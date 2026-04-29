@@ -45,6 +45,8 @@ func main() {
 	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, summarizer, cfg)
 
 	router := gin.Default()
+	// Trust only requests from localhost/private networks (running behind nginx)
+	router.SetTrustedProxies([]string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
 
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
