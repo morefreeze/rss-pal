@@ -140,20 +140,32 @@ export default function ArticleListPage() {
       ) : (
         <>
           {articles.map(article => (
-            <Link key={article.id} to={`/articles/${article.id}`} className="card" style={{ display: 'block' }}>
-              <div className="text-bold">{article.title}</div>
-              {article.summary_brief && (
-                <div className="text-muted text-sm mt-1">
-                  {stripMarkdown(article.summary_brief).slice(0, 120)}...
-                </div>
-              )}
-              <div className="flex-between mt-1">
-                <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
-                {article.feed_title && (
-                  <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
-                    {article.feed_title}
-                  </span>
+            <Link
+              key={article.id}
+              to={`/articles/${article.id}`}
+              className="card"
+              style={{ display: 'block', opacity: article.is_read ? 0.6 : 1 }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                {!article.is_read && (
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
                 )}
+                <div style={{ flex: 1 }}>
+                  <div className={article.is_read ? 'text-muted' : 'text-bold'}>{article.title}</div>
+                  {article.summary_brief && (
+                    <div className="text-muted text-sm mt-1">
+                      {stripMarkdown(article.summary_brief).slice(0, 120)}...
+                    </div>
+                  )}
+                  <div className="flex-between mt-1">
+                    <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+                    {article.feed_title && (
+                      <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
+                        {article.feed_title}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </Link>
           ))}

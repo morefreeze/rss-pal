@@ -93,6 +93,7 @@ export interface Article {
   summary_brief: string
   summary_detailed: string
   fetched_at: string
+  is_read?: boolean
 }
 
 export interface ReadingProgress {

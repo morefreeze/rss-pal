@@ -27,6 +27,7 @@ type Article struct {
 	SummaryBrief    string     `json:"summary_brief" db:"summary_brief"`
 	SummaryDetailed string     `json:"summary_detailed" db:"summary_detailed"`
 	FetchedAt       time.Time  `json:"fetched_at" db:"fetched_at"`
+	IsRead          bool       `json:"is_read" db:"is_read"`
 }
 
 type UserPreference struct {
