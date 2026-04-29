@@ -3,16 +3,17 @@ package model
 import "time"
 
 type Feed struct {
-	ID                int       `json:"id" db:"id"`
-	URL               string    `json:"url" db:"url"`
-	Title             string    `json:"title" db:"title"`
+	ID                int        `json:"id" db:"id"`
+	URL               string     `json:"url" db:"url"`
+	Title             string     `json:"title" db:"title"`
 	LastFetchedAt     *time.Time `json:"last_fetched_at" db:"last_fetched_at"`
-	FetchIntervalMin  int       `json:"fetch_interval_minutes" db:"fetch_interval_minutes"`
-	ETag              string    `json:"etag" db:"etag"`
-	LastModified      string    `json:"last_modified" db:"last_modified"`
-	IsActive          bool      `json:"is_active" db:"is_active"`
-	OwnerID           *int      `json:"owner_id" db:"owner_id"`
-	CreatedAt         time.Time `json:"created_at" db:"created_at"`
+	FetchIntervalMin  int        `json:"fetch_interval_minutes" db:"fetch_interval_minutes"`
+	ETag              string     `json:"etag" db:"etag"`
+	LastModified      string     `json:"last_modified" db:"last_modified"`
+	IsActive          bool       `json:"is_active" db:"is_active"`
+	OwnerID           *int       `json:"owner_id" db:"owner_id"`
+	FeedType          string     `json:"feed_type" db:"feed_type"` // "rss" or "html"
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
 }
 
 type Article struct {
@@ -56,7 +57,8 @@ type ReadingProgress struct {
 // Request/Response types
 
 type AddFeedRequest struct {
-	URL string `json:"url"`
+	URL      string `json:"url"`
+	FeedType string `json:"feed_type"` // "rss" or "html", defaults to "rss"
 }
 
 type UpdateProgressRequest struct {

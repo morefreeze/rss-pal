@@ -78,6 +78,7 @@ func main() {
 		apiGroup.GET("/feeds", feedHandler.GetAll)
 		apiGroup.GET("/feeds/:id", feedHandler.GetByID)
 		apiGroup.POST("/feeds", feedHandler.Create)
+		apiGroup.POST("/feeds/preview", feedHandler.Preview)
 		apiGroup.PUT("/feeds/:id", feedHandler.Update)
 		apiGroup.DELETE("/feeds/:id", feedHandler.Delete)
 		apiGroup.POST("/feeds/:id/fetch", feedHandler.FetchNow)

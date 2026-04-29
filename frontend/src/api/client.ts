@@ -78,6 +78,7 @@ export interface Feed {
   fetch_interval_minutes: number
   is_active: boolean
   owner_id: number | null
+  feed_type: string
   created_at: string
 }
 
@@ -118,12 +119,29 @@ export interface InviteCode {
   created_at: string
 }
 
+// Feed preview types
+export interface FeedPreviewItem {
+  title: string
+  url: string
+  published_at?: string
+}
+
+export interface FeedPreview {
+  feed_title: string
+  feed_type: 'rss' | 'html'
+  actual_url: string
+  items: FeedPreviewItem[]
+}
+
 // Feeds
 export const getFeeds = () =>
   api.get<Feed[]>('/feeds').then(res => res.data)
 
-export const addFeed = (url: string) =>
-  api.post<Feed>('/feeds', { url }).then(res => res.data)
+export const previewFeed = (url: string) =>
+  api.post<FeedPreview>('/feeds/preview', { url }).then(res => res.data)
+
+export const addFeed = (url: string, feedType?: string) =>
+  api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss' }).then(res => res.data)
 
 export const deleteFeed = (id: number) =>
   api.delete(`/feeds/${id}`)
