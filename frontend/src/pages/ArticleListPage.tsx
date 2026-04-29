@@ -247,11 +247,14 @@ export default function ArticleListPage() {
             <>
               <div className="text-muted text-sm mb-1" style={{ padding: '0 4px' }}>找到 {searchResults.length} 篇文章</div>
               {searchResults.map(article => (
-                <Link
+                <div
                   key={article.id}
-                  to={`/articles/${article.id}`}
                   className="card"
-                  style={{ display: 'block', opacity: isRead(article) ? 0.6 : 1 }}
+                  style={{ display: 'block', opacity: isRead(article) ? 0.6 : 1, cursor: 'pointer' }}
+                  onClick={() => {
+                    try { sessionStorage.setItem('articleNavList', JSON.stringify(searchResults.map(a => a.id))) } catch {}
+                    navigate(`/articles/${article.id}`)
+                  }}
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     {!isRead(article) && (
@@ -274,7 +277,7 @@ export default function ArticleListPage() {
                       </div>
                     </div>
                   </div>
-                </Link>
+                </div>
               ))}
             </>
           )
