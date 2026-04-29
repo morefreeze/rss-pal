@@ -225,10 +225,9 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 	query := `
 		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at
 		FROM articles
-		WHERE ((LENGTH(content) < $1 OR content IS NULL) OR content LIKE '%<%>%')
-		AND fetched_at > NOW() - INTERVAL '7 days'
-		AND refetch_attempts < 3
-		AND url != ''
+		WHERE url != '' AND refetch_attempts < 5
+		  AND ((LENGTH(content) < $1 OR content IS NULL AND fetched_at > NOW() - INTERVAL '7 days')
+		       OR (content LIKE '%<%>%' AND fetched_at > NOW() - INTERVAL '30 days'))
 		ORDER BY fetched_at DESC
 		LIMIT 50
 	`
