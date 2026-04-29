@@ -38,6 +38,14 @@ export default function ArticlePage() {
       const data = await getArticle(Number(id))
       setArticle(data.article)
       setProgress(data.progress)
+      // Track as viewed in session so list can show it as read on back-navigation
+      try {
+        const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+        if (!read.includes(Number(id))) {
+          read.push(Number(id))
+          sessionStorage.setItem('readArticles', JSON.stringify(read))
+        }
+      } catch {}
 
       // Scroll to saved position
       const savedProgress = data.progress?.scroll_position
@@ -102,6 +110,14 @@ export default function ArticlePage() {
       const newProgress = await updateProgress(article.id, scrollPosition, isCompleted)
       setProgress(newProgress)
       if (isCompleted && !wasCompleted) {
+        // Track as read in session storage so article list can reflect the change
+        try {
+          const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+          if (!read.includes(article.id)) {
+            read.push(article.id)
+            sessionStorage.setItem('readArticles', JSON.stringify(read))
+          }
+        } catch {}
         window.dispatchEvent(new Event('refresh-unread'))
       }
     }
@@ -373,9 +389,13 @@ export default function ArticlePage() {
         </div>
         {article.content ? (
           <div style={{ lineHeight: 1.8, fontSize: 15 }}>
-            {article.content.split(/\n\n+/).map((para, i) => (
-              <p key={i} style={{ marginBottom: '0.8em' }}>{para.trim()}</p>
-            ))}
+            {article.content.split(/\n{2,}/).map((para, i) => {
+              const trimmed = para.trim()
+              if (!trimmed) return null
+              return (
+                <p key={i} style={{ marginBottom: '0.9em', whiteSpace: 'pre-line' }}>{trimmed}</p>
+              )
+            })}
           </div>
         ) : (
           <div className="text-muted">暂无内容，点击"重新抓取"从原文链接抓取</div>
