@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds } from '../api/client'
 
 const PAGE_SIZE = 20
 
 export default function ArticleListPage() {
+  const navigate = useNavigate()
   const [articles, setArticles] = useState<Article[]>([])
   const [recommended, setRecommended] = useState<Article[]>([])
   const [feeds, setFeeds] = useState<Feed[]>([])
@@ -134,6 +135,13 @@ export default function ArticleListPage() {
   }
 
   const isRead = (article: Article) => article.is_read || sessionReadIds.has(article.id)
+
+  const openArticle = (id: number) => {
+    try {
+      sessionStorage.setItem('articleNavList', JSON.stringify(articles.map(a => a.id)))
+    } catch {}
+    navigate(`/articles/${id}`)
+  }
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return ''
@@ -276,11 +284,11 @@ export default function ArticleListPage() {
       ) : !searchQuery ? (
         <>
           {articles.map(article => (
-            <Link
+            <div
               key={article.id}
-              to={`/articles/${article.id}`}
               className="card"
-              style={{ display: 'block', opacity: isRead(article) ? 0.6 : 1 }}
+              style={{ display: 'block', opacity: isRead(article) ? 0.6 : 1, cursor: 'pointer' }}
+              onClick={() => openArticle(article.id)}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 {!isRead(article) && (
@@ -303,7 +311,7 @@ export default function ArticleListPage() {
                   </div>
                 </div>
               </div>
-            </Link>
+            </div>
           ))}
           {hasMore && (
             <div style={{ textAlign: 'center', padding: '12px' }}>
