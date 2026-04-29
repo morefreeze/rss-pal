@@ -17,6 +17,9 @@ export default function ArticleListPage() {
   const [unreadOnly, setUnreadOnly] = useState(() => {
     try { return sessionStorage.getItem('unreadOnly') === 'true' } catch { return false }
   })
+  const [savedOnly, setSavedOnly] = useState(() => {
+    try { return sessionStorage.getItem('savedOnly') === 'true' } catch { return false }
+  })
   const [showRecommended, setShowRecommended] = useState(true)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
@@ -50,7 +53,7 @@ export default function ArticleListPage() {
     setHasMore(true)
     setFocusedIdx(-1)
     loadArticles(0, true)
-  }, [selectedFeed, unreadOnly])
+  }, [selectedFeed, unreadOnly, savedOnly])
 
   const loadFeeds = async () => {
     const data = await getFeeds()
@@ -65,6 +68,7 @@ export default function ArticleListPage() {
       const raw = await getArticles({
         feed_id: selectedFeed || undefined,
         unread: unreadOnly || undefined,
+        saved: savedOnly || undefined,
         limit: PAGE_SIZE,
         offset: off,
       })
@@ -88,7 +92,7 @@ export default function ArticleListPage() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedFeed, unreadOnly])
+  }, [selectedFeed, unreadOnly, savedOnly])
 
   const loadMore = useCallback(() => {
     if (!loadingMore && hasMore) {
@@ -254,11 +258,25 @@ export default function ArticleListPage() {
               checked={unreadOnly}
               onChange={e => {
                 setUnreadOnly(e.target.checked)
+                if (e.target.checked) setSavedOnly(false)
                 try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
               }}
               disabled={!!searchQuery}
             />
             仅未读
+          </label>
+          <label className="flex gap-1" style={{ alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={savedOnly}
+              onChange={e => {
+                setSavedOnly(e.target.checked)
+                if (e.target.checked) setUnreadOnly(false)
+                try { sessionStorage.setItem('savedOnly', String(e.target.checked)) } catch {}
+              }}
+              disabled={!!searchQuery}
+            />
+            收藏
           </label>
           {!searchQuery && (
             <button
