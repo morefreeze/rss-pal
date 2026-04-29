@@ -291,7 +291,9 @@ export default function ArticleListPage() {
           <Link to="/feeds"><button>去添加订阅</button></Link>
         </div>
       ) : !searchQuery && articles.length === 0 ? (
-        <div className="card text-muted">暂无文章，订阅源正在抓取中...</div>
+        <div className="card text-muted">
+          {unreadOnly ? '没有未读文章 🎉' : '暂无文章，订阅源正在抓取中...'}
+        </div>
       ) : !searchQuery ? (
         <>
           {articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id)).map(article => (
