@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
@@ -49,6 +50,24 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 	unreadOnly := c.Query("unread") == "true"
 
 	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, getUserID(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, articles)
+}
+
+func (h *ArticleHandler) Search(c *gin.Context) {
+	query := strings.TrimSpace(c.Query("q"))
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit > 50 {
+		limit = 50
+	}
+	articles, err := h.articleRepo.Search(query, getUserID(c), limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
