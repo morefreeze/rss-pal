@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
-  getArticle, generateSummary, fetchContent, likeArticle, dislikeArticle, saveArticle,
+  getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryWithTemplate, shareArticle, exportMarkdown,
   Article, ReadingProgress, SummaryTemplate
@@ -13,7 +13,6 @@ export default function ArticlePage() {
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [loading, setLoading] = useState(true)
-  const [summarizing, setSummarizing] = useState(false)
   const [fetchingContent, setFetchingContent] = useState(false)
   const [liked, setLiked] = useState(false)
   const [disliked, setDisliked] = useState(false)
@@ -107,19 +106,6 @@ export default function ArticlePage() {
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
-
-  const handleGenerateSummary = async () => {
-    if (!article) return
-    setSummarizing(true)
-    try {
-      const result = await generateSummary(article.id)
-      setArticle({ ...article, summary_brief: result.summary_brief, summary_detailed: result.summary_detailed })
-    } catch {
-      alert('生成总结失败')
-    } finally {
-      setSummarizing(false)
-    }
-  }
 
   const handleRegenerateWithTemplate = async () => {
     if (!article) return
@@ -255,6 +241,10 @@ export default function ArticlePage() {
   if (loading) return <div className="card">Loading...</div>
   if (!article) return <div className="card">文章不存在</div>
 
+  const readingTime = article.content
+    ? Math.max(1, Math.round(article.content.replace(/\s+/g, ' ').split(' ').length / 200))
+    : 0
+
   return (
     <div ref={contentRef}>
       {/* Sticky progress bar at top of viewport */}
@@ -283,8 +273,11 @@ export default function ArticlePage() {
         )}
         <h2>{article.title}</h2>
         <div className="text-muted text-sm mb-2">
-          {formatDate(article.published_at)} · <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
-          {progressPercent > 0 && <span style={{ marginLeft: 8 }}>· 阅读进度 {progressPercent}%</span>}
+          {formatDate(article.published_at)}
+          {readingTime > 0 && <span> · 约 {readingTime} 分钟</span>}
+          <span> · </span>
+          <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
+          {progressPercent > 0 && <span> · 阅读进度 {progressPercent}%</span>}
         </div>
 
         <div className="flex gap-2 mb-2">
@@ -313,38 +306,28 @@ export default function ArticlePage() {
 
       {/* Summary section — shown before content */}
       <div className="card">
-        <div className="flex-between mb-1">
+        <div className="flex-between mb-2">
           <h3>AI 总结</h3>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {(!article.summary_brief && !article.summary_detailed) && (
-              <button onClick={handleGenerateSummary} disabled={summarizing}>
-                {summarizing ? '生成中...' : '生成总结'}
-              </button>
-            )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select
+              value={selectedTemplateId ?? ''}
+              onChange={e => setSelectedTemplateId(e.target.value ? Number(e.target.value) : undefined)}
+              style={{ fontSize: 13, padding: '2px 6px' }}
+            >
+              <option value="">默认模板</option>
+              {templates.map(t => (
+                <option key={t.id} value={t.id}>{t.name}{t.is_system ? '' : ' ★'}</option>
+              ))}
+            </select>
+            <button
+              className={article.summary_brief || article.summary_detailed ? 'secondary' : ''}
+              onClick={handleRegenerateWithTemplate}
+              disabled={regenerating}
+              style={{ fontSize: 13, padding: '4px 12px' }}
+            >
+              {(regenerating) ? '生成中...' : (article.summary_brief || article.summary_detailed) ? '重新生成' : '生成总结'}
+            </button>
           </div>
-        </div>
-
-        {/* Template selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 14, color: '#555' }}>模板：</span>
-          <select
-            value={selectedTemplateId ?? ''}
-            onChange={e => setSelectedTemplateId(e.target.value ? Number(e.target.value) : undefined)}
-            style={{ fontSize: 14, padding: '2px 6px' }}
-          >
-            <option value="">默认</option>
-            {templates.map(t => (
-              <option key={t.id} value={t.id}>{t.name}{t.is_system ? ' (系统)' : ''}</option>
-            ))}
-          </select>
-          <button
-            className="secondary"
-            onClick={handleRegenerateWithTemplate}
-            disabled={regenerating}
-            style={{ fontSize: 13, padding: '2px 10px' }}
-          >
-            {regenerating ? '生成中...' : '重新生成'}
-          </button>
         </div>
 
         {(article.summary_brief || article.summary_detailed) ? (
@@ -360,7 +343,9 @@ export default function ArticlePage() {
             )}
           </div>
         ) : (
-          <div className="text-muted text-sm">暂无总结{summarizing ? '，生成中...' : '，点击"生成总结"'}</div>
+          <div className="text-muted text-sm" style={{ padding: '8px 0' }}>
+            {(regenerating) ? '正在生成总结...' : '暂无总结，点击右上角"生成总结"按钮'}
+          </div>
         )}
       </div>
 
