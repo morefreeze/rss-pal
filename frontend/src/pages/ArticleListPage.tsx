@@ -309,16 +309,27 @@ export default function ArticleListPage() {
         </div>
       </div>
 
-      {showRecommended && recommended.length > 0 && (
+      {showRecommended && recommended.length > 0 && !searchQuery && (
         <div className="mb-2">
           <div className="flex-between mb-1">
-            <h3>推荐</h3>
+            <h3>为你推荐</h3>
             <button className="secondary text-sm" onClick={() => setShowRecommended(false)}>收起</button>
           </div>
           {recommended.map(article => (
             <Link key={article.id} to={`/articles/${article.id}`} className="card" style={{ display: 'block' }}>
-              <div className="text-bold">{article.title}</div>
-              <div className="text-muted text-sm">{formatDate(article.published_at)}</div>
+              <div className="flex-between">
+                <div style={{ flex: 1 }}>
+                  <div className="text-bold">{article.title}</div>
+                  <div className="flex gap-2 mt-1">
+                    <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+                    {article.feed_title && (
+                      <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
+                        {article.feed_title}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
             </Link>
           ))}
         </div>
