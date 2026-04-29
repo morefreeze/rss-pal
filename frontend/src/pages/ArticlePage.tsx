@@ -84,6 +84,25 @@ export default function ArticlePage() {
     }
   }, [id])
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Skip if focused in an input/textarea
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
+      if (e.key === 'n' || e.key === 'j') {
+        if (nextId) navigate(`/articles/${nextId}`)
+      } else if (e.key === 'p' || e.key === 'k') {
+        if (prevId) navigate(`/articles/${prevId}`)
+      } else if (e.key === 'Escape' || e.key === 'Backspace') {
+        navigate(-1)
+      } else if (e.key === 'm') {
+        if (article && !progress?.is_completed) handleMarkRead()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [nextId, prevId, article, progress, navigate])
+
   // Load templates on mount
   useEffect(() => {
     getTemplates().then(ts => setTemplates(ts || [])).catch(() => {})
