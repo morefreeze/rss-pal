@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, Feed, FeedPreview } from '../api/client'
+import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, Feed, FeedPreview } from '../api/client'
 
 const POPULAR_FEEDS = [
   { name: 'Hacker News', url: 'https://hnrss.org/frontpage', desc: '科技社区热帖' },
@@ -76,6 +76,15 @@ export default function FeedListPage() {
   const handleCancelPreview = () => {
     setPreview(null)
     setPreviewError('')
+  }
+
+  const handleToggleActive = async (feed: Feed) => {
+    try {
+      await toggleFeedActive(feed.id, !feed.is_active, feed.title || feed.url)
+      setFeeds(prev => prev.map(f => f.id === feed.id ? { ...f, is_active: !f.is_active } : f))
+    } catch {
+      alert('操作失败')
+    }
   }
 
   const handleDelete = async (id: number) => {
@@ -211,10 +220,13 @@ export default function FeedListPage() {
           <div key={feed.id} className="card">
             <div className="flex-between">
               <div>
-                <div className="text-bold">
+                <div className="text-bold" style={!feed.is_active ? { color: '#aaa' } : {}}>
                   {feed.title || feed.url}
                   {feed.feed_type === 'html' && (
                     <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#fef9c3', borderRadius: 4, color: '#854d0e' }}>网页</span>
+                  )}
+                  {!feed.is_active && (
+                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#f3f4f6', borderRadius: 4, color: '#6b7280' }}>已暂停</span>
                   )}
                 </div>
                 <div className="text-muted text-sm">{feed.url}</div>
@@ -223,12 +235,21 @@ export default function FeedListPage() {
                 </div>
               </div>
               <div className="flex gap-1">
+                {feed.is_active ? (
+                  <button
+                    className="secondary"
+                    disabled={fetchingId === feed.id}
+                    onClick={() => handleFetch(feed.id)}
+                  >
+                    {fetchingId === feed.id ? '抓取中...' : '刷新'}
+                  </button>
+                ) : null}
                 <button
                   className="secondary"
-                  disabled={fetchingId === feed.id}
-                  onClick={() => handleFetch(feed.id)}
+                  onClick={() => handleToggleActive(feed)}
+                  style={!feed.is_active ? { color: '#92400e', background: '#fef9c3' } : {}}
                 >
-                  {fetchingId === feed.id ? '抓取中...' : '刷新'}
+                  {feed.is_active ? '暂停' : '继续'}
                 </button>
                 <button className="secondary" onClick={() => handleDelete(feed.id)}>删除</button>
               </div>

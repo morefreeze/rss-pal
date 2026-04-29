@@ -156,6 +156,9 @@ export const addFeed = (url: string, feedType?: string) =>
 export const deleteFeed = (id: number) =>
   api.delete(`/feeds/${id}`)
 
+export const toggleFeedActive = (id: number, isActive: boolean, title: string) =>
+  api.put<Feed>(`/feeds/${id}`, { is_active: isActive, title }).then(res => res.data)
+
 export const fetchFeedNow = (id: number) =>
   api.post<{ message: string; new_articles: number; feed_title: string }>(`/feeds/${id}/fetch`).then(res => res.data)
 
