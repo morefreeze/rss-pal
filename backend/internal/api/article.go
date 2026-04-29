@@ -99,7 +99,7 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleRepo.GetByID(id)
+	article, err := h.articleRepo.GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -133,13 +133,13 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleRepo.GetByID(id)
+	userID := getUserID(c)
+
+	article, err := h.articleRepo.GetByID(id, userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
-
-	userID := getUserID(c)
 
 	// Determine which summarizer to use (user-custom or global)
 	summarizerToUse := h.summarizer
