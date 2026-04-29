@@ -10,8 +10,12 @@ export default function ArticleListPage() {
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [selectedFeed, setSelectedFeed] = useState<number | null>(null)
-  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [selectedFeed, setSelectedFeed] = useState<number | null>(() => {
+    try { return JSON.parse(sessionStorage.getItem('selectedFeed') || 'null') } catch { return null }
+  })
+  const [unreadOnly, setUnreadOnly] = useState(() => {
+    try { return sessionStorage.getItem('unreadOnly') === 'true' } catch { return false }
+  })
   const [showRecommended, setShowRecommended] = useState(true)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
@@ -82,6 +86,9 @@ export default function ArticleListPage() {
     setMarkingAllRead(true)
     try {
       await markAllRead()
+      // Clear session read tracking — everything is now read
+      try { sessionStorage.removeItem('readArticles') } catch {}
+      setSessionReadIds(new Set())
       if (unreadOnly) {
         setArticles([])
         setHasMore(false)
@@ -157,7 +164,11 @@ export default function ArticleListPage() {
           />
           <select
             value={selectedFeed || ''}
-            onChange={e => setSelectedFeed(e.target.value ? Number(e.target.value) : null)}
+            onChange={e => {
+              const val = e.target.value ? Number(e.target.value) : null
+              setSelectedFeed(val)
+              try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
+            }}
             style={{ padding: '6px 12px' }}
             disabled={!!searchQuery}
           >
@@ -170,7 +181,10 @@ export default function ArticleListPage() {
             <input
               type="checkbox"
               checked={unreadOnly}
-              onChange={e => setUnreadOnly(e.target.checked)}
+              onChange={e => {
+                setUnreadOnly(e.target.checked)
+                try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
+              }}
               disabled={!!searchQuery}
             />
             仅未读
