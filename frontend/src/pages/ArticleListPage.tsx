@@ -24,6 +24,7 @@ export default function ArticleListPage() {
   const [searchResults, setSearchResults] = useState<Article[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [markingAllRead, setMarkingAllRead] = useState(false)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
   const [sessionReadIds, setSessionReadIds] = useState<Set<number>>(() => {
     try {
       return new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]'))
@@ -87,9 +88,22 @@ export default function ArticleListPage() {
     }
   }, [selectedFeed, unreadOnly])
 
-  const loadMore = () => {
-    loadArticles(offset + PAGE_SIZE, false)
-  }
+  const loadMore = useCallback(() => {
+    if (!loadingMore && hasMore) {
+      loadArticles(offset + PAGE_SIZE, false)
+    }
+  }, [loadingMore, hasMore, offset, loadArticles])
+
+  // Infinite scroll via IntersectionObserver
+  useEffect(() => {
+    if (!loadMoreRef.current) return
+    const observer = new IntersectionObserver(
+      entries => { if (entries[0].isIntersecting) loadMore() },
+      { rootMargin: '200px' }
+    )
+    observer.observe(loadMoreRef.current)
+    return () => observer.disconnect()
+  }, [loadMore])
 
   const handleMarkAllRead = async () => {
     setMarkingAllRead(true)
@@ -339,14 +353,8 @@ export default function ArticleListPage() {
             </div>
           ))}
           {hasMore && (
-            <div style={{ textAlign: 'center', padding: '12px' }}>
-              <button
-                className="secondary"
-                disabled={loadingMore}
-                onClick={loadMore}
-              >
-                {loadingMore ? '加载中...' : '加载更多'}
-              </button>
+            <div ref={loadMoreRef} style={{ textAlign: 'center', padding: '12px', color: '#999', fontSize: 13 }}>
+              {loadingMore ? '加载中...' : ''}
             </div>
           )}
         </>
