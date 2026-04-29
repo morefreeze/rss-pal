@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 
 const STYLE_OPTIONS = [
   { value: 'bullets', label: '要点列表' },
@@ -27,6 +27,13 @@ export default function SettingsPage({ user }: SettingsPageProps) {
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteCreating, setInviteCreating] = useState(false)
   const [copiedCode, setCopiedCode] = useState('')
+
+  // Password change
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [pwChanging, setPwChanging] = useState(false)
+  const [pwError, setPwError] = useState('')
+  const [pwSuccess, setPwSuccess] = useState('')
 
   const [showNewTemplate, setShowNewTemplate] = useState(false)
   const [newTemplate, setNewTemplate] = useState<Partial<SummaryTemplate>>({
@@ -119,6 +126,27 @@ export default function SettingsPage({ user }: SettingsPageProps) {
     }
   }
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newPassword.length < 6) {
+      setPwError('新密码至少 6 位')
+      return
+    }
+    setPwChanging(true)
+    setPwError('')
+    setPwSuccess('')
+    try {
+      await changePassword(oldPassword, newPassword)
+      setOldPassword('')
+      setNewPassword('')
+      setPwSuccess('密码已修改')
+    } catch (err: any) {
+      setPwError(err?.response?.data?.error || '修改失败，请重试')
+    } finally {
+      setPwChanging(false)
+    }
+  }
+
   const handleDeleteTemplate = async (id: number) => {
     if (!confirm('确定删除此模板？')) return
     try {
@@ -207,6 +235,38 @@ export default function SettingsPage({ user }: SettingsPageProps) {
           )}
         </div>
       )}
+
+      {/* 修改密码 */}
+      <div className="card mb-2">
+        <h3 className="mb-2">修改密码</h3>
+        <form onSubmit={handleChangePassword}>
+          <div className="mb-1">
+            <input
+              type="password"
+              value={oldPassword}
+              placeholder="当前密码"
+              onChange={e => setOldPassword(e.target.value)}
+              style={{ width: '100%' }}
+              disabled={pwChanging}
+            />
+          </div>
+          <div className="mb-2">
+            <input
+              type="password"
+              value={newPassword}
+              placeholder="新密码（至少 6 位）"
+              onChange={e => setNewPassword(e.target.value)}
+              style={{ width: '100%' }}
+              disabled={pwChanging}
+            />
+          </div>
+          {pwError && <div className="text-sm mb-1" style={{ color: '#dc2626' }}>{pwError}</div>}
+          {pwSuccess && <div className="text-sm mb-1" style={{ color: '#16a34a' }}>{pwSuccess}</div>}
+          <button type="submit" disabled={pwChanging || !oldPassword || !newPassword}>
+            {pwChanging ? '修改中...' : '修改密码'}
+          </button>
+        </form>
+      </div>
 
       {/* AI 配置区域 */}
       <div className="card mb-2">
