@@ -266,9 +266,9 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			continue
 		}
 
-		content := item.Description
+		content := rss.StripHTML(item.Description)
 		if content == "" {
-			content = item.Content
+			content = rss.StripHTML(item.Content)
 		}
 
 		if item.Link != "" {

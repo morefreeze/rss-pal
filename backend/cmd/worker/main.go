@@ -221,9 +221,9 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			content := item.Description
+			content := rss.StripHTML(item.Description)
 			if content == "" {
-				content = item.Content
+				content = rss.StripHTML(item.Content)
 			}
 
 			if item.Link != "" {

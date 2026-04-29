@@ -188,3 +188,17 @@ func (f *ContentFetcher) FetchContentFromReader(r io.Reader) (string, error) {
 
 	return cleanContent(content), nil
 }
+
+// StripHTML removes HTML tags from a string, returning plain text.
+// Used to sanitize RSS description/content fields that may contain HTML markup.
+func StripHTML(html string) string {
+	if !strings.Contains(html, "<") {
+		return html
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return html
+	}
+	text := doc.Text()
+	return cleanContent(text)
+}
