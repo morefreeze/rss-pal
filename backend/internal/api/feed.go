@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strconv"
@@ -63,10 +64,11 @@ func (h *FeedHandler) Preview(c *gin.Context) {
 		return
 	}
 
-	ctx := c.Request.Context()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
 	result, err := h.fetcher.Preview(ctx, req.URL)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无法获取该地址: " + err.Error()})
 		return
 	}
 
