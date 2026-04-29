@@ -67,8 +67,8 @@ export default function FeedListPage() {
         setAddSuccess('订阅已添加，后台将自动抓取文章')
       }
       setTimeout(() => setAddSuccess(''), 5000)
-    } catch {
-      toast.error('添加失败，请重试')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || '添加失败，请重试')
     } finally {
       setAdding(false)
     }

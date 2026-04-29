@@ -105,6 +105,10 @@ func (h *FeedHandler) Create(c *gin.Context) {
 	}
 
 	if err := h.repo.Create(feed); err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			c.JSON(http.StatusConflict, gin.H{"error": "该订阅地址已存在"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
