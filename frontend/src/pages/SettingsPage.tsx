@@ -16,6 +16,7 @@ interface SettingsPageProps {
 export default function SettingsPage({ user }: SettingsPageProps) {
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
   const [aiConfig, setAiConfig] = useState<UserAIConfig>({ api_key: '', base_url: '', model: '' })
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false)
   const [loading, setLoading] = useState(true)
   const [aiSaving, setAiSaving] = useState(false)
   const [aiError, setAiError] = useState('')
@@ -43,7 +44,12 @@ export default function SettingsPage({ user }: SettingsPageProps) {
       try {
         const [tmpl, cfg] = await Promise.all([getTemplates(), getAIConfig()])
         setTemplates(tmpl || [])
-        setAiConfig(cfg || { api_key: '', base_url: '', model: '' })
+        if (cfg) {
+          const hasKey = !!cfg.api_key
+          setApiKeyConfigured(hasKey)
+          // Don't pre-fill masked API key — keep field empty so user enters a new one if changing
+          setAiConfig({ api_key: '', base_url: cfg.base_url || '', model: cfg.model || '' })
+        }
       } catch {
         // ignore — backend may not have config yet
       } finally {
@@ -84,6 +90,10 @@ export default function SettingsPage({ user }: SettingsPageProps) {
     setAiSuccess('')
     try {
       await saveAIConfig(aiConfig)
+      if (aiConfig.api_key) {
+        setApiKeyConfigured(true)
+        setAiConfig(prev => ({ ...prev, api_key: '' }))
+      }
       setAiSuccess('保存成功')
     } catch {
       setAiError('保存失败，请重试')
@@ -100,6 +110,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
     try {
       await saveAIConfig({ api_key: '', base_url: '', model: '' })
       setAiConfig({ api_key: '', base_url: '', model: '' })
+      setApiKeyConfigured(false)
       setAiSuccess('已清除，将使用系统 AI')
     } catch {
       setAiError('操作失败，请重试')
@@ -203,13 +214,18 @@ export default function SettingsPage({ user }: SettingsPageProps) {
         <p className="text-muted text-sm mb-2">配置你自己的 AI 服务，将优先于系统 AI 使用</p>
 
         <div className="mb-1">
-          <label className="text-sm text-bold">API Key</label>
+          <div className="flex-between" style={{ marginBottom: 4 }}>
+            <label className="text-sm text-bold">API Key</label>
+            {apiKeyConfigured && !aiConfig.api_key && (
+              <span className="text-sm" style={{ color: '#16a34a' }}>✓ 已配置</span>
+            )}
+          </div>
           <input
             type="password"
             value={aiConfig.api_key}
-            placeholder="sk-..."
+            placeholder={apiKeyConfigured ? '输入新 Key 以覆盖现有配置' : 'sk-...'}
             onChange={e => setAiConfig(prev => ({ ...prev, api_key: e.target.value }))}
-            style={{ width: '100%', marginTop: 4 }}
+            style={{ width: '100%' }}
           />
         </div>
 

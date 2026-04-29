@@ -147,6 +147,15 @@ func (h *SettingsHandler) SaveAIConfig(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
+
+	// If api_key is empty, preserve existing key
+	if req.APIKey == "" {
+		existing, _ := h.templateRepo.GetUserAIConfig(userID)
+		if existing != nil {
+			req.APIKey = existing.APIKey
+		}
+	}
+
 	cfg := &model.UserAIConfig{
 		UserID:  userID,
 		APIKey:  req.APIKey,
