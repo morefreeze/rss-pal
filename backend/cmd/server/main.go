@@ -42,6 +42,7 @@ func main() {
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
+	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, summarizer, cfg)
 
 	router := gin.Default()
 
@@ -107,6 +108,9 @@ func main() {
 		// Stats
 		apiGroup.GET("/stats", statsHandler.GetStats)
 		apiGroup.GET("/stats/progress", statsHandler.GetProgress)
+
+		// Insights
+		apiGroup.POST("/insights/generate", insightsHandler.Generate)
 
 		// Templates
 		apiGroup.GET("/templates", settingsHandler.GetTemplates)

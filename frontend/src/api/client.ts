@@ -181,6 +181,9 @@ export const recordReadDuration = (articleId: number, durationSeconds: number) =
 export const getTopics = () =>
   api.get<InterestTopic[]>('/preferences/topics').then(res => res.data)
 
+export const generateInsights = () =>
+  api.post<{ insights: string; message?: string }>('/insights/generate').then(res => res.data)
+
 // Progress
 export const getProgress = (articleId: number) =>
   api.get<{ progress: ReadingProgress | null }>(`/progress/${articleId}`).then(res => res.data)

@@ -358,7 +358,11 @@ export default function ArticlePage() {
           </button>
         </div>
         {article.content ? (
-          <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, fontSize: 15 }}>{article.content}</div>
+          <div style={{ lineHeight: 1.8, fontSize: 15 }}>
+            {article.content.split(/\n\n+/).map((para, i) => (
+              <p key={i} style={{ marginBottom: '0.8em' }}>{para.trim()}</p>
+            ))}
+          </div>
         ) : (
           <div className="text-muted">暂无内容，点击"重新抓取"从原文链接抓取</div>
         )}
