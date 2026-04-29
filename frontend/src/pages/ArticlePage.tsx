@@ -243,7 +243,7 @@ export default function ArticlePage() {
   if (!article) return <div className="card">文章不存在</div>
 
   const readingTime = article.content
-    ? Math.max(1, Math.round(article.content.replace(/\s+/g, ' ').split(' ').length / 200))
+    ? Math.max(1, Math.round(article.content.length / 800))
     : 0
 
   return (
