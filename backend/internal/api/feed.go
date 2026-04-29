@@ -1,0 +1,227 @@
+package api
+
+import (
+	"log"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/rss"
+	"github.com/gin-gonic/gin"
+)
+
+type FeedHandler struct {
+	repo           *repository.FeedRepository
+	articleRepo    *repository.ArticleRepository
+	fetcher        *rss.Fetcher
+	contentFetcher *rss.ContentFetcher
+}
+
+func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.ArticleRepository) *FeedHandler {
+	return &FeedHandler{
+		repo:           repo,
+		articleRepo:    articleRepo,
+		fetcher:        rss.NewFetcher(),
+		contentFetcher: rss.NewContentFetcher(),
+	}
+}
+
+func (h *FeedHandler) GetAll(c *gin.Context) {
+	userID := getUserID(c)
+	feeds, err := h.repo.GetVisibleByUser(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, feeds)
+}
+
+func (h *FeedHandler) GetByID(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	feed, err := h.repo.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
+		return
+	}
+	c.JSON(http.StatusOK, feed)
+}
+
+func (h *FeedHandler) Create(c *gin.Context) {
+	var req model.AddFeedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	feed := &model.Feed{
+		URL:              req.URL,
+		FetchIntervalMin: 60,
+		IsActive:         true,
+		OwnerID:          getOwnerID(c),
+	}
+
+	if err := h.repo.Create(feed); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, feed)
+}
+
+func (h *FeedHandler) Update(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	existing, err := h.repo.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
+		return
+	}
+
+	if !isAdmin(c) && (existing.OwnerID == nil || *existing.OwnerID != getUserID(c)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	var feed model.Feed
+	if err := c.ShouldBindJSON(&feed); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	feed.ID = id
+	if err := h.repo.Update(&feed); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, feed)
+}
+
+func (h *FeedHandler) Delete(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	feed, err := h.repo.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
+		return
+	}
+
+	if !isAdmin(c) && (feed.OwnerID == nil || *feed.OwnerID != getUserID(c)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	if err := h.repo.Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *FeedHandler) FetchNow(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	feed, err := h.repo.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
+		return
+	}
+
+	if !isAdmin(c) && (feed.OwnerID == nil || *feed.OwnerID != getUserID(c)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	log.Printf("Manual fetch triggered for feed: %s", feed.URL)
+	result, err := h.fetcher.Fetch(c.Request.Context(), feed.URL, feed.ETag, feed.LastModified)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "fetch failed: " + err.Error()})
+		return
+	}
+
+	if result == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "not modified", "new_articles": 0})
+		return
+	}
+
+	if err := h.repo.UpdateFetchInfo(feed.ID, result.ETag, result.LastModified, time.Now()); err != nil {
+		log.Printf("Failed to update feed info: %v", err)
+	}
+	if result.Feed != nil && result.Feed.Title != "" {
+		if err := h.repo.UpdateTitle(feed.ID, result.Feed.Title); err != nil {
+			log.Printf("Failed to update feed title: %v", err)
+		}
+	}
+
+	newCount := 0
+	for _, item := range result.Feed.Items {
+		if newCount >= 10 {
+			break
+		}
+
+		exists, _ := h.articleRepo.Exists(feed.ID, item.Link)
+		if exists {
+			h.articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedTime(item.PublishedParsed, item.UpdatedParsed))
+			continue
+		}
+
+		content := item.Description
+		if content == "" {
+			content = item.Content
+		}
+
+		if item.Link != "" {
+			fullContent, err := h.contentFetcher.FetchContent(c.Request.Context(), item.Link)
+			if err == nil && len(fullContent) > len(content) {
+				content = fullContent
+			}
+		}
+
+		article := &model.Article{
+			FeedID:      feed.ID,
+			Title:       item.Title,
+			URL:         item.Link,
+			Content:     content,
+			PublishedAt: publishedTime(item.PublishedParsed, item.UpdatedParsed),
+		}
+
+		if err := h.articleRepo.Create(article); err != nil {
+			log.Printf("Failed to create article: %v", err)
+		} else {
+			newCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "fetch completed",
+		"new_articles": newCount,
+		"feed_title":  result.Feed.Title,
+	})
+}
+
+func publishedTime(published, updated *time.Time) *time.Time {
+	if published != nil {
+		return published
+	}
+	return updated
+}

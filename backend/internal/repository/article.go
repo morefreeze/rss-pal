@@ -1,0 +1,237 @@
+package repository
+
+import (
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/bytedance/rss-pal/internal/model"
+)
+
+type ArticleRepository struct {
+	db *sql.DB
+}
+
+func NewArticleRepository(db *sql.DB) *ArticleRepository {
+	return &ArticleRepository{db: db}
+}
+
+func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error) {
+	var articles []model.Article
+	for rows.Next() {
+		var a model.Article
+		var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &feedTitle)
+		if err != nil {
+			return nil, err
+		}
+		a.Content = content.String
+		a.SummaryBrief = summaryBrief.String
+		a.SummaryDetailed = summaryDetailed.String
+		a.FeedTitle = feedTitle.String
+		articles = append(articles, a)
+	}
+	return articles, nil
+}
+
+func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Article, error) {
+	var articles []model.Article
+	for rows.Next() {
+		var a model.Article
+		var content, summaryBrief, summaryDetailed sql.NullString
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt)
+		if err != nil {
+			return nil, err
+		}
+		a.Content = content.String
+		a.SummaryBrief = summaryBrief.String
+		a.SummaryDetailed = summaryDetailed.String
+		articles = append(articles, a)
+	}
+	return articles, nil
+}
+
+func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, userID int) ([]model.Article, error) {
+	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, feeds.title as feed_title FROM articles JOIN feeds ON articles.feed_id = feeds.id`
+	args := []interface{}{}
+	conditions := []string{}
+	argIdx := 1
+
+	// Only return articles from feeds visible to this user (shared feeds or user's own feeds)
+	conditions = append(conditions, fmt.Sprintf("(feeds.owner_id IS NULL OR feeds.owner_id = $%d)", argIdx))
+	args = append(args, userID)
+	argIdx++
+
+	if feedID != nil {
+		conditions = append(conditions, fmt.Sprintf("articles.feed_id = $%d", argIdx))
+		args = append(args, *feedID)
+		argIdx++
+	}
+
+	if unreadOnly {
+		conditions = append(conditions, "articles.id NOT IN (SELECT article_id FROM reading_progress WHERE is_completed = true)")
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + conditions[0]
+		for i := 1; i < len(conditions); i++ {
+			query += " AND " + conditions[i]
+		}
+	}
+
+	query += fmt.Sprintf(" ORDER BY COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanArticle(rows)
+}
+
+func (r *ArticleRepository) GetByID(id int) (*model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, f.title as feed_title
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		WHERE a.id = $1`
+	var a model.Article
+	var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
+	err := r.db.QueryRow(query, id).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &feedTitle)
+	if err != nil {
+		return nil, err
+	}
+	a.Content = content.String
+	a.SummaryBrief = summaryBrief.String
+	a.SummaryDetailed = summaryDetailed.String
+	a.FeedTitle = feedTitle.String
+	return &a, nil
+}
+
+func (r *ArticleRepository) Create(article *model.Article) error {
+	query := `INSERT INTO articles (feed_id, title, url, content, published_at) VALUES ($1, $2, $3, $4, $5) RETURNING id, fetched_at`
+	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt).Scan(&article.ID, &article.FetchedAt)
+}
+
+func (r *ArticleRepository) Exists(feedID int, url string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM articles WHERE feed_id = $1 AND url = $2)`
+	var exists bool
+	err := r.db.QueryRow(query, feedID, url).Scan(&exists)
+	return exists, err
+}
+
+func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed string) error {
+	query := `UPDATE articles SET summary_brief = $1, summary_detailed = $2 WHERE id = $3`
+	_, err := r.db.Exec(query, summaryBrief, summaryDetailed, id)
+	return err
+}
+
+func (r *ArticleRepository) UpdateContent(id int, content string) error {
+	query := `UPDATE articles SET content = $1, refetch_attempts = 0 WHERE id = $2`
+	_, err := r.db.Exec(query, content, id)
+	return err
+}
+
+func (r *ArticleRepository) IncrementRefetchAttempts(id int) error {
+	query := `UPDATE articles SET refetch_attempts = refetch_attempts + 1 WHERE id = $1`
+	_, err := r.db.Exec(query, id)
+	return err
+}
+
+func (r *ArticleRepository) UpdatePublishedAtIfNull(feedID int, url string, publishedAt *time.Time) error {
+	if publishedAt == nil {
+		return nil
+	}
+	query := `UPDATE articles SET published_at = $1 WHERE feed_id = $2 AND url = $3 AND published_at IS NULL`
+	_, err := r.db.Exec(query, publishedAt, feedID, url)
+	return err
+}
+
+func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at
+		FROM articles a
+		LEFT JOIN (
+			SELECT article_id, SUM(
+				CASE signal_type
+					WHEN 'like' THEN 5.0 * signal_value
+					WHEN 'dislike' THEN -10.0 * signal_value
+					WHEN 'save' THEN 3.0 * signal_value
+					WHEN 'read_duration' THEN signal_value / 60.0
+					ELSE 1.0 * signal_value
+				END
+			) as score
+			FROM user_preferences
+			WHERE created_at > NOW() - INTERVAL '30 days'
+			AND user_id = $2
+			GROUP BY article_id
+		) p ON a.id = p.article_id
+		WHERE p.score IS NOT NULL AND p.score > 0
+		ORDER BY p.score DESC, a.published_at DESC NULLS LAST
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+func (r *ArticleRepository) GetArticlesForTopicExtraction(limit int) ([]model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at
+		FROM articles a
+		JOIN user_preferences p ON a.id = p.article_id
+		WHERE p.signal_type IN ('like', 'save')
+		AND a.content IS NOT NULL AND a.content != ''
+		ORDER BY p.created_at DESC
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Article, error) {
+	query := `
+		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at
+		FROM articles
+		WHERE (summary_brief IS NULL OR summary_brief = '')
+		AND LENGTH(content) > 100
+		ORDER BY fetched_at DESC
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.Article, error) {
+	query := `
+		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at
+		FROM articles
+		WHERE (LENGTH(content) < $1 OR content IS NULL)
+		AND fetched_at > NOW() - INTERVAL '7 days'
+		AND refetch_attempts < 3
+		ORDER BY fetched_at DESC
+		LIMIT 50
+	`
+	rows, err := r.db.Query(query, minLength)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanArticleNoFeedTitle(rows)
+}

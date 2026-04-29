@@ -1,0 +1,1 @@
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS refetch_attempts INT DEFAULT 0;

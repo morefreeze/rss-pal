@@ -1,0 +1,29 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Go build artifacts
+backend/bin/
+backend/server
+backend/worker
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Docker volumes
+postgres_data/
+
+# Claude Code loop state
+.claude/
+
+# Editor
+.DS_Store
+*.swp
+*.idea/
+.vscode/
+
+# Logs
+log/
+*.log
