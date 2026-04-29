@@ -65,7 +65,7 @@ function App() {
           <Route path="articles/:id" element={<ArticlePage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="stats" element={<StatsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings" element={<SettingsPage user={user} />} />
         </Route>
         <Route path="*" element={<Navigate to="/articles" replace />} />
       </Routes>

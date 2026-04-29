@@ -69,7 +69,9 @@ func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bo
 	}
 
 	if unreadOnly {
-		conditions = append(conditions, "articles.id NOT IN (SELECT article_id FROM reading_progress WHERE is_completed = true)")
+		conditions = append(conditions, fmt.Sprintf("articles.id NOT IN (SELECT article_id FROM reading_progress WHERE is_completed = true AND user_id = $%d)", argIdx))
+		args = append(args, userID)
+		argIdx++
 	}
 
 	if len(conditions) > 0 {
