@@ -98,8 +98,12 @@ export default function ArticlePage() {
 
       // Update progress
       const isCompleted = scrollPosition > 0.9
+      const wasCompleted = progress?.is_completed
       const newProgress = await updateProgress(article.id, scrollPosition, isCompleted)
       setProgress(newProgress)
+      if (isCompleted && !wasCompleted) {
+        window.dispatchEvent(new Event('refresh-unread'))
+      }
     }
   }, [article, id])
 
