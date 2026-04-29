@@ -95,15 +95,15 @@ LEFT JOIN reading_progress rp ON articles.id = rp.article_id AND rp.user_id = $1
 	return r.scanArticle(rows)
 }
 
-func (r *ArticleRepository) GetByID(id int) (*model.Article, error) {
+func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	query := `
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, f.title as feed_title
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
-		WHERE a.id = $1`
+		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
 	var a model.Article
 	var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
-	err := r.db.QueryRow(query, id).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &feedTitle)
+	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &feedTitle)
 	if err != nil {
 		return nil, err
 	}

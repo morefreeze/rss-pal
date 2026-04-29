@@ -30,7 +30,7 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleRepo.GetByID(id)
+	article, err := h.articleRepo.GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -68,7 +68,7 @@ func (h *ContentHandler) ExportMarkdown(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleRepo.GetByID(id)
+	article, err := h.articleRepo.GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
