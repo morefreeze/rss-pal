@@ -84,6 +84,19 @@ func (h *PreferenceHandler) Save(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
+func (h *PreferenceHandler) Unsave(c *gin.Context) {
+	var req model.PreferenceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.prefRepo.DeleteSignal(getUserID(c), req.ArticleID, "save"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusOK)
+}
+
 func (h *PreferenceHandler) RecordReadDuration(c *gin.Context) {
 	var req struct {
 		ArticleID       int     `json:"article_id"`

@@ -100,6 +100,12 @@ func (r *PreferenceRepository) GetRecentReadTitles(userID int, limit int) ([]str
 	return titles, nil
 }
 
+// DeleteSignal removes all rows for a given user+article+signal_type.
+func (r *PreferenceRepository) DeleteSignal(userID, articleID int, signalType string) error {
+	_, err := r.db.Exec(`DELETE FROM user_preferences WHERE user_id = $1 AND article_id = $2 AND signal_type = $3`, userID, articleID, signalType)
+	return err
+}
+
 // GetUserSignals returns the most recent signal_value per signal_type for a given user+article.
 func (r *PreferenceRepository) GetUserSignals(userID, articleID int) (map[string]float64, error) {
 	query := `

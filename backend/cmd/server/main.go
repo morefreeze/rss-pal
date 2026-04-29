@@ -103,6 +103,7 @@ func main() {
 		apiGroup.POST("/preferences/like", prefHandler.Like)
 		apiGroup.POST("/preferences/dislike", prefHandler.Dislike)
 		apiGroup.POST("/preferences/save", prefHandler.Save)
+		apiGroup.DELETE("/preferences/save", prefHandler.Unsave)
 		apiGroup.POST("/preferences/read-duration", prefHandler.RecordReadDuration)
 		apiGroup.GET("/preferences/topics", prefHandler.GetTopics)
 
