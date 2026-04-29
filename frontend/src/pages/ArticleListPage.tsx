@@ -197,6 +197,17 @@ export default function ArticleListPage() {
             />
             仅未读
           </label>
+          {!searchQuery && (
+            <button
+              className="secondary"
+              style={{ fontSize: 12, padding: '4px 10px' }}
+              onClick={() => loadArticles(0, true)}
+              disabled={loading}
+              title="刷新文章列表"
+            >
+              ↻
+            </button>
+          )}
           {!searchQuery && articles.length > 0 && (
             <button
               className="secondary"
