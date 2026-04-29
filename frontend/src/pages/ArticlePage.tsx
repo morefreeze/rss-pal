@@ -97,7 +97,10 @@ export default function ArticlePage() {
       } else if (e.key === 'Escape' || e.key === 'Backspace') {
         navigate(-1)
       } else if (e.key === 'm') {
-        if (article && !progress?.is_completed) handleMarkRead()
+        if (article) {
+          if (progress?.is_completed) handleMarkUnread()
+          else handleMarkRead()
+        }
       }
     }
     window.addEventListener('keydown', handler)
@@ -224,6 +227,17 @@ export default function ArticlePage() {
         read.push(article.id)
         sessionStorage.setItem('readArticles', JSON.stringify(read))
       }
+    } catch {}
+    window.dispatchEvent(new Event('refresh-unread'))
+  }
+
+  const handleMarkUnread = async () => {
+    if (!article) return
+    await resetProgress(article.id)
+    setProgress(null)
+    try {
+      const read: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+      sessionStorage.setItem('readArticles', JSON.stringify(read.filter(id => id !== article.id)))
     } catch {}
     window.dispatchEvent(new Event('refresh-unread'))
   }
@@ -395,7 +409,15 @@ export default function ArticlePage() {
           >
             {saved ? '✓ 已保存' : '⭐ 保存'}
           </button>
-          {!progress?.is_completed && (
+          {progress?.is_completed ? (
+            <button
+              className="secondary"
+              onClick={handleMarkUnread}
+              style={{ fontSize: 13 }}
+            >
+              ↩ 标记未读
+            </button>
+          ) : (
             <button
               className="secondary"
               onClick={handleMarkRead}
