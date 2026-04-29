@@ -15,6 +15,7 @@ export default function ArticlePage() {
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   // Compute prev/next from session nav list
   const navList: number[] = (() => {
@@ -43,6 +44,7 @@ export default function ArticlePage() {
   const loadArticle = async () => {
     if (!id) return
     setLoading(true)
+    setLoadError('')
     try {
       const data = await getArticle(Number(id))
       setArticle(data.article)
@@ -68,6 +70,12 @@ export default function ArticlePage() {
           const scrollHeight = contentRef.current?.scrollHeight || 0
           window.scrollTo(0, scrollHeight * savedProgress)
         }, 100)
+      }
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        setLoadError('文章不存在或无权访问')
+      } else {
+        setLoadError('加载失败，请稍后重试')
       }
     } finally {
       setLoading(false)
@@ -322,7 +330,12 @@ export default function ArticlePage() {
   const progressPercent = progress?.scroll_position ? Math.round(progress.scroll_position * 100) : 0
 
   if (loading) return <div className="card">Loading...</div>
-  if (!article) return <div className="card">文章不存在</div>
+  if (loadError || !article) return (
+    <div className="card" style={{ textAlign: 'center' }}>
+      <div className="text-muted">{loadError || '文章不存在'}</div>
+      <button className="secondary" style={{ marginTop: 12 }} onClick={() => navigate(-1)}>← 返回</button>
+    </div>
+  )
 
   const readingTime = article.content
     ? Math.max(1, Math.round(article.content.length / 800))
