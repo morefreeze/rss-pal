@@ -14,6 +14,7 @@ type Feed struct {
 	OwnerID           *int       `json:"owner_id" db:"owner_id"`
 	FeedType          string     `json:"feed_type" db:"feed_type"` // "rss" or "html"
 	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	ArticleCount      int        `json:"article_count" db:"article_count"`
 }
 
 type Article struct {

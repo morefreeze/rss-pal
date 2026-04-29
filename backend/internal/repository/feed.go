@@ -80,13 +80,31 @@ func (r *FeedRepository) GetByID(id int) (*model.Feed, error) {
 }
 
 func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds WHERE owner_id IS NULL OR owner_id = $1 ORDER BY created_at DESC`
+	query := `
+		SELECT f.id, f.url, f.title, f.last_fetched_at, f.fetch_interval_minutes, f.etag, f.last_modified, f.is_active, f.owner_id, f.feed_type, f.created_at,
+		       COUNT(a.id) AS article_count
+		FROM feeds f
+		LEFT JOIN articles a ON a.feed_id = f.id
+		WHERE f.owner_id IS NULL OR f.owner_id = $1
+		GROUP BY f.id
+		ORDER BY f.created_at DESC
+	`
 	rows, err := r.db.Query(query, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return r.scanFeeds(rows)
+
+	var feeds []model.Feed
+	for rows.Next() {
+		var f model.Feed
+		err := rows.Scan(&f.ID, &f.URL, &f.Title, &f.LastFetchedAt, &f.FetchIntervalMin, &f.ETag, &f.LastModified, &f.IsActive, &f.OwnerID, &f.FeedType, &f.CreatedAt, &f.ArticleCount)
+		if err != nil {
+			return nil, err
+		}
+		feeds = append(feeds, f)
+	}
+	return feeds, nil
 }
 
 func (r *FeedRepository) Create(feed *model.Feed) error {
