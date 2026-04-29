@@ -432,11 +432,15 @@ export default function ArticleListPage() {
               </div>
             </div>
           ))}
-          {hasMore && (
+          {hasMore ? (
             <div ref={loadMoreRef} style={{ textAlign: 'center', padding: '12px', color: '#999', fontSize: 13 }}>
               {loadingMore ? '加载中...' : ''}
             </div>
-          )}
+          ) : articles.length > 0 ? (
+            <div style={{ textAlign: 'center', padding: '16px', color: '#ccc', fontSize: 13 }}>
+              — 已加载全部文章 —
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>
