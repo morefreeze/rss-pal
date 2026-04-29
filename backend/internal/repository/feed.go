@@ -17,15 +17,19 @@ func NewFeedRepository(db *sql.DB) *FeedRepository {
 
 func (r *FeedRepository) scanFeed(row *sql.Row) (*model.Feed, error) {
 	var f model.Feed
-	var title, etag, lastModified sql.NullString
+	var title, etag, lastModified, feedType sql.NullString
 	var ownerID sql.NullInt64
-	err := row.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &f.CreatedAt)
+	err := row.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &f.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	f.Title = title.String
 	f.ETag = etag.String
 	f.LastModified = lastModified.String
+	f.FeedType = feedType.String
+	if f.FeedType == "" {
+		f.FeedType = "rss"
+	}
 	if ownerID.Valid {
 		oid := int(ownerID.Int64)
 		f.OwnerID = &oid
@@ -37,15 +41,19 @@ func (r *FeedRepository) scanFeeds(rows *sql.Rows) ([]model.Feed, error) {
 	var feeds []model.Feed
 	for rows.Next() {
 		var f model.Feed
-		var title, etag, lastModified sql.NullString
+		var title, etag, lastModified, feedType sql.NullString
 		var ownerID sql.NullInt64
-		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &f.CreatedAt)
+		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &f.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
 		f.Title = title.String
 		f.ETag = etag.String
 		f.LastModified = lastModified.String
+		f.FeedType = feedType.String
+		if f.FeedType == "" {
+			f.FeedType = "rss"
+		}
 		if ownerID.Valid {
 			oid := int(ownerID.Int64)
 			f.OwnerID = &oid
@@ -56,7 +64,7 @@ func (r *FeedRepository) scanFeeds(rows *sql.Rows) ([]model.Feed, error) {
 }
 
 func (r *FeedRepository) GetAll() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, created_at FROM feeds ORDER BY created_at DESC`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds ORDER BY created_at DESC`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -67,12 +75,12 @@ func (r *FeedRepository) GetAll() ([]model.Feed, error) {
 }
 
 func (r *FeedRepository) GetByID(id int) (*model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, created_at FROM feeds WHERE id = $1`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds WHERE id = $1`
 	return r.scanFeed(r.db.QueryRow(query, id))
 }
 
 func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, created_at FROM feeds WHERE owner_id IS NULL OR owner_id = $1 ORDER BY created_at DESC`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds WHERE owner_id IS NULL OR owner_id = $1 ORDER BY created_at DESC`
 	rows, err := r.db.Query(query, userID)
 	if err != nil {
 		return nil, err
@@ -82,8 +90,12 @@ func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 }
 
 func (r *FeedRepository) Create(feed *model.Feed) error {
-	query := `INSERT INTO feeds (url, title, fetch_interval_minutes, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, created_at`
-	return r.db.QueryRow(query, feed.URL, feed.Title, feed.FetchIntervalMin, feed.OwnerID).Scan(&feed.ID, &feed.CreatedAt)
+	feedType := feed.FeedType
+	if feedType == "" {
+		feedType = "rss"
+	}
+	query := `INSERT INTO feeds (url, title, fetch_interval_minutes, owner_id, feed_type) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`
+	return r.db.QueryRow(query, feed.URL, feed.Title, feed.FetchIntervalMin, feed.OwnerID, feedType).Scan(&feed.ID, &feed.CreatedAt)
 }
 
 func (r *FeedRepository) Update(feed *model.Feed) error {
@@ -114,7 +126,7 @@ func (r *FeedRepository) UpdateTitle(id int, title string) error {
 }
 
 func (r *FeedRepository) GetAllActive() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, created_at FROM feeds WHERE is_active = true`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds WHERE is_active = true`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err

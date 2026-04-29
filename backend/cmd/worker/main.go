@@ -170,6 +170,12 @@ func fetchAllFeeds(ctx context.Context, feedRepo *repository.FeedRepository, art
 
 func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, feed model.Feed) {
 	log.Printf("Fetching feed: %s", feed.URL)
+
+	if feed.FeedType == "html" {
+		processHTMLFeed(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer, feed)
+		return
+	}
+
 	result, err := fetcher.Fetch(ctx, feed.URL, feed.ETag, feed.LastModified)
 	if err != nil {
 		log.Printf("Failed to fetch feed %s: %v", feed.URL, err)
@@ -252,6 +258,63 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 
 	wg.Wait()
 	log.Printf("Feed %s fetched, %d new articles", feed.URL, newCount)
+}
+
+func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, feed model.Feed) {
+	htmlFeed, err := fetcher.FetchHTML(ctx, feed.URL)
+	if err != nil {
+		log.Printf("Failed to scrape HTML feed %s: %v", feed.URL, err)
+		return
+	}
+
+	if err := feedRepo.UpdateFetchInfo(feed.ID, "", "", time.Now()); err != nil {
+		log.Printf("Failed to update feed info: %v", err)
+	}
+	if htmlFeed.Title != "" {
+		_ = feedRepo.UpdateTitle(feed.ID, htmlFeed.Title)
+	}
+
+	var (
+		wg          sync.WaitGroup
+		sem         = make(chan struct{}, maxConcurrentContent)
+		newCount    int64
+		queuedCount int
+	)
+
+	for _, item := range htmlFeed.Items {
+		if queuedCount >= maxNewArticlesPerFeed || item.Link == "" {
+			break
+		}
+		exists, _ := articleRepo.Exists(feed.ID, item.Link)
+		if exists {
+			continue
+		}
+		queuedCount++
+		wg.Add(1)
+		go func(link, title string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			content, _ := contentFetcher.FetchContent(ctx, link)
+			article := &model.Article{
+				FeedID:  feed.ID,
+				Title:   title,
+				URL:     link,
+				Content: content,
+			}
+			if err := articleRepo.Create(article); err != nil {
+				log.Printf("Failed to create HTML article: %v", err)
+			} else {
+				atomic.AddInt64(&newCount, 1)
+				if summarizer != nil {
+					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
+				}
+			}
+		}(item.Link, item.Title)
+	}
+
+	wg.Wait()
+	log.Printf("HTML feed %s scraped, %d new articles", feed.URL, newCount)
 }
 
 func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRepository, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer) {

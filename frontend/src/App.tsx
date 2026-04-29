@@ -60,7 +60,7 @@ function App() {
         <Route path="/share/:token" element={<SharePage />} />
         <Route element={<RequireAuth user={user} onLogout={handleLogout} />}>
           <Route index element={<Navigate to="/articles" replace />} />
-          <Route path="feeds" element={<FeedListPage user={user} />} />
+          <Route path="feeds" element={<FeedListPage />} />
           <Route path="articles" element={<ArticleListPage />} />
           <Route path="articles/:id" element={<ArticlePage />} />
           <Route path="insights" element={<InsightsPage />} />

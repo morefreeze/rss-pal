@@ -1,22 +1,25 @@
 import { useState, useEffect } from 'react'
-import { getFeeds, addFeed, deleteFeed, fetchFeedNow, createInviteCode, getInviteCodes, Feed, InviteCode } from '../api/client'
+import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, Feed, FeedPreview } from '../api/client'
 
-interface FeedListPageProps {
-  user: { id: number; username: string; is_admin: boolean } | null
-}
+const POPULAR_FEEDS = [
+  { name: 'Hacker News', url: 'https://hnrss.org/frontpage', desc: '科技社区热帖' },
+  { name: '少数派', url: 'https://sspai.com/feed', desc: '数字生活方式' },
+  { name: 'V2EX', url: 'https://www.v2ex.com/index.xml', desc: '技术&创意社区' },
+  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', desc: '科技新闻' },
+  { name: '阮一峰博客', url: 'https://www.ruanyifeng.com/blog/atom.xml', desc: '技术&周刊' },
+]
 
-export default function FeedListPage({ user }: FeedListPageProps) {
+export default function FeedListPage() {
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [newUrl, setNewUrl] = useState('')
   const [loading, setLoading] = useState(true)
   const [fetchingId, setFetchingId] = useState<number | null>(null)
-  const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([])
-  const [showInvitePanel, setShowInvitePanel] = useState(false)
-  const [newCode, setNewCode] = useState('')
+  const [previewing, setPreviewing] = useState(false)
+  const [preview, setPreview] = useState<FeedPreview | null>(null)
+  const [previewError, setPreviewError] = useState('')
+  const [adding, setAdding] = useState(false)
 
-  useEffect(() => {
-    loadFeeds()
-  }, [])
+  useEffect(() => { loadFeeds() }, [])
 
   const loadFeeds = async () => {
     try {
@@ -27,29 +30,52 @@ export default function FeedListPage({ user }: FeedListPageProps) {
     }
   }
 
-  const handleAdd = async (e: React.FormEvent) => {
+  const handlePreview = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newUrl) return
-
+    if (!newUrl.trim()) return
+    setPreviewing(true)
+    setPreview(null)
+    setPreviewError('')
     try {
-      const feed = await addFeed(newUrl)
+      const result = await previewFeed(newUrl.trim())
+      setPreview(result)
+    } catch (err: any) {
+      setPreviewError(err?.response?.data?.error || '无法获取该地址的内容，请检查 URL 是否正确')
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  const handleConfirmAdd = async () => {
+    if (!preview) return
+    setAdding(true)
+    try {
+      const actualUrl = preview.actual_url || newUrl.trim()
+      const feed = await addFeed(actualUrl, preview.feed_type)
       setNewUrl('')
+      setPreview(null)
       await loadFeeds()
       // Auto-fetch after adding
       try {
         await fetchFeedNow(feed.id)
         await loadFeeds()
       } catch {
-        // Fetch failed silently, worker will pick it up later
+        // Worker will pick it up
       }
-    } catch (err) {
-      alert('添加失败')
+    } catch {
+      alert('添加失败，请重试')
+    } finally {
+      setAdding(false)
     }
+  }
+
+  const handleCancelPreview = () => {
+    setPreview(null)
+    setPreviewError('')
   }
 
   const handleDelete = async (id: number) => {
     if (!confirm('确定删除此订阅？')) return
-
     try {
       await deleteFeed(id)
       loadFeeds()
@@ -73,92 +99,117 @@ export default function FeedListPage({ user }: FeedListPageProps) {
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return '从未'
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-  }
-
-  const loadInviteCodes = async () => {
-    try {
-      const data = await getInviteCodes()
-      setInviteCodes(data || [])
-    } catch { /* ignore */ }
-  }
-
-  const handleCreateCode = async () => {
-    try {
-      const code = await createInviteCode(72)
-      setNewCode(code.code)
-      loadInviteCodes()
-    } catch {
-      alert('创建失败')
-    }
+    return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   }
 
   if (loading) return <div className="card">Loading...</div>
 
   return (
     <div>
-      <div className="flex-between mb-2">
-        <h2>订阅管理</h2>
-        {user?.is_admin && (
-          <button className="secondary" onClick={() => { setShowInvitePanel(!showInvitePanel); if (!showInvitePanel) loadInviteCodes() }}>
-            邀请码
+      <h2 className="mb-2">订阅管理</h2>
+
+      {/* Add feed: 2-step preview flow */}
+      <div className="card mb-2">
+        <h3 className="mb-2">添加订阅</h3>
+        <p className="text-muted text-sm mb-2">支持 RSS/Atom 订阅地址，也可以直接输入博客或新闻网站地址，系统会自动识别</p>
+
+        <form onSubmit={handlePreview} className="flex gap-2 mb-2">
+          <input
+            type="text"
+            placeholder="输入 RSS 地址或网站 URL"
+            value={newUrl}
+            onChange={e => { setNewUrl(e.target.value); setPreview(null); setPreviewError('') }}
+            style={{ flex: 1 }}
+            disabled={previewing || adding}
+          />
+          <button type="submit" disabled={previewing || adding || !newUrl.trim()}>
+            {previewing ? '获取中...' : '预览'}
           </button>
+        </form>
+
+        {/* Popular feeds */}
+        <div className="mb-2">
+          <div className="text-sm text-muted mb-1">热门推荐：</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {POPULAR_FEEDS.map(f => (
+              <button
+                key={f.url}
+                className="secondary"
+                style={{ fontSize: 12, padding: '3px 10px' }}
+                title={f.desc}
+                onClick={() => { setNewUrl(f.url); setPreview(null); setPreviewError('') }}
+              >
+                {f.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Preview error */}
+        {previewError && (
+          <div style={{ color: '#dc2626', fontSize: 14, marginBottom: 8 }}>{previewError}</div>
+        )}
+
+        {/* Preview result */}
+        {preview && (
+          <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, padding: 12 }}>
+            <div className="flex-between mb-2">
+              <div>
+                <div className="text-bold">{preview.feed_title || '未命名订阅源'}</div>
+                <div className="text-muted text-sm">
+                  {preview.feed_type === 'html' ? '🌐 网页抓取模式' : '📡 RSS/Atom 订阅'}
+                  {preview.actual_url !== newUrl.trim() && (
+                    <span style={{ marginLeft: 6 }}>· 已自动发现 RSS 地址</span>
+                  )}
+                  · {preview.items.length} 篇文章
+                </div>
+              </div>
+              <div className="flex gap-1">
+                <button onClick={handleConfirmAdd} disabled={adding}>
+                  {adding ? '添加中...' : '确认订阅'}
+                </button>
+                <button className="secondary" onClick={handleCancelPreview}>取消</button>
+              </div>
+            </div>
+            <div>
+              {preview.items.length === 0 ? (
+                <div className="text-muted text-sm">未找到文章，该地址可能不包含可识别的内容</div>
+              ) : (
+                preview.items.map((item, i) => (
+                  <div key={i} style={{ padding: '5px 0', borderBottom: i < preview.items.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm" style={{ color: '#213547' }}>
+                      {item.title}
+                    </a>
+                    {item.published_at && (
+                      <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
+                        {new Date(item.published_at).toLocaleDateString('zh-CN')}
+                      </span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         )}
       </div>
 
-      {showInvitePanel && (
-        <div className="card mb-2">
-          <div className="flex-between mb-1">
-            <h3>邀请码管理</h3>
-            <button onClick={handleCreateCode}>生成新邀请码</button>
-          </div>
-          {newCode && (
-            <div className="card" style={{ background: '#f0f9ff', marginBottom: 8, padding: '8px 12px' }}>
-              新邀请码: <strong>{newCode}</strong>
-              <button className="secondary text-sm" style={{ marginLeft: 8 }} onClick={() => navigator.clipboard.writeText(newCode)}>复制</button>
-            </div>
-          )}
-          {inviteCodes.length === 0 ? (
-            <div className="text-muted text-sm">暂无邀请码</div>
-          ) : (
-            inviteCodes.map(ic => (
-              <div key={ic.id} className="flex-between text-sm" style={{ padding: '4px 0' }}>
-                <span>
-                  <strong>{ic.code}</strong>
-                  {ic.used_by ? <span className="text-muted"> (已使用)</span> : <span style={{ color: '#16a34a' }}> (可用)</span>}
-                </span>
-                <span className="text-muted">
-                  {ic.expires_at ? `有效期至 ${new Date(ic.expires_at).toLocaleDateString('zh-CN')}` : '永久'}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      <form onSubmit={handleAdd} className="flex gap-2 mb-2">
-        <input
-          type="url"
-          placeholder="RSS 地址"
-          value={newUrl}
-          onChange={e => setNewUrl(e.target.value)}
-          style={{ flex: 1 }}
-        />
-        <button type="submit">添加</button>
-      </form>
-
+      {/* Existing feeds list */}
       {feeds.length === 0 ? (
-        <div className="card text-muted">暂无订阅</div>
+        <div className="card text-muted">暂无订阅，从上方添加你的第一个订阅源</div>
       ) : (
         feeds.map(feed => (
           <div key={feed.id} className="card">
             <div className="flex-between">
               <div>
-                <div className="text-bold">{feed.title || feed.url}</div>
+                <div className="text-bold">
+                  {feed.title || feed.url}
+                  {feed.feed_type === 'html' && (
+                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#fef9c3', borderRadius: 4, color: '#854d0e' }}>网页</span>
+                  )}
+                </div>
                 <div className="text-muted text-sm">{feed.url}</div>
                 <div className="text-muted text-sm mt-1">
-                  {feed.owner_id ? '私有' : '共享'} | 上次抓取: {formatDate(feed.last_fetched_at)}
+                  {feed.owner_id ? '私有' : '共享'} · 上次抓取：{formatDate(feed.last_fetched_at)}
                 </div>
               </div>
               <div className="flex gap-1">

@@ -53,6 +53,26 @@ func (h *FeedHandler) GetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, feed)
 }
 
+// Preview fetches a URL and returns up to 10 articles without saving anything.
+func (h *FeedHandler) Preview(c *gin.Context) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	result, err := h.fetcher.Preview(ctx, req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 func (h *FeedHandler) Create(c *gin.Context) {
 	var req model.AddFeedRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -60,11 +80,17 @@ func (h *FeedHandler) Create(c *gin.Context) {
 		return
 	}
 
+	feedType := req.FeedType
+	if feedType == "" {
+		feedType = "rss"
+	}
+
 	feed := &model.Feed{
 		URL:              req.URL,
 		FetchIntervalMin: 60,
 		IsActive:         true,
 		OwnerID:          getOwnerID(c),
+		FeedType:         feedType,
 	}
 
 	if err := h.repo.Create(feed); err != nil {
@@ -153,6 +179,50 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 	}
 
 	log.Printf("Manual fetch triggered for feed: %s", feed.URL)
+
+	// HTML feeds use scraping instead of RSS parsing
+	if feed.FeedType == "html" {
+		htmlFeed, err := h.fetcher.FetchHTML(c.Request.Context(), feed.URL)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "fetch failed: " + err.Error()})
+			return
+		}
+		if err := h.repo.UpdateFetchInfo(feed.ID, "", "", time.Now()); err != nil {
+			log.Printf("Failed to update feed info: %v", err)
+		}
+		if htmlFeed.Title != "" {
+			_ = h.repo.UpdateTitle(feed.ID, htmlFeed.Title)
+		}
+		newCount := 0
+		for _, item := range htmlFeed.Items {
+			if item.Link == "" {
+				continue
+			}
+			exists, _ := h.articleRepo.Exists(feed.ID, item.Link)
+			if exists {
+				continue
+			}
+			content, _ := h.contentFetcher.FetchContent(c.Request.Context(), item.Link)
+			article := &model.Article{
+				FeedID:  feed.ID,
+				Title:   item.Title,
+				URL:     item.Link,
+				Content: content,
+			}
+			if err := h.articleRepo.Create(article); err != nil {
+				log.Printf("Failed to create article: %v", err)
+			} else {
+				newCount++
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":      "fetch completed",
+			"new_articles": newCount,
+			"feed_title":   htmlFeed.Title,
+		})
+		return
+	}
+
 	result, err := h.fetcher.Fetch(c.Request.Context(), feed.URL, feed.ETag, feed.LastModified)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "fetch failed: " + err.Error()})
