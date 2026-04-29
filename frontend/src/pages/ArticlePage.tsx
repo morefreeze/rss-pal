@@ -186,6 +186,20 @@ export default function ArticlePage() {
     }
   }
 
+  const handleMarkRead = async () => {
+    if (!article) return
+    const newProgress = await updateProgress(article.id, 1.0, true)
+    setProgress(newProgress)
+    try {
+      const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+      if (!read.includes(article.id)) {
+        read.push(article.id)
+        sessionStorage.setItem('readArticles', JSON.stringify(read))
+      }
+    } catch {}
+    window.dispatchEvent(new Event('refresh-unread'))
+  }
+
   const getOrFetchShareToken = async (): Promise<string> => {
     if (shareToken) return shareToken
     if (!article) return ''
@@ -310,7 +324,7 @@ export default function ArticlePage() {
           {progressPercent > 0 && <span> · 阅读进度 {progressPercent}%</span>}
         </div>
 
-        <div className="flex gap-2 mb-2">
+        <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
           <button
             onClick={handleLike}
             style={liked ? { backgroundColor: '#22c55e', color: 'white' } : {}}
@@ -331,6 +345,15 @@ export default function ArticlePage() {
           >
             {saved ? '✓ 已保存' : '⭐ 保存'}
           </button>
+          {!progress?.is_completed && (
+            <button
+              className="secondary"
+              onClick={handleMarkRead}
+              style={{ fontSize: 13 }}
+            >
+              ✓ 标记已读
+            </button>
+          )}
         </div>
       </div>
 
