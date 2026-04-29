@@ -14,6 +14,14 @@ export default function ArticlePage() {
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // Compute prev/next from session nav list
+  const navList: number[] = (() => {
+    try { return JSON.parse(sessionStorage.getItem('articleNavList') || '[]') } catch { return [] }
+  })()
+  const currentIdx = id ? navList.indexOf(Number(id)) : -1
+  const prevId = currentIdx > 0 ? navList[currentIdx - 1] : null
+  const nextId = currentIdx >= 0 && currentIdx < navList.length - 1 ? navList[currentIdx + 1] : null
   const [fetchingContent, setFetchingContent] = useState(false)
   const [liked, setLiked] = useState(false)
   const [disliked, setDisliked] = useState(false)
@@ -304,13 +312,35 @@ export default function ArticlePage() {
 
       <div className="card">
         <div className="flex-between mb-2">
-          <button
-            className="secondary"
-            onClick={() => navigate(-1)}
-            style={{ fontSize: 13, padding: '4px 10px' }}
-          >
-            ← 返回
-          </button>
+          <div className="flex gap-1">
+            <button
+              className="secondary"
+              onClick={() => navigate(-1)}
+              style={{ fontSize: 13, padding: '4px 10px' }}
+            >
+              ← 返回
+            </button>
+            {prevId && (
+              <button
+                className="secondary"
+                onClick={() => navigate(`/articles/${prevId}`)}
+                style={{ fontSize: 13, padding: '4px 10px' }}
+                title="上一篇"
+              >
+                ‹ 上一篇
+              </button>
+            )}
+            {nextId && (
+              <button
+                className="secondary"
+                onClick={() => navigate(`/articles/${nextId}`)}
+                style={{ fontSize: 13, padding: '4px 10px' }}
+                title="下一篇"
+              >
+                下一篇 ›
+              </button>
+            )}
+          </div>
           {article.feed_title && (
             <div className="text-sm" style={{ color: '#4b6bcc' }}>{article.feed_title}</div>
           )}
