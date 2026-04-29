@@ -64,6 +64,15 @@ func (r *UserRepository) AdminExists() (bool, error) {
 	return exists, err
 }
 
+func (r *UserRepository) ChangePassword(userID int, newPassword string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2`, string(hash), userID)
+	return err
+}
+
 func (r *UserRepository) Register(username, password string, code string) (*model.User, error) {
 	tx, err := r.db.Begin()
 	if err != nil {

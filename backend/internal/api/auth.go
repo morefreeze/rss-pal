@@ -155,6 +155,37 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	var req struct {
+		OldPassword string `json:"old_password" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请填写旧密码和新密码"})
+		return
+	}
+	if len(req.NewPassword) < 6 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码至少 6 位"})
+		return
+	}
+
+	userID := getUserID(c)
+	user, err := h.userRepo.FindByID(userID)
+	if err != nil || user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if !h.userRepo.VerifyPassword(user, req.OldPassword) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "旧密码不正确"})
+		return
+	}
+	if err := h.userRepo.ChangePassword(userID, req.NewPassword); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "修改失败，请重试"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "密码已修改"})
+}
+
 func (h *AuthHandler) CreateInviteCode(c *gin.Context) {
 	if !c.GetBool("isAdmin") {
 		c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})

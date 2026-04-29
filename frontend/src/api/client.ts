@@ -50,6 +50,9 @@ export const register = (username: string, password: string, code: string) =>
 export const getMe = () =>
   api.get<{ id: number; username: string; is_admin: boolean }>('/auth/me').then(res => res.data)
 
+export const changePassword = (oldPassword: string, newPassword: string) =>
+  api.put('/auth/password', { old_password: oldPassword, new_password: newPassword }).then(res => res.data)
+
 export const logout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('user')
