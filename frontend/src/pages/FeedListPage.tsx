@@ -232,7 +232,7 @@ export default function FeedListPage() {
                 </div>
                 <div className="text-muted text-sm">{feed.url}</div>
                 <div className="text-muted text-sm mt-1">
-                  {feed.owner_id ? '私有' : '共享'} · 上次抓取：{formatDate(feed.last_fetched_at)}
+                  {feed.owner_id ? '私有' : '共享'} · {feed.article_count} 篇 · 上次抓取：{formatDate(feed.last_fetched_at)}
                 </div>
               </div>
               <div className="flex gap-1">

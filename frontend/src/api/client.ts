@@ -90,6 +90,7 @@ export interface Feed {
   owner_id: number | null
   feed_type: string
   created_at: string
+  article_count: number
 }
 
 export interface Article {
