@@ -68,6 +68,14 @@ export default function ArticleListPage() {
       const data = raw || []
       if (reset) {
         setArticles(data)
+        // Restore scroll position when navigating back from article page
+        try {
+          const savedScroll = sessionStorage.getItem('articleListScroll')
+          if (savedScroll) {
+            sessionStorage.removeItem('articleListScroll')
+            setTimeout(() => window.scrollTo(0, Number(savedScroll)), 50)
+          }
+        } catch {}
       } else {
         setArticles(prev => [...prev, ...data])
       }
@@ -139,6 +147,7 @@ export default function ArticleListPage() {
   const openArticle = (id: number) => {
     try {
       sessionStorage.setItem('articleNavList', JSON.stringify(articles.map(a => a.id)))
+      sessionStorage.setItem('articleListScroll', String(window.scrollY))
     } catch {}
     navigate(`/articles/${id}`)
   }
