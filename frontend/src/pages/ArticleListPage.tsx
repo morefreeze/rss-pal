@@ -30,6 +30,7 @@ export default function ArticleListPage() {
       return new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]'))
     } catch { return new Set() }
   })
+  const [focusedIdx, setFocusedIdx] = useState<number>(-1)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export default function ArticleListPage() {
   useEffect(() => {
     setOffset(0)
     setHasMore(true)
+    setFocusedIdx(-1)
     loadArticles(0, true)
   }, [selectedFeed, unreadOnly])
 
@@ -155,6 +157,44 @@ export default function ArticleListPage() {
       }
     }, 400)
   }
+
+  // Keyboard navigation: j/k moves focus, o/Enter opens focused article
+  useEffect(() => {
+    const displayedArticles = searchQuery
+      ? (searchResults || [])
+      : articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id))
+
+    const handler = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        setFocusedIdx(i => {
+          const next = Math.min(i + 1, displayedArticles.length - 1)
+          // scroll into view after state update
+          setTimeout(() => {
+            const cards = document.querySelectorAll('[data-article-card]')
+            cards[next]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+          }, 0)
+          return next
+        })
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setFocusedIdx(i => {
+          const prev = Math.max(i - 1, 0)
+          setTimeout(() => {
+            const cards = document.querySelectorAll('[data-article-card]')
+            cards[prev]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+          }, 0)
+          return prev
+        })
+      } else if ((e.key === 'o' || e.key === 'Enter') && focusedIdx >= 0) {
+        const article = displayedArticles[focusedIdx]
+        if (article) openArticle(article.id)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [articles, searchResults, searchQuery, unreadOnly, sessionReadIds, focusedIdx])
 
   const isRead = (article: Article) => article.is_read || sessionReadIds.has(article.id)
 
@@ -269,12 +309,20 @@ export default function ArticleListPage() {
           ) : (
             <>
               <div className="text-muted text-sm mb-1" style={{ padding: '0 4px' }}>找到 {searchResults.length} 篇文章</div>
-              {searchResults.map(article => (
+              {searchResults.map((article, idx) => (
                 <div
                   key={article.id}
                   className="card"
-                  style={{ display: 'block', opacity: isRead(article) ? 0.6 : 1, cursor: 'pointer' }}
+                  data-article-card
+                  style={{
+                    display: 'block',
+                    opacity: isRead(article) ? 0.6 : 1,
+                    cursor: 'pointer',
+                    outline: focusedIdx === idx ? '2px solid #0066cc' : 'none',
+                    outlineOffset: -2,
+                  }}
                   onClick={() => {
+                    setFocusedIdx(idx)
                     try { sessionStorage.setItem('articleNavList', JSON.stringify(searchResults.map(a => a.id))) } catch {}
                     navigate(`/articles/${article.id}`)
                   }}
@@ -322,12 +370,19 @@ export default function ArticleListPage() {
         </div>
       ) : !searchQuery ? (
         <>
-          {articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id)).map(article => (
+          {articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id)).map((article, idx) => (
             <div
               key={article.id}
               className="card"
-              style={{ display: 'block', opacity: isRead(article) ? 0.6 : 1, cursor: 'pointer' }}
-              onClick={() => openArticle(article.id)}
+              data-article-card
+              style={{
+                display: 'block',
+                opacity: isRead(article) ? 0.6 : 1,
+                cursor: 'pointer',
+                outline: focusedIdx === idx ? '2px solid #0066cc' : 'none',
+                outlineOffset: -2,
+              }}
+              onClick={() => { setFocusedIdx(idx); openArticle(article.id) }}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 {!isRead(article) && (
