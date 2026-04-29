@@ -88,13 +88,13 @@ func (r *UserRepository) Register(username, password string, code string) (*mode
 		code,
 	).Scan(&codeID, &usedBy)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("invalid or expired invite code")
+		return nil, fmt.Errorf("邀请码无效或已过期")
 	}
 	if err != nil {
 		return nil, err
 	}
 	if usedBy != nil {
-		return nil, fmt.Errorf("invite code already used")
+		return nil, fmt.Errorf("邀请码已被使用")
 	}
 
 	// Check username uniqueness
@@ -104,7 +104,7 @@ func (r *UserRepository) Register(username, password string, code string) (*mode
 		return nil, err
 	}
 	if exists {
-		return nil, fmt.Errorf("username already taken")
+		return nil, fmt.Errorf("用户名已被占用")
 	}
 
 	// Create user
