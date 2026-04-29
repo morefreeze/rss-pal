@@ -62,6 +62,7 @@ export const logout = () => {
   sessionStorage.removeItem('articleListScroll')
   sessionStorage.removeItem('selectedFeed')
   sessionStorage.removeItem('unreadOnly')
+  sessionStorage.removeItem('savedOnly')
 }
 
 export const getUser = () => {
@@ -163,7 +164,7 @@ export const fetchFeedNow = (id: number) =>
   api.post<{ message: string; new_articles: number; feed_title: string }>(`/feeds/${id}/fetch`).then(res => res.data)
 
 // Articles
-export const getArticles = (params?: { feed_id?: number; unread?: boolean; limit?: number; offset?: number }) =>
+export const getArticles = (params?: { feed_id?: number; unread?: boolean; saved?: boolean; limit?: number; offset?: number }) =>
   api.get<Article[]>('/articles', { params }).then(res => res.data)
 
 export const searchArticles = (q: string, limit?: number) =>

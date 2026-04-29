@@ -65,8 +65,9 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 	}
 
 	unreadOnly := c.Query("unread") == "true"
+	savedOnly := c.Query("saved") == "true"
 
-	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, getUserID(c))
+	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, savedOnly, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

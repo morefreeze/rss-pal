@@ -54,7 +54,7 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 	return articles, nil
 }
 
-func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, userID int) ([]model.Article, error) {
+func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int) ([]model.Article, error) {
 	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read
 FROM articles
 JOIN feeds ON articles.feed_id = feeds.id
@@ -74,6 +74,14 @@ LEFT JOIN reading_progress rp ON articles.id = rp.article_id AND rp.user_id = $1
 
 	if unreadOnly {
 		conditions = append(conditions, "COALESCE(rp.is_completed, false) = false")
+	}
+
+	if savedOnly {
+		query += fmt.Sprintf(`
+LEFT JOIN user_preferences up_save ON articles.id = up_save.article_id AND up_save.user_id = $1 AND up_save.signal_type = 'save'`)
+		conditions = append(conditions, fmt.Sprintf("up_save.signal_value = $%d", argIdx))
+		args = append(args, 1.0)
+		argIdx++
 	}
 
 	if len(conditions) > 0 {
