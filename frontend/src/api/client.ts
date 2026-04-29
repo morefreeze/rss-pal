@@ -157,6 +157,9 @@ export const fetchFeedNow = (id: number) =>
 export const getArticles = (params?: { feed_id?: number; unread?: boolean; limit?: number; offset?: number }) =>
   api.get<Article[]>('/articles', { params }).then(res => res.data)
 
+export const searchArticles = (q: string, limit?: number) =>
+  api.get<Article[]>('/articles/search', { params: { q, limit } }).then(res => res.data)
+
 export const getArticle = (id: number) =>
   api.get<{ article: Article; progress: ReadingProgress | null }>(`/articles/${id}`).then(res => res.data)
 

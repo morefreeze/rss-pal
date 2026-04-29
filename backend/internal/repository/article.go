@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
@@ -238,4 +239,25 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 	defer rows.Close()
 
 	return r.scanArticleNoFeedTitle(rows)
+}
+
+func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Article, error) {
+	q := "%" + strings.ReplaceAll(query, "%", "\\%") + "%"
+	sqlStr := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, f.title as feed_title,
+		       COALESCE(rp.is_completed, false) as is_read
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $2
+		WHERE (f.owner_id IS NULL OR f.owner_id = $2)
+		  AND (a.title ILIKE $1 OR a.summary_brief ILIKE $1 OR a.content ILIKE $1)
+		ORDER BY COALESCE(a.published_at, a.fetched_at) DESC
+		LIMIT $3
+	`
+	rows, err := r.db.Query(sqlStr, q, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticle(rows)
 }
