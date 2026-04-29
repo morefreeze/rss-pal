@@ -76,6 +76,15 @@ export default function ArticleListPage() {
     return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   }
 
+  const stripMarkdown = (text: string) =>
+    text
+      .replace(/[#*`_~>\[\]]/g, '')
+      .replace(/\n+/g, ' ')
+      .replace(/•\s*/g, '')
+      .replace(/▸\s*/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+
   return (
     <div>
       <div className="flex-between mb-2">
@@ -119,16 +128,23 @@ export default function ArticleListPage() {
 
       {loading ? (
         <div className="card">Loading...</div>
+      ) : articles.length === 0 && feeds.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📰</div>
+          <div className="text-bold" style={{ marginBottom: 8, fontSize: 16 }}>还没有订阅</div>
+          <div className="text-muted" style={{ marginBottom: 16 }}>去「订阅」页面添加你感兴趣的 RSS 源或网站，系统会自动抓取并生成 AI 摘要</div>
+          <Link to="/feeds"><button>去添加订阅</button></Link>
+        </div>
       ) : articles.length === 0 ? (
-        <div className="card text-muted">暂无文章</div>
+        <div className="card text-muted">暂无文章，订阅源正在抓取中...</div>
       ) : (
         <>
           {articles.map(article => (
             <Link key={article.id} to={`/articles/${article.id}`} className="card" style={{ display: 'block' }}>
               <div className="text-bold">{article.title}</div>
               {article.summary_brief && (
-                <div className="text-muted text-sm mt-1" style={{ whiteSpace: 'pre-line' }}>
-                  {article.summary_brief.slice(0, 150)}...
+                <div className="text-muted text-sm mt-1">
+                  {stripMarkdown(article.summary_brief).slice(0, 120)}...
                 </div>
               )}
               <div className="flex-between mt-1">
