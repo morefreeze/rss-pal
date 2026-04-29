@@ -56,3 +56,17 @@ func (r *ProgressRepository) UpdateTimestamp(articleID int, t time.Time) error {
 	_, err := r.db.Exec(query, t, articleID)
 	return err
 }
+
+func (r *ProgressRepository) MarkAllRead(userID int) error {
+	query := `
+		INSERT INTO reading_progress (user_id, article_id, scroll_position, last_read_at, is_completed)
+		SELECT $1, a.id, 1.0, NOW(), true
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		WHERE f.owner_id IS NULL OR f.owner_id = $1
+		ON CONFLICT (article_id, user_id) DO UPDATE SET
+			is_completed = true, scroll_position = 1.0, last_read_at = NOW()
+	`
+	_, err := r.db.Exec(query, userID)
+	return err
+}

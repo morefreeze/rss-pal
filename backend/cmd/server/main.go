@@ -89,6 +89,8 @@ func main() {
 		apiGroup.GET("/articles", articleHandler.GetAll)
 		apiGroup.GET("/articles/search", articleHandler.Search)
 		apiGroup.GET("/articles/recommended", articleHandler.GetRecommended)
+		apiGroup.GET("/articles/unread-count", articleHandler.GetUnreadCount)
+		apiGroup.POST("/articles/mark-all-read", articleHandler.MarkAllRead)
 		apiGroup.GET("/articles/:id", articleHandler.GetByID)
 		apiGroup.POST("/articles/:id/summary", articleHandler.GenerateSummary)
 		apiGroup.POST("/articles/:id/content", contentHandler.FetchContent)

@@ -160,6 +160,12 @@ export const getArticles = (params?: { feed_id?: number; unread?: boolean; limit
 export const searchArticles = (q: string, limit?: number) =>
   api.get<Article[]>('/articles/search', { params: { q, limit } }).then(res => res.data)
 
+export const getUnreadCount = () =>
+  api.get<{ count: number }>('/articles/unread-count').then(res => res.data.count)
+
+export const markAllRead = () =>
+  api.post('/articles/mark-all-read').then(res => res.data)
+
 export const getArticle = (id: number) =>
   api.get<{ article: Article; progress: ReadingProgress | null }>(`/articles/${id}`).then(res => res.data)
 

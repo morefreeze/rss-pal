@@ -240,6 +240,20 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 	return r.scanArticleNoFeedTitle(rows)
 }
 
+func (r *ArticleRepository) GetUnreadCount(userID int) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+		WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+		AND COALESCE(rp.is_completed, false) = false
+	`
+	var count int
+	err := r.db.QueryRow(query, userID).Scan(&count)
+	return count, err
+}
+
 func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Article, error) {
 	q := "%" + strings.ReplaceAll(query, "%", "\\%") + "%"
 	sqlStr := `

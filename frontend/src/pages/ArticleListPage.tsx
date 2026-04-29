@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { getArticles, searchArticles, getRecommended, Article, Feed, getFeeds } from '../api/client'
+import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds } from '../api/client'
 
 const PAGE_SIZE = 20
 
@@ -18,6 +18,7 @@ export default function ArticleListPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Article[] | null>(null)
   const [searching, setSearching] = useState(false)
+  const [markingAllRead, setMarkingAllRead] = useState(false)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -63,6 +64,19 @@ export default function ArticleListPage() {
 
   const loadMore = () => {
     loadArticles(offset + PAGE_SIZE, false)
+  }
+
+  const handleMarkAllRead = async () => {
+    setMarkingAllRead(true)
+    try {
+      await markAllRead()
+      setArticles(prev => prev.map(a => ({ ...a, is_read: true })))
+      window.dispatchEvent(new Event('refresh-unread'))
+    } catch {
+      // silent fail
+    } finally {
+      setMarkingAllRead(false)
+    }
   }
 
   const loadRecommended = async () => {
@@ -142,6 +156,16 @@ export default function ArticleListPage() {
             />
             仅未读
           </label>
+          {!searchQuery && articles.length > 0 && (
+            <button
+              className="secondary"
+              style={{ fontSize: 12, padding: '4px 10px' }}
+              onClick={handleMarkAllRead}
+              disabled={markingAllRead}
+            >
+              {markingAllRead ? '处理中...' : '全部已读'}
+            </button>
+          )}
         </div>
       </div>
 

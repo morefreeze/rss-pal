@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { logout } from '../api/client'
+import { logout, getUnreadCount } from '../api/client'
 
 interface LayoutProps {
   user: { id: number; username: string; is_admin: boolean } | null
@@ -9,6 +9,17 @@ interface LayoutProps {
 
 export default function Layout({ user, onLogout }: LayoutProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  const refreshUnread = useCallback(() => {
+    getUnreadCount().then(setUnreadCount).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshUnread()
+    window.addEventListener('refresh-unread', refreshUnread)
+    return () => window.removeEventListener('refresh-unread', refreshUnread)
+  }, [refreshUnread])
 
   const handleLogout = () => {
     logout()
@@ -18,6 +29,27 @@ export default function Layout({ user, onLogout }: LayoutProps) {
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     isActive ? 'nav-link active' : 'nav-link'
 
+  const articlesLabel = (
+    <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      文章
+      {unreadCount > 0 && (
+        <span style={{
+          background: '#0066cc',
+          color: 'white',
+          borderRadius: 10,
+          fontSize: 11,
+          fontWeight: 600,
+          padding: '1px 5px',
+          minWidth: 18,
+          textAlign: 'center',
+          lineHeight: '16px',
+        }}>
+          {unreadCount > 99 ? '99+' : unreadCount}
+        </span>
+      )}
+    </span>
+  )
+
   return (
     <div>
       <header style={{ marginBottom: 16 }}>
@@ -26,7 +58,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
 
           {/* Desktop nav */}
           <nav className="flex gap-2 desktop-nav" style={{ alignItems: 'center' }}>
-            <NavLink to="/articles" className={navLinkClass}>文章</NavLink>
+            <NavLink to="/articles" className={navLinkClass}>{articlesLabel}</NavLink>
             <NavLink to="/feeds" className={navLinkClass}>订阅</NavLink>
             <NavLink to="/insights" className={navLinkClass}>洞察</NavLink>
             <NavLink to="/stats" className={navLinkClass}>统计</NavLink>
@@ -53,7 +85,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
         {menuOpen && (
           <nav className="mobile-nav" style={{ marginTop: 8, padding: '8px 0', background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
             {[
-              { to: '/articles', label: '文章' },
+              { to: '/articles', label: articlesLabel },
               { to: '/feeds', label: '订阅' },
               { to: '/insights', label: '洞察' },
               { to: '/stats', label: '统计' },

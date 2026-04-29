@@ -21,6 +21,23 @@ type ArticleHandler struct {
 	cfg          *config.Config
 }
 
+func (h *ArticleHandler) GetUnreadCount(c *gin.Context) {
+	count, err := h.articleRepo.GetUnreadCount(getUserID(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": count})
+}
+
+func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
+	if err := h.progressRepo.MarkAllRead(getUserID(c)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已全部标记为已读"})
+}
+
 func NewArticleHandler(articleRepo *repository.ArticleRepository, progressRepo *repository.ProgressRepository, summarizer *service.SummarizerService) *ArticleHandler {
 	return &ArticleHandler{
 		articleRepo:  articleRepo,
