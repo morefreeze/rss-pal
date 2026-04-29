@@ -19,9 +19,9 @@ func (r *PreferenceRepository) Add(preference *model.UserPreference) error {
 	return r.db.QueryRow(query, preference.UserID, preference.ArticleID, preference.SignalType, preference.SignalValue).Scan(&preference.ID, &preference.CreatedAt)
 }
 
-func (r *PreferenceRepository) GetTopics() ([]model.InterestTopic, error) {
-	query := `SELECT id, topic, weight, last_reinforced_at FROM interest_topics ORDER BY weight DESC`
-	rows, err := r.db.Query(query)
+func (r *PreferenceRepository) GetTopics(userID int) ([]model.InterestTopic, error) {
+	query := `SELECT id, topic, weight, last_reinforced_at FROM interest_topics WHERE user_id = $1 ORDER BY weight DESC`
+	rows, err := r.db.Query(query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -39,21 +39,21 @@ func (r *PreferenceRepository) GetTopics() ([]model.InterestTopic, error) {
 	return topics, nil
 }
 
-func (r *PreferenceRepository) UpsertTopic(topic string, weightDelta float64) error {
+func (r *PreferenceRepository) UpsertTopic(userID int, topic string, weightDelta float64) error {
 	query := `
-		INSERT INTO interest_topics (topic, weight, last_reinforced_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (topic) DO UPDATE SET
-			weight = interest_topics.weight + $2,
+		INSERT INTO interest_topics (user_id, topic, weight, last_reinforced_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (user_id, topic) DO UPDATE SET
+			weight = interest_topics.weight + $3,
 			last_reinforced_at = NOW()
 	`
-	_, err := r.db.Exec(query, topic, weightDelta)
+	_, err := r.db.Exec(query, userID, topic, weightDelta)
 	return err
 }
 
-func (r *PreferenceRepository) DecayTopics(decayFactor float64) error {
-	query := `UPDATE interest_topics SET weight = weight * $1 WHERE weight > 0.01`
-	_, err := r.db.Exec(query, decayFactor)
+func (r *PreferenceRepository) DecayTopics(userID int, decayFactor float64) error {
+	query := `UPDATE interest_topics SET weight = weight * $1 WHERE user_id = $2 AND weight > 0.01`
+	_, err := r.db.Exec(query, decayFactor, userID)
 	return err
 }
 

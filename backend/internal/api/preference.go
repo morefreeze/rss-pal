@@ -110,7 +110,7 @@ func (h *PreferenceHandler) RecordReadDuration(c *gin.Context) {
 }
 
 func (h *PreferenceHandler) GetTopics(c *gin.Context) {
-	topics, err := h.prefRepo.GetTopics()
+	topics, err := h.prefRepo.GetTopics(getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

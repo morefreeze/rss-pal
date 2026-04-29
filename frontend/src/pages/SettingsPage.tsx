@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, SummaryTemplate, UserAIConfig } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 
 const STYLE_OPTIONS = [
   { value: 'bullets', label: '要点列表' },
@@ -9,13 +9,23 @@ const STYLE_OPTIONS = [
   { value: 'academic', label: '学术风格' },
 ]
 
-export default function SettingsPage() {
+interface SettingsPageProps {
+  user?: { is_admin: boolean } | null
+}
+
+export default function SettingsPage({ user }: SettingsPageProps) {
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
   const [aiConfig, setAiConfig] = useState<UserAIConfig>({ api_key: '', base_url: '', model: '' })
   const [loading, setLoading] = useState(true)
   const [aiSaving, setAiSaving] = useState(false)
   const [aiError, setAiError] = useState('')
   const [aiSuccess, setAiSuccess] = useState('')
+
+  // Invite codes (admin only)
+  const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([])
+  const [inviteLoading, setInviteLoading] = useState(false)
+  const [inviteCreating, setInviteCreating] = useState(false)
+  const [copiedCode, setCopiedCode] = useState('')
 
   const [showNewTemplate, setShowNewTemplate] = useState(false)
   const [newTemplate, setNewTemplate] = useState<Partial<SummaryTemplate>>({
@@ -42,6 +52,31 @@ export default function SettingsPage() {
     }
     load()
   }, [])
+
+  useEffect(() => {
+    if (!user?.is_admin) return
+    setInviteLoading(true)
+    getInviteCodes().then(codes => setInviteCodes(codes || [])).catch(() => {}).finally(() => setInviteLoading(false))
+  }, [user])
+
+  const handleCreateInviteCode = async () => {
+    setInviteCreating(true)
+    try {
+      const code = await createInviteCode(72)
+      setInviteCodes(prev => [code, ...prev])
+    } catch {
+      alert('创建邀请码失败')
+    } finally {
+      setInviteCreating(false)
+    }
+  }
+
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopiedCode(code)
+      setTimeout(() => setCopiedCode(''), 2000)
+    })
+  }
 
   const handleSaveAI = async () => {
     setAiSaving(true)
@@ -117,9 +152,50 @@ export default function SettingsPage() {
   const systemTemplates = templates.filter(t => t.is_system)
   const userTemplates = templates.filter(t => !t.is_system)
 
+  const formatDate = (d: string | null) => d ? new Date(d).toLocaleString('zh-CN') : '永不'
+
   return (
     <div>
       <h2 className="mb-2">设置</h2>
+
+      {/* 邀请码管理（仅管理员可见） */}
+      {user?.is_admin && (
+        <div className="card mb-2">
+          <div className="flex-between mb-1">
+            <h3>邀请码管理</h3>
+            <button onClick={handleCreateInviteCode} disabled={inviteCreating}>
+              {inviteCreating ? '创建中...' : '生成邀请码'}
+            </button>
+          </div>
+          <p className="text-muted text-sm mb-2">最多允许 10 名测试用户注册</p>
+          {inviteLoading ? (
+            <div className="text-muted text-sm">加载中...</div>
+          ) : inviteCodes.length === 0 ? (
+            <div className="text-muted text-sm">暂无邀请码，点击"生成邀请码"创建</div>
+          ) : (
+            <div>
+              {inviteCodes.map(ic => (
+                <div key={ic.id} className="flex-between" style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <div>
+                    <code style={{ fontSize: 14, background: '#f3f4f6', padding: '2px 8px', borderRadius: 4 }}>{ic.code}</code>
+                    <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
+                      {ic.used_by ? <span style={{ color: '#16a34a' }}>已使用</span> : <span style={{ color: '#2563eb' }}>未使用</span>}
+                    </span>
+                    <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
+                      过期：{formatDate(ic.expires_at)}
+                    </span>
+                  </div>
+                  {!ic.used_by && (
+                    <button className="secondary" style={{ fontSize: 12, padding: '2px 10px' }} onClick={() => handleCopyCode(ic.code)}>
+                      {copiedCode === ic.code ? '已复制！' : '复制'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* AI 配置区域 */}
       <div className="card mb-2">
