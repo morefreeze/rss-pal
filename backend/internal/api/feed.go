@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
@@ -61,6 +65,11 @@ func (h *FeedHandler) Preview(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.URL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url required"})
+		return
+	}
+
+	if err := validatePublicURL(req.URL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -296,4 +305,37 @@ func publishedTime(published, updated *time.Time) *time.Time {
 		return published
 	}
 	return updated
+}
+
+// validatePublicURL blocks SSRF by rejecting non-HTTP(S) schemes and private/loopback IPs.
+func validatePublicURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("only http/https URLs are supported")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("invalid URL: missing host")
+	}
+
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("private or internal addresses are not allowed")
+		}
+	}
+
+	// Block common internal hostnames
+	lower := strings.ToLower(host)
+	blocked := []string{"localhost", "metadata.google.internal", "169.254.169.254"}
+	for _, b := range blocked {
+		if lower == b {
+			return fmt.Errorf("private or internal addresses are not allowed")
+		}
+	}
+
+	return nil
 }
