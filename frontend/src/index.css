@@ -153,3 +153,22 @@ input:focus, textarea:focus {
 }
 .markdown-body a { color: #0066cc; }
 .markdown-body hr { border: none; border-top: 1px solid #eee; margin: 12px 0; }
+
+/* Nav links */
+.nav-link { color: #213547; font-size: 14px; padding: 4px 6px; border-radius: 4px; }
+.nav-link:hover { background: #f0f0f0; text-decoration: none; }
+.nav-link.active { color: #0066cc; font-weight: 600; background: #e8f0fe; }
+
+/* Responsive navigation */
+.mobile-menu-btn { display: none; }
+.mobile-nav { display: none; }
+
+@media (max-width: 640px) {
+  .desktop-nav { display: none !important; }
+  .mobile-menu-btn { display: block; }
+  .mobile-nav { display: block; }
+
+  #root { padding: 12px; }
+
+  .card { padding: 12px; }
+}
