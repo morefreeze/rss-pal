@@ -165,6 +165,12 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .nav-link:hover { background: #f0f0f0; text-decoration: none; }
 .nav-link.active { color: #0066cc; font-weight: 600; background: #e8f0fe; }
 
+/* Toast animation */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 /* Responsive navigation */
 .mobile-menu-btn { display: none; }
 .mobile-nav { display: none; }

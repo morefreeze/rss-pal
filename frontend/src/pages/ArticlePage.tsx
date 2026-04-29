@@ -7,6 +7,7 @@ import {
   getTemplates, generateSummaryWithTemplate, shareArticle, exportMarkdown,
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
+import { toast } from '../utils/toast'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
@@ -162,7 +163,7 @@ export default function ArticlePage() {
       const result = await generateSummaryWithTemplate(article.id, selectedTemplateId)
       setArticle({ ...article, summary_brief: result.summary_brief, summary_detailed: result.summary_detailed })
     } catch {
-      alert('重新生成总结失败')
+      toast.error('重新生成总结失败')
     } finally {
       setRegenerating(false)
     }
@@ -175,7 +176,7 @@ export default function ArticlePage() {
       const result = await fetchContent(article.id)
       setArticle({ ...article, content: result.content })
     } catch {
-      alert('获取内容失败')
+      toast.error('获取内容失败')
     } finally {
       setFetchingContent(false)
     }
@@ -245,7 +246,7 @@ export default function ArticlePage() {
         '_blank'
       )
     } catch {
-      alert('获取分享链接失败')
+      toast.error('获取分享链接失败')
     }
   }
 
@@ -254,9 +255,9 @@ export default function ArticlePage() {
     const feedTitle = (article as any).feed_title || ''
     const text = `📖 ${article.title}\n\n${article.summary_brief || ''}\n\n🔗 ${article.url}\n#RSS阅读 #${feedTitle}`
     navigator.clipboard.writeText(text).then(() => {
-      alert('已复制到剪贴板，去小红书粘贴发布吧！')
+      toast.success('已复制到剪贴板，去小红书粘贴发布吧！')
     }).catch(() => {
-      alert('复制失败，请手动复制')
+      toast.error('复制失败，请手动复制')
     })
   }
 
@@ -289,7 +290,7 @@ export default function ArticlePage() {
       setCopyLinkText('已复制！')
       setTimeout(() => setCopyLinkText('复制链接'), 2000)
     } catch {
-      alert('复制失败，请手动复制')
+      toast.error('复制失败，请手动复制')
     }
   }
 
