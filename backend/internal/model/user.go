@@ -1,0 +1,35 @@
+package model
+
+import "time"
+
+type User struct {
+	ID           int       `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	IsAdmin      bool      `json:"is_admin"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type InviteCode struct {
+	ID        int        `json:"id"`
+	Code      string     `json:"code"`
+	CreatedBy int        `json:"created_by"`
+	UsedBy    *int       `json:"used_by"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type RegisterRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required,min=6"`
+	Code     string `json:"code" binding:"required"`
+}
+
+type LoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+type CreateInviteCodeRequest struct {
+	ExpiresInHours int `json:"expires_in_hours"`
+}
