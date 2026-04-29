@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { logout, getUnreadCount } from '../api/client'
+import Toaster from './Toaster'
 
 interface LayoutProps {
   user: { id: number; username: string; is_admin: boolean } | null
@@ -113,6 +114,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
       <main>
         <Outlet />
       </main>
+      <Toaster />
     </div>
   )
 }

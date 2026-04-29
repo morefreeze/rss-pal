@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, Feed, FeedPreview } from '../api/client'
+import { toast } from '../utils/toast'
 
 const POPULAR_FEEDS = [
   { name: 'Hacker News', url: 'https://hnrss.org/frontpage', desc: '科技社区热帖' },
@@ -67,7 +68,7 @@ export default function FeedListPage() {
       }
       setTimeout(() => setAddSuccess(''), 5000)
     } catch {
-      alert('添加失败，请重试')
+      toast.error('添加失败，请重试')
     } finally {
       setAdding(false)
     }
@@ -83,7 +84,7 @@ export default function FeedListPage() {
       await toggleFeedActive(feed.id, !feed.is_active, feed.title || feed.url)
       setFeeds(prev => prev.map(f => f.id === feed.id ? { ...f, is_active: !f.is_active } : f))
     } catch {
-      alert('操作失败')
+      toast.error('操作失败')
     }
   }
 
@@ -93,7 +94,7 @@ export default function FeedListPage() {
       await deleteFeed(id)
       loadFeeds()
     } catch {
-      alert('删除失败')
+      toast.error('删除失败')
     }
   }
 
@@ -102,9 +103,9 @@ export default function FeedListPage() {
     try {
       const result = await fetchFeedNow(id)
       await loadFeeds()
-      alert(`${result.feed_title || '订阅源'}：抓取完成，${result.new_articles} 篇新文章`)
+      toast.success(`${result.feed_title || '订阅源'}：抓取完成，${result.new_articles} 篇新文章`)
     } catch (err: any) {
-      alert('抓取失败：' + (err?.response?.data?.error || err?.message || '未知错误'))
+      toast.error('抓取失败：' + (err?.response?.data?.error || err?.message || '未知错误'))
     } finally {
       setFetchingId(null)
     }

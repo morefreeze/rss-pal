@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { toast } from '../utils/toast'
 
 const STYLE_OPTIONS = [
   { value: 'bullets', label: '要点列表' },
@@ -78,7 +79,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
       const code = await createInviteCode(72)
       setInviteCodes(prev => [code, ...prev])
     } catch {
-      alert('创建邀请码失败')
+      toast.error('创建邀请码失败')
     } finally {
       setInviteCreating(false)
     }
@@ -153,16 +154,16 @@ export default function SettingsPage({ user }: SettingsPageProps) {
       await deleteTemplate(id)
       setTemplates(prev => prev.filter(t => t.id !== id))
     } catch {
-      alert('删除失败')
+      toast.error('删除失败')
     }
   }
 
   const handleSetDefault = async (id: number) => {
     try {
       await setDefaultTemplate(id)
-      alert('已设为默认模板')
+      toast.success('已设为默认模板')
     } catch {
-      alert('设置失败')
+      toast.error('设置失败')
     }
   }
 
