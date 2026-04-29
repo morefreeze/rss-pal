@@ -18,6 +18,7 @@ export default function FeedListPage() {
   const [preview, setPreview] = useState<FeedPreview | null>(null)
   const [previewError, setPreviewError] = useState('')
   const [adding, setAdding] = useState(false)
+  const [addSuccess, setAddSuccess] = useState('')
 
   useEffect(() => { loadFeeds() }, [])
 
@@ -49,6 +50,7 @@ export default function FeedListPage() {
   const handleConfirmAdd = async () => {
     if (!preview) return
     setAdding(true)
+    setAddSuccess('')
     try {
       const actualUrl = preview.actual_url || newUrl.trim()
       const feed = await addFeed(actualUrl, preview.feed_type)
@@ -57,11 +59,13 @@ export default function FeedListPage() {
       await loadFeeds()
       // Auto-fetch after adding
       try {
-        await fetchFeedNow(feed.id)
+        const result = await fetchFeedNow(feed.id)
         await loadFeeds()
+        setAddSuccess(`已添加「${result.feed_title || feed.url}」，抓取到 ${result.new_articles} 篇新文章`)
       } catch {
-        // Worker will pick it up
+        setAddSuccess('订阅已添加，后台将自动抓取文章')
       }
+      setTimeout(() => setAddSuccess(''), 5000)
     } catch {
       alert('添加失败，请重试')
     } finally {
@@ -107,6 +111,12 @@ export default function FeedListPage() {
   return (
     <div>
       <h2 className="mb-2">订阅管理</h2>
+
+      {addSuccess && (
+        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '10px 14px', marginBottom: 12, color: '#166534', fontSize: 14 }}>
+          ✓ {addSuccess}
+        </div>
+      )}
 
       {/* Add feed: 2-step preview flow */}
       <div className="card mb-2">
