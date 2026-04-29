@@ -81,7 +81,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	if user == nil || !h.userRepo.VerifyPassword(user, req.Password) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
 
@@ -149,7 +149,7 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 	userID := c.GetInt("userID")
 	user, err := h.userRepo.FindByID(userID)
 	if err != nil || user == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
 		return
 	}
 	c.JSON(http.StatusOK, user)
@@ -172,7 +172,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	userID := getUserID(c)
 	user, err := h.userRepo.FindByID(userID)
 	if err != nil || user == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
 		return
 	}
 	if !h.userRepo.VerifyPassword(user, req.OldPassword) {
