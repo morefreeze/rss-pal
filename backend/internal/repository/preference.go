@@ -100,6 +100,31 @@ func (r *PreferenceRepository) GetRecentReadTitles(userID int, limit int) ([]str
 	return titles, nil
 }
 
+// GetUserSignals returns the most recent signal_value per signal_type for a given user+article.
+func (r *PreferenceRepository) GetUserSignals(userID, articleID int) (map[string]float64, error) {
+	query := `
+		SELECT DISTINCT ON (signal_type) signal_type, signal_value
+		FROM user_preferences
+		WHERE user_id = $1 AND article_id = $2
+		ORDER BY signal_type, created_at DESC
+	`
+	rows, err := r.db.Query(query, userID, articleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	signals := map[string]float64{}
+	for rows.Next() {
+		var t string
+		var v float64
+		if err := rows.Scan(&t, &v); err != nil {
+			return nil, err
+		}
+		signals[t] = v
+	}
+	return signals, nil
+}
+
 func (r *PreferenceRepository) GetArticleScore(articleID int) (float64, error) {
 	query := `
 		SELECT COALESCE(SUM(

@@ -34,7 +34,7 @@ func main() {
 
 	authHandler := api.NewAuthHandler(cfg, userRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo)
-	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, summarizerService)
+	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo)
 	progressHandler := api.NewProgressHandler(progressRepo)
