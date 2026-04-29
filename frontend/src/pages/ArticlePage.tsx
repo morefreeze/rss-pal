@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle,
@@ -10,6 +10,7 @@ import {
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [loading, setLoading] = useState(true)
@@ -268,9 +269,18 @@ export default function ArticlePage() {
       )}
 
       <div className="card">
-        {article.feed_title && (
-          <div className="text-sm mb-1" style={{ color: '#4b6bcc' }}>{article.feed_title}</div>
-        )}
+        <div className="flex-between mb-2">
+          <button
+            className="secondary"
+            onClick={() => navigate(-1)}
+            style={{ fontSize: 13, padding: '4px 10px' }}
+          >
+            ← 返回
+          </button>
+          {article.feed_title && (
+            <div className="text-sm" style={{ color: '#4b6bcc' }}>{article.feed_title}</div>
+          )}
+        </div>
         <h2>{article.title}</h2>
         <div className="text-muted text-sm mb-2">
           {formatDate(article.published_at)}

@@ -21,7 +21,8 @@ func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error)
 	for rows.Next() {
 		var a model.Article
 		var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
-		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &feedTitle)
+		var isRead sql.NullBool
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &feedTitle, &isRead)
 		if err != nil {
 			return nil, err
 		}
@@ -29,6 +30,7 @@ func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error)
 		a.SummaryBrief = summaryBrief.String
 		a.SummaryDetailed = summaryDetailed.String
 		a.FeedTitle = feedTitle.String
+		a.IsRead = isRead.Bool
 		articles = append(articles, a)
 	}
 	return articles, nil
@@ -52,15 +54,16 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 }
 
 func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, userID int) ([]model.Article, error) {
-	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, feeds.title as feed_title FROM articles JOIN feeds ON articles.feed_id = feeds.id`
-	args := []interface{}{}
+	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read
+FROM articles
+JOIN feeds ON articles.feed_id = feeds.id
+LEFT JOIN reading_progress rp ON articles.id = rp.article_id AND rp.user_id = $1`
+	args := []interface{}{userID}
 	conditions := []string{}
-	argIdx := 1
+	argIdx := 2
 
 	// Only return articles from feeds visible to this user (shared feeds or user's own feeds)
-	conditions = append(conditions, fmt.Sprintf("(feeds.owner_id IS NULL OR feeds.owner_id = $%d)", argIdx))
-	args = append(args, userID)
-	argIdx++
+	conditions = append(conditions, "(feeds.owner_id IS NULL OR feeds.owner_id = $1)")
 
 	if feedID != nil {
 		conditions = append(conditions, fmt.Sprintf("articles.feed_id = $%d", argIdx))
@@ -69,9 +72,7 @@ func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bo
 	}
 
 	if unreadOnly {
-		conditions = append(conditions, fmt.Sprintf("articles.id NOT IN (SELECT article_id FROM reading_progress WHERE is_completed = true AND user_id = $%d)", argIdx))
-		args = append(args, userID)
-		argIdx++
+		conditions = append(conditions, "COALESCE(rp.is_completed, false) = false")
 	}
 
 	if len(conditions) > 0 {
