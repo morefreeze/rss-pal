@@ -31,6 +31,7 @@ services:
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}
       CLAUDE_BASE_URL: ${CLAUDE_BASE_URL:-https://api.anthropic.com}
       AUTH_PASSWORD: ${AUTH_PASSWORD:-admin}
+      JWT_SECRET: ${JWT_SECRET:-rss-pal-secret-change-in-production}
       SERVER_PORT: 8080
     depends_on:
       postgres:
