@@ -28,6 +28,7 @@ export default function ArticleListPage() {
   const [searching, setSearching] = useState(false)
   const [markingAllRead, setMarkingAllRead] = useState(false)
   const loadMoreRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const [sessionReadIds, setSessionReadIds] = useState<Set<number>>(() => {
     try {
       return new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]'))
@@ -170,6 +171,11 @@ export default function ArticleListPage() {
 
     const handler = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
+      if (e.key === '/') {
+        e.preventDefault()
+        searchRef.current?.focus()
+        return
+      }
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault()
         setFocusedIdx(i => {
@@ -231,11 +237,12 @@ export default function ArticleListPage() {
         <h2>文章列表</h2>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
           <input
+            ref={searchRef}
             type="search"
-            placeholder="搜索文章..."
+            placeholder="搜索文章... ( / 聚焦)"
             value={searchQuery}
             onChange={handleSearchChange}
-            style={{ padding: '6px 12px', width: 180 }}
+            style={{ padding: '6px 12px', width: 200 }}
           />
           <select
             value={selectedFeed || ''}
