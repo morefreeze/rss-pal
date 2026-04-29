@@ -56,6 +56,12 @@ export const changePassword = (oldPassword: string, newPassword: string) =>
 export const logout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('user')
+  // Clear session-local state so a new login gets a clean slate
+  sessionStorage.removeItem('readArticles')
+  sessionStorage.removeItem('articleNavList')
+  sessionStorage.removeItem('articleListScroll')
+  sessionStorage.removeItem('selectedFeed')
+  sessionStorage.removeItem('unreadOnly')
 }
 
 export const getUser = () => {
