@@ -19,7 +19,12 @@ export default function Layout({ user, onLogout }: LayoutProps) {
   useEffect(() => {
     refreshUnread()
     window.addEventListener('refresh-unread', refreshUnread)
-    return () => window.removeEventListener('refresh-unread', refreshUnread)
+    // Poll every 2 minutes so the badge stays current as worker fetches articles
+    const interval = setInterval(refreshUnread, 2 * 60 * 1000)
+    return () => {
+      window.removeEventListener('refresh-unread', refreshUnread)
+      clearInterval(interval)
+    }
   }, [refreshUnread])
 
   const handleLogout = () => {
