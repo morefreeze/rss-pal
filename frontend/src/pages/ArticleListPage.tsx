@@ -283,7 +283,7 @@ export default function ArticleListPage() {
         <div className="card text-muted">暂无文章，订阅源正在抓取中...</div>
       ) : !searchQuery ? (
         <>
-          {articles.map(article => (
+          {articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id)).map(article => (
             <div
               key={article.id}
               className="card"
