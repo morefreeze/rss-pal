@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
-  getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle,
+  getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryWithTemplate, shareArticle, exportMarkdown,
   Article, ReadingProgress, SummaryTemplate
@@ -215,6 +215,7 @@ export default function ArticlePage() {
   const handleSave = async () => {
     if (!article) return
     if (saved) {
+      await unsaveArticle(article.id)
       setSaved(false)
     } else {
       await saveArticle(article.id)

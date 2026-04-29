@@ -198,6 +198,9 @@ export const dislikeArticle = (articleId: number) =>
 export const saveArticle = (articleId: number) =>
   api.post('/preferences/save', { article_id: articleId })
 
+export const unsaveArticle = (articleId: number) =>
+  api.delete('/preferences/save', { data: { article_id: articleId } })
+
 export const recordReadDuration = (articleId: number, durationSeconds: number) =>
   api.post('/preferences/read-duration', { article_id: articleId, duration_seconds: durationSeconds })
 
