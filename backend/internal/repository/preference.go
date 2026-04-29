@@ -57,6 +57,49 @@ func (r *PreferenceRepository) DecayTopics(userID int, decayFactor float64) erro
 	return err
 }
 
+func (r *PreferenceRepository) GetTopicStrings(userID int) ([]string, error) {
+	query := `SELECT topic FROM interest_topics WHERE user_id = $1 ORDER BY weight DESC LIMIT 20`
+	rows, err := r.db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var topics []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		topics = append(topics, t)
+	}
+	return topics, nil
+}
+
+func (r *PreferenceRepository) GetRecentReadTitles(userID int, limit int) ([]string, error) {
+	query := `
+		SELECT a.title
+		FROM reading_progress rp
+		JOIN articles a ON rp.article_id = a.id
+		WHERE rp.user_id = $1
+		ORDER BY rp.last_read_at DESC
+		LIMIT $2
+	`
+	rows, err := r.db.Query(query, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var titles []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		titles = append(titles, t)
+	}
+	return titles, nil
+}
+
 func (r *PreferenceRepository) GetArticleScore(articleID int) (float64, error) {
 	query := `
 		SELECT COALESCE(SUM(
