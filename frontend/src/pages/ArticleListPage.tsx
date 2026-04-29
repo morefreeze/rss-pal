@@ -19,11 +19,23 @@ export default function ArticleListPage() {
   const [searchResults, setSearchResults] = useState<Article[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [markingAllRead, setMarkingAllRead] = useState(false)
+  const [sessionReadIds, setSessionReadIds] = useState<Set<number>>(() => {
+    try {
+      return new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]'))
+    } catch { return new Set() }
+  })
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     loadFeeds()
     loadRecommended()
+    const onRefreshUnread = () => {
+      try {
+        setSessionReadIds(new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]')))
+      } catch {}
+    }
+    window.addEventListener('refresh-unread', onRefreshUnread)
+    return () => window.removeEventListener('refresh-unread', onRefreshUnread)
   }, [])
 
   useEffect(() => {
@@ -70,7 +82,12 @@ export default function ArticleListPage() {
     setMarkingAllRead(true)
     try {
       await markAllRead()
-      setArticles(prev => prev.map(a => ({ ...a, is_read: true })))
+      if (unreadOnly) {
+        setArticles([])
+        setHasMore(false)
+      } else {
+        setArticles(prev => prev.map(a => ({ ...a, is_read: true })))
+      }
       window.dispatchEvent(new Event('refresh-unread'))
     } catch {
       // silent fail
@@ -108,6 +125,8 @@ export default function ArticleListPage() {
       }
     }, 400)
   }
+
+  const isRead = (article: Article) => article.is_read || sessionReadIds.has(article.id)
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return ''
@@ -199,14 +218,14 @@ export default function ArticleListPage() {
                   key={article.id}
                   to={`/articles/${article.id}`}
                   className="card"
-                  style={{ display: 'block', opacity: article.is_read ? 0.6 : 1 }}
+                  style={{ display: 'block', opacity: isRead(article) ? 0.6 : 1 }}
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    {!article.is_read && (
+                    {!isRead(article) && (
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
                     )}
                     <div style={{ flex: 1 }}>
-                      <div className={article.is_read ? 'text-muted' : 'text-bold'}>{article.title}</div>
+                      <div className={isRead(article) ? 'text-muted' : 'text-bold'}>{article.title}</div>
                       {article.summary_brief && (
                         <div className="text-muted text-sm mt-1">
                           {stripMarkdown(article.summary_brief).slice(0, 120)}...
@@ -247,14 +266,14 @@ export default function ArticleListPage() {
               key={article.id}
               to={`/articles/${article.id}`}
               className="card"
-              style={{ display: 'block', opacity: article.is_read ? 0.6 : 1 }}
+              style={{ display: 'block', opacity: isRead(article) ? 0.6 : 1 }}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                {!article.is_read && (
+                {!isRead(article) && (
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
                 )}
                 <div style={{ flex: 1 }}>
-                  <div className={article.is_read ? 'text-muted' : 'text-bold'}>{article.title}</div>
+                  <div className={isRead(article) ? 'text-muted' : 'text-bold'}>{article.title}</div>
                   {article.summary_brief && (
                     <div className="text-muted text-sm mt-1">
                       {stripMarkdown(article.summary_brief).slice(0, 120)}...
