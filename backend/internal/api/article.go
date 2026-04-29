@@ -16,6 +16,7 @@ import (
 type ArticleHandler struct {
 	articleRepo  *repository.ArticleRepository
 	progressRepo *repository.ProgressRepository
+	prefRepo     *repository.PreferenceRepository
 	summarizer   *service.SummarizerService
 	templateRepo *repository.TemplateRepository
 	cfg          *config.Config
@@ -38,10 +39,11 @@ func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "已全部标记为已读"})
 }
 
-func NewArticleHandler(articleRepo *repository.ArticleRepository, progressRepo *repository.ProgressRepository, summarizer *service.SummarizerService) *ArticleHandler {
+func NewArticleHandler(articleRepo *repository.ArticleRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, summarizer *service.SummarizerService) *ArticleHandler {
 	return &ArticleHandler{
 		articleRepo:  articleRepo,
 		progressRepo: progressRepo,
+		prefRepo:     prefRepo,
 		summarizer:   summarizer,
 	}
 }
@@ -106,12 +108,14 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	// Get reading progress
-	progress, _ := h.progressRepo.GetByArticleAndUser(id, getUserID(c))
+	userID := getUserID(c)
+	progress, _ := h.progressRepo.GetByArticleAndUser(id, userID)
+	signals, _ := h.prefRepo.GetUserSignals(userID, id)
 
 	response := gin.H{
 		"article":  article,
 		"progress": progress,
+		"signals":  signals,
 	}
 	c.JSON(http.StatusOK, response)
 }

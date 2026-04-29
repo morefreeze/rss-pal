@@ -47,6 +47,11 @@ export default function ArticlePage() {
       const data = await getArticle(Number(id))
       setArticle(data.article)
       setProgress(data.progress)
+      if (data.signals) {
+        setLiked((data.signals['like'] ?? 0) > 0)
+        setDisliked((data.signals['dislike'] ?? 0) > 0)
+        setSaved((data.signals['save'] ?? 0) > 0)
+      }
       // Track as viewed in session so list can show it as read on back-navigation
       try {
         const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')

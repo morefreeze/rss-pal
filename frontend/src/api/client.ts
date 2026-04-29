@@ -177,7 +177,7 @@ export const markAllRead = () =>
   api.post('/articles/mark-all-read').then(res => res.data)
 
 export const getArticle = (id: number) =>
-  api.get<{ article: Article; progress: ReadingProgress | null }>(`/articles/${id}`).then(res => res.data)
+  api.get<{ article: Article; progress: ReadingProgress | null; signals: Record<string, number> | null }>(`/articles/${id}`).then(res => res.data)
 
 export const getRecommended = (limit?: number) =>
   api.get<Article[]>('/articles/recommended', { params: { limit } }).then(res => res.data)
