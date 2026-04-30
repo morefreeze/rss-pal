@@ -30,9 +30,9 @@ func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, 
 		return "", err
 	}
 
-	// Set a realistic User-Agent
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 
 	resp, err := f.client.Do(req)
 	if err != nil {
@@ -51,12 +51,13 @@ func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, 
 	}
 
 	// Remove unwanted elements
-	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share").Remove()
+	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Remove()
 
 	// Try to find main content
 	var content string
 
 	// Try common content selectors (ordered from most specific to least)
+	// Includes both English and Chinese news site class conventions
 	selectors := []string{
 		"article",
 		"[role='main']",
@@ -68,9 +69,20 @@ func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, 
 		".story-body",
 		".post-body",
 		".field-item",
+		// Chinese site common selectors
+		".article-text",
+		".article__body",
+		".content-article",
+		"[class*=article-detail]",
+		"[class*=articleDetail]",
+		"[class*=post-detail]",
+		"[id*=article-body]",
+		"[id*=articleBody]",
+		"[id*=js_content]",   // WeChat articles
 		".content",
 		".post",
 		"#content",
+		"#main",
 		"body",
 	}
 
@@ -144,19 +156,28 @@ func cleanContent(content string) string {
 	re = regexp.MustCompile(` {2,}`)
 	content = re.ReplaceAllString(content, " ")
 
-	// Remove common junk patterns
-	junkPatterns := []string{
-		"Subscribe to our newsletter",
-		"Sign up for",
-		"Follow us on",
-		"Share this article",
-		"Read more:",
-		"Click here to",
+	// Remove line-level junk (navigation/social text that snuck through)
+	lines := strings.Split(content, "\n")
+	var filtered []string
+	junkContains := []string{
+		"Subscribe to our newsletter", "Sign up for our", "Follow us on",
+		"Share this article", "Read more:", "Click here to",
+		"All rights reserved", "Terms of Service", "Privacy Policy",
 	}
-
-	for _, pattern := range junkPatterns {
-		content = strings.ReplaceAll(content, pattern, "")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		isJunk := false
+		for _, junk := range junkContains {
+			if strings.Contains(trimmed, junk) {
+				isJunk = true
+				break
+			}
+		}
+		if !isJunk {
+			filtered = append(filtered, line)
+		}
 	}
+	content = strings.Join(filtered, "\n")
 
 	return strings.TrimSpace(content)
 }

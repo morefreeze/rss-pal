@@ -82,9 +82,11 @@ func (r *FeedRepository) GetByID(id int) (*model.Feed, error) {
 func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 	query := `
 		SELECT f.id, f.url, f.title, f.last_fetched_at, f.fetch_interval_minutes, f.etag, f.last_modified, f.is_active, f.owner_id, f.feed_type, f.created_at,
-		       COUNT(a.id) AS article_count
+		       COUNT(a.id) AS article_count,
+		       COUNT(CASE WHEN COALESCE(rp.is_completed, false) = false THEN 1 END) AS unread_count
 		FROM feeds f
 		LEFT JOIN articles a ON a.feed_id = f.id
+		LEFT JOIN reading_progress rp ON rp.article_id = a.id AND rp.user_id = $1
 		WHERE f.owner_id IS NULL OR f.owner_id = $1
 		GROUP BY f.id
 		ORDER BY f.created_at DESC
@@ -98,7 +100,7 @@ func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 	var feeds []model.Feed
 	for rows.Next() {
 		var f model.Feed
-		err := rows.Scan(&f.ID, &f.URL, &f.Title, &f.LastFetchedAt, &f.FetchIntervalMin, &f.ETag, &f.LastModified, &f.IsActive, &f.OwnerID, &f.FeedType, &f.CreatedAt, &f.ArticleCount)
+		err := rows.Scan(&f.ID, &f.URL, &f.Title, &f.LastFetchedAt, &f.FetchIntervalMin, &f.ETag, &f.LastModified, &f.IsActive, &f.OwnerID, &f.FeedType, &f.CreatedAt, &f.ArticleCount, &f.UnreadCount)
 		if err != nil {
 			return nil, err
 		}

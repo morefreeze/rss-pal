@@ -287,20 +287,22 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 		}
 		exists, _ := articleRepo.Exists(feed.ID, item.Link)
 		if exists {
+			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, item.PublishedParsed)
 			continue
 		}
 		queuedCount++
 		wg.Add(1)
-		go func(link, title string) {
+		go func(link, title string, pubAt *time.Time) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			content, _ := contentFetcher.FetchContent(ctx, link)
 			article := &model.Article{
-				FeedID:  feed.ID,
-				Title:   title,
-				URL:     link,
-				Content: content,
+				FeedID:      feed.ID,
+				Title:       title,
+				URL:         link,
+				Content:     content,
+				PublishedAt: pubAt,
 			}
 			if err := articleRepo.Create(article); err != nil {
 				log.Printf("Failed to create HTML article: %v", err)
@@ -310,7 +312,7 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
 				}
 			}
-		}(item.Link, item.Title)
+		}(item.Link, item.Title, item.PublishedParsed)
 	}
 
 	wg.Wait()
