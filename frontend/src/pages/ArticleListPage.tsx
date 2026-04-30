@@ -256,7 +256,7 @@ export default function ArticleListPage() {
           >
             <option value="">全部订阅</option>
             {feeds.map(f => (
-              <option key={f.id} value={f.id}>{f.title || f.url}</option>
+              <option key={f.id} value={f.id}>{f.title || f.url}{f.unread_count > 0 ? ` (${f.unread_count})` : ''}</option>
             ))}
           </select>
           <label className="flex gap-1" style={{ alignItems: 'center' }}>

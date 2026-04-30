@@ -91,6 +91,7 @@ export interface Feed {
   feed_type: string
   created_at: string
   article_count: number
+  unread_count: number
 }
 
 export interface Article {
@@ -163,6 +164,9 @@ export const toggleFeedActive = (id: number, isActive: boolean, title: string) =
 
 export const fetchFeedNow = (id: number) =>
   api.post<{ message: string; new_articles: number; feed_title: string }>(`/feeds/${id}/fetch`).then(res => res.data)
+
+export const exportOPML = () =>
+  api.get('/feeds/export/opml', { responseType: 'blob' }).then(res => res.data as Blob)
 
 // Articles
 export const getArticles = (params?: { feed_id?: number; unread?: boolean; saved?: boolean; limit?: number; offset?: number }) =>
@@ -299,3 +303,6 @@ export const generateSummaryWithTemplate = (articleId: number, templateId?: numb
 
 export const exportMarkdown = (articleId: number) =>
   api.get(`/articles/${articleId}/export/md`, { responseType: 'text' }).then(res => res.data as string)
+
+export const polishPrompt = (content: string) =>
+  api.post<{ polished: string }>('/settings/polish-prompt', { content }).then(res => res.data.polished)
