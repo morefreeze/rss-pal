@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -13,10 +16,15 @@ import (
 type SettingsHandler struct {
 	templateRepo *repository.TemplateRepository
 	cfg          *config.Config
+	summarizer   *ai.Summarizer
 }
 
 func NewSettingsHandler(cfg *config.Config, templateRepo *repository.TemplateRepository) *SettingsHandler {
-	return &SettingsHandler{cfg: cfg, templateRepo: templateRepo}
+	var summarizer *ai.Summarizer
+	if cfg.Claude.APIKey != "" {
+		summarizer = ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
+	}
+	return &SettingsHandler{cfg: cfg, templateRepo: templateRepo, summarizer: summarizer}
 }
 
 // GetTemplates GET /api/templates — 返回系统模板 + 用户自己的模板列表
@@ -173,4 +181,31 @@ func (h *SettingsHandler) SaveAIConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, cfg)
+}
+
+// PolishPrompt POST /api/settings/polish-prompt — AI 润色摘要 prompt
+func (h *SettingsHandler) PolishPrompt(c *gin.Context) {
+	if h.summarizer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI service not configured"})
+		return
+	}
+
+	var req struct {
+		Content string `json:"content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	polished, err := h.summarizer.Polish(ctx, req.Content)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AI 润色失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"polished": polished})
 }

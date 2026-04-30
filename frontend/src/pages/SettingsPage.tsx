@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
 
 const STYLE_OPTIONS = [
@@ -12,6 +12,72 @@ const STYLE_OPTIONS = [
 
 interface SettingsPageProps {
   user?: { is_admin: boolean } | null
+}
+
+function PromptField({
+  label, value, onChange, rows = 3
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  rows?: number
+}) {
+  const [polishing, setPolishing] = useState(false)
+  const [polished, setPolished] = useState<string | null>(null)
+
+  const handlePolish = async () => {
+    if (!value.trim()) {
+      toast.error('请先填写 Prompt 内容')
+      return
+    }
+    setPolishing(true)
+    setPolished(null)
+    try {
+      const result = await polishPrompt(value)
+      setPolished(result)
+    } catch {
+      toast.error('AI 润色失败，请重试')
+    } finally {
+      setPolishing(false)
+    }
+  }
+
+  return (
+    <div className="mb-1">
+      <div className="flex-between" style={{ marginBottom: 4 }}>
+        <label className="text-sm text-bold">{label}</label>
+        <button
+          type="button"
+          className="secondary"
+          style={{ fontSize: 11, padding: '2px 8px' }}
+          onClick={handlePolish}
+          disabled={polishing}
+        >
+          {polishing ? '润色中...' : '✨ AI 润色'}
+        </button>
+      </div>
+      <textarea
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        rows={rows}
+        style={{ width: '100%' }}
+      />
+      {polished !== null && (
+        <div style={{ marginTop: 6, padding: 10, background: '#f0fdf4', borderRadius: 6, border: '1px solid #bbf7d0' }}>
+          <div className="text-sm text-bold" style={{ marginBottom: 4, color: '#16a34a' }}>润色结果：</div>
+          <div className="text-sm" style={{ whiteSpace: 'pre-wrap', marginBottom: 8 }}>{polished}</div>
+          <div className="flex gap-2">
+            <button type="button" style={{ fontSize: 12, padding: '3px 10px' }} onClick={() => { onChange(polished); setPolished(null) }}>
+              使用润色版
+            </button>
+            <button type="button" className="secondary" style={{ fontSize: 12, padding: '3px 10px' }} onClick={() => setPolished(null)}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function SettingsPage({ user }: SettingsPageProps) {
@@ -47,6 +113,9 @@ export default function SettingsPage({ user }: SettingsPageProps) {
   const [templateSaving, setTemplateSaving] = useState(false)
   const [templateError, setTemplateError] = useState('')
 
+  // Which system templates have their prompts expanded
+  const [expandedTemplates, setExpandedTemplates] = useState<Set<number>>(new Set())
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -55,7 +124,6 @@ export default function SettingsPage({ user }: SettingsPageProps) {
         if (cfg) {
           const hasKey = !!cfg.api_key
           setApiKeyConfigured(hasKey)
-          // Don't pre-fill masked API key — keep field empty so user enters a new one if changing
           setAiConfig({ api_key: '', base_url: cfg.base_url || '', model: cfg.model || '' })
         }
       } catch {
@@ -185,6 +253,28 @@ export default function SettingsPage({ user }: SettingsPageProps) {
     } finally {
       setTemplateSaving(false)
     }
+  }
+
+  const handleCopySystemTemplate = (t: SummaryTemplate) => {
+    setNewTemplate({
+      name: `${t.name}（副本）`,
+      description: t.description,
+      brief_prompt: t.brief_prompt,
+      detailed_prompt: t.detailed_prompt,
+      style: t.style,
+    })
+    setShowNewTemplate(true)
+    setTimeout(() => {
+      document.querySelector<HTMLElement>('[data-new-template-form]')?.scrollIntoView({ behavior: 'smooth' })
+    }, 50)
+  }
+
+  const toggleExpand = (id: number) => {
+    setExpandedTemplates(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
   }
 
   if (loading) return <div className="card">Loading...</div>
@@ -336,7 +426,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
 
         {/* 新建模板表单 */}
         {showNewTemplate && (
-          <form onSubmit={handleCreateTemplate} className="card mb-2" style={{ background: '#f8fafc' }}>
+          <form data-new-template-form onSubmit={handleCreateTemplate} className="card mb-2" style={{ background: '#f8fafc' }}>
             <h4 className="mb-1">新建模板</h4>
 
             <div className="mb-1">
@@ -372,25 +462,19 @@ export default function SettingsPage({ user }: SettingsPageProps) {
               </select>
             </div>
 
-            <div className="mb-1">
-              <label className="text-sm text-bold">简短摘要 Prompt</label>
-              <textarea
-                value={newTemplate.brief_prompt}
-                onChange={e => setNewTemplate(prev => ({ ...prev, brief_prompt: e.target.value }))}
-                rows={3}
-                style={{ width: '100%', marginTop: 4 }}
-              />
-            </div>
+            <PromptField
+              label="简短摘要 Prompt"
+              value={newTemplate.brief_prompt || ''}
+              onChange={v => setNewTemplate(prev => ({ ...prev, brief_prompt: v }))}
+              rows={3}
+            />
 
-            <div className="mb-2">
-              <label className="text-sm text-bold">详细摘要 Prompt</label>
-              <textarea
-                value={newTemplate.detailed_prompt}
-                onChange={e => setNewTemplate(prev => ({ ...prev, detailed_prompt: e.target.value }))}
-                rows={4}
-                style={{ width: '100%', marginTop: 4 }}
-              />
-            </div>
+            <PromptField
+              label="详细摘要 Prompt"
+              value={newTemplate.detailed_prompt || ''}
+              onChange={v => setNewTemplate(prev => ({ ...prev, detailed_prompt: v }))}
+              rows={4}
+            />
 
             {templateError && <div className="text-sm mb-1" style={{ color: '#dc2626' }}>{templateError}</div>}
 
@@ -405,17 +489,43 @@ export default function SettingsPage({ user }: SettingsPageProps) {
           <div className="mb-2">
             <div className="text-sm text-muted mb-1" style={{ fontWeight: 600 }}>系统模板</div>
             {systemTemplates.map(t => (
-              <div key={t.id} className="flex-between" style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
-                <div>
-                  <span className="text-bold text-sm">{t.name}</span>
-                  {t.style && (
-                    <span className="text-sm" style={{ marginLeft: 8, padding: '2px 8px', background: '#e0f2fe', borderRadius: 4, color: '#0369a1' }}>
-                      {STYLE_OPTIONS.find(o => o.value === t.style)?.label || t.style}
-                    </span>
-                  )}
-                  {t.description && <div className="text-muted text-sm mt-1">{t.description}</div>}
+              <div key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+                <div className="flex-between">
+                  <div>
+                    <span className="text-bold text-sm">{t.name}</span>
+                    {t.style && (
+                      <span className="text-sm" style={{ marginLeft: 8, padding: '2px 8px', background: '#e0f2fe', borderRadius: 4, color: '#0369a1' }}>
+                        {STYLE_OPTIONS.find(o => o.value === t.style)?.label || t.style}
+                      </span>
+                    )}
+                    {t.description && <div className="text-muted text-sm mt-1">{t.description}</div>}
+                  </div>
+                  <div className="flex gap-1">
+                    <button className="secondary" style={{ fontSize: 12, padding: '2px 8px' }} onClick={() => toggleExpand(t.id)}>
+                      {expandedTemplates.has(t.id) ? '收起' : '查看'}
+                    </button>
+                    <button className="secondary" style={{ fontSize: 12, padding: '2px 8px' }} onClick={() => handleCopySystemTemplate(t)}>
+                      复制
+                    </button>
+                    <button className="secondary" onClick={() => handleSetDefault(t.id)}>设为默认</button>
+                  </div>
                 </div>
-                <button className="secondary" onClick={() => handleSetDefault(t.id)}>设为默认</button>
+                {expandedTemplates.has(t.id) && (
+                  <div style={{ marginTop: 8, padding: 10, background: '#f8fafc', borderRadius: 6, border: '1px solid #e5e7eb' }}>
+                    {t.brief_prompt && (
+                      <div className="mb-2">
+                        <div className="text-sm text-bold text-muted" style={{ marginBottom: 4 }}>简短摘要 Prompt：</div>
+                        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0, color: '#374151', lineHeight: 1.5 }}>{t.brief_prompt}</pre>
+                      </div>
+                    )}
+                    {t.detailed_prompt && (
+                      <div>
+                        <div className="text-sm text-bold text-muted" style={{ marginBottom: 4 }}>详细摘要 Prompt：</div>
+                        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0, color: '#374151', lineHeight: 1.5 }}>{t.detailed_prompt}</pre>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -232,6 +232,30 @@ func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, 
 	}, nil
 }
 
+// Polish takes a prompt template text and returns an improved version using the AI model.
+func (s *Summarizer) Polish(ctx context.Context, promptText string) (string, error) {
+	instruction := fmt.Sprintf(`你是一个专业的 prompt 工程师。用户写了一段用于 AI 摘要的指令，请帮助优化这段指令，使其更清晰、更具体、效果更好。
+要求：
+- 保持中文表达
+- 保留原有的意图和方向
+- 使指令更精确，避免模糊表达
+- 直接输出优化后的指令内容，不要添加任何前缀、说明或引号
+
+用户的原始指令：
+%s`, promptText)
+
+	req := chatRequest{
+		Model:     s.model,
+		MaxTokens: 600,
+		Messages:  []chatMessage{{Role: "user", Content: instruction}},
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	return s.doCall(ctx, body, 600)
+}
+
 func (s *Summarizer) GenerateInsights(ctx context.Context, topics []string, recentArticles string) (string, error) {
 	prompt := fmt.Sprintf(`基于用户的兴趣主题和最近的阅读行为，请分析用户的兴趣趋势并提供洞察：
 
