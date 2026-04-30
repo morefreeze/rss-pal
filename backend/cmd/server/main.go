@@ -80,6 +80,7 @@ func main() {
 
 		// Feeds
 		apiGroup.GET("/feeds", feedHandler.GetAll)
+		apiGroup.GET("/feeds/export/opml", feedHandler.ExportOPML)
 		apiGroup.GET("/feeds/:id", feedHandler.GetByID)
 		apiGroup.POST("/feeds", feedHandler.Create)
 		apiGroup.POST("/feeds/preview", feedHandler.Preview)
@@ -128,6 +129,7 @@ func main() {
 		apiGroup.GET("/settings/ai", settingsHandler.GetAIConfig)
 		apiGroup.PUT("/settings/ai", settingsHandler.SaveAIConfig)
 		apiGroup.PUT("/settings/template", settingsHandler.SetDefaultTemplate)
+		apiGroup.POST("/settings/polish-prompt", settingsHandler.PolishPrompt)
 	}
 
 	log.Printf("Server starting on port %s", cfg.Server.Port)

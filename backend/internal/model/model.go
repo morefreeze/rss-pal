@@ -15,6 +15,7 @@ type Feed struct {
 	FeedType          string     `json:"feed_type" db:"feed_type"` // "rss" or "html"
 	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
 	ArticleCount      int        `json:"article_count" db:"article_count"`
+	UnreadCount       int        `json:"unread_count" db:"unread_count"`
 }
 
 type Article struct {

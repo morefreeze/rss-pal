@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react'
-import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, Feed, FeedPreview } from '../api/client'
+import { useState, useEffect, useRef } from 'react'
+import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
 
 const POPULAR_FEEDS = [
-  { name: 'Hacker News', url: 'https://hnrss.org/frontpage', desc: '科技社区热帖' },
-  { name: '少数派', url: 'https://sspai.com/feed', desc: '数字生活方式' },
-  { name: 'V2EX', url: 'https://www.v2ex.com/index.xml', desc: '技术&创意社区' },
-  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', desc: '科技新闻' },
-  { name: '阮一峰博客', url: 'https://www.ruanyifeng.com/blog/atom.xml', desc: '技术&周刊' },
+  { name: 'Hacker News', url: 'https://hnrss.org/frontpage', desc: '全球科技社区热帖聚合' },
+  { name: '36氪', url: 'https://36kr.com/feed', desc: '中国科技商业资讯聚合' },
+  { name: '少数派', url: 'https://sspai.com/feed', desc: '数字生活方式与效率工具' },
+  { name: 'BBC 中文', url: 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', desc: '国际新闻中文报道' },
+  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', desc: '英文科技新闻聚合' },
 ]
 
 export default function FeedListPage() {
@@ -16,10 +16,13 @@ export default function FeedListPage() {
   const [loading, setLoading] = useState(true)
   const [fetchingId, setFetchingId] = useState<number | null>(null)
   const [previewing, setPreviewing] = useState(false)
+  const [previewStatus, setPreviewStatus] = useState('')
   const [preview, setPreview] = useState<FeedPreview | null>(null)
   const [previewError, setPreviewError] = useState('')
   const [adding, setAdding] = useState(false)
   const [addSuccess, setAddSuccess] = useState('')
+  const [importing, setImporting] = useState(false)
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { loadFeeds() }, [])
 
@@ -32,20 +35,40 @@ export default function FeedListPage() {
     }
   }
 
-  const handlePreview = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newUrl.trim()) return
+  const normalizeURL = (raw: string) => {
+    const trimmed = raw.trim()
+    if (trimmed && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      return 'https://' + trimmed
+    }
+    return trimmed
+  }
+
+  const doPreview = async (url: string) => {
+    const normalized = normalizeURL(url)
+    if (!normalized) return
+    setNewUrl(normalized)
     setPreviewing(true)
+    setPreviewStatus('获取中...')
     setPreview(null)
     setPreviewError('')
+    // After 4s show "probing RSS" hint so user knows it's still working
+    if (previewTimer.current) clearTimeout(previewTimer.current)
+    previewTimer.current = setTimeout(() => setPreviewStatus('正在探测 RSS 地址...'), 4000)
     try {
-      const result = await previewFeed(newUrl.trim())
+      const result = await previewFeed(normalized)
       setPreview(result)
     } catch (err: any) {
       setPreviewError(err?.response?.data?.error || '无法获取该地址的内容，请检查 URL 是否正确')
     } finally {
+      if (previewTimer.current) clearTimeout(previewTimer.current)
       setPreviewing(false)
+      setPreviewStatus('')
     }
+  }
+
+  const handlePreview = async (e: React.FormEvent) => {
+    e.preventDefault()
+    doPreview(newUrl)
   }
 
   const handleConfirmAdd = async () => {
@@ -111,6 +134,48 @@ export default function FeedListPage() {
     }
   }
 
+  const handleExportOPML = async () => {
+    try {
+      const blob = await exportOPML()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = 'rss-pal-subscriptions.opml'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(a.href)
+    } catch {
+      toast.error('导出失败')
+    }
+  }
+
+  const handleImportOPML = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(text, 'text/xml')
+      const outlines = doc.querySelectorAll('outline[xmlUrl]')
+      const entries = Array.from(outlines)
+        .map(o => ({ url: o.getAttribute('xmlUrl') || '', type: o.getAttribute('type') || 'rss' }))
+        .filter(e => !!e.url)
+      if (entries.length === 0) { toast.error('未找到有效的订阅地址'); return }
+      let added = 0, skipped = 0
+      for (const entry of entries) {
+        try { await addFeed(entry.url, entry.type === 'html' ? 'html' : 'rss'); added++ } catch { skipped++ }
+      }
+      await loadFeeds()
+      toast.success(`导入完成：${added} 个订阅添加成功${skipped > 0 ? `，${skipped} 个已存在或失败` : ''}`)
+    } catch {
+      toast.error('OPML 文件解析失败')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return '从未'
     return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -120,7 +185,18 @@ export default function FeedListPage() {
 
   return (
     <div>
-      <h2 className="mb-2">订阅管理</h2>
+      <div className="flex-between mb-2">
+        <h2>订阅管理</h2>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input id="opml-import" type="file" accept=".opml,.xml" style={{ display: 'none' }} onChange={handleImportOPML} />
+          <button className="secondary" style={{ fontSize: 12, padding: '3px 10px' }} disabled={importing} onClick={() => (document.getElementById('opml-import') as HTMLInputElement)?.click()}>
+            {importing ? '导入中...' : '导入 OPML'}
+          </button>
+          <button className="secondary" style={{ fontSize: 12, padding: '3px 10px' }} onClick={handleExportOPML}>
+            导出 OPML
+          </button>
+        </div>
+      </div>
 
       {addSuccess && (
         <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '10px 14px', marginBottom: 12, color: '#166534', fontSize: 14 }}>
@@ -131,7 +207,7 @@ export default function FeedListPage() {
       {/* Add feed: 2-step preview flow */}
       <div className="card mb-2">
         <h3 className="mb-2">添加订阅</h3>
-        <p className="text-muted text-sm mb-2">支持 RSS/Atom 订阅地址，也可以直接输入博客或新闻网站地址，系统会自动识别</p>
+        <p className="text-muted text-sm mb-2">支持 RSS/Atom 地址，也可直接输入任意博客或新闻网站 URL，系统自动提取文章列表，预览确认后再订阅</p>
 
         <form onSubmit={handlePreview} className="flex gap-2 mb-2">
           <input
@@ -143,7 +219,7 @@ export default function FeedListPage() {
             disabled={previewing || adding}
           />
           <button type="submit" disabled={previewing || adding || !newUrl.trim()}>
-            {previewing ? '获取中...' : '预览'}
+            {previewing ? previewStatus || '获取中...' : '预览'}
           </button>
         </form>
 
@@ -157,7 +233,7 @@ export default function FeedListPage() {
                 className="secondary"
                 style={{ fontSize: 12, padding: '3px 10px' }}
                 title={f.desc}
-                onClick={() => { setNewUrl(f.url); setPreview(null); setPreviewError('') }}
+                onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
               >
                 {f.name}
               </button>
@@ -193,7 +269,10 @@ export default function FeedListPage() {
             </div>
             <div>
               {preview.items.length === 0 ? (
-                <div className="text-muted text-sm">未找到文章，该地址可能不包含可识别的内容</div>
+                <div className="text-muted text-sm">
+                  未找到文章。可能原因：该页面使用 JavaScript 动态加载内容，或此地址不是文章列表页。
+                  <br />建议尝试该网站的 RSS 直接地址（通常在页脚或设置中可找到）。
+                </div>
               ) : (
                 preview.items.map((item, i) => (
                   <div key={i} style={{ padding: '5px 0', borderBottom: i < preview.items.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
@@ -232,7 +311,9 @@ export default function FeedListPage() {
                 </div>
                 <div className="text-muted text-sm">{feed.url}</div>
                 <div className="text-muted text-sm mt-1">
-                  {feed.owner_id ? '私有' : '共享'} · {feed.article_count} 篇 · 上次抓取：{formatDate(feed.last_fetched_at)}
+                  {feed.owner_id ? '私有' : '共享'} · {feed.article_count} 篇
+                  {feed.unread_count > 0 && <span style={{ color: '#2563eb', fontWeight: 500 }}> · {feed.unread_count} 未读</span>}
+                  {' '}· 上次抓取：{formatDate(feed.last_fetched_at)}
                 </div>
               </div>
               <div className="flex gap-1">

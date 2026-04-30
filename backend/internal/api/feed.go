@@ -68,12 +68,17 @@ func (h *FeedHandler) Preview(c *gin.Context) {
 		return
 	}
 
+	// Auto-add https:// if no scheme provided
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+		req.URL = "https://" + req.URL
+	}
+
 	if err := validatePublicURL(req.URL); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 	result, err := h.fetcher.Preview(ctx, req.URL)
 	if err != nil {
@@ -81,6 +86,10 @@ func (h *FeedHandler) Preview(c *gin.Context) {
 		return
 	}
 
+	// Make sure actual_url is set (used by frontend to confirm the add)
+	if result.ActualURL == "" {
+		result.ActualURL = req.URL
+	}
 	c.JSON(http.StatusOK, result)
 }
 
@@ -89,6 +98,10 @@ func (h *FeedHandler) Create(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+		req.URL = "https://" + req.URL
 	}
 
 	feedType := req.FeedType
@@ -219,10 +232,11 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			}
 			content, _ := h.contentFetcher.FetchContent(c.Request.Context(), item.Link)
 			article := &model.Article{
-				FeedID:  feed.ID,
-				Title:   item.Title,
-				URL:     item.Link,
-				Content: content,
+				FeedID:      feed.ID,
+				Title:       item.Title,
+				URL:         item.Link,
+				Content:     content,
+				PublishedAt: publishedTime(item.PublishedParsed, item.UpdatedParsed),
 			}
 			if err := h.articleRepo.Create(article); err != nil {
 				log.Printf("Failed to create article: %v", err)
@@ -309,6 +323,47 @@ func publishedTime(published, updated *time.Time) *time.Time {
 		return published
 	}
 	return updated
+}
+
+func (h *FeedHandler) ExportOPML(c *gin.Context) {
+	userID := getUserID(c)
+	feeds, err := h.repo.GetVisibleByUser(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	sb.WriteString(`<opml version="2.0">` + "\n")
+	sb.WriteString(`  <head><title>RSS Pal Subscriptions</title></head>` + "\n")
+	sb.WriteString(`  <body>` + "\n")
+	for _, feed := range feeds {
+		title := feed.Title
+		if title == "" {
+			title = feed.URL
+		}
+		feedType := "rss"
+		if feed.FeedType == "html" {
+			feedType = "html"
+		}
+		sb.WriteString(`    <outline type="` + feedType + `" text="` + xmlEscape(title) + `" title="` + xmlEscape(title) + `" xmlUrl="` + xmlEscape(feed.URL) + `"/>` + "\n")
+	}
+	sb.WriteString(`  </body>` + "\n")
+	sb.WriteString(`</opml>` + "\n")
+
+	c.Header("Content-Type", "text/xml; charset=utf-8")
+	c.Header("Content-Disposition", "attachment; filename=rss-pal-subscriptions.opml")
+	c.String(http.StatusOK, sb.String())
+}
+
+func xmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "'", "&#39;")
+	return s
 }
 
 // validatePublicURL blocks SSRF by rejecting non-HTTP(S) schemes and private/loopback IPs.
