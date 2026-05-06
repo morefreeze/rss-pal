@@ -81,17 +81,22 @@ function PromptField({
 }
 
 function buildBookmarkletJS(apiBase: string, token: string): string {
-  // Form POST instead of fetch — sites like x.com restrict `connect-src` in
-  // their CSP, which blocks fetch/XHR to localhost. Form submission is
-  // governed by `form-action` (independent of connect-src) so it goes
-  // through. The backend renders an HTML result page in the new tab that
-  // auto-closes on success.
+  // postMessage relay — fetch/XHR is blocked by `connect-src` CSP on
+  // many sites (x.com, etc.), and form POST from HTTPS to http://localhost
+  // is blocked by mixed-content rules. Top-level window.open from HTTPS
+  // to HTTP is *not* blocked, so we open a same-origin receiver page on
+  // the RSS Pal host, hand the captured payload over via postMessage,
+  // and let the receiver POST same-origin (no CSP, no mixed content).
   const code = `(function(){
-var f=document.createElement('form');
-f.method='POST';f.action='${apiBase}/api/bookmarklet/capture';f.enctype='multipart/form-data';f.target='_blank';f.style.display='none';
-function add(n,v){var i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;f.appendChild(i);}
-add('token','${token}');add('url',location.href);add('title',document.title);add('html',document.documentElement.outerHTML);
-document.body.appendChild(f);f.submit();setTimeout(function(){f.remove();},100);
+var data={token:'${token}',url:location.href,title:document.title,html:document.documentElement.outerHTML};
+var w=window.open('${apiBase}/bookmarklet-receiver.html','_blank');
+if(!w){alert('RSS Pal: 请允许此页面弹窗后再试');return;}
+function onMsg(e){
+  if(e.source!==w||!e.data||e.data.type!=='rsspal:ready')return;
+  window.removeEventListener('message',onMsg);
+  w.postMessage({type:'rsspal:capture',token:data.token,url:data.url,title:data.title,html:data.html},'${apiBase}');
+}
+window.addEventListener('message',onMsg);
 })();`
   return 'javascript:' + encodeURIComponent(code)
 }

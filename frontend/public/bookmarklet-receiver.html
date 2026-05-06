@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RSS Pal - 抓取</title>
+<style>
+body{font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb;color:#222}
+.box{padding:28px 36px;background:#fff;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.08);max-width:520px;text-align:center}
+h1{margin:0 0 12px;font-size:20px}
+h1.ok{color:#16a34a}
+h1.err{color:#dc2626}
+h1.info{color:#2563eb}
+p{margin:6px 0;line-height:1.5}
+.hint{color:#9ca3af;font-size:13px;margin-top:18px}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#2563eb;border-radius:50%;animation:s .8s linear infinite;vertical-align:-3px;margin-right:8px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="box" id="box">
+  <h1 class="info"><span class="spinner"></span>等待页面数据…</h1>
+  <p class="hint">如果一直停在这里，请确认是从书签栏触发的</p>
+</div>
+<script>
+(function () {
+  var box = document.getElementById('box');
+
+  function render(cls, heading, msg, autoClose) {
+    box.innerHTML =
+      '<h1 class="' + cls + '">' + heading + '</h1>' +
+      '<p>' + (msg || '') + '</p>' +
+      (autoClose
+        ? '<p class="hint">2.5 秒后自动关闭…</p>'
+        : '<p class="hint">可关闭此页面</p>');
+    if (autoClose) setTimeout(function () { try { window.close(); } catch (e) {} }, 2500);
+  }
+  function escapeText(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+  function fail(msg) { render('err', '❌ 抓取失败', escapeText(msg), false); }
+
+  if (!window.opener) {
+    fail('缺少 opener 上下文 — 请从书签栏触发，不要直接打开本页');
+    return;
+  }
+
+  function onMsg(e) {
+    var d = e.data;
+    if (e.source !== window.opener) return;
+    if (!d || d.type !== 'rsspal:capture') return;
+    window.removeEventListener('message', onMsg);
+
+    if (!d.token || !d.url || !d.html) {
+      fail('数据不完整');
+      return;
+    }
+
+    box.innerHTML = '<h1 class="info"><span class="spinner"></span>正在保存…</h1>';
+
+    fetch('/api/bookmarklet/capture', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + d.token,
+      },
+      body: JSON.stringify({ url: d.url, title: d.title || '', html: d.html }),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, j: j, status: r.status }; });
+      })
+      .then(function (x) {
+        if (x.ok) {
+          var phase = x.j.status;
+          var heading = phase === 'created' ? '✅ 已收藏'
+            : phase === 'updated' ? '✅ 已更新'
+            : phase === 'unchanged' ? 'ℹ️ 未更新'
+            : '✅ 抓取成功';
+          var cls = phase === 'unchanged' ? 'info' : 'ok';
+          render(cls, heading, escapeText(x.j.message), true);
+        } else {
+          fail(x.j && x.j.error ? x.j.error : 'HTTP ' + x.status);
+        }
+      })
+      .catch(function (err) { fail('网络错误: ' + err.message); });
+  }
+
+  window.addEventListener('message', onMsg);
+  // Tell the opener we're ready to receive the captured payload.
+  try {
+    window.opener.postMessage({ type: 'rsspal:ready' }, '*');
+  } catch (e) {
+    fail('与发起页面通讯失败: ' + e.message);
+  }
+})();
+</script>
+</body>
+</html>
