@@ -102,7 +102,7 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleRepo.GetByID(id, getUserID(c))
+	article, feedType, err := h.articleRepo.GetByIDWithFeedType(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -113,9 +113,10 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 	signals, _ := h.prefRepo.GetUserSignals(userID, id)
 
 	response := gin.H{
-		"article":  article,
-		"progress": progress,
-		"signals":  signals,
+		"article":          article,
+		"progress":         progress,
+		"signals":          signals,
+		"from_bookmarklet": feedType == "saved",
 	}
 	c.JSON(http.StatusOK, response)
 }
