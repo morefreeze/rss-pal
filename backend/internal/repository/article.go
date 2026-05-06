@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/lib/pq"
 )
 
 type ArticleRepository struct {
@@ -309,6 +310,70 @@ func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Art
 		LIMIT $3
 	`
 	rows, err := r.db.Query(sqlStr, q, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticle(rows)
+}
+
+// GetByIDsForUser fetches the given article IDs in the order they appear in
+// `ids`. Used by the weekly digest to honor the "frozen snapshot" semantic:
+// once a digest is generated for a week, the article set is locked.
+func (r *ArticleRepository) GetByIDsForUser(userID int, ids []int) ([]model.Article, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	int64s := make(pq.Int64Array, len(ids))
+	for i, id := range ids {
+		int64s[i] = int64(id)
+	}
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+		WHERE a.id = ANY($2) AND (f.owner_id IS NULL OR f.owner_id = $1)
+		ORDER BY array_position($2, a.id)
+	`
+	rows, err := r.db.Query(query, userID, int64s)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticle(rows)
+}
+
+// GetTopArticlesInRange returns up to `limit` articles from feeds visible to
+// `userID` whose published_at falls in [start, end). Ranks by personalization
+// score (mirrors GetRecommended), tie-breaking by published_at desc. Falls
+// back to recency for users with no preference signals.
+func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Time, limit int) ([]model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+		LEFT JOIN (
+			SELECT article_id, SUM(
+				CASE signal_type
+					WHEN 'like' THEN 5.0 * signal_value
+					WHEN 'dislike' THEN -10.0 * signal_value
+					WHEN 'save' THEN 3.0 * signal_value
+					WHEN 'read_duration' THEN signal_value / 60.0
+					ELSE 1.0 * signal_value
+				END
+			) as score
+			FROM user_preferences
+			WHERE user_id = $1
+			GROUP BY article_id
+		) p ON a.id = p.article_id
+		WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+		  AND a.published_at >= $2 AND a.published_at < $3
+		ORDER BY COALESCE(p.score, 0) DESC, a.published_at DESC
+		LIMIT $4
+	`
+	rows, err := r.db.Query(query, userID, start, end, limit)
 	if err != nil {
 		return nil, err
 	}

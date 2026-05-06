@@ -29,6 +29,7 @@ func main() {
 	templateRepo := repository.NewTemplateRepository(db)
 	shareRepo := repository.NewShareRepository(db)
 	recommendedRepo := repository.NewRecommendedFeedRepository(db)
+	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	summarizerService := service.NewSummarizerService(summarizer)
@@ -45,6 +46,7 @@ func main() {
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
 	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, summarizer, cfg)
 	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
+	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
 
 	router := gin.Default()
@@ -129,6 +131,9 @@ func main() {
 		// Recommended feeds (catalog)
 		apiGroup.GET("/recommended-feeds", recommendedHandler.List)
 		apiGroup.POST("/recommended-feeds/:id/subscribe", recommendedHandler.Subscribe)
+
+		// Weekly digest
+		apiGroup.GET("/weekly-digest", weeklyHandler.Get)
 
 		// Templates
 		apiGroup.GET("/templates", settingsHandler.GetTemplates)
