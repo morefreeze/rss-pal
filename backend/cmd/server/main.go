@@ -28,6 +28,7 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	templateRepo := repository.NewTemplateRepository(db)
 	shareRepo := repository.NewShareRepository(db)
+	recommendedRepo := repository.NewRecommendedFeedRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	summarizerService := service.NewSummarizerService(summarizer)
@@ -43,6 +44,7 @@ func main() {
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
 	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, summarizer, cfg)
+	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
 
 	router := gin.Default()
@@ -123,6 +125,10 @@ func main() {
 
 		// Insights
 		apiGroup.POST("/insights/generate", insightsHandler.Generate)
+
+		// Recommended feeds (catalog)
+		apiGroup.GET("/recommended-feeds", recommendedHandler.List)
+		apiGroup.POST("/recommended-feeds/:id/subscribe", recommendedHandler.Subscribe)
 
 		// Templates
 		apiGroup.GET("/templates", settingsHandler.GetTemplates)
