@@ -14,11 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// allowLoopbackForTesting, when true, lets validateImageURL accept loopback
-// targets. Only set from _test.go files. Used to allow httptest.NewServer
-// URLs (which resolve to 127.0.0.1) in test scenarios.
-var allowLoopbackForTesting bool
-
 // blockedCIDRs is the IPv4/IPv6 ranges we refuse to proxy to. Covers loopback,
 // RFC1918 private ranges, link-local, IPv6 ULA, and the cloud metadata IP.
 var blockedCIDRs = func() []*net.IPNet {
@@ -74,11 +69,7 @@ func validateImageURL(raw string) (*url.URL, error) {
 	host := u.Hostname()
 	if ip := net.ParseIP(host); ip != nil {
 		if isBlockedIP(ip) {
-			if allowLoopbackForTesting && ip.IsLoopback() {
-				// allow — test path
-			} else {
-				return nil, errors.New("blocked address")
-			}
+			return nil, errors.New("blocked address")
 		}
 		return u, nil
 	}
@@ -88,11 +79,7 @@ func validateImageURL(raw string) (*url.URL, error) {
 	}
 	for _, ip := range ips {
 		if isBlockedIP(ip) {
-			if allowLoopbackForTesting && ip.IsLoopback() {
-				// allow — test path
-			} else {
-				return nil, errors.New("blocked address")
-			}
+			return nil, errors.New("blocked address")
 		}
 	}
 	return u, nil
@@ -104,15 +91,42 @@ const (
 	proxyUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
-var proxyClient = &http.Client{Timeout: proxyTimeout}
+// ImageProxy serves remote images through this server. Constructed via
+// NewImageProxy for production use; tests instantiate the struct directly
+// with custom dependencies.
+type ImageProxy struct {
+	Validate func(rawURL string) (*url.URL, error)
+	Client   *http.Client
+}
 
-// ProxyImage streams an image from a remote URL through this server. It is
-// unauthenticated by design — image tags do not carry our auth cookie/JWT
-// reliably and the content is public anyway. SSRF is the real risk and is
-// handled by validateImageURL.
-func ProxyImage(c *gin.Context) {
+// NewImageProxy returns a production-ready proxy: strict SSRF validation,
+// 30s timeout, 10MB cap, and redirect re-validation against the SSRF guard.
+func NewImageProxy() *ImageProxy {
+	p := &ImageProxy{Validate: validateImageURL}
+	p.Client = &http.Client{
+		Timeout:       proxyTimeout,
+		CheckRedirect: p.checkRedirect,
+	}
+	return p
+}
+
+// checkRedirect re-runs the SSRF guard at every redirect hop. Without this,
+// an attacker-controlled origin could 302 to 169.254.169.254 (or any other
+// blocked range) and bypass validateImageURL.
+func (p *ImageProxy) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("too many redirects")
+	}
+	if _, err := p.Validate(req.URL.String()); err != nil {
+		return fmt.Errorf("redirect rejected: %w", err)
+	}
+	return nil
+}
+
+// Handle is the gin handler.
+func (p *ImageProxy) Handle(c *gin.Context) {
 	raw := c.Query("url")
-	target, err := validateImageURL(raw)
+	target, err := p.Validate(raw)
 	if err != nil {
 		c.String(http.StatusBadRequest, "invalid url: %s", err)
 		return
@@ -131,7 +145,7 @@ func ProxyImage(c *gin.Context) {
 	req.Header.Set("Referer", target.Scheme+"://"+target.Host+"/")
 	req.Header.Set("User-Agent", proxyUserAgent)
 
-	resp, err := proxyClient.Do(req)
+	resp, err := p.Client.Do(req)
 	if err != nil {
 		c.String(http.StatusBadGateway, "upstream: %s", err)
 		return
@@ -142,6 +156,13 @@ func ProxyImage(c *gin.Context) {
 		c.String(http.StatusBadGateway, "upstream status %d", resp.StatusCode)
 		return
 	}
+
+	// Content-Length precheck: reject if upstream declares oversize body.
+	if cl := resp.ContentLength; cl > proxyMaxBytes {
+		c.String(http.StatusBadGateway, "upstream too large: %d bytes", cl)
+		return
+	}
+
 	ct := resp.Header.Get("Content-Type")
 	if !strings.HasPrefix(ct, "image/") {
 		c.String(http.StatusUnsupportedMediaType, "non-image content-type: %s", ct)
