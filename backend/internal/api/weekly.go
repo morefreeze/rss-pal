@@ -98,6 +98,10 @@ func (h *WeeklyHandler) Get(c *gin.Context) {
 		}
 	}
 
+	if articles == nil {
+		articles = []model.Article{}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"week_start": weekStart.Format("2006-01-02"),
 		"intro_text": intro,
