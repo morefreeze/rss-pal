@@ -253,6 +253,63 @@ func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*Sum
 	}, nil
 }
 
+// SummarizeStream generates brief then detailed summaries, invoking
+// onBriefDelta and onDetailedDelta with token chunks as they arrive.
+func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
+	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
+	content = truncateContent(content)
+
+	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头：
+
+标题：%s
+
+内容：
+%s
+
+请只输出要点列表，不要其他内容。`, title, content)
+
+	brief, err := s.callStream(ctx, briefPrompt, 500, onBriefDelta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream brief: %w", err)
+	}
+
+	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论：
+
+标题：%s
+
+内容：
+%s
+
+请用中文输出详细总结。`, title, content)
+
+	detailed, err := s.callStream(ctx, detailedPrompt, 1000, onDetailedDelta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream detailed summary: %w", err)
+	}
+
+	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+}
+
+// SummarizeWithTemplateStream is the streaming counterpart of SummarizeWithTemplate.
+func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, content,
+	briefPromptTpl, detailedPromptTpl string,
+	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
+	content = truncateContent(content)
+	r := strings.NewReplacer("{title}", title, "{content}", content)
+
+	brief, err := s.callStream(ctx, r.Replace(briefPromptTpl), 500, onBriefDelta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream brief with template: %w", err)
+	}
+
+	detailed, err := s.callStream(ctx, r.Replace(detailedPromptTpl), 1000, onDetailedDelta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream detailed with template: %w", err)
+	}
+
+	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+}
+
 func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (string, error) {
 	content = truncateContent(content)
 	prompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头：
