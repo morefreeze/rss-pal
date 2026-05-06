@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getWeeklyDigest, WeeklyDigest } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
+import { toast } from '../utils/toast'
 
 function shiftWeek(weekStart: string, days: number): string {
   const d = new Date(weekStart + 'T00:00:00+08:00')
@@ -21,6 +22,8 @@ export default function WeeklyPage() {
     try {
       const data = await getWeeklyDigest(w)
       setDigest(data)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || '加载周刊失败')
     } finally {
       setLoading(false)
     }
@@ -34,10 +37,10 @@ export default function WeeklyPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2>本周精选 · {digest.week_start}</h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="secondary" onClick={() => setWeek(shiftWeek(digest.week_start, -7))}>‹ 上一周</button>
-          <button className="secondary" onClick={() => setWeek(shiftWeek(digest.week_start, 7))}>下一周 ›</button>
+          <button className="secondary" title="查看上一周" onClick={() => setWeek(shiftWeek(digest.week_start, -7))}>‹ 上一周</button>
+          <button className="secondary" title="查看下一周" onClick={() => setWeek(shiftWeek(digest.week_start, 7))}>下一周 ›</button>
           {week !== undefined && (
-            <button className="secondary" onClick={() => setWeek(undefined)}>本周</button>
+            <button className="secondary" title="回到本周" onClick={() => setWeek(undefined)}>本周</button>
           )}
         </div>
       </div>
