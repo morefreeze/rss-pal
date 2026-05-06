@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -29,17 +30,31 @@ const captureMaxBodyBytes = 1 << 20 // 1 MiB
 // Below this ratio, the receiver page asks the user to confirm.
 const duplicateOverwriteRatio = 1.5
 
+// markdownImageRe matches markdown image syntax: ![alt](url). Used to count
+// images for the duplicate-prompt comparison so users see at a glance when
+// a re-capture lost images (typical login-wall regression).
+var markdownImageRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
+
+func countMarkdownImages(s string) int {
+	return len(markdownImageRe.FindAllStringIndex(s, -1))
+}
+
 // shouldPromptDuplicate returns true when a bookmarklet capture for an
 // existing URL should pause and ask the user (rather than auto-overwriting).
-// Pure function so it can be unit-tested without a DB. The caller passes
-// the lengths of the new and stored content; force=true bypasses the prompt
-// entirely (used after the user has explicitly chosen to overwrite).
-func shouldPromptDuplicate(newLen, oldLen int, force bool) bool {
+// Pure function so it can be unit-tested without a DB. Triggers a prompt on:
+//   - length regression: new content is below 1.5x the old length, or
+//   - image regression: new content has strictly fewer markdown images.
+// force=true bypasses everything (used after the user explicitly chose
+// to overwrite).
+func shouldPromptDuplicate(newLen, oldLen, newImages, oldImages int, force bool) bool {
 	if force {
 		return false
 	}
 	if oldLen == 0 {
 		return false
+	}
+	if newImages < oldImages {
+		return true
 	}
 	return float64(newLen) < duplicateOverwriteRatio*float64(oldLen)
 }
@@ -115,13 +130,17 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 
 	if existing != nil {
 		newLen, oldLen := len(content), len(existing.Content)
-		if shouldPromptDuplicate(newLen, oldLen, req.Force) {
+		newImages := countMarkdownImages(content)
+		oldImages := countMarkdownImages(existing.Content)
+		if shouldPromptDuplicate(newLen, oldLen, newImages, oldImages, req.Force) {
 			c.JSON(http.StatusOK, gin.H{
 				"status":          "duplicate",
 				"article_id":      existing.ID,
 				"existing_length": oldLen,
 				"new_length":      newLen,
-				"message":         fmt.Sprintf("已有内容 %d 字 / 新内容 %d 字", oldLen, newLen),
+				"existing_images": oldImages,
+				"new_images":      newImages,
+				"message":         fmt.Sprintf("已有内容 %d 字 %d 图 / 新内容 %d 字 %d 图", oldLen, oldImages, newLen, newImages),
 			})
 			return
 		}
