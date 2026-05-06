@@ -2,7 +2,12 @@ package api
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestIsBlockedIP(t *testing.T) {
@@ -52,5 +57,75 @@ func TestValidateImageURL(t *testing.T) {
 		if (err != nil) != tc.wantErr {
 			t.Errorf("validateImageURL(%q) err=%v, wantErr=%v", tc.raw, err, tc.wantErr)
 		}
+	}
+}
+
+func TestProxyImage_StreamsAndInjectsReferer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var gotReferer string
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReferer = r.Header.Get("Referer")
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nFAKEBYTES"))
+	}))
+	defer origin.Close()
+
+	allowLoopbackForTesting = true
+	t.Cleanup(func() { allowLoopbackForTesting = false })
+
+	r := gin.New()
+	r.GET("/api/proxy/image", ProxyImage)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/proxy/image?url="+origin.URL+"/cat.png", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("content-type = %q, want image/png", ct)
+	}
+	if !strings.HasPrefix(gotReferer, origin.URL) {
+		t.Errorf("referer = %q, want prefix %q", gotReferer, origin.URL)
+	}
+	if !strings.Contains(rec.Body.String(), "FAKEBYTES") {
+		t.Errorf("body did not stream upstream payload: %q", rec.Body.String())
+	}
+}
+
+func TestProxyImage_RejectsNonImageContentType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html>"))
+	}))
+	defer origin.Close()
+
+	allowLoopbackForTesting = true
+	t.Cleanup(func() { allowLoopbackForTesting = false })
+
+	r := gin.New()
+	r.GET("/api/proxy/image", ProxyImage)
+	req := httptest.NewRequest(http.MethodGet, "/api/proxy/image?url="+origin.URL+"/foo", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Errorf("expected non-200 for text/html upstream, got 200")
+	}
+}
+
+func TestProxyImage_RejectsBadScheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/api/proxy/image", ProxyImage)
+	req := httptest.NewRequest(http.MethodGet, "/api/proxy/image?url=file:///etc/passwd", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusForbidden {
+		t.Errorf("expected 4xx for file:// scheme, got %d", rec.Code)
 	}
 }
