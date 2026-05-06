@@ -43,5 +43,8 @@ func main() {
 			log.Printf("backfilled %d articles…", updated)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		log.Fatalf("row iteration error: %v", err)
+	}
 	log.Printf("done; backfilled %d articles", updated)
 }
