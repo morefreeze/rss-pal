@@ -57,6 +57,15 @@ services:
       postgres:
         condition: service_healthy
 
+  rsshub:
+    image: diygod/rsshub:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      CACHE_TYPE: memory
+      CACHE_EXPIRE: 3600
+      REQUEST_TIMEOUT: 15000
+
   frontend:
     build:
       context: ./frontend
