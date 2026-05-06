@@ -1,6 +1,6 @@
 module github.com/bytedance/rss-pal
 
-go 1.20
+go 1.24
 
 require (
 	github.com/PuerkitoBio/goquery v1.8.0
