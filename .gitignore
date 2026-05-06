@@ -7,6 +7,8 @@
 backend/bin/
 backend/server
 backend/worker
+backend/seed
+backend/backfill_metrics
 
 # Frontend
 frontend/node_modules/
