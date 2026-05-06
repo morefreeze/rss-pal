@@ -289,7 +289,8 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			content = rss.StripHTML(item.Content)
 		}
 
-		if item.Link != "" {
+		skipDeepFetch := feed.FeedType == "youtube" || feed.FeedType == "podcast"
+		if !skipDeepFetch && item.Link != "" {
 			fullContent, err := h.contentFetcher.FetchContent(c.Request.Context(), item.Link)
 			if err == nil && len(fullContent) > len(content) {
 				content = fullContent
