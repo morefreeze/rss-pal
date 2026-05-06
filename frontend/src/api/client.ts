@@ -306,3 +306,9 @@ export const exportMarkdown = (articleId: number) =>
 
 export const polishPrompt = (content: string) =>
   api.post<{ polished: string }>('/settings/polish-prompt', { content }).then(res => res.data.polished)
+
+export const getBookmarkletToken = () =>
+  api.get<{ token: string | null }>('/settings/bookmarklet-token').then(res => res.data.token)
+
+export const regenerateBookmarkletToken = () =>
+  api.post<{ token: string }>('/settings/bookmarklet-token/regenerate').then(res => res.data.token)

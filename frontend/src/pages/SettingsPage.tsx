@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
 
 const STYLE_OPTIONS = [
@@ -75,6 +75,110 @@ function PromptField({
             </button>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function buildBookmarkletJS(apiBase: string, token: string): string {
+  const code = `(function(){
+fetch('${apiBase}/api/bookmarklet/capture',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({url:location.href,title:document.title,html:document.documentElement.outerHTML})}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(x){toast(x.ok?x.j.message:'错误: '+(x.j.error||'未知错误'))}).catch(function(e){toast('错误: '+e.message)});
+function toast(m){var d=document.createElement('div');d.style.cssText='position:fixed;top:20px;right:20px;z-index:2147483647;padding:12px 16px;background:#222;color:#fff;border-radius:8px;font:14px -apple-system,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:320px;';d.textContent='RSS Pal: '+m;document.body.appendChild(d);setTimeout(function(){d.remove()},3000);}
+})();`
+  return 'javascript:' + encodeURIComponent(code)
+}
+
+function BookmarkletSection() {
+  const [token, setToken] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    getBookmarkletToken().then(setToken).catch(() => setToken(null))
+  }, [])
+
+  const handleRegenerate = async () => {
+    if (token && !confirm('重新生成会让旧书签失效，确认?')) return
+    setBusy(true)
+    try {
+      const t = await regenerateBookmarkletToken()
+      setToken(t)
+      setRevealed(true)
+      toast.success('Token 已生成，请重新拖动书签')
+    } catch {
+      toast.error('生成失败，请重试')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const apiBase = window.location.origin
+  const bookmarkletJS = token ? buildBookmarkletJS(apiBase, token) : ''
+  const masked = token ? token.slice(0, 6) + '…' + token.slice(-4) : '尚未生成'
+
+  return (
+    <div className="card mb-2">
+      <h3 className="mb-1">📌 浏览器抓取</h3>
+      <p className="text-muted text-sm mb-2">
+        把下方按钮拖到浏览器书签栏。在任何网页点一下，就把当前页发回 RSS Pal —
+        匹配到已有文章则更新内容，否则保存到「📑 收藏」feed。
+      </p>
+
+      {token ? (
+        <div style={{ marginBottom: 12 }}>
+          <a
+            href={bookmarkletJS}
+            draggable
+            onClick={e => e.preventDefault()}
+            style={{
+              display: 'inline-block',
+              padding: '8px 16px',
+              background: '#222',
+              color: '#fff',
+              borderRadius: 6,
+              textDecoration: 'none',
+              fontSize: 14,
+              cursor: 'grab',
+            }}
+          >
+            📑 发送到 RSS Pal
+          </a>
+          <span className="text-muted text-sm" style={{ marginLeft: 12 }}>
+            ← 拖到书签栏
+          </span>
+        </div>
+      ) : (
+        <div className="text-muted text-sm mb-2">点「生成 Token」获取你的第一个 token。</div>
+      )}
+
+      <div className="flex gap-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="text-sm">Token:</span>
+        <code style={{ background: '#f3f4f6', padding: '3px 8px', borderRadius: 4, fontSize: 12 }}>
+          {revealed && token ? token : masked}
+        </code>
+        {token && (
+          <button
+            type="button"
+            className="secondary"
+            style={{ fontSize: 12, padding: '3px 10px' }}
+            onClick={() => setRevealed(v => !v)}
+          >
+            {revealed ? '隐藏' : '显示'}
+          </button>
+        )}
+        <button
+          type="button"
+          style={{ fontSize: 12, padding: '3px 10px' }}
+          onClick={handleRegenerate}
+          disabled={busy}
+        >
+          {busy ? '...' : token ? '🔄 重新生成' : '生成 Token'}
+        </button>
+      </div>
+      {token && (
+        <p className="text-muted text-sm" style={{ marginTop: 8, marginBottom: 0 }}>
+          ⚠️ 重新生成后旧书签会失效，需要重新拖一次。
+        </p>
       )}
     </div>
   )
@@ -358,6 +462,9 @@ export default function SettingsPage({ user }: SettingsPageProps) {
           </button>
         </form>
       </div>
+
+      {/* 浏览器抓取（bookmarklet） */}
+      <BookmarkletSection />
 
       {/* AI 配置区域 */}
       <div className="card mb-2">
