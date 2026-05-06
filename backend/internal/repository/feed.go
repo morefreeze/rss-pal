@@ -101,9 +101,22 @@ func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 	var feeds []model.Feed
 	for rows.Next() {
 		var f model.Feed
-		err := rows.Scan(&f.ID, &f.URL, &f.Title, &f.LastFetchedAt, &f.FetchIntervalMin, &f.ETag, &f.LastModified, &f.IsActive, &f.OwnerID, &f.FeedType, &f.CreatedAt, &f.ArticleCount, &f.UnreadCount)
+		var title, etag, lastModified, feedType sql.NullString
+		var ownerID sql.NullInt64
+		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &f.CreatedAt, &f.ArticleCount, &f.UnreadCount)
 		if err != nil {
 			return nil, err
+		}
+		f.Title = title.String
+		f.ETag = etag.String
+		f.LastModified = lastModified.String
+		f.FeedType = feedType.String
+		if f.FeedType == "" {
+			f.FeedType = "rss"
+		}
+		if ownerID.Valid {
+			oid := int(ownerID.Int64)
+			f.OwnerID = &oid
 		}
 		feeds = append(feeds, f)
 	}
