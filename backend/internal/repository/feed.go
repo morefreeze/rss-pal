@@ -160,7 +160,7 @@ func (r *FeedRepository) UpdateTitle(id int, title string) error {
 }
 
 func (r *FeedRepository) GetAllActive() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds WHERE is_active = true AND feed_type IN ('rss', 'html')`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds WHERE is_active = true AND feed_type IN ('rss', 'html', 'youtube', 'podcast')`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
