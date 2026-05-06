@@ -11,6 +11,7 @@ import { toast } from '../utils/toast'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
 import ReadingLayout from '../components/ReadingLayout'
+import BackToTopButton from '../components/BackToTopButton'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 
 export default function ArticlePage() {
@@ -714,6 +715,7 @@ export default function ArticlePage() {
           </div>
         </div>
       </div>
+      <BackToTopButton />
     </div>
   )
 }
