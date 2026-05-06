@@ -10,6 +10,7 @@ import InsightsPage from './pages/InsightsPage'
 import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
 import SharePage from './pages/SharePage'
+import RecommendedPage from './pages/RecommendedPage'
 import Layout from './components/Layout'
 
 interface User {
@@ -61,6 +62,7 @@ function App() {
         <Route element={<RequireAuth user={user} onLogout={handleLogout} />}>
           <Route index element={<Navigate to="/articles" replace />} />
           <Route path="feeds" element={<FeedListPage />} />
+          <Route path="recommended" element={<RecommendedPage />} />
           <Route path="articles" element={<ArticleListPage />} />
           <Route path="articles/:id" element={<ArticlePage />} />
           <Route path="insights" element={<InsightsPage />} />

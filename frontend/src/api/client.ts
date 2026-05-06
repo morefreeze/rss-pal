@@ -314,3 +314,23 @@ export const getBookmarkletToken = () =>
 
 export const regenerateBookmarkletToken = () =>
   api.post<{ token: string }>('/settings/bookmarklet-token/regenerate').then(res => res.data.token)
+
+export interface RecommendedFeed {
+  id: number
+  url: string
+  title: string
+  description: string
+  category: string                // 'ai_eng' | 'cn_tech' | 'enterprise' | 'podcast' | 'youtube'
+  language: string                // 'zh' | 'en'
+  feed_type: string
+  is_broken: boolean
+  sort_order: number
+  subscribed: boolean
+  created_at: string
+}
+
+export const getRecommendedFeeds = () =>
+  api.get<RecommendedFeed[]>('/recommended-feeds').then(res => res.data || [])
+
+export const subscribeRecommendedFeed = (id: number) =>
+  api.post<{ status: string; feed_id?: number }>(`/recommended-feeds/${id}/subscribe`).then(res => res.data)
