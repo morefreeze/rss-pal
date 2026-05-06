@@ -9,6 +9,7 @@ backend/server
 backend/worker
 backend/seed
 backend/backfill_metrics
+backend/backfill_content
 
 # Frontend
 frontend/node_modules/
