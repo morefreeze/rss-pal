@@ -133,6 +133,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		URL:     normalized,
 		Content: content,
 	}
+	article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 	if err := h.articleRepo.Create(article); err != nil {
 		log.Printf("bookmarklet: Create article failed for user=%d url=%s: %v", user.ID, normalized, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "新建文章失败"})
