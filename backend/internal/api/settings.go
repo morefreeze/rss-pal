@@ -15,16 +15,17 @@ import (
 
 type SettingsHandler struct {
 	templateRepo *repository.TemplateRepository
+	userRepo     *repository.UserRepository
 	cfg          *config.Config
 	summarizer   *ai.Summarizer
 }
 
-func NewSettingsHandler(cfg *config.Config, templateRepo *repository.TemplateRepository) *SettingsHandler {
+func NewSettingsHandler(cfg *config.Config, templateRepo *repository.TemplateRepository, userRepo *repository.UserRepository) *SettingsHandler {
 	var summarizer *ai.Summarizer
 	if cfg.Claude.APIKey != "" {
 		summarizer = ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	}
-	return &SettingsHandler{cfg: cfg, templateRepo: templateRepo, summarizer: summarizer}
+	return &SettingsHandler{cfg: cfg, templateRepo: templateRepo, userRepo: userRepo, summarizer: summarizer}
 }
 
 // GetTemplates GET /api/templates — 返回系统模板 + 用户自己的模板列表
@@ -208,4 +209,36 @@ func (h *SettingsHandler) PolishPrompt(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"polished": polished})
+}
+
+// GetBookmarkletToken GET /api/settings/bookmarklet-token — 返回当前用户的
+// bookmarklet token；未生成过返回 token=null。
+func (h *SettingsHandler) GetBookmarkletToken(c *gin.Context) {
+	userID := getUserID(c)
+	token, err := h.userRepo.GetBookmarkletToken(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if token == "" {
+		c.JSON(http.StatusOK, gin.H{"token": nil})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+// RegenerateBookmarkletToken POST /api/settings/bookmarklet-token/regenerate
+// — 生成新的 token，旧 token 立即失效。
+func (h *SettingsHandler) RegenerateBookmarkletToken(c *gin.Context) {
+	userID := getUserID(c)
+	token, err := GenerateBookmarkletToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成 token 失败"})
+		return
+	}
+	if err := h.userRepo.SetBookmarkletToken(userID, token); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 token 失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
 }
