@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	_ "github.com/JohannesKaufmann/html-to-markdown/v2"
 )
 
 // jinaFallbackMinChars is the threshold below which a successful direct
