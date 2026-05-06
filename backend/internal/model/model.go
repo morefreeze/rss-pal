@@ -29,6 +29,8 @@ type Article struct {
 	SummaryBrief    string     `json:"summary_brief" db:"summary_brief"`
 	SummaryDetailed string     `json:"summary_detailed" db:"summary_detailed"`
 	FetchedAt       time.Time  `json:"fetched_at" db:"fetched_at"`
+	WordCount       int        `json:"word_count" db:"word_count"`
+	ReadingMinutes  int        `json:"reading_minutes" db:"reading_minutes"`
 	IsRead          bool       `json:"is_read" db:"is_read"`
 }
 
