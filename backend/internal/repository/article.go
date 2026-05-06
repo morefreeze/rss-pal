@@ -123,6 +123,32 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	return &a, nil
 }
 
+// GetByIDWithFeedType returns the article alongside its feed's feed_type
+// (e.g., "rss" / "saved" / "youtube"). Used by the article handler to derive
+// the from_bookmarklet response field without modifying model.Article.
+func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title, f.feed_type
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
+	var a model.Article
+	var content, summaryBrief, summaryDetailed, feedTitle, feedType sql.NullString
+	err := r.db.QueryRow(query, id, userID).Scan(
+		&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
+		&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
+		&feedTitle, &feedType,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+	a.Content = content.String
+	a.SummaryBrief = summaryBrief.String
+	a.SummaryDetailed = summaryDetailed.String
+	a.FeedTitle = feedTitle.String
+	return &a, feedType.String, nil
+}
+
 func (r *ArticleRepository) Create(article *model.Article) error {
 	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fetched_at`
 	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes).Scan(&article.ID, &article.FetchedAt)
