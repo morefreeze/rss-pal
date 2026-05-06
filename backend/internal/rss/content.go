@@ -2,8 +2,11 @@ package rss
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -11,8 +14,16 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+// jinaFallbackMinChars is the threshold below which a successful direct
+// extraction is still considered insufficient — likely a JS-rendered page or
+// boilerplate-only response — and we try the Jina Reader fallback instead.
+// Kept aligned with the worker's "short content" re-fetch threshold so the
+// fallback is exercised before an article gets flagged for endless re-fetching.
+const jinaFallbackMinChars = 300
+
 type ContentFetcher struct {
-	client *http.Client
+	client     *http.Client
+	jinaAPIKey string
 }
 
 func NewContentFetcher() *ContentFetcher {
@@ -20,14 +31,43 @@ func NewContentFetcher() *ContentFetcher {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		jinaAPIKey: os.Getenv("JINA_API_KEY"),
 	}
 }
 
-// FetchContent fetches and extracts main content from a URL
+// FetchContent fetches and extracts main content from a URL. If the direct
+// fetch is blocked (non-2xx, e.g. Cloudflare 403) or yields too little text
+// (likely a JS-rendered page), it falls back to Jina Reader (r.jina.ai).
 func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, error) {
+	content, status, err := f.fetchDirect(ctx, url)
+	if err != nil {
+		// Network-level failure — try Jina before giving up.
+		if jc, jerr := f.fetchViaJina(ctx, url); jerr == nil && jc != "" {
+			return jc, nil
+		}
+		return "", err
+	}
+
+	if status == http.StatusOK && len(content) >= jinaFallbackMinChars {
+		return content, nil
+	}
+
+	// Direct fetch was blocked or extracted too little — try Jina Reader.
+	if jc, jerr := f.fetchViaJina(ctx, url); jerr == nil && jc != "" {
+		return jc, nil
+	} else if jerr != nil {
+		log.Printf("Jina fallback failed for %s: %v", url, jerr)
+	}
+
+	return content, nil
+}
+
+// fetchDirect performs the original direct HTTP scrape. Returns the extracted
+// content, the HTTP status code, and any transport error.
+func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, int, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -36,18 +76,18 @@ func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, 
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", nil // Don't fail, just return empty content
+		return "", resp.StatusCode, nil
 	}
 
 	// Parse HTML
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return "", err
+		return "", resp.StatusCode, err
 	}
 
 	// Remove unwanted elements
@@ -114,6 +154,56 @@ func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, 
 		content = content[:50000] + "..."
 	}
 
+	return content, http.StatusOK, nil
+}
+
+// fetchViaJina retrieves the article via the Jina Reader proxy
+// (https://r.jina.ai/<url>), which executes the page in a real browser and
+// returns clean markdown — useful for Cloudflare-protected or JS-rendered
+// pages that block direct scraping. If an API key is configured but rejected
+// (auth error / out of balance), retries once anonymously so the fallback
+// still works on the free tier.
+func (f *ContentFetcher) fetchViaJina(ctx context.Context, target string) (string, error) {
+	if content, err := f.jinaRequest(ctx, target, f.jinaAPIKey); err == nil {
+		return content, nil
+	} else if f.jinaAPIKey == "" {
+		return "", err
+	} else {
+		log.Printf("Jina request with API key failed (%v), retrying anonymously", err)
+	}
+	return f.jinaRequest(ctx, target, "")
+}
+
+func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string) (string, error) {
+	endpoint := "https://r.jina.ai/" + target
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	req.Header.Set("Accept", "text/plain")
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("jina reader returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 200_000))
+	if err != nil {
+		return "", err
+	}
+
+	content := strings.TrimSpace(string(body))
+	if len(content) > 50000 {
+		content = content[:50000] + "..."
+	}
 	return content, nil
 }
 
