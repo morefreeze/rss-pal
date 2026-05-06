@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
-  getTemplates, generateSummaryWithTemplate, shareArticle, exportMarkdown,
+  getTemplates, generateSummaryStream, shareArticle, exportMarkdown,
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
@@ -40,7 +40,12 @@ export default function ArticlePage() {
   // Template selector state
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined)
-  const [regenerating, setRegenerating] = useState(false)
+
+  // Streaming summary state
+  const [streamingBrief, setStreamingBrief] = useState('')
+  const [streamingDetailed, setStreamingDetailed] = useState('')
+  const [streamPhase, setStreamPhase] = useState<'idle' | 'brief' | 'detailed'>('idle')
+  const streamAbortRef = useRef<AbortController | null>(null)
 
   // Share state
   const [shareToken, setShareToken] = useState<string>('')
@@ -104,6 +109,7 @@ export default function ArticlePage() {
       if (topTimer.current) {
         clearTimeout(topTimer.current)
       }
+      streamAbortRef.current?.abort()
     }
   }, [id])
 
@@ -185,15 +191,50 @@ export default function ArticlePage() {
 
   const handleRegenerateWithTemplate = async () => {
     if (!article) return
-    setRegenerating(true)
-    try {
-      const result = await generateSummaryWithTemplate(article.id, selectedTemplateId)
-      setArticle({ ...article, summary_brief: result.summary_brief, summary_detailed: result.summary_detailed })
-    } catch {
-      toast.error('重新生成总结失败')
-    } finally {
-      setRegenerating(false)
-    }
+    streamAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    streamAbortRef.current = ctrl
+
+    setStreamingBrief('')
+    setStreamingDetailed('')
+    setStreamPhase('brief')
+
+    let finalBrief = ''
+    let finalDetailed = ''
+
+    await generateSummaryStream(
+      article.id,
+      selectedTemplateId,
+      {
+        onBriefDelta: (t) => setStreamingBrief(prev => prev + t),
+        onBriefPhaseDone: () => setStreamPhase('detailed'),
+        onBriefDone: (full) => {
+          finalBrief = full
+          setStreamingBrief(full)
+        },
+        onDetailedDelta: (t) => {
+          setStreamPhase(prev => prev === 'brief' ? 'detailed' : prev)
+          setStreamingDetailed(prev => prev + t)
+        },
+        onDetailedDone: (full) => {
+          finalDetailed = full
+          setStreamingDetailed(full)
+        },
+        onDone: () => {
+          setArticle(a => a ? { ...a, summary_brief: finalBrief, summary_detailed: finalDetailed } : a)
+          setStreamPhase('idle')
+          setStreamingBrief('')
+          setStreamingDetailed('')
+        },
+        onError: (msg) => {
+          toast.error('生成总结失败：' + msg)
+          setStreamPhase('idle')
+          setStreamingBrief('')
+          setStreamingDetailed('')
+        },
+      },
+      ctrl.signal,
+    )
   }
 
   const handleFetchContent = async () => {
@@ -517,15 +558,36 @@ export default function ArticlePage() {
             <button
               className={article.summary_brief || article.summary_detailed ? 'secondary' : ''}
               onClick={handleRegenerateWithTemplate}
-              disabled={regenerating}
+              disabled={streamPhase !== 'idle'}
               style={{ fontSize: 13, padding: '4px 12px' }}
             >
-              {(regenerating) ? '生成中...' : (article.summary_brief || article.summary_detailed) ? '重新生成' : '生成总结'}
+              {streamPhase !== 'idle' ? '生成中...' : (article.summary_brief || article.summary_detailed) ? '重新生成' : '生成总结'}
             </button>
           </div>
         </div>
 
-        {(article.summary_brief || article.summary_detailed) ? (
+        {streamPhase !== 'idle' ? (
+          <div className="markdown-body">
+            {streamingBrief && (
+              <div style={{ whiteSpace: 'pre-wrap' }}>
+                {streamingBrief}
+                {streamPhase === 'brief' && <span className="typing-caret">▍</span>}
+              </div>
+            )}
+            {streamingDetailed && (
+              <>
+                <hr style={{ margin: '12px 0', borderColor: '#eee' }} />
+                <div style={{ whiteSpace: 'pre-wrap' }}>
+                  {streamingDetailed}
+                  {streamPhase === 'detailed' && <span className="typing-caret">▍</span>}
+                </div>
+              </>
+            )}
+            {!streamingBrief && !streamingDetailed && (
+              <div className="text-muted text-sm" style={{ padding: '8px 0' }}>正在生成总结...</div>
+            )}
+          </div>
+        ) : (article.summary_brief || article.summary_detailed) ? (
           <div className="markdown-body">
             {article.summary_brief && (
               <ReactMarkdown>{article.summary_brief}</ReactMarkdown>
@@ -539,7 +601,7 @@ export default function ArticlePage() {
           </div>
         ) : (
           <div className="text-muted text-sm" style={{ padding: '8px 0' }}>
-            {(regenerating) ? '正在生成总结...' : '暂无总结，点击右上角"生成总结"按钮'}
+            暂无总结，点击右上角"生成总结"按钮
           </div>
         )}
       </div>
