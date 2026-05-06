@@ -62,7 +62,12 @@ func (h *WeeklyHandler) Get(c *gin.Context) {
 		for i, id := range cached.ArticleIDs {
 			ids[i] = int(id)
 		}
-		articles, _ = h.articleRepo.GetByIDsForUser(userID, ids)
+		var err error
+		articles, err = h.articleRepo.GetByIDsForUser(userID, ids)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		intro = cached.IntroText
 	} else {
 		var err error
