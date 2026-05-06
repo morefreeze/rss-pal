@@ -262,12 +262,14 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 
 func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.Article, error) {
 	query := `
-		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes
-		FROM articles
-		WHERE url != '' AND refetch_attempts < 5
-		  AND ((LENGTH(content) < $1 OR content IS NULL AND fetched_at > NOW() - INTERVAL '7 days')
-		       OR (content LIKE '%<%>%' AND fetched_at > NOW() - INTERVAL '30 days'))
-		ORDER BY fetched_at DESC
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		WHERE a.url != '' AND a.refetch_attempts < 5
+		  AND f.feed_type NOT IN ('youtube', 'podcast')
+		  AND ((LENGTH(a.content) < $1 OR a.content IS NULL AND a.fetched_at > NOW() - INTERVAL '7 days')
+		       OR (a.content LIKE '%<%>%' AND a.fetched_at > NOW() - INTERVAL '30 days'))
+		ORDER BY a.fetched_at DESC
 		LIMIT 50
 	`
 	rows, err := r.db.Query(query, minLength)

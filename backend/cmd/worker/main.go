@@ -226,7 +226,8 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				content = rss.StripHTML(item.Content)
 			}
 
-			if item.Link != "" {
+			skipDeepFetch := feed.FeedType == "youtube" || feed.FeedType == "podcast"
+			if !skipDeepFetch && item.Link != "" {
 				log.Printf("Fetching full content for: %s", item.Link)
 				fullContent, err := contentFetcher.FetchContent(ctx, item.Link)
 				if err != nil {
