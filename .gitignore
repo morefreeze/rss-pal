@@ -21,6 +21,9 @@ postgres_data/
 # Git worktrees
 .worktrees/
 
+# Local TLS certs (generated via mkcert; see certs/README.md)
+certs/*.pem
+
 # Editor
 .DS_Store
 *.swp
