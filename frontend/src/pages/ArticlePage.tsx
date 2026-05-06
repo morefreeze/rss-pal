@@ -10,10 +10,13 @@ import {
 import { toast } from '../utils/toast'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
+import ReadingLayout from '../components/ReadingLayout'
+import { useReaderSettings } from '../hooks/useReaderSettings'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const reader = useReaderSettings()
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [loading, setLoading] = useState(true)
@@ -116,11 +119,13 @@ export default function ArticlePage() {
           if (progress?.is_completed) handleMarkUnread()
           else handleMarkRead()
         }
+      } else if (e.key === 'r') {
+        reader.toggleMode()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [nextId, prevId, article, progress, navigate])
+  }, [nextId, prevId, article, progress, navigate, reader])
 
   // Load templates on mount
   useEffect(() => {
@@ -339,6 +344,30 @@ export default function ArticlePage() {
     </div>
   )
 
+  if (reader.mode === 'reading') {
+    return (
+      <ReadingLayout
+        article={{
+          title: article.title,
+          url: article.url,
+          published_at: article.published_at,
+          word_count: article.word_count ?? 0,
+          reading_minutes: article.reading_minutes ?? 0,
+          content: article.content,
+          summary_brief: article.summary_brief,
+          summary_detailed: article.summary_detailed,
+        }}
+        fontSize={reader.fontSize}
+        fontFamily={reader.fontFamily}
+        bgTheme={reader.bgTheme}
+        onExit={() => reader.setMode('normal')}
+        onFontSize={reader.setFontSize}
+        onFontFamily={reader.setFontFamily}
+        onBgTheme={reader.setBgTheme}
+      />
+    )
+  }
+
   return (
     <div ref={contentRef}>
       {/* Sticky progress bar at top of viewport */}
@@ -443,6 +472,14 @@ export default function ArticlePage() {
               ✓ 标记已读
             </button>
           )}
+          <button
+            className="secondary"
+            onClick={() => reader.setMode('reading')}
+            title="进入阅读模式 (r)"
+            style={{ fontSize: 13 }}
+          >
+            📖 阅读模式
+          </button>
         </div>
       </div>
 

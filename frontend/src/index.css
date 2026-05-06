@@ -184,3 +184,43 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 
   .card { padding: 12px; }
 }
+
+/* ===== Reader-mode themes ===== */
+body[data-reader-bg='default'] { --reader-bg:#fff;    --reader-fg:#1a1a1a; --reader-muted:#666;    --reader-code-bg:#f3f3f3; --reader-link:#0066cc; }
+body[data-reader-bg='sepia']   { --reader-bg:#f5edd6; --reader-fg:#3a2f1a; --reader-muted:#7a6f55; --reader-code-bg:#ebe2c8; --reader-link:#5b3b00; }
+body[data-reader-bg='green']   { --reader-bg:#cce8cf; --reader-fg:#1f2e1f; --reader-muted:#456b48; --reader-code-bg:#bcdcbf; --reader-link:#1a4d1a; }
+body[data-reader-bg='gray']    { --reader-bg:#ebebeb; --reader-fg:#262626; --reader-muted:#666;    --reader-code-bg:#dcdcdc; --reader-link:#0066cc; }
+body[data-reader-bg='dark']    { --reader-bg:#1a1a1a; --reader-fg:#d4d4d4; --reader-muted:#888;    --reader-code-bg:#262626; --reader-link:#7eb6ff; }
+
+body.reading-mode-active {
+  background: var(--reader-bg);
+  color: var(--reader-fg);
+}
+
+/* Hide app chrome (header) when reading mode is active.
+   Layout renders: #root > div > header + main > <Outlet/>.
+   ReadingLayout mounts inside <main>, so we hide the sibling <header>. */
+body.reading-mode-active #root > div > header { display: none; }
+
+.reading-layout { background: var(--reader-bg); color: var(--reader-fg); min-height: 100vh; }
+.reading-toolbar { padding: 16px 24px; }
+.reading-exit { background: transparent; border: 1px solid var(--reader-muted); color: var(--reader-fg); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+
+.reading-article { max-width: 720px; margin: 0 auto; padding: 8px 24px 96px; line-height: 1.8; }
+.reading-article .reading-title { color: var(--reader-fg); margin-bottom: 8px; }
+.reading-article .reading-meta { color: var(--reader-muted); font-size: 13px; margin-bottom: 24px; }
+.reading-article .reading-meta a { color: var(--reader-link); }
+
+.reading-summary { border: 1px dashed var(--reader-muted); border-radius: 6px; padding: 8px 12px; margin-bottom: 24px; }
+.reading-summary-toggle { background: transparent; border: none; color: var(--reader-fg); cursor: pointer; font-size: 13px; padding: 0; }
+.reading-summary-body { margin-top: 8px; color: var(--reader-fg); }
+.reading-summary-body hr { border: none; border-top: 1px solid var(--reader-muted); margin: 12px 0; }
+
+.reading-article .markdown-body img { max-width: 100%; height: auto; border-radius: 4px; }
+.reading-article .markdown-body pre { overflow-x: auto; padding: 12px; border-radius: 6px; background: var(--reader-code-bg); }
+.reading-article .markdown-body code { background: var(--reader-code-bg); padding: 2px 4px; border-radius: 3px; }
+.reading-article .markdown-body pre code { background: transparent; padding: 0; }
+.reading-article .markdown-body blockquote { border-left: 3px solid var(--reader-muted); padding-left: 12px; color: var(--reader-muted); }
+.reading-article .markdown-body table { border-collapse: collapse; margin: 12px 0; }
+.reading-article .markdown-body th, .reading-article .markdown-body td { border: 1px solid var(--reader-muted); padding: 6px 10px; }
+.reading-article .markdown-body a { color: var(--reader-link); }
