@@ -23,7 +23,7 @@ func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error)
 		var a model.Article
 		var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
 		var isRead sql.NullBool
-		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &feedTitle, &isRead)
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &feedTitle, &isRead)
 		if err != nil {
 			return nil, err
 		}
@@ -42,7 +42,7 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 	for rows.Next() {
 		var a model.Article
 		var content, summaryBrief, summaryDetailed sql.NullString
-		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt)
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes)
 		if err != nil {
 			return nil, err
 		}
@@ -55,7 +55,7 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 }
 
 func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int) ([]model.Article, error) {
-	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read
+	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, articles.word_count, articles.reading_minutes, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read
 FROM articles
 JOIN feeds ON articles.feed_id = feeds.id
 LEFT JOIN reading_progress rp ON articles.id = rp.article_id AND rp.user_id = $1`
@@ -105,13 +105,13 @@ LEFT JOIN user_preferences up_save ON articles.id = up_save.article_id AND up_sa
 
 func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, f.title as feed_title
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
 	var a model.Article
 	var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
-	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &feedTitle)
+	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &feedTitle)
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +123,8 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 }
 
 func (r *ArticleRepository) Create(article *model.Article) error {
-	query := `INSERT INTO articles (feed_id, title, url, content, published_at) VALUES ($1, $2, $3, $4, $5) RETURNING id, fetched_at`
-	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt).Scan(&article.ID, &article.FetchedAt)
+	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fetched_at`
+	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes).Scan(&article.ID, &article.FetchedAt)
 }
 
 func (r *ArticleRepository) Exists(feedID int, url string) (bool, error) {
@@ -170,9 +170,8 @@ func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed 
 	return err
 }
 
-func (r *ArticleRepository) UpdateContent(id int, content string) error {
-	query := `UPDATE articles SET content = $1, refetch_attempts = 0 WHERE id = $2`
-	_, err := r.db.Exec(query, content, id)
+func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, readingMinutes int) error {
+	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0 WHERE id = $4`, content, wordCount, readingMinutes, id)
 	return err
 }
 
@@ -193,7 +192,7 @@ func (r *ArticleRepository) UpdatePublishedAtIfNull(feedID int, url string, publ
 
 func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
 		FROM articles a
 		LEFT JOIN (
 			SELECT article_id, SUM(
@@ -225,7 +224,7 @@ func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Artic
 
 func (r *ArticleRepository) GetArticlesForTopicExtraction(limit int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
 		FROM articles a
 		JOIN user_preferences p ON a.id = p.article_id
 		WHERE p.signal_type IN ('like', 'save')
@@ -244,7 +243,7 @@ func (r *ArticleRepository) GetArticlesForTopicExtraction(limit int) ([]model.Ar
 
 func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Article, error) {
 	query := `
-		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at
+		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes
 		FROM articles
 		WHERE (summary_brief IS NULL OR summary_brief = '')
 		AND LENGTH(content) > 100
@@ -261,7 +260,7 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 
 func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.Article, error) {
 	query := `
-		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at
+		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes
 		FROM articles
 		WHERE url != '' AND refetch_attempts < 5
 		  AND ((LENGTH(content) < $1 OR content IS NULL AND fetched_at > NOW() - INTERVAL '7 days')
@@ -295,7 +294,7 @@ func (r *ArticleRepository) GetUnreadCount(userID int) (int, error) {
 func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Article, error) {
 	q := "%" + strings.ReplaceAll(query, "%", "\\%") + "%"
 	sqlStr := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, f.title as feed_title,
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title,
 		       COALESCE(rp.is_completed, false) as is_read
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id

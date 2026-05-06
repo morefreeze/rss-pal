@@ -53,7 +53,8 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 	}
 
 	// Update article content
-	if err := h.articleRepo.UpdateContent(id, content); err != nil {
+	wc, rm := rss.ComputeMetrics(content)
+	if err := h.articleRepo.UpdateContent(id, content, wc, rm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

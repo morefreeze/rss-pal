@@ -244,6 +244,7 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				Content:     content,
 				PublishedAt: parsePublishedTime(item.PublishedParsed, item.UpdatedParsed),
 			}
+			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 
 			if err := articleRepo.Create(article); err != nil {
 				log.Printf("Failed to create article: %v", err)
@@ -304,6 +305,7 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 				Content:     content,
 				PublishedAt: pubAt,
 			}
+			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 			if err := articleRepo.Create(article); err != nil {
 				log.Printf("Failed to create HTML article: %v", err)
 			} else {
@@ -362,7 +364,8 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 			}
 
 			if len(content) > len(article.Content) {
-				if err := articleRepo.UpdateContent(article.ID, content); err != nil {
+				wc, rm := rss.ComputeMetrics(content)
+				if err := articleRepo.UpdateContent(article.ID, content, wc, rm); err != nil {
 					log.Printf("Failed to update content for article %d: %v", article.ID, err)
 				} else {
 					log.Printf("Updated content for article %d: %d chars", article.ID, len(content))

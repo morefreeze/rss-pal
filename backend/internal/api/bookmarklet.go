@@ -13,6 +13,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/gin-gonic/gin"
 )
@@ -99,7 +100,8 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 			})
 			return
 		}
-		if err := h.articleRepo.UpdateContent(existing.ID, content); err != nil {
+		wc, rm := rss.ComputeMetrics(content)
+		if err := h.articleRepo.UpdateContent(existing.ID, content, wc, rm); err != nil {
 			log.Printf("bookmarklet: UpdateContent failed for article=%d: %v", existing.ID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章失败"})
 			return
