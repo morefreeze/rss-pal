@@ -314,25 +314,34 @@ export default function ArticleListPage() {
 
       {recommended.length > 0 && !searchQuery && (
         <div className="mb-2">
-          <div className="flex-between mb-1">
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              为你推荐
-              <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({recommended.length})</span>
-            </h3>
-            <button
-              className="secondary"
-              style={{ padding: '2px 10px', fontSize: 16, lineHeight: 1 }}
-              aria-label={showRecommended ? '收起' : '展开'}
-              title={showRecommended ? '收起' : '展开'}
-              onClick={() => {
-                const next = !showRecommended
-                setShowRecommended(next)
-                try { localStorage.setItem('showRecommended', String(next)) } catch {}
-              }}
-            >
-              {showRecommended ? '◀' : '▼'}
-            </button>
-          </div>
+          <button
+            type="button"
+            aria-expanded={showRecommended}
+            title={showRecommended ? '收起' : '展开'}
+            onClick={() => {
+              const next = !showRecommended
+              setShowRecommended(next)
+              try { localStorage.setItem('showRecommended', String(next)) } catch {}
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              width: '100%',
+              padding: '6px 0',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              textAlign: 'left',
+              color: 'inherit',
+            }}
+          >
+            <span aria-hidden style={{ fontSize: 12, color: '#888', width: 14, display: 'inline-block', textAlign: 'center' }}>
+              {showRecommended ? '▼' : '◀'}
+            </span>
+            <h3 style={{ margin: 0 }}>为你推荐</h3>
+            <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({recommended.length})</span>
+          </button>
           {showRecommended && recommended.map(article => (
             <Link key={article.id} to={`/articles/${article.id}`} className="card" style={{ display: 'block' }}>
               <div className="flex-between">
