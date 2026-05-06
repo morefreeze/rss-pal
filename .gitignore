@@ -20,6 +20,9 @@ postgres_data/
 # Claude Code loop state
 .claude/
 
+# Brainstorm visual companion artifacts
+.superpowers/
+
 # Git worktrees
 .worktrees/
 
