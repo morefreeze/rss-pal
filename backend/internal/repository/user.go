@@ -175,6 +175,46 @@ func (r *UserRepository) CountNonAdminUsers() (int, error) {
 	return count, err
 }
 
+// GetByBookmarkletToken returns the user that owns the given bookmarklet
+// token, or (nil, nil) if no row matches. Used by the capture endpoint
+// to authenticate cross-origin bookmarklet requests.
+func (r *UserRepository) GetByBookmarkletToken(token string) (*model.User, error) {
+	if token == "" {
+		return nil, nil
+	}
+	user := &model.User{}
+	err := r.db.QueryRow(
+		`SELECT id, username, password_hash, is_admin, created_at FROM users WHERE bookmarklet_token = $1`,
+		token,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return user, err
+}
+
+// GetBookmarkletToken returns the user's current bookmarklet token, or "" if
+// none has been generated yet.
+func (r *UserRepository) GetBookmarkletToken(userID int) (string, error) {
+	var token sql.NullString
+	err := r.db.QueryRow(`SELECT bookmarklet_token FROM users WHERE id = $1`, userID).Scan(&token)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return token.String, err
+}
+
+// SetBookmarkletToken writes (or rotates) the user's long-lived bookmarklet
+// token. Pass an empty string to clear it.
+func (r *UserRepository) SetBookmarkletToken(userID int, token string) error {
+	var t interface{} = token
+	if token == "" {
+		t = nil
+	}
+	_, err := r.db.Exec(`UPDATE users SET bookmarklet_token = $1 WHERE id = $2`, t, userID)
+	return err
+}
+
 func generateCode(length int) string {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	b := make([]byte, length)
