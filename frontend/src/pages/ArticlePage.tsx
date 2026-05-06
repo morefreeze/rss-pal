@@ -8,6 +8,7 @@ import {
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
+import ReadingMeta from '../components/ReadingMeta'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
@@ -337,10 +338,6 @@ export default function ArticlePage() {
     </div>
   )
 
-  const readingTime = article.content
-    ? Math.max(1, Math.round(article.content.length / 800))
-    : 0
-
   return (
     <div ref={contentRef}>
       {/* Sticky progress bar at top of viewport */}
@@ -399,12 +396,12 @@ export default function ArticlePage() {
           )}
         </div>
         <h2>{article.title}</h2>
-        <div className="text-muted text-sm mb-2">
-          {formatDate(article.published_at)}
-          {readingTime > 0 && <span> · 约 {readingTime} 分钟</span>}
-          <span> · </span>
+        <div className="text-muted text-sm mb-2" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <span>{formatDate(article.published_at)}</span>
+          <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+          <span>·</span>
           <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
-          {progressPercent > 0 && <span> · 阅读进度 {progressPercent}%</span>}
+          {progressPercent > 0 && <span>· 阅读进度 {progressPercent}%</span>}
         </div>
 
         <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>

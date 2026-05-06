@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds } from '../api/client'
+import ReadingMeta from '../components/ReadingMeta'
 
 const PAGE_SIZE = 20
 
@@ -375,7 +376,10 @@ export default function ArticleListPage() {
                         </div>
                       )}
                       <div className="flex-between mt-1">
-                        <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+                        <div className="flex gap-2" style={{ alignItems: 'center' }}>
+                          <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+                          <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+                        </div>
                         {article.feed_title && (
                           <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
                             {article.feed_title}
@@ -432,7 +436,10 @@ export default function ArticleListPage() {
                     </div>
                   )}
                   <div className="flex-between mt-1">
-                    <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+                    <div className="flex gap-2" style={{ alignItems: 'center' }}>
+                      <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+                      <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+                    </div>
                     {article.feed_title && (
                       <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
                         {article.feed_title}

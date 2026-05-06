@@ -105,6 +105,8 @@ export interface Article {
   summary_brief: string
   summary_detailed: string
   fetched_at: string
+  word_count?: number
+  reading_minutes?: number
   is_read?: boolean
 }
 
