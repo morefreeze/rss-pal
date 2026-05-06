@@ -238,6 +238,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 				Content:     content,
 				PublishedAt: publishedTime(item.PublishedParsed, item.UpdatedParsed),
 			}
+			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 			if err := h.articleRepo.Create(article); err != nil {
 				log.Printf("Failed to create article: %v", err)
 			} else {
@@ -304,6 +305,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			Content:     content,
 			PublishedAt: publishedTime(item.PublishedParsed, item.UpdatedParsed),
 		}
+		article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 
 		if err := h.articleRepo.Create(article); err != nil {
 			log.Printf("Failed to create article: %v", err)
