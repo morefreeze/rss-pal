@@ -26,4 +26,10 @@ func TestFetchContentFromReader_HeadingsAndParagraphs(t *testing.T) {
 	if !strings.Contains(got, "second paragraph") {
 		t.Errorf("expected second paragraph text in output, got:\n%s", got)
 	}
+	if strings.Contains(got, "<p>") || strings.Contains(got, "<h2>") {
+		t.Errorf("expected raw HTML tags to be stripped from markdown, got:\n%s", got)
+	}
+	if !strings.Contains(got, "\n\n") {
+		t.Errorf("expected paragraph separators (\\n\\n), got:\n%s", got)
+	}
 }
