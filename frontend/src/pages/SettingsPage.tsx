@@ -81,9 +81,17 @@ function PromptField({
 }
 
 function buildBookmarkletJS(apiBase: string, token: string): string {
+  // Form POST instead of fetch — sites like x.com restrict `connect-src` in
+  // their CSP, which blocks fetch/XHR to localhost. Form submission is
+  // governed by `form-action` (independent of connect-src) so it goes
+  // through. The backend renders an HTML result page in the new tab that
+  // auto-closes on success.
   const code = `(function(){
-fetch('${apiBase}/api/bookmarklet/capture',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({url:location.href,title:document.title,html:document.documentElement.outerHTML})}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(x){toast(x.ok?x.j.message:'错误: '+(x.j.error||'未知错误'))}).catch(function(e){toast('错误: '+e.message)});
-function toast(m){var d=document.createElement('div');d.style.cssText='position:fixed;top:20px;right:20px;z-index:2147483647;padding:12px 16px;background:#222;color:#fff;border-radius:8px;font:14px -apple-system,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:320px;';d.textContent='RSS Pal: '+m;document.body.appendChild(d);setTimeout(function(){d.remove()},3000);}
+var f=document.createElement('form');
+f.method='POST';f.action='${apiBase}/api/bookmarklet/capture';f.enctype='multipart/form-data';f.target='_blank';f.style.display='none';
+function add(n,v){var i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;f.appendChild(i);}
+add('token','${token}');add('url',location.href);add('title',document.title);add('html',document.documentElement.outerHTML);
+document.body.appendChild(f);f.submit();setTimeout(function(){f.remove();},100);
 })();`
   return 'javascript:' + encodeURIComponent(code)
 }
@@ -121,7 +129,7 @@ function BookmarkletSection() {
       <h3 className="mb-1">📌 浏览器抓取</h3>
       <p className="text-muted text-sm mb-2">
         把下方按钮拖到浏览器书签栏。在任何网页点一下，就把当前页发回 RSS Pal —
-        匹配到已有文章则更新内容，否则保存到「📑 收藏」feed。
+        匹配到已有文章则更新内容，否则保存到「📑 收藏」feed。结果会在新标签页提示，成功后自动关闭。
       </p>
 
       {token ? (
