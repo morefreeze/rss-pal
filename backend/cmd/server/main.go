@@ -73,6 +73,9 @@ func main() {
 	// Public share route (no auth required)
 	router.GET("/api/share/:token", shareHandler.GetByToken)
 
+	// Public image proxy (no auth — <img> tags can't reliably carry auth headers).
+	router.GET("/api/proxy/image", api.NewImageProxy().Handle)
+
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT)
 	router.POST("/api/bookmarklet/capture", bookmarkletHandler.Capture)
 
