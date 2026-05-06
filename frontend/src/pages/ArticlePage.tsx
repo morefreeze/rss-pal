@@ -142,14 +142,40 @@ export default function ArticlePage() {
     getTemplates().then(ts => setTemplates(ts || [])).catch(() => {})
   }, [])
 
-  const handleScroll = useCallback(async () => {
+  const pendingProgressRef = useRef<{ scrollPosition: number; isCompleted: boolean } | null>(null)
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushProgress = useCallback(async () => {
+    if (!article) return
+    const pending = pendingProgressRef.current
+    if (!pending) return
+    pendingProgressRef.current = null
+    if (progressTimerRef.current) {
+      clearTimeout(progressTimerRef.current)
+      progressTimerRef.current = null
+    }
+    try {
+      const newProgress = await updateProgress(article.id, pending.scrollPosition, pending.isCompleted)
+      setProgress(newProgress)
+    } catch {
+      // network blip — let the next scroll re-schedule
+    }
+  }, [article])
+
+  const scheduleProgressFlush = useCallback(() => {
+    if (progressTimerRef.current) clearTimeout(progressTimerRef.current)
+    progressTimerRef.current = setTimeout(() => {
+      flushProgress()
+    }, 1500)
+  }, [flushProgress])
+
+  const handleScroll = useCallback(() => {
     if (!article || !contentRef.current) return
 
     const scrollTop = window.scrollY
     const scrollHeight = contentRef.current.scrollHeight - window.innerHeight
     const scrollPosition = scrollHeight > 0 ? scrollTop / scrollHeight : 0
 
-    // Detect if scrolled to top for 10+ seconds (reset progress)
     if (scrollTop === 0) {
       if (!topTimer.current) {
         topTimer.current = setTimeout(async () => {
@@ -159,35 +185,58 @@ export default function ArticlePage() {
           }
         }, 10000)
       }
-    } else {
-      if (topTimer.current) {
-        clearTimeout(topTimer.current)
-        topTimer.current = null
-      }
-
-      // Update progress
-      const isCompleted = scrollPosition > 0.9
-      const wasCompleted = progress?.is_completed
-      const newProgress = await updateProgress(article.id, scrollPosition, isCompleted)
-      setProgress(newProgress)
-      if (isCompleted && !wasCompleted) {
-        // Track as read in session storage so article list can reflect the change
-        try {
-          const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
-          if (!read.includes(article.id)) {
-            read.push(article.id)
-            sessionStorage.setItem('readArticles', JSON.stringify(read))
-          }
-        } catch {}
-        window.dispatchEvent(new Event('refresh-unread'))
-      }
+      return
     }
-  }, [article, id])
+
+    if (topTimer.current) {
+      clearTimeout(topTimer.current)
+      topTimer.current = null
+    }
+
+    const isCompleted = scrollPosition > 0.9
+    const wasCompleted = progress?.is_completed
+
+    // Update local UI immediately so the progress bar stays smooth
+    setProgress(prev => prev ? {
+      ...prev,
+      scroll_position: scrollPosition,
+      is_completed: isCompleted,
+    } : prev)
+
+    pendingProgressRef.current = { scrollPosition, isCompleted }
+
+    if (isCompleted && !wasCompleted) {
+      try {
+        const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+        if (!read.includes(article.id)) {
+          read.push(article.id)
+          sessionStorage.setItem('readArticles', JSON.stringify(read))
+        }
+      } catch {}
+      window.dispatchEvent(new Event('refresh-unread'))
+      flushProgress()
+      return
+    }
+
+    scheduleProgressFlush()
+  }, [article, id, progress, flushProgress, scheduleProgressFlush])
 
   useEffect(() => {
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
+
+  useEffect(() => {
+    const onVisibility = () => { if (document.hidden) flushProgress() }
+    const onBeforeUnload = () => { flushProgress() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      flushProgress()
+    }
+  }, [flushProgress])
 
   const handleRegenerateWithTemplate = async () => {
     if (!article) return
