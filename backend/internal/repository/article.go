@@ -209,7 +209,9 @@ func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Artic
 			AND user_id = $2
 			GROUP BY article_id
 		) p ON a.id = p.article_id
+		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $2
 		WHERE p.score IS NOT NULL AND p.score > 0
+		AND COALESCE(rp.is_completed, false) = false
 		ORDER BY p.score DESC, a.published_at DESC NULLS LAST
 		LIMIT $1
 	`

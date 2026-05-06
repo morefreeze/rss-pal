@@ -21,7 +21,9 @@ export default function ArticleListPage() {
   const [savedOnly, setSavedOnly] = useState(() => {
     try { return sessionStorage.getItem('savedOnly') === 'true' } catch { return false }
   })
-  const [showRecommended, setShowRecommended] = useState(true)
+  const [showRecommended, setShowRecommended] = useState(() => {
+    try { return localStorage.getItem('showRecommended') === 'true' } catch { return false }
+  })
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -310,13 +312,25 @@ export default function ArticleListPage() {
         </div>
       </div>
 
-      {showRecommended && recommended.length > 0 && !searchQuery && (
+      {recommended.length > 0 && !searchQuery && (
         <div className="mb-2">
           <div className="flex-between mb-1">
-            <h3>为你推荐</h3>
-            <button className="secondary text-sm" onClick={() => setShowRecommended(false)}>收起</button>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              为你推荐
+              <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({recommended.length})</span>
+            </h3>
+            <button
+              className="secondary text-sm"
+              onClick={() => {
+                const next = !showRecommended
+                setShowRecommended(next)
+                try { localStorage.setItem('showRecommended', String(next)) } catch {}
+              }}
+            >
+              {showRecommended ? '收起' : '展开'}
+            </button>
           </div>
-          {recommended.map(article => (
+          {showRecommended && recommended.map(article => (
             <Link key={article.id} to={`/articles/${article.id}`} className="card" style={{ display: 'block' }}>
               <div className="flex-between">
                 <div style={{ flex: 1 }}>
