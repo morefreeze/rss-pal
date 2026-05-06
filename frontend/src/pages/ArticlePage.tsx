@@ -9,6 +9,7 @@ import {
 } from '../api/client'
 import { toast } from '../utils/toast'
 import ReadingMeta from '../components/ReadingMeta'
+import MarkdownArticle from '../components/MarkdownArticle'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
@@ -500,13 +501,7 @@ export default function ArticlePage() {
         </div>
         {article.content ? (
           <div style={{ lineHeight: 1.8, fontSize: 15 }}>
-            {article.content.split(/\n{2,}/).map((para, i) => {
-              const trimmed = para.trim()
-              if (!trimmed) return null
-              return (
-                <p key={i} style={{ marginBottom: '0.9em', whiteSpace: 'pre-line' }}>{trimmed}</p>
-              )
-            })}
+            <MarkdownArticle source={article.content} />
           </div>
         ) : (
           <div className="text-muted">暂无内容，点击"重新抓取"从原文链接抓取</div>
