@@ -93,8 +93,9 @@ p{margin:6px 0;line-height:1.5}
     function renderDuplicatePrompt(j) {
       box.innerHTML =
         '<h1 class="info">⚠️ 已有同 URL 文章</h1>'
-        + '<p>现有内容 ' + j.existing_length + ' 字 / 新内容 ' + j.new_length + ' 字</p>'
-        + '<p>新内容看起来不是明显改进，怎么处理？</p>'
+        + '<p>现有内容 ' + j.existing_length + ' 字 · ' + (j.existing_images || 0) + ' 图</p>'
+        + '<p>新内容 ' + j.new_length + ' 字 · ' + (j.new_images || 0) + ' 图</p>'
+        + '<p>怎么处理？</p>'
         + '<div style="margin-top:14px;display:flex;gap:8px;justify-content:center;">'
         +   '<button id="ow" style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">覆盖</button>'
         +   '<button id="kp" style="padding:8px 18px;background:#f3f4f6;border:1px solid #ddd;border-radius:6px;cursor:pointer;">保留旧内容</button>'
