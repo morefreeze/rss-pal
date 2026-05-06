@@ -134,6 +134,35 @@ func (r *ArticleRepository) Exists(feedID int, url string) (bool, error) {
 	return exists, err
 }
 
+// FindByOwnerAndURL returns the article matching exactURL within any feed
+// owned by ownerID, or (nil, nil) if no match. Caller is responsible for
+// passing a normalized URL (see util.NormalizeURL).
+func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		WHERE f.owner_id = $1 AND a.url = $2
+		LIMIT 1
+	`
+	var a model.Article
+	var content, summaryBrief, summaryDetailed sql.NullString
+	err := r.db.QueryRow(query, ownerID, exactURL).Scan(
+		&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
+		&summaryBrief, &summaryDetailed, &a.FetchedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	a.Content = content.String
+	a.SummaryBrief = summaryBrief.String
+	a.SummaryDetailed = summaryDetailed.String
+	return &a, nil
+}
+
 func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed string) error {
 	query := `UPDATE articles SET summary_brief = $1, summary_detailed = $2 WHERE id = $3`
 	_, err := r.db.Exec(query, summaryBrief, summaryDetailed, id)
