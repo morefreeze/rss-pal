@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
@@ -146,7 +147,7 @@ func (r *FeedRepository) UpdateTitle(id int, title string) error {
 }
 
 func (r *FeedRepository) GetAllActive() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds WHERE is_active = true`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at FROM feeds WHERE is_active = true AND feed_type IN ('rss', 'html')`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -154,4 +155,53 @@ func (r *FeedRepository) GetAllActive() ([]model.Feed, error) {
 	defer rows.Close()
 
 	return r.scanFeeds(rows)
+}
+
+// GetOrCreateSavedFeed returns the user's "📑 收藏" feed, creating it if it
+// doesn't exist. Saved feeds are the destination for articles captured via
+// the browser bookmarklet when no existing article matches the captured URL.
+// The url column has a global UNIQUE constraint, so we use a per-user
+// sentinel of `bookmarklet://user/<id>`.
+func (r *FeedRepository) GetOrCreateSavedFeed(ownerID int) (*model.Feed, error) {
+	var f model.Feed
+	var title, etag, lastModified, feedType sql.NullString
+	var dbOwnerID sql.NullInt64
+	err := r.db.QueryRow(
+		`SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, created_at
+		 FROM feeds WHERE owner_id = $1 AND feed_type = 'saved'`,
+		ownerID,
+	).Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &dbOwnerID, &feedType, &f.CreatedAt)
+	if err == nil {
+		f.Title = title.String
+		f.ETag = etag.String
+		f.LastModified = lastModified.String
+		f.FeedType = feedType.String
+		if dbOwnerID.Valid {
+			oid := int(dbOwnerID.Int64)
+			f.OwnerID = &oid
+		}
+		return &f, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	owner := ownerID
+	newFeed := &model.Feed{
+		URL:              fmt.Sprintf("bookmarklet://user/%d", ownerID),
+		Title:            "📑 收藏",
+		FetchIntervalMin: 60,
+		IsActive:         true,
+		OwnerID:          &owner,
+		FeedType:         "saved",
+	}
+	insertErr := r.db.QueryRow(
+		`INSERT INTO feeds (url, title, fetch_interval_minutes, is_active, owner_id, feed_type)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
+		newFeed.URL, newFeed.Title, newFeed.FetchIntervalMin, newFeed.IsActive, newFeed.OwnerID, newFeed.FeedType,
+	).Scan(&newFeed.ID, &newFeed.CreatedAt)
+	if insertErr != nil {
+		return nil, insertErr
+	}
+	return newFeed, nil
 }
