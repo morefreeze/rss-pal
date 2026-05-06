@@ -12,6 +12,19 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+
+	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2/converter"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/table"
+)
+
+var mdConverter = htmltomd.NewConverter(
+	htmltomd.WithPlugins(
+		base.NewBasePlugin(),
+		commonmark.NewCommonmarkPlugin(),
+		table.NewTablePlugin(),
+	),
 )
 
 // jinaFallbackMinChars is the threshold below which a successful direct
@@ -129,7 +142,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 	for _, selector := range selectors {
 		if doc.Find(selector).Length() > 0 {
 			selection := doc.Find(selector).First()
-			content = extractText(selection)
+			content = extractMarkdown(selection)
 			if len(content) > 200 {
 				break
 			}
@@ -207,34 +220,19 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 	return content, nil
 }
 
-func extractText(selection *goquery.Selection) string {
-	var text strings.Builder
-
-	selection.Find("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre").Each(func(i int, s *goquery.Selection) {
-		t := strings.TrimSpace(s.Text())
-		if len(t) > 20 {
-			text.WriteString(t)
-			text.WriteString("\n\n")
-		}
-	})
-
-	if text.Len() > 200 {
-		return text.String()
+// extractMarkdown converts the HTML inside the goquery selection into Markdown.
+// Falls back to the selection's plain text if conversion fails (which should
+// not happen under normal use but keeps the pipeline robust).
+func extractMarkdown(selection *goquery.Selection) string {
+	html, err := selection.Html()
+	if err != nil || strings.TrimSpace(html) == "" {
+		return strings.TrimSpace(selection.Text())
 	}
-
-	// Fallback: extract text from leaf nodes (elements with no children)
-	text.Reset()
-	selection.Find("*").Each(func(i int, s *goquery.Selection) {
-		if s.Children().Length() == 0 {
-			t := strings.TrimSpace(s.Text())
-			if len(t) > 20 {
-				text.WriteString(t)
-				text.WriteString(" ")
-			}
-		}
-	})
-
-	return strings.TrimSpace(text.String())
+	md, err := mdConverter.ConvertString(html)
+	if err != nil {
+		return strings.TrimSpace(selection.Text())
+	}
+	return strings.TrimSpace(md)
 }
 
 func cleanContent(content string) string {
@@ -281,18 +279,25 @@ func (f *ContentFetcher) FetchContentFromReader(r io.Reader) (string, error) {
 
 	doc.Find("script, style, nav, header, footer, aside").Remove()
 
+	selectors := []string{"article", "[role='main']", "main", ".content", ".post", "#content", "body"}
 	var content string
-	doc.Find("article, main, .content, .post, #content").Each(func(i int, s *goquery.Selection) {
-		if content == "" {
-			content = extractText(s)
+	for _, sel := range selectors {
+		if doc.Find(sel).Length() == 0 {
+			continue
 		}
-	})
+		md := extractMarkdown(doc.Find(sel).First())
+		if len(md) > 50 {
+			content = md
+			break
+		}
+	}
 
 	if content == "" {
-		doc.Find("p").Each(func(i int, s *goquery.Selection) {
-			text := strings.TrimSpace(s.Text())
-			if len(text) > 50 {
-				content += text + "\n\n"
+		// Last-resort paragraph fallback (kept for ultra-stripped pages)
+		doc.Find("p").Each(func(_ int, s *goquery.Selection) {
+			t := strings.TrimSpace(s.Text())
+			if len(t) > 30 {
+				content += t + "\n\n"
 			}
 		})
 	}
