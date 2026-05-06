@@ -46,6 +46,9 @@ export default function ArticlePage() {
   const [shareToken, setShareToken] = useState<string>('')
   const [copyLinkText, setCopyLinkText] = useState('复制链接')
 
+  // Bookmarklet state
+  const [fromBookmarklet, setFromBookmarklet] = useState(false)
+
   const loadArticle = async () => {
     if (!id) return
     setLoading(true)
@@ -54,6 +57,7 @@ export default function ArticlePage() {
       const data = await getArticle(Number(id))
       setArticle(data.article)
       setProgress(data.progress)
+      setFromBookmarklet(Boolean(data.from_bookmarklet))
       if (data.signals) {
         setLiked((data.signals['like'] ?? 0) > 0)
         setDisliked((data.signals['dislike'] ?? 0) > 0)
@@ -203,6 +207,18 @@ export default function ArticlePage() {
     } finally {
       setFetchingContent(false)
     }
+  }
+
+  const handleRescrapeViaBookmarklet = () => {
+    if (!article) return
+    const ok = window.confirm(
+      `重新抓取需要在原网页运行书签。\n` +
+      `会打开 ${article.url}，请到新标签页点你 bookmark bar 上的 RSS Pal 书签来抓取最新内容。\n\n` +
+      `继续？`
+    )
+    if (!ok) return
+    window.open(article.url, '_blank', 'noopener,noreferrer')
+    toast.info('已打开原网页 — 在新标签里点你的 RSS Pal 书签')
   }
 
   const handleLike = async () => {
@@ -532,9 +548,15 @@ export default function ArticlePage() {
       <div className="card">
         <div className="flex-between mb-1">
           <h3>原文内容</h3>
-          <button onClick={handleFetchContent} disabled={fetchingContent}>
-            {fetchingContent ? '获取中...' : '重新抓取'}
-          </button>
+          {fromBookmarklet ? (
+            <button onClick={handleRescrapeViaBookmarklet} title="在新标签打开原网页，由你点击书签来更新">
+              🔁 通过书签重新抓取
+            </button>
+          ) : (
+            <button onClick={handleFetchContent} disabled={fetchingContent}>
+              {fetchingContent ? '获取中...' : '重新抓取'}
+            </button>
+          )}
         </div>
         {article.content ? (
           <div style={{ lineHeight: 1.8, fontSize: 15 }}>

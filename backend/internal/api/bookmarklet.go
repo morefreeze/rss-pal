@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -22,6 +24,40 @@ import (
 // generous for outerHTML on a typical article page; abusive payloads are
 // truncated and produce a 413.
 const captureMaxBodyBytes = 1 << 20 // 1 MiB
+
+// duplicateOverwriteRatio is the threshold at which a re-captured article's
+// new content is considered a clear improvement and we silently overwrite.
+// Below this ratio, the receiver page asks the user to confirm.
+const duplicateOverwriteRatio = 1.5
+
+// markdownImageRe matches markdown image syntax: ![alt](url). Used to count
+// images for the duplicate-prompt comparison so users see at a glance when
+// a re-capture lost images (typical login-wall regression).
+var markdownImageRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
+
+func countMarkdownImages(s string) int {
+	return len(markdownImageRe.FindAllStringIndex(s, -1))
+}
+
+// shouldPromptDuplicate returns true when a bookmarklet capture for an
+// existing URL should pause and ask the user (rather than auto-overwriting).
+// Pure function so it can be unit-tested without a DB. Triggers a prompt on:
+//   - length regression: new content is below 1.5x the old length, or
+//   - image regression: new content has strictly fewer markdown images.
+// force=true bypasses everything (used after the user explicitly chose
+// to overwrite).
+func shouldPromptDuplicate(newLen, oldLen, newImages, oldImages int, force bool) bool {
+	if force {
+		return false
+	}
+	if oldLen == 0 {
+		return false
+	}
+	if newImages < oldImages {
+		return true
+	}
+	return float64(newLen) < duplicateOverwriteRatio*float64(oldLen)
+}
 
 type BookmarkletHandler struct {
 	userRepo    *repository.UserRepository
@@ -56,6 +92,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		URL   string `json:"url"`
 		Title string `json:"title"`
 		HTML  string `json:"html"`
+		Force bool   `json:"force"`
 	}
 	dec := json.NewDecoder(c.Request.Body)
 	if err := dec.Decode(&req); err != nil {
@@ -92,11 +129,18 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	if existing != nil {
-		if len(content) <= len(existing.Content) {
+		newLen, oldLen := len(content), len(existing.Content)
+		newImages := countMarkdownImages(content)
+		oldImages := countMarkdownImages(existing.Content)
+		if shouldPromptDuplicate(newLen, oldLen, newImages, oldImages, req.Force) {
 			c.JSON(http.StatusOK, gin.H{
-				"status":     "unchanged",
-				"article_id": existing.ID,
-				"message":    "已有内容更完整,未覆盖",
+				"status":          "duplicate",
+				"article_id":      existing.ID,
+				"existing_length": oldLen,
+				"new_length":      newLen,
+				"existing_images": oldImages,
+				"new_images":      newImages,
+				"message":         fmt.Sprintf("已有内容 %d 字 %d 图 / 新内容 %d 字 %d 图", oldLen, oldImages, newLen, newImages),
 			})
 			return
 		}
@@ -111,7 +155,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		if err := h.articleRepo.UpdateSummary(existing.ID, "", ""); err != nil {
 			log.Printf("bookmarklet: clear summary failed for article=%d: %v", existing.ID, err)
 		}
-		log.Printf("bookmarklet: updated article=%d user=%d url=%s len=%d", existing.ID, user.ID, normalized, len(content))
+		log.Printf("bookmarklet: updated article=%d user=%d url=%s len=%d (force=%v)", existing.ID, user.ID, normalized, newLen, req.Force)
 		c.JSON(http.StatusOK, gin.H{
 			"status":     "updated",
 			"article_id": existing.ID,
