@@ -334,3 +334,12 @@ export const getRecommendedFeeds = () =>
 
 export const subscribeRecommendedFeed = (id: number) =>
   api.post<{ status: string; feed_id?: number }>(`/recommended-feeds/${id}/subscribe`).then(res => res.data)
+
+export interface WeeklyDigest {
+  week_start: string
+  intro_text: string
+  articles: Article[]
+}
+
+export const getWeeklyDigest = (week?: string) =>
+  api.get<WeeklyDigest>('/weekly-digest', { params: week ? { week } : {} }).then(res => res.data)
