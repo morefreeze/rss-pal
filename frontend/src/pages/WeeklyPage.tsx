@@ -7,7 +7,10 @@ import { toast } from '../utils/toast'
 function shiftWeek(weekStart: string, days: number): string {
   const d = new Date(weekStart + 'T00:00:00+08:00')
   d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
+  // Convert back to Asia/Shanghai date string by adding the +8h offset before
+  // taking the UTC date components (toISOString uses UTC).
+  const shanghai = new Date(d.getTime() + 8 * 3600 * 1000)
+  return shanghai.toISOString().slice(0, 10)
 }
 
 export default function WeeklyPage() {
