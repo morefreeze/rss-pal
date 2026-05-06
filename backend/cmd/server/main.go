@@ -40,9 +40,10 @@ func main() {
 	progressHandler := api.NewProgressHandler(progressRepo)
 	contentHandler := api.NewContentHandler(articleRepo)
 	statsHandler := api.NewStatsHandler(statsRepo)
-	settingsHandler := api.NewSettingsHandler(cfg, templateRepo)
+	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
 	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, summarizer, cfg)
+	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
 
 	router := gin.Default()
 	// Trust only requests from localhost/private networks (running behind nginx)
@@ -67,6 +68,9 @@ func main() {
 
 	// Public share route (no auth required)
 	router.GET("/api/share/:token", shareHandler.GetByToken)
+
+	// Public bookmarklet capture (CORS + per-user token auth, no JWT)
+	router.POST("/api/bookmarklet/capture", bookmarkletHandler.Capture)
 
 	// Protected routes
 	apiGroup := router.Group("/api")
@@ -130,6 +134,8 @@ func main() {
 		apiGroup.PUT("/settings/ai", settingsHandler.SaveAIConfig)
 		apiGroup.PUT("/settings/template", settingsHandler.SetDefaultTemplate)
 		apiGroup.POST("/settings/polish-prompt", settingsHandler.PolishPrompt)
+		apiGroup.GET("/settings/bookmarklet-token", settingsHandler.GetBookmarkletToken)
+		apiGroup.POST("/settings/bookmarklet-token/regenerate", settingsHandler.RegenerateBookmarkletToken)
 	}
 
 	log.Printf("Server starting on port %s", cfg.Server.Port)
