@@ -320,14 +320,17 @@ export default function ArticleListPage() {
               <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({recommended.length})</span>
             </h3>
             <button
-              className="secondary text-sm"
+              className="secondary"
+              style={{ padding: '2px 10px', fontSize: 16, lineHeight: 1 }}
+              aria-label={showRecommended ? '收起' : '展开'}
+              title={showRecommended ? '收起' : '展开'}
               onClick={() => {
                 const next = !showRecommended
                 setShowRecommended(next)
                 try { localStorage.setItem('showRecommended', String(next)) } catch {}
               }}
             >
-              {showRecommended ? '收起' : '展开'}
+              {showRecommended ? '◀' : '▼'}
             </button>
           </div>
           {showRecommended && recommended.map(article => (
