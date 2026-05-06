@@ -30,7 +30,7 @@ func (r *RecommendedFeedRepository) ListWithSubscriptionStatus(userID int) ([]mo
 	}
 	defer rows.Close()
 
-	var out []model.RecommendedFeed
+	out := make([]model.RecommendedFeed, 0)
 	for rows.Next() {
 		var rf model.RecommendedFeed
 		var description sql.NullString

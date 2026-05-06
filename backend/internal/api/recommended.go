@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 )
 
 type RecommendedHandler struct {
@@ -64,8 +65,13 @@ func (h *RecommendedHandler) Subscribe(c *gin.Context) {
 		FeedType:         rf.FeedType,
 	}
 	if err := h.feedRepo.Create(feed); err != nil {
-		// Likely UNIQUE conflict on url. Treat as idempotent.
-		c.JSON(http.StatusOK, gin.H{"status": "already_subscribed"})
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			// UNIQUE violation — already subscribed. Idempotent success.
+			c.JSON(http.StatusOK, gin.H{"status": "already_subscribed"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "订阅失败: " + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "subscribed", "feed_id": feed.ID})
