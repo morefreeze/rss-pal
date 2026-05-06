@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getRecommendedFeeds, subscribeRecommendedFeed, RecommendedFeed } from '../api/client'
+import { toast } from '../utils/toast'
 
 const CATEGORY_LABELS: Record<string, string> = {
   ai_eng: 'AI 工程',
@@ -32,8 +33,8 @@ export default function RecommendedPage() {
     try {
       await subscribeRecommendedFeed(id)
       await load()
-    } catch (e: any) {
-      alert(e?.response?.data?.error || '订阅失败')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || '订阅失败')
     } finally {
       setBusyId(null)
     }
