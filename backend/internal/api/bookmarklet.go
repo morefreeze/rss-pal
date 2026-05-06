@@ -223,7 +223,9 @@ func extractContentFromHTML(html string) (string, error) {
 }
 
 // selectionText pulls block-level text out of a goquery Selection in a way
-// that preserves paragraph breaks. Mirrors rss.extractText's behavior.
+// that preserves paragraph breaks. Bookmarklet captures user-selected
+// text and intentionally stays plain-text (the article-content
+// scraper now produces Markdown — different goal).
 func selectionText(s *goquery.Selection) string {
 	var b strings.Builder
 	s.Find("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre").Each(func(i int, sel *goquery.Selection) {
