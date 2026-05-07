@@ -256,6 +256,18 @@ func (s *Summarizer) Polish(ctx context.Context, promptText string) (string, err
 	return s.doCall(ctx, body, 600)
 }
 
+// GenerateUserInsight runs a non-streaming chat completion with the layered
+// prompt the worker built. maxTokens is fixed at 1500 (sufficient for the
+// 4-section markdown insight format).
+func (s *Summarizer) GenerateUserInsight(ctx context.Context, prompt string) (string, error) {
+	return s.call(ctx, prompt, 1500)
+}
+
+// Model returns the configured model id (used by user_insights.model column).
+func (s *Summarizer) Model() string {
+	return s.model
+}
+
 func (s *Summarizer) GenerateInsights(ctx context.Context, topics []string, recentArticles string) (string, error) {
 	prompt := fmt.Sprintf(`基于用户的兴趣主题和最近的阅读行为，请分析用户的兴趣趋势并提供洞察：
 
