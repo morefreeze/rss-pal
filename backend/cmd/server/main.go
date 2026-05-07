@@ -38,13 +38,14 @@ func main() {
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo)
 	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
-	prefHandler := api.NewPreferenceHandler(prefRepo)
+	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo)
 	contentHandler := api.NewContentHandler(articleRepo)
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
-	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, summarizer, cfg)
+	userInsightsRepo := repository.NewUserInsightRepository(db)
+	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, userInsightsRepo, summarizer, cfg)
 	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
@@ -118,6 +119,9 @@ func main() {
 		apiGroup.DELETE("/preferences/save", prefHandler.Unsave)
 		apiGroup.POST("/preferences/read-duration", prefHandler.RecordReadDuration)
 		apiGroup.GET("/preferences/topics", prefHandler.GetTopics)
+		apiGroup.GET("/preferences/tags", prefHandler.GetTags)
+		apiGroup.DELETE("/preferences/topics/:id", prefHandler.DeleteTopic)
+		apiGroup.DELETE("/preferences/tags/:id", prefHandler.DeleteTag)
 
 		// Progress
 		apiGroup.GET("/progress/:article_id", progressHandler.Get)
@@ -129,6 +133,7 @@ func main() {
 		apiGroup.GET("/stats/progress", statsHandler.GetProgress)
 
 		// Insights
+		apiGroup.GET("/insights/latest", insightsHandler.Latest)
 		apiGroup.POST("/insights/generate", insightsHandler.Generate)
 
 		// Recommended feeds (catalog)

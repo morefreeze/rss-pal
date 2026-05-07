@@ -1,6 +1,78 @@
 package api
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestExtractContentFromHTMLPreservesImages(t *testing.T) {
+	cases := []struct {
+		name     string
+		baseURL  string
+		html     string
+		mustHave []string // substrings that must appear in extracted markdown
+	}{
+		{
+			name:    "absolute img inside article",
+			baseURL: "https://example.com/post/1",
+			html: `<html><body><article>
+				<h1>Title</h1>
+				<p>Some paragraph long enough to pass the length filter for plain text fallback.</p>
+				<p><img src="https://cdn.example.com/photo.jpg" alt="cat"></p>
+				<p>Another paragraph long enough to keep the article above 200 chars total.</p>
+			</article></body></html>`,
+			mustHave: []string{"![cat](https://cdn.example.com/photo.jpg)"},
+		},
+		{
+			name:    "relative img resolved against base url",
+			baseURL: "https://example.com/post/1",
+			html: `<html><body><article>
+				<h1>Hello</h1>
+				<p>Body paragraph one with enough characters to pass the 200-char gate easily right here.</p>
+				<p><img src="/static/cat.jpg" alt="cat"></p>
+				<p>Body paragraph two with enough characters to pass the 200-char gate easily right here.</p>
+			</article></body></html>`,
+			mustHave: []string{"![cat](https://example.com/static/cat.jpg)"},
+		},
+		{
+			name:    "protocol-relative img resolved",
+			baseURL: "https://example.com/post/1",
+			html: `<html><body><article>
+				<p>Body paragraph one with enough characters to pass the 200-char gate easily right here.</p>
+				<p><img src="//cdn.example.com/pic.png" alt="pic"></p>
+				<p>Body paragraph two with enough characters to pass the 200-char gate easily right here.</p>
+			</article></body></html>`,
+			mustHave: []string{"![pic](https://cdn.example.com/pic.png)"},
+		},
+		{
+			name:    "multiple images preserved",
+			baseURL: "https://example.com/post/1",
+			html: `<html><body><article>
+				<p>Body paragraph one with enough characters to pass the 200-char gate easily right here.</p>
+				<p><img src="https://cdn.example.com/a.jpg" alt="a"></p>
+				<p>Body paragraph two with enough characters to pass the 200-char gate easily right here.</p>
+				<p><img src="https://cdn.example.com/b.jpg" alt="b"></p>
+			</article></body></html>`,
+			mustHave: []string{"![a](https://cdn.example.com/a.jpg)", "![b](https://cdn.example.com/b.jpg)"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := extractContentFromHTML(tc.html, tc.baseURL)
+			if err != nil {
+				t.Fatalf("extractContentFromHTML returned error: %v", err)
+			}
+			for _, want := range tc.mustHave {
+				if !strings.Contains(got, want) {
+					t.Errorf("extracted content missing %q\n--- got ---\n%s", want, got)
+				}
+			}
+			if n := countMarkdownImages(got); n < len(tc.mustHave) {
+				t.Errorf("countMarkdownImages = %d, want >= %d\n--- got ---\n%s", n, len(tc.mustHave), got)
+			}
+		})
+	}
+}
 
 func TestShouldPromptDuplicate(t *testing.T) {
 	cases := []struct {
