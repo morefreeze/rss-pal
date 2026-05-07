@@ -96,7 +96,10 @@ func (h *ContentHandler) tryBackfillMedia(ctx context.Context, article *model.Ar
 		if result, err := h.fetcher.Fetch(ctx, feed.URL, "", ""); err == nil && result != nil && result.Feed != nil {
 			for _, item := range result.Feed.Items {
 				if item != nil && item.Link == article.URL {
-					mi = rss.ExtractMedia(item)
+					mi = rss.ExtractVideoMedia(article.URL)
+					if mi == nil {
+						mi = rss.ExtractMedia(item)
+					}
 					break
 				}
 			}

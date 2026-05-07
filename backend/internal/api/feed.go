@@ -24,11 +24,11 @@ type FeedHandler struct {
 	contentFetcher *rss.ContentFetcher
 }
 
-func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.ArticleRepository) *FeedHandler {
+func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.ArticleRepository, rsshubBase string) *FeedHandler {
 	return &FeedHandler{
 		repo:           repo,
 		articleRepo:    articleRepo,
-		fetcher:        rss.NewFetcher(),
+		fetcher:        rss.NewFetcher(rsshubBase),
 		contentFetcher: rss.NewContentFetcher(),
 	}
 }
@@ -280,7 +280,10 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 		}
 
 		exists, _ := h.articleRepo.Exists(feed.ID, item.Link)
-		mediaInfo := rss.ExtractMedia(item)
+		mediaInfo := rss.ExtractVideoMedia(item.Link)
+		if mediaInfo == nil {
+			mediaInfo = rss.ExtractMedia(item)
+		}
 		if exists {
 			h.articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedTime(item.PublishedParsed, item.UpdatedParsed))
 			if mediaInfo != nil {

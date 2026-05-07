@@ -16,13 +16,14 @@ import (
 )
 
 type Fetcher struct {
-	parser *gofeed.Parser
-	client *http.Client
+	parser     *gofeed.Parser
+	client     *http.Client
+	rsshubBase string
 }
 
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-func NewFetcher() *Fetcher {
+func NewFetcher(rsshubBase string) *Fetcher {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
@@ -30,8 +31,9 @@ func NewFetcher() *Fetcher {
 		},
 	}
 	return &Fetcher{
-		parser: gofeed.NewParser(),
-		client: client,
+		parser:     gofeed.NewParser(),
+		client:     client,
+		rsshubBase: rsshubBase,
 	}
 }
 
@@ -57,6 +59,7 @@ type PreviewResult struct {
 }
 
 func (f *Fetcher) Fetch(ctx context.Context, feedURL string, etag, lastModified string) (*FetchResult, error) {
+	feedURL = ResolveFeedURL(feedURL, f.rsshubBase)
 	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -99,7 +102,8 @@ func (f *Fetcher) Fetch(ctx context.Context, feedURL string, etag, lastModified 
 // Preview fetches a URL and returns up to 10 articles without saving anything.
 // Tries RSS/Atom first, then auto-discovers RSS link in HTML, then falls back to scraping.
 func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	fetchURL := ResolveFeedURL(rawURL, f.rsshubBase)
+	req, err := http.NewRequestWithContext(ctx, "GET", fetchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
@@ -210,6 +214,7 @@ func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, e
 
 // FetchHTML fetches an HTML page and extracts article links as a synthetic feed
 func (f *Fetcher) FetchHTML(ctx context.Context, feedURL string) (*gofeed.Feed, error) {
+	feedURL = ResolveFeedURL(feedURL, f.rsshubBase)
 	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
 	if err != nil {
 		return nil, err
@@ -467,6 +472,9 @@ func (f *Fetcher) scrapeHTMLArticles(doc *goquery.Document, baseURL string) *Pre
 		}
 	}
 
+	if items == nil {
+		items = []PreviewItem{}
+	}
 	return &PreviewResult{
 		FeedTitle: pageTitle,
 		FeedType:  "html",
@@ -476,7 +484,7 @@ func (f *Fetcher) scrapeHTMLArticles(doc *goquery.Document, baseURL string) *Pre
 }
 
 func rssToPreview(feed *gofeed.Feed, feedURL string) *PreviewResult {
-	var items []PreviewItem
+	items := make([]PreviewItem, 0, len(feed.Items))
 	for i, item := range feed.Items {
 		if i >= 10 {
 			break
