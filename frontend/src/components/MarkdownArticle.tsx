@@ -6,6 +6,8 @@ import rehypeKatex from 'rehype-katex'
 import 'highlight.js/styles/github.css'
 import 'katex/dist/katex.min.css'
 import { stripMathShadow } from '../util/mathShadow'
+import VideoEmbed from './VideoEmbed'
+import { parsePlaceholder } from './parseVideoPlaceholder'
 
 type Props = {
   source: string
@@ -34,6 +36,18 @@ function isAvatarImg(src: string | undefined, alt: string | undefined): boolean 
     if (altLower.includes(kw)) return true
   }
   return false
+}
+
+// Returns the plain-text content of paragraph children when it consists
+// of a single text run, otherwise null. Used to detect placeholder
+// paragraphs without false-positives on rich content.
+function extractParagraphText(children: unknown): string | null {
+  if (typeof children === 'string') return children
+  if (Array.isArray(children)) {
+    if (children.length !== 1) return null
+    return extractParagraphText(children[0])
+  }
+  return null
 }
 
 // Rewrites <img src="..."> to go through the backend proxy so hotlink-
@@ -70,6 +84,14 @@ export default function MarkdownArticle({ source }: Props) {
               {children}
             </a>
           ),
+          p: ({ children, ...rest }) => {
+            const text = extractParagraphText(children)
+            if (text) {
+              const v = parsePlaceholder(text)
+              if (v) return <VideoEmbed {...v} />
+            }
+            return <p {...rest}>{children}</p>
+          },
         }}
       >
         {cleaned}
