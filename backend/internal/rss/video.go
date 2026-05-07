@@ -19,6 +19,9 @@ type VideoEmbed struct {
 // youTubeIDPattern matches the canonical YouTube video ID character set/length.
 var youTubeIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
 
+// bilibiliBVPattern matches BV-form Bilibili IDs.
+var bilibiliBVPattern = regexp.MustCompile(`^BV[0-9A-Za-z]{10}$`)
+
 // ExtractVideo parses a single URL and returns a VideoEmbed if it matches
 // a supported YouTube or Bilibili form. Pure: no network I/O.
 func ExtractVideo(rawURL string) (*VideoEmbed, bool) {
@@ -32,6 +35,9 @@ func ExtractVideo(rawURL string) (*VideoEmbed, bool) {
 	host := strings.TrimPrefix(strings.ToLower(u.Host), "www.")
 
 	if v, ok := extractYouTube(u, host); ok {
+		return v, true
+	}
+	if v, ok := extractBilibili(u, host); ok {
 		return v, true
 	}
 	return nil, false
@@ -65,6 +71,32 @@ func extractYouTube(u *url.URL, host string) (*VideoEmbed, bool) {
 	}
 	v := &VideoEmbed{Platform: "youtube", ID: id}
 	v.Start = parseStartParam(u)
+	v.EmbedURL = v.buildEmbedURL()
+	return v, true
+}
+
+func extractBilibili(u *url.URL, host string) (*VideoEmbed, bool) {
+	if host != "bilibili.com" && host != "m.bilibili.com" {
+		return nil, false
+	}
+	if !strings.HasPrefix(u.Path, "/video/") {
+		return nil, false
+	}
+	id := strings.TrimPrefix(u.Path, "/video/")
+	id = strings.TrimRight(id, "/")
+	if i := strings.Index(id, "/"); i >= 0 {
+		id = id[:i]
+	}
+	if !bilibiliBVPattern.MatchString(id) {
+		return nil, false
+	}
+	v := &VideoEmbed{Platform: "bilibili", ID: id}
+	v.Start = parseStartParam(u)
+	if p := u.Query().Get("p"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			v.Page = n
+		}
+	}
 	v.EmbedURL = v.buildEmbedURL()
 	return v, true
 }
