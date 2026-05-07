@@ -291,7 +291,7 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				log.Printf("Failed to create article: %v", err)
 			} else {
 				atomic.AddInt64(&newCount, 1)
-				if summarizer != nil {
+				if summarizer != nil && !isVideoArticle(article) {
 					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
 				}
 			}
@@ -300,6 +300,14 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 
 	wg.Wait()
 	log.Printf("Feed %s fetched, %d new articles", feed.URL, newCount)
+}
+
+// isVideoArticle reports whether the article's primary media is an embedded
+// video. AI summarization is skipped for these because the stored content
+// is the iframe placeholder + a short description — summarizing it produces
+// hallucinated text loosely tied to the title rather than the video itself.
+func isVideoArticle(a *model.Article) bool {
+	return a != nil && strings.HasPrefix(a.MediaType, "video/")
 }
 
 func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, feed model.Feed) {
@@ -351,7 +359,7 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 				log.Printf("Failed to create HTML article: %v", err)
 			} else {
 				atomic.AddInt64(&newCount, 1)
-				if summarizer != nil {
+				if summarizer != nil && !isVideoArticle(article) {
 					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
 				}
 			}
@@ -410,7 +418,7 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 					log.Printf("Failed to update content for article %d: %v", article.ID, err)
 				} else {
 					log.Printf("Updated content for article %d: %d chars", article.ID, len(content))
-					if summarizer != nil {
+					if summarizer != nil && !isVideoArticle(article) {
 						asyncSummarize(summarizer, articleRepo, article.ID, article.Title, content)
 					}
 				}

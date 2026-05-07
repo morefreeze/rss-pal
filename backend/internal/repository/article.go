@@ -330,6 +330,7 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 		FROM articles
 		WHERE (summary_brief IS NULL OR summary_brief = '')
 		AND LENGTH(content) > 100
+		AND (media_type IS NULL OR media_type NOT LIKE 'video/%')
 		ORDER BY fetched_at DESC
 		LIMIT $1
 	`

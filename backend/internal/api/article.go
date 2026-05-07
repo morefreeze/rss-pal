@@ -157,6 +157,14 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		return
 	}
 
+	// Video articles store an iframe + a short description, not a transcript;
+	// summarising them yields hallucinations loosely tied to the title.
+	// Reject explicitly so the user knows why no summary appears.
+	if strings.HasPrefix(article.MediaType, "video/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "视频文章暂不支持自动总结"})
+		return
+	}
+
 	// Determine which summarizer to use (user-custom or global)
 	summarizerToUse := h.summarizer
 
