@@ -406,3 +406,83 @@ func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Ti
 	defer rows.Close()
 	return r.scanArticle(rows)
 }
+
+// FindArticlesNeedingClassification returns up to `limit` articles that have
+// strong signals in the last 7 days but no cached topic.
+func (r *ArticleRepository) FindArticlesNeedingClassification(limit int) ([]model.Article, error) {
+	query := `
+		SELECT DISTINCT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
+		FROM articles a
+		JOIN user_preferences up ON up.article_id = a.id
+		WHERE a.topic IS NULL
+		  AND up.created_at > NOW() - INTERVAL '7 days'
+		  AND (
+		    up.signal_type IN ('like','save')
+		    OR (up.signal_type = 'read_duration' AND up.signal_value >= 60)
+		  )
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+// SetClassification writes topic + tags onto an article. Pass empty string and
+// empty slice to mark the article as "AI returned nothing" (still cached, won't retry).
+func (r *ArticleRepository) SetClassification(articleID int, topic string, tags []string) error {
+	_, err := r.db.Exec(
+		`UPDATE articles SET topic = $1, tags = $2 WHERE id = $3`,
+		nullableString(topic), pq.Array(tags), articleID,
+	)
+	return err
+}
+
+// GetClassification reads the cached topic + tags for one article.
+// Returns ("", nil, nil) when not yet classified.
+func (r *ArticleRepository) GetClassification(articleID int) (string, []string, error) {
+	var topic sql.NullString
+	var tags pq.StringArray
+	err := r.db.QueryRow(
+		`SELECT topic, tags FROM articles WHERE id = $1`, articleID,
+	).Scan(&topic, &tags)
+	if err != nil {
+		return "", nil, err
+	}
+	return topic.String, []string(tags), nil
+}
+
+// GetTopTopicVocabulary returns the most-frequent topics across articles, used
+// as a recommendation list for the AI classifier (B3 self-stabilizing vocabulary).
+func (r *ArticleRepository) GetTopTopicVocabulary(limit int) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT topic
+		FROM articles
+		WHERE topic IS NOT NULL AND topic <> ''
+		GROUP BY topic
+		ORDER BY COUNT(*) DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func nullableString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
