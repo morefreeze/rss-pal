@@ -139,6 +139,7 @@ func (r *PreferenceRepository) GetArticleScore(articleID int) (float64, error) {
 				WHEN 'dislike' THEN -10.0 * signal_value
 				WHEN 'save' THEN 3.0 * signal_value
 				WHEN 'read_duration' THEN signal_value / 60.0
+				WHEN 'completed_listen' THEN 8.0 * signal_value
 				ELSE 1.0 * signal_value
 			END
 		), 0)

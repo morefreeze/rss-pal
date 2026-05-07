@@ -281,6 +281,7 @@ func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Artic
 					WHEN 'dislike' THEN -10.0 * signal_value
 					WHEN 'save' THEN 3.0 * signal_value
 					WHEN 'read_duration' THEN signal_value / 60.0
+					WHEN 'completed_listen' THEN 8.0 * signal_value
 					ELSE 1.0 * signal_value
 				END
 			) as score
@@ -440,6 +441,7 @@ func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Ti
 					WHEN 'dislike' THEN -10.0 * signal_value
 					WHEN 'save' THEN 3.0 * signal_value
 					WHEN 'read_duration' THEN signal_value / 60.0
+					WHEN 'completed_listen' THEN 8.0 * signal_value
 					ELSE 1.0 * signal_value
 				END
 			) as score
@@ -470,7 +472,7 @@ func (r *ArticleRepository) FindArticlesNeedingClassification(limit int) ([]mode
 		WHERE a.topic IS NULL
 		  AND up.created_at > NOW() - INTERVAL '7 days'
 		  AND (
-		    up.signal_type IN ('like','save')
+		    up.signal_type IN ('like','save','completed_listen')
 		    OR (up.signal_type = 'read_duration' AND up.signal_value >= 60)
 		  )
 		LIMIT $1
@@ -563,6 +565,7 @@ LEFT JOIN (
             WHEN 'dislike' THEN -10.0 * signal_value
             WHEN 'save' THEN 3.0 * signal_value
             WHEN 'read_duration' THEN signal_value / 60.0
+            WHEN 'completed_listen' THEN 8.0 * signal_value
             ELSE 1.0 * signal_value
         END
     ) AS score
@@ -588,11 +591,12 @@ JOIN (
         CASE signal_type
             WHEN 'like' THEN 5.0 * signal_value
             WHEN 'save' THEN 3.0 * signal_value
+            WHEN 'completed_listen' THEN 2.0 * signal_value
             ELSE 0
         END
     ) AS score
     FROM user_preferences
-    WHERE user_id = $1 AND signal_type IN ('like','save')
+    WHERE user_id = $1 AND signal_type IN ('like','save','completed_listen')
     GROUP BY article_id
 ) p ON a.id = p.article_id
 WHERE (f.owner_id IS NULL OR f.owner_id = $1)
