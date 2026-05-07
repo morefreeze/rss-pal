@@ -1,6 +1,8 @@
 import { Article } from '../api/client'
 import { usePlayer } from '../player/PlayerContext'
 import Spinner from './Spinner'
+import VideoEmbed from './VideoEmbed'
+import { parseStoredEmbedURL } from './parseVideoPlaceholder'
 
 function fmtMinSec(sec: number): string {
   if (!sec || sec <= 0) return ''
@@ -10,9 +12,20 @@ function fmtMinSec(sec: number): string {
 }
 
 export default function ArticlePlayerCard({ article }: { article: Article }) {
-  const p = usePlayer()
   if (!article.media_url) return null
 
+  // Branch on media_type: video → embedded iframe; otherwise → audio player.
+  if (article.media_type && article.media_type.startsWith('video/')) {
+    const v = parseStoredEmbedURL(article.media_url, article.media_type)
+    if (!v) return null
+    return <VideoEmbed {...v} />
+  }
+
+  return <AudioCard article={article} />
+}
+
+function AudioCard({ article }: { article: Article }) {
+  const p = usePlayer()
   const isCurrent = p.articleId === article.id
   const playing = isCurrent && p.playing
 
