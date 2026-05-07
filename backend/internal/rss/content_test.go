@@ -138,7 +138,7 @@ func TestStripAvatars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	stripAvatars(doc)
+	StripAvatars(doc)
 
 	imgs := doc.Find("img")
 	if imgs.Length() != 1 {
@@ -147,6 +147,27 @@ func TestStripAvatars(t *testing.T) {
 	src, _ := imgs.First().Attr("src")
 	if src != "https://example.com/screenshot.png" {
 		t.Errorf("wrong img survived: src=%q", src)
+	}
+}
+
+func TestFetchContentFromReader_StripsAvatars(t *testing.T) {
+	html := `<html><body><article>
+		<p>Intro paragraph long enough to keep around for the selector.</p>
+		<p><img class="avatar" src="https://example.com/byline.png" alt="me"></p>
+		<p><img src="https://example.com/figure.png" alt="figure"></p>
+		<p>Trailing paragraph long enough to keep around as well.</p>
+	</article></body></html>`
+
+	f := NewContentFetcher()
+	got, err := f.FetchContentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("FetchContentFromReader: %v", err)
+	}
+	if strings.Contains(got, "byline.png") {
+		t.Errorf("expected avatar to be stripped, got:\n%s", got)
+	}
+	if !strings.Contains(got, "figure.png") {
+		t.Errorf("expected real figure to survive, got:\n%s", got)
 	}
 }
 
