@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { usePlayer } from '../player/PlayerContext'
 
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2] as const
@@ -12,7 +13,10 @@ function fmt(sec: number): string {
 
 export default function MiniPlayer() {
   const p = usePlayer()
+  const [dragValue, setDragValue] = useState<number | null>(null)
   if (p.articleId === null) return null
+
+  const sliderValue = dragValue ?? p.position
 
   return (
     <div
@@ -49,15 +53,33 @@ export default function MiniPlayer() {
           type="range"
           min={0}
           max={p.duration || 0}
-          value={p.position}
-          onChange={e => p.seek(Number(e.target.value))}
+          value={sliderValue}
+          onChange={e => setDragValue(Number(e.target.value))}
+          onMouseUp={() => {
+            if (dragValue !== null) {
+              p.seek(dragValue)
+              setDragValue(null)
+            }
+          }}
+          onTouchEnd={() => {
+            if (dragValue !== null) {
+              p.seek(dragValue)
+              setDragValue(null)
+            }
+          }}
+          onKeyUp={() => {
+            if (dragValue !== null) {
+              p.seek(dragValue)
+              setDragValue(null)
+            }
+          }}
           style={{ width: '100%' }}
           aria-label="播放进度"
         />
       </div>
 
       <span style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' }}>
-        {fmt(p.position)} / {fmt(p.duration)}
+        {fmt(sliderValue)} / {fmt(p.duration)}
       </span>
 
       <select
