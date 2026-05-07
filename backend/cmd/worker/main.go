@@ -47,7 +47,7 @@ func main() {
 	templateRepo := repository.NewTemplateRepository(db)
 	userInsightsRepo := repository.NewUserInsightRepository(db)
 
-	fetcher := rss.NewFetcher()
+	fetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
 	contentFetcher := rss.NewContentFetcher()
 
 	var summarizer *ai.Summarizer

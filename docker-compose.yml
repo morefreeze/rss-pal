@@ -34,9 +34,12 @@ services:
       JWT_SECRET: ${JWT_SECRET:-rss-pal-secret-change-in-production}
       JINA_API_KEY: ${JINA_API_KEY}
       SERVER_PORT: 8080
+      RSSHUB_BASE_URL: http://rsshub:1200
     depends_on:
       postgres:
         condition: service_healthy
+      rsshub:
+        condition: service_started
     ports:
       - "8080:8080"
 
@@ -53,9 +56,12 @@ services:
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}
       CLAUDE_BASE_URL: ${CLAUDE_BASE_URL:-https://api.anthropic.com}
       JINA_API_KEY: ${JINA_API_KEY}
+      RSSHUB_BASE_URL: http://rsshub:1200
     depends_on:
       postgres:
         condition: service_healthy
+      rsshub:
+        condition: service_started
 
   rsshub:
     image: diygod/rsshub:latest

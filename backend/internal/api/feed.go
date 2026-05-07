@@ -24,11 +24,11 @@ type FeedHandler struct {
 	contentFetcher *rss.ContentFetcher
 }
 
-func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.ArticleRepository) *FeedHandler {
+func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.ArticleRepository, rsshubBase string) *FeedHandler {
 	return &FeedHandler{
 		repo:           repo,
 		articleRepo:    articleRepo,
-		fetcher:        rss.NewFetcher(),
+		fetcher:        rss.NewFetcher(rsshubBase),
 		contentFetcher: rss.NewContentFetcher(),
 	}
 }
