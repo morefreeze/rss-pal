@@ -2,12 +2,14 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
-  getTopics, getTags, getLatestInsights, generateInsightsStream,
+  getTopics, getTags, getLatestInsights, generateInsights,
   deleteTopic, deleteTag,
   InterestTopic, InterestTag, PersistedInsight,
 } from '../api/client'
 
-type Phase = 'loading' | 'empty' | 'has' | 'streaming'
+type Phase = 'loading' | 'empty' | 'has'
+
+const POLL_MS = 2000
 
 export default function InsightsPage() {
   const navigate = useNavigate()
@@ -15,11 +17,20 @@ export default function InsightsPage() {
   const [topics, setTopics] = useState<InterestTopic[]>([])
   const [tags, setTags] = useState<InterestTag[]>([])
   const [insight, setInsight] = useState<PersistedInsight | null>(null)
-  const [streamText, setStreamText] = useState('')
   const [remainingToday, setRemainingToday] = useState(3)
   const [remainingMonth, setRemainingMonth] = useState(100)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  const [busy, setBusy] = useState(false)
+  const pollRef = useRef<number | null>(null)
+
+  const refresh = async () => {
+    const latest = await getLatestInsights().catch(() => null)
+    if (!latest) return null
+    setRemainingToday(latest.remaining_today)
+    setRemainingMonth(latest.remaining_month)
+    setInsight(latest.insight)
+    return latest.insight
+  }
 
   useEffect(() => {
     Promise.all([
@@ -37,46 +48,48 @@ export default function InsightsPage() {
       const empty = t.length === 0 && g.length === 0 && (!latest || !latest.insight)
       setPhase(empty ? 'empty' : 'has')
     })
-    return () => abortRef.current?.abort()
+    return () => { if (pollRef.current) window.clearInterval(pollRef.current) }
   }, [])
 
-  const handleGenerate = () => {
-    if (remainingToday <= 0) return
-    setPhase('streaming')
-    setStreamText('')
+  // Auto-poll while a pending row exists.
+  useEffect(() => {
+    if (insight?.status !== 'pending') {
+      if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null }
+      return
+    }
+    if (pollRef.current) return
+    pollRef.current = window.setInterval(refresh, POLL_MS)
+    return () => { if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null } }
+  }, [insight?.status])
+
+  const handleGenerate = async () => {
+    if (busy || remainingToday <= 0 || insight?.status === 'pending') return
+    setBusy(true)
     setErrorMsg(null)
-    abortRef.current = new AbortController()
-    generateInsightsStream({
-      onDelta: t => setStreamText(prev => prev + t),
-      onDone: (full, quota) => {
-        setInsight({
-          id: 0,
-          content: full,
-          triggered_by: 'manual',
-          generated_at: new Date().toISOString(),
-        })
-        setStreamText('')
-        setRemainingToday(quota.remaining_today)
-        setRemainingMonth(quota.remaining_month)
-        setPhase('has')
-      },
-      onError: (msg, quota) => {
-        setErrorMsg(msg === 'quota_exceeded' ? '今日已达上限' :
-                    msg === 'no_data' ? '暂无足够数据' : `生成失败：${msg}`)
-        if (quota) {
-          setRemainingToday(quota.remaining_today)
-          setRemainingMonth(quota.remaining_month)
-        }
-        setStreamText('')
-        setPhase(insight ? 'has' : 'empty')
-      },
-    }, abortRef.current.signal)
+    try {
+      const resp = await generateInsights()
+      if (resp.status === 'no_data') {
+        setErrorMsg(resp.message || '暂无足够数据')
+        return
+      }
+      // status === 'pending': server kicked off the job; refresh to pick up the pending row.
+      setRemainingToday(resp.remaining_today)
+      setRemainingMonth(resp.remaining_month)
+      await refresh()
+    } catch (e: any) {
+      const status = e?.response?.status
+      if (status === 429) setErrorMsg('今日已达上限')
+      else if (status === 409) setErrorMsg('已有生成任务在进行中')
+      else setErrorMsg(`生成失败：${e?.message || '请稍后重试'}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleDeleteTopic = async (id: number) => {
     setTopics(prev => prev.filter(t => t.id !== id))
     try { await deleteTopic(id) }
-    catch { /* keep optimistic UI; refresh will reconcile */ }
+    catch { /* keep optimistic UI */ }
   }
   const handleDeleteTag = async (id: number) => {
     setTags(prev => prev.filter(t => t.id !== id))
@@ -87,10 +100,13 @@ export default function InsightsPage() {
   if (phase === 'loading') return <div className="card">Loading...</div>
   if (phase === 'empty') return <EmptyState onGo={() => navigate('/articles')} />
 
-  const buttonLabel = phase === 'streaming' ? '分析中...' :
+  const isPending = insight?.status === 'pending'
+  const buttonLabel = busy ? '提交中…' :
+                      isPending ? '生成中…' :
                       remainingToday <= 0 ? '今日已达上限' :
-                      `重新生成 (今日 ${3 - remainingToday}/3)`
-  const subtitle = insight ? formatSubtitle(insight) : ''
+                      `重新生成 (今日 ${remainingToday}/3)`
+  const buttonDisabled = busy || isPending || remainingToday <= 0
+  const subtitle = insight && insight.status === 'done' ? formatSubtitle(insight) : ''
 
   return (
     <div>
@@ -117,7 +133,7 @@ export default function InsightsPage() {
           <h3>AI 个性化洞察</h3>
           <button
             onClick={handleGenerate}
-            disabled={phase === 'streaming' || remainingToday <= 0}
+            disabled={buttonDisabled}
             title={`今日剩 ${remainingToday} 次 · 本月剩 ${remainingMonth} 次`}
             style={{ fontSize: 13, padding: '4px 12px' }}
           >
@@ -127,11 +143,15 @@ export default function InsightsPage() {
         {subtitle && <div className="text-muted text-sm mb-1">{subtitle}</div>}
         {errorMsg && <div className="text-muted text-sm mb-1" style={{ color: '#c0392b' }}>{errorMsg}</div>}
 
-        {phase === 'streaming' ? (
-          <div className="markdown-body">
-            <ReactMarkdown>{streamText || '正在分析…'}</ReactMarkdown>
+        {isPending ? (
+          <div className="text-muted text-sm" style={{ padding: '12px 0' }}>
+            🌀 正在生成中，需要 30 秒到 1 分钟，稍后回来查看（页面会自动刷新）
           </div>
-        ) : insight ? (
+        ) : insight?.status === 'failed' ? (
+          <div className="text-sm" style={{ color: '#c0392b' }}>
+            上次生成失败：{insight.error_msg || '未知错误'}（不消耗配额，可重试）
+          </div>
+        ) : insight?.status === 'done' && insight.content ? (
           <div className="markdown-body">
             <ReactMarkdown>{insight.content}</ReactMarkdown>
           </div>

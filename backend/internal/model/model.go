@@ -88,6 +88,8 @@ type UserInsight struct {
 	ID          int       `json:"id" db:"id"`
 	UserID      int       `json:"user_id" db:"user_id"`
 	Content     string    `json:"content" db:"content"`
+	Status      string    `json:"status" db:"status"` // "pending" | "done" | "failed"
+	ErrorMsg    string    `json:"error_msg,omitempty" db:"error_msg"`
 	TriggeredBy string    `json:"triggered_by" db:"triggered_by"` // "auto" | "manual"
 	Model       string    `json:"model,omitempty" db:"model"`
 	GeneratedAt time.Time `json:"generated_at" db:"generated_at"`

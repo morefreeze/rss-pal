@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +37,7 @@ func NewInsightsHandler(prefRepo *repository.PreferenceRepository, templateRepo 
 const (
 	dailyManualLimit   = 3
 	monthlyManualLimit = 100
+	asyncGenTimeout    = 5 * time.Minute
 )
 
 type insightQuota struct {
@@ -84,14 +88,12 @@ func (h *InsightsHandler) chooseSummarizer(userID int) *ai.Summarizer {
 	return ai.NewSummarizerWithModel(aiCfg.APIKey, baseURL, aiCfg.Model)
 }
 
-// Generate (non-streaming, kept for backward compat). Streaming variant in Task 13.
+// Generate kicks off an async insight job. Returns immediately with the
+// updated quota; the actual AI call runs in a background goroutine and
+// updates the user_insights row from 'pending' to 'done' (or 'failed').
 func (h *InsightsHandler) Generate(c *gin.Context) {
-	if c.Query("stream") == "1" {
-		h.GenerateStream(c)
-		return
-	}
-
 	userID := getUserID(c)
+
 	quota, ok := h.computeQuota(userID)
 	if !ok {
 		c.JSON(http.StatusTooManyRequests, gin.H{
@@ -105,7 +107,7 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 	topics, err := h.prefRepo.GetTopicStrings(userID)
 	if err != nil || len(topics) == 0 {
 		c.JSON(http.StatusOK, gin.H{
-			"insights":        "",
+			"status":          "no_data",
 			"message":         "暂无足够的阅读数据来生成洞察，请先多阅读并标记文章",
 			"remaining_today": quota.RemainingToday,
 			"remaining_month": quota.RemainingMonth,
@@ -113,26 +115,54 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 		return
 	}
 
-	titles, _ := h.prefRepo.GetRecentReadTitles(userID, 20)
 	summarizer := h.chooseSummarizer(userID)
-
-	insights, err := summarizer.GenerateInsights(c.Request.Context(), topics, strings.Join(titles, "\n"))
+	id, err := h.userInsightsRepo.InsertPending(userID, "manual", summarizer.Model())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成洞察失败: " + err.Error()})
+		if errors.Is(err, repository.ErrPendingExists) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":           "already_pending",
+				"remaining_today": quota.RemainingToday,
+				"remaining_month": quota.RemainingMonth,
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := h.userInsightsRepo.Insert(userID, insights, "manual", summarizer.Model()); err != nil {
-		// Persistence failure is non-fatal: still return content; just log via header.
-		c.Header("X-Insight-Save-Error", err.Error())
-	}
+	titles, _ := h.prefRepo.GetRecentReadTitles(userID, 20)
+	prompt := buildSimplePrompt(topics, titles)
 
-	quota, _ = h.computeQuota(userID)
-	c.JSON(http.StatusOK, gin.H{
-		"insights":        insights,
+	go h.runAsyncManual(id, userID, summarizer, prompt)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"status":          "pending",
+		"id":              id,
 		"remaining_today": quota.RemainingToday,
 		"remaining_month": quota.RemainingMonth,
 	})
+}
+
+func (h *InsightsHandler) runAsyncManual(id, userID int, s *ai.Summarizer, prompt string) {
+	ctx, cancel := context.WithTimeout(context.Background(), asyncGenTimeout)
+	defer cancel()
+	content, err := s.GenerateUserInsight(ctx, prompt)
+	if err != nil {
+		log.Printf("insights: async user=%d id=%d failed: %v", userID, id, err)
+		_ = h.userInsightsRepo.MarkFailed(id, err.Error())
+		return
+	}
+	if err := h.userInsightsRepo.MarkDone(id, content); err != nil {
+		log.Printf("insights: async user=%d id=%d MarkDone: %v", userID, id, err)
+		return
+	}
+	log.Printf("insights: async user=%d id=%d ok (%dB)", userID, id, len(content))
+}
+
+func buildSimplePrompt(topics, titles []string) string {
+	return "基于用户的兴趣主题和最近阅读，请用中文 markdown 给出洞察分析（核心兴趣领域 / 近期偏好变化 / 可能的新兴趣点 / 阅读建议）：\n\n" +
+		"## 用户兴趣主题（按权重排序）\n" + strings.Join(topics, "\n") + "\n\n" +
+		"## 最近阅读的文章标题\n" + strings.Join(titles, "\n")
 }
 
 // parseIDParam parses :id from the route. Returns (id, true) on success;
