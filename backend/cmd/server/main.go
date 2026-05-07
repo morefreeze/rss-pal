@@ -38,7 +38,7 @@ func main() {
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo)
 	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
-	prefHandler := api.NewPreferenceHandler(prefRepo)
+	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo)
 	contentHandler := api.NewContentHandler(articleRepo)
 	statsHandler := api.NewStatsHandler(statsRepo)

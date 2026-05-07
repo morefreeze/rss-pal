@@ -11,11 +11,35 @@ import (
 )
 
 type PreferenceHandler struct {
-	prefRepo *repository.PreferenceRepository
+	prefRepo    *repository.PreferenceRepository
+	articleRepo *repository.ArticleRepository
 }
 
-func NewPreferenceHandler(prefRepo *repository.PreferenceRepository) *PreferenceHandler {
-	return &PreferenceHandler{prefRepo: prefRepo}
+func NewPreferenceHandler(prefRepo *repository.PreferenceRepository, articleRepo *repository.ArticleRepository) *PreferenceHandler {
+	return &PreferenceHandler{prefRepo: prefRepo, articleRepo: articleRepo}
+}
+
+// applyCachedClassification, when the article already has a cached classification,
+// upserts the topic + tags into the user's interest tables synchronously. Silently
+// no-ops when the article is not yet classified (worker will pick it up).
+func (h *PreferenceHandler) applyCachedClassification(userID, articleID int, signalType string, signalValue float64) {
+	if h.articleRepo == nil {
+		return
+	}
+	topic, tags, err := h.articleRepo.GetClassification(articleID)
+	if err != nil || topic == "" {
+		return
+	}
+	strength := StrengthFromSignal(signalType, signalValue)
+	if strength <= 0 {
+		return
+	}
+	tw := SignalToTopicWeight(strength)
+	gw := SignalToTagWeight(strength)
+	_ = h.prefRepo.UpsertTopic(userID, topic, tw)
+	for _, t := range tags {
+		_ = h.prefRepo.UpsertTag(userID, t, gw)
+	}
 }
 
 func (h *PreferenceHandler) Like(c *gin.Context) {
@@ -37,6 +61,7 @@ func (h *PreferenceHandler) Like(c *gin.Context) {
 		return
 	}
 
+	h.applyCachedClassification(pref.UserID, pref.ArticleID, "like", 1.0)
 	c.Status(http.StatusOK)
 }
 
@@ -81,6 +106,7 @@ func (h *PreferenceHandler) Save(c *gin.Context) {
 		return
 	}
 
+	h.applyCachedClassification(pref.UserID, pref.ArticleID, "save", 1.0)
 	c.Status(http.StatusOK)
 }
 
@@ -119,6 +145,7 @@ func (h *PreferenceHandler) RecordReadDuration(c *gin.Context) {
 		return
 	}
 
+	h.applyCachedClassification(pref.UserID, pref.ArticleID, "read_duration", req.DurationSeconds)
 	c.Status(http.StatusOK)
 }
 
