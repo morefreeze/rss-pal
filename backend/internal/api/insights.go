@@ -6,27 +6,30 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
+	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
 )
 
 type InsightsHandler struct {
 	prefRepo         *repository.PreferenceRepository
+	articleRepo      *repository.ArticleRepository
 	templateRepo     *repository.TemplateRepository
 	userInsightsRepo *repository.UserInsightRepository
 	summarizer       *ai.Summarizer
 	cfg              *config.Config
 }
 
-func NewInsightsHandler(prefRepo *repository.PreferenceRepository, templateRepo *repository.TemplateRepository,
-	userInsightsRepo *repository.UserInsightRepository, summarizer *ai.Summarizer, cfg *config.Config) *InsightsHandler {
+func NewInsightsHandler(prefRepo *repository.PreferenceRepository, articleRepo *repository.ArticleRepository,
+	templateRepo *repository.TemplateRepository, userInsightsRepo *repository.UserInsightRepository,
+	summarizer *ai.Summarizer, cfg *config.Config) *InsightsHandler {
 	return &InsightsHandler{
 		prefRepo:         prefRepo,
+		articleRepo:      articleRepo,
 		templateRepo:     templateRepo,
 		userInsightsRepo: userInsightsRepo,
 		summarizer:       summarizer,
@@ -61,16 +64,52 @@ func (h *InsightsHandler) computeQuota(userID int) (insightQuota, bool) {
 	return q, q.RemainingToday > 0 && q.RemainingMonth > 0
 }
 
-// Latest returns the most recent insight + quota.
+// Latest returns the most recent insight + quota + per-recommendation article
+// metadata so the frontend can render clickable cards without an extra round-trip.
 func (h *InsightsHandler) Latest(c *gin.Context) {
 	userID := getUserID(c)
 	ins, _ := h.userInsightsRepo.GetLatest(userID)
 	quota, _ := h.computeQuota(userID)
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"insight":         ins,
 		"remaining_today": quota.RemainingToday,
 		"remaining_month": quota.RemainingMonth,
-	})
+	}
+	if ins != nil && len(ins.Recommendations) > 0 {
+		ids := make([]int, 0)
+		seen := map[int]bool{}
+		for _, d := range ins.Recommendations {
+			for _, a := range d.Articles {
+				if !seen[a.ArticleID] {
+					seen[a.ArticleID] = true
+					ids = append(ids, a.ArticleID)
+				}
+			}
+		}
+		if len(ids) > 0 {
+			arts, err := h.articleRepo.GetByIDsForUser(userID, ids)
+			if err != nil {
+				log.Printf("insights: Latest GetByIDsForUser user=%d: %v", userID, err)
+			} else {
+				meta := make(map[string]gin.H, len(arts))
+				for _, a := range arts {
+					brief := []rune(a.SummaryBrief)
+					if len(brief) > 80 {
+						brief = brief[:80]
+					}
+					meta[strconv.Itoa(a.ID)] = gin.H{
+						"id":         a.ID,
+						"title":      a.Title,
+						"feed_title": a.FeedTitle,
+						"brief":      string(brief),
+						"is_read":    a.IsRead,
+					}
+				}
+				resp["rec_articles"] = meta
+			}
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *InsightsHandler) chooseSummarizer(userID int) *ai.Summarizer {
@@ -104,7 +143,7 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 		return
 	}
 
-	topics, err := h.prefRepo.GetTopicStrings(userID)
+	topics, err := h.prefRepo.GetTopics(userID)
 	if err != nil || len(topics) == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"status":          "no_data",
@@ -113,6 +152,13 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 			"remaining_month": quota.RemainingMonth,
 		})
 		return
+	}
+	tags, _ := h.prefRepo.GetTags(userID)
+	titles, _ := h.prefRepo.GetRecentReadTitles(userID, 20)
+	candidates, err := h.articleRepo.GetInsightCandidates(userID, 40, 10)
+	if err != nil {
+		log.Printf("insights: GetInsightCandidates user=%d: %v", userID, err)
+		candidates = nil
 	}
 
 	summarizer := h.chooseSummarizer(userID)
@@ -130,10 +176,9 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 		return
 	}
 
-	titles, _ := h.prefRepo.GetRecentReadTitles(userID, 20)
-	prompt := buildSimplePrompt(topics, titles)
+	prompt := ai.BuildInsightPrompt(topics, tags, titles, candidates)
 
-	go h.runAsyncManual(id, userID, summarizer, prompt)
+	go h.runAsyncManual(id, userID, summarizer, prompt, candidates)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"status":          "pending",
@@ -143,26 +188,28 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 	})
 }
 
-func (h *InsightsHandler) runAsyncManual(id, userID int, s *ai.Summarizer, prompt string) {
+func (h *InsightsHandler) runAsyncManual(id, userID int, s *ai.Summarizer, prompt string, candidates []model.InsightCandidate) {
 	ctx, cancel := context.WithTimeout(context.Background(), asyncGenTimeout)
 	defer cancel()
-	content, err := s.GenerateUserInsight(ctx, prompt)
+	raw, err := s.GenerateUserInsightJSON(ctx, prompt)
 	if err != nil {
 		log.Printf("insights: async user=%d id=%d failed: %v", userID, id, err)
 		_ = h.userInsightsRepo.MarkFailed(id, err.Error())
 		return
 	}
-	if err := h.userInsightsRepo.MarkDone(id, content); err != nil {
-		log.Printf("insights: async user=%d id=%d MarkDone: %v", userID, id, err)
+	idSet := make(map[int]bool, len(candidates))
+	for _, c := range candidates {
+		idSet[c.Article.ID] = true
+	}
+	markdown, recs, dropped := ai.ParseInsightJSON(raw, idSet)
+	if len(dropped) > 0 {
+		log.Printf("insights: user=%d id=%d dropped %d entries: %v", userID, id, len(dropped), dropped)
+	}
+	if err := h.userInsightsRepo.MarkDoneWithRecs(id, markdown, recs); err != nil {
+		log.Printf("insights: async user=%d id=%d MarkDoneWithRecs: %v", userID, id, err)
 		return
 	}
-	log.Printf("insights: async user=%d id=%d ok (%dB)", userID, id, len(content))
-}
-
-func buildSimplePrompt(topics, titles []string) string {
-	return "基于用户的兴趣主题和最近阅读，请用中文 markdown 给出洞察分析（核心兴趣领域 / 近期偏好变化 / 可能的新兴趣点 / 阅读建议）：\n\n" +
-		"## 用户兴趣主题（按权重排序）\n" + strings.Join(topics, "\n") + "\n\n" +
-		"## 最近阅读的文章标题\n" + strings.Join(titles, "\n")
+	log.Printf("insights: async user=%d id=%d ok (%dB md, %d recs)", userID, id, len(markdown), len(recs))
 }
 
 // parseIDParam parses :id from the route. Returns (id, true) on success;
