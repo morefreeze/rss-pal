@@ -42,7 +42,7 @@ Starting at the position immediately after the closing `$` of a qualifying math 
 - Digits `[0-9]`
 - Single ASCII letter (i.e. one letter not part of a longer word — see stop condition)
 - Unicode math operator blocks: U+2200–U+23FF, U+2A00–U+2AFF
-- U+00B7–U+00FF (Latin-1 supplement; covers `±`, `·`, `÷`, `×`, etc.)
+- U+00B0–U+00FF (Latin-1 supplement math chars; covers `°`, `±`, `²`, `³`, `µ`, `·`, `×`, `÷`, etc. — bound starts at U+00B0 to skip currency/copyright at U+00A0–U+00AF)
 - U+200B (zero-width space — Jina's spacing artefact in fractions/radicals)
 - Common math punctuation: `.` `,` `=` `:` `−` (Unicode minus U+2212)
 - Whitespace `[ \t]`
