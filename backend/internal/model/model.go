@@ -3,19 +3,19 @@ package model
 import "time"
 
 type Feed struct {
-	ID                int        `json:"id" db:"id"`
-	URL               string     `json:"url" db:"url"`
-	Title             string     `json:"title" db:"title"`
-	LastFetchedAt     *time.Time `json:"last_fetched_at" db:"last_fetched_at"`
-	FetchIntervalMin  int        `json:"fetch_interval_minutes" db:"fetch_interval_minutes"`
-	ETag              string     `json:"etag" db:"etag"`
-	LastModified      string     `json:"last_modified" db:"last_modified"`
-	IsActive          bool       `json:"is_active" db:"is_active"`
-	OwnerID           *int       `json:"owner_id" db:"owner_id"`
-	FeedType          string     `json:"feed_type" db:"feed_type"` // "rss" or "html"
-	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
-	ArticleCount      int        `json:"article_count" db:"article_count"`
-	UnreadCount       int        `json:"unread_count" db:"unread_count"`
+	ID               int        `json:"id" db:"id"`
+	URL              string     `json:"url" db:"url"`
+	Title            string     `json:"title" db:"title"`
+	LastFetchedAt    *time.Time `json:"last_fetched_at" db:"last_fetched_at"`
+	FetchIntervalMin int        `json:"fetch_interval_minutes" db:"fetch_interval_minutes"`
+	ETag             string     `json:"etag" db:"etag"`
+	LastModified     string     `json:"last_modified" db:"last_modified"`
+	IsActive         bool       `json:"is_active" db:"is_active"`
+	OwnerID          *int       `json:"owner_id" db:"owner_id"`
+	FeedType         string     `json:"feed_type" db:"feed_type"` // "rss" or "html"
+	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
+	ArticleCount     int        `json:"article_count" db:"article_count"`
+	UnreadCount      int        `json:"unread_count" db:"unread_count"`
 }
 
 type Article struct {
@@ -44,10 +44,10 @@ type UserPreference struct {
 }
 
 type InterestTopic struct {
-	ID                 int       `json:"id" db:"id"`
-	Topic              string    `json:"topic" db:"topic"`
-	Weight             float64   `json:"weight" db:"weight"`
-	LastReinforcedAt   time.Time `json:"last_reinforced_at" db:"last_reinforced_at"`
+	ID               int       `json:"id" db:"id"`
+	Topic            string    `json:"topic" db:"topic"`
+	Weight           float64   `json:"weight" db:"weight"`
+	LastReinforcedAt time.Time `json:"last_reinforced_at" db:"last_reinforced_at"`
 }
 
 type ReadingProgress struct {
@@ -73,4 +73,54 @@ type UpdateProgressRequest struct {
 
 type PreferenceRequest struct {
 	ArticleID int `json:"article_id"`
+}
+
+// InterestTag is the fine-grained counterpart of InterestTopic.
+type InterestTag struct {
+	ID               int       `json:"id" db:"id"`
+	Tag              string    `json:"tag" db:"tag"`
+	Weight           float64   `json:"weight" db:"weight"`
+	LastReinforcedAt time.Time `json:"last_reinforced_at" db:"last_reinforced_at"`
+}
+
+// UserInsight is one persisted AI-generated insight (auto or manual).
+type UserInsight struct {
+	ID              int                       `json:"id" db:"id"`
+	UserID          int                       `json:"user_id" db:"user_id"`
+	Content         string                    `json:"content" db:"content"`
+	Status          string                    `json:"status" db:"status"` // "pending" | "done" | "failed"
+	ErrorMsg        string                    `json:"error_msg,omitempty" db:"error_msg"`
+	TriggeredBy     string                    `json:"triggered_by" db:"triggered_by"` // "auto" | "manual"
+	Model           string                    `json:"model,omitempty" db:"model"`
+	GeneratedAt     time.Time                 `json:"generated_at" db:"generated_at"`
+	Recommendations []RecommendationDirection `json:"recommendations,omitempty" db:"recommendations"`
+}
+
+// ArticleRecommendation is one (article_id, reason) entry inside a direction.
+type ArticleRecommendation struct {
+	ArticleID int    `json:"article_id"`
+	Reason    string `json:"reason"`
+}
+
+// RecommendationDirection groups article recommendations under one interest
+// direction. Kind is "core" (strengthen existing top interest) or "emerging"
+// (weak signal that recurs).
+type RecommendationDirection struct {
+	Direction     string                  `json:"direction"`
+	DirectionKind string                  `json:"direction_kind"`
+	Articles      []ArticleRecommendation `json:"articles"`
+}
+
+// InsightCandidate is one row from ArticleRepository.GetInsightCandidates,
+// shipped to the AI prompt as a candidate article it may select.
+type InsightCandidate struct {
+	Article     Article
+	AlreadyRead bool   // true when from the past-favorites slice (read 30–180d ago, ever liked/saved)
+	BriefShort  string // first 60 runes of summary_brief, "" if none
+}
+
+// Classification is what the AI returns for one article.
+type Classification struct {
+	Topic string   `json:"topic"`
+	Tags  []string `json:"tags"`
 }

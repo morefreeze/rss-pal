@@ -39,3 +39,6 @@ certs/*.pem
 # Logs
 log/
 *.log
+
+# Tooling artifacts
+.playwright-mcp/

@@ -406,3 +406,194 @@ func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Ti
 	defer rows.Close()
 	return r.scanArticle(rows)
 }
+
+// FindArticlesNeedingClassification returns up to `limit` articles that have
+// strong signals in the last 7 days but no cached topic.
+func (r *ArticleRepository) FindArticlesNeedingClassification(limit int) ([]model.Article, error) {
+	query := `
+		SELECT DISTINCT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
+		FROM articles a
+		JOIN user_preferences up ON up.article_id = a.id
+		WHERE a.topic IS NULL
+		  AND up.created_at > NOW() - INTERVAL '7 days'
+		  AND (
+		    up.signal_type IN ('like','save')
+		    OR (up.signal_type = 'read_duration' AND up.signal_value >= 60)
+		  )
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+// SetClassification writes topic + tags onto an article. Pass empty string and
+// empty slice to mark the article as "AI returned nothing" (still cached, won't retry).
+func (r *ArticleRepository) SetClassification(articleID int, topic string, tags []string) error {
+	_, err := r.db.Exec(
+		`UPDATE articles SET topic = $1, tags = $2 WHERE id = $3`,
+		topic, pq.Array(tags), articleID,
+	)
+	return err
+}
+
+// GetClassification reads the cached topic + tags for one article.
+// Returns ("", nil, nil) when not yet classified.
+func (r *ArticleRepository) GetClassification(articleID int) (string, []string, error) {
+	var topic sql.NullString
+	var tags pq.StringArray
+	err := r.db.QueryRow(
+		`SELECT topic, tags FROM articles WHERE id = $1`, articleID,
+	).Scan(&topic, &tags)
+	if err != nil {
+		return "", nil, err
+	}
+	return topic.String, []string(tags), nil
+}
+
+// GetTopTopicVocabulary returns the most-frequent topics across articles, used
+// as a recommendation list for the AI classifier (B3 self-stabilizing vocabulary).
+func (r *ArticleRepository) GetTopTopicVocabulary(limit int) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT topic
+		FROM articles
+		WHERE topic IS NOT NULL AND topic <> ''
+		GROUP BY topic
+		ORDER BY COUNT(*) DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+
+// GetInsightCandidates returns up to (unreadLimit + readLimit) candidate
+// articles for the AI prompt:
+//
+//   - unread block: visible to userID, not yet completed, ranked by score
+//     (existing user_preferences signal weighting) DESC, then published_at
+//     DESC NULLS LAST. Caps at unreadLimit. AlreadyRead=false.
+//
+//   - past-favorites block: visible to userID, is_completed=true, has at
+//     least one 'like' or 'save' signal, last_read_at between 30 and 180
+//     days ago. Same score+recency ranking. Caps at readLimit. AlreadyRead=true.
+//
+// The two blocks are concatenated (unread first). They are disjoint by
+// is_completed, so no extra dedup is needed.
+func (r *ArticleRepository) GetInsightCandidates(userID, unreadLimit, readLimit int) ([]model.InsightCandidate, error) {
+	const unreadQuery = `
+SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
+       f.title AS feed_title
+FROM articles a
+JOIN feeds f ON a.feed_id = f.id
+LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+LEFT JOIN (
+    SELECT article_id, SUM(
+        CASE signal_type
+            WHEN 'like' THEN 5.0 * signal_value
+            WHEN 'dislike' THEN -10.0 * signal_value
+            WHEN 'save' THEN 3.0 * signal_value
+            WHEN 'read_duration' THEN signal_value / 60.0
+            ELSE 1.0 * signal_value
+        END
+    ) AS score
+    FROM user_preferences
+    WHERE user_id = $1 AND created_at > NOW() - INTERVAL '30 days'
+    GROUP BY article_id
+) p ON a.id = p.article_id
+WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+  AND COALESCE(rp.is_completed, false) = false
+ORDER BY COALESCE(p.score, 0) DESC, a.published_at DESC NULLS LAST
+LIMIT $2
+`
+	const readQuery = `
+SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
+       f.title AS feed_title
+FROM articles a
+JOIN feeds f ON a.feed_id = f.id
+JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+JOIN (
+    SELECT article_id, SUM(
+        CASE signal_type
+            WHEN 'like' THEN 5.0 * signal_value
+            WHEN 'save' THEN 3.0 * signal_value
+            ELSE 0
+        END
+    ) AS score
+    FROM user_preferences
+    WHERE user_id = $1 AND signal_type IN ('like','save')
+    GROUP BY article_id
+) p ON a.id = p.article_id
+WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+  AND rp.is_completed = true
+  AND rp.last_read_at BETWEEN NOW() - INTERVAL '180 days' AND NOW() - INTERVAL '30 days'
+  AND p.score > 0
+ORDER BY p.score DESC, rp.last_read_at DESC
+LIMIT $2
+`
+
+	scan := func(rows *sql.Rows, alreadyRead bool, out *[]model.InsightCandidate) error {
+		defer rows.Close()
+		for rows.Next() {
+			var a model.Article
+			var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
+			if err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
+				&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
+				&feedTitle); err != nil {
+				return err
+			}
+			a.Content = content.String
+			a.SummaryBrief = summaryBrief.String
+			a.SummaryDetailed = summaryDetailed.String
+			a.FeedTitle = feedTitle.String
+			brief := []rune(a.SummaryBrief)
+			if len(brief) > 60 {
+				brief = brief[:60]
+			}
+			*out = append(*out, model.InsightCandidate{
+				Article:     a,
+				AlreadyRead: alreadyRead,
+				BriefShort:  string(brief),
+			})
+		}
+		return rows.Err()
+	}
+
+	var out []model.InsightCandidate
+	if unreadLimit > 0 {
+		rows, err := r.db.Query(unreadQuery, userID, unreadLimit)
+		if err != nil {
+			return nil, err
+		}
+		if err := scan(rows, false, &out); err != nil {
+			return nil, err
+		}
+	}
+	if readLimit > 0 {
+		rows, err := r.db.Query(readQuery, userID, readLimit)
+		if err != nil {
+			return nil, err
+		}
+		if err := scan(rows, true, &out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+

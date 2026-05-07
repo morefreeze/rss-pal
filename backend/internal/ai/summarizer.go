@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -37,9 +38,14 @@ func NewSummarizerWithModel(apiKey, baseURL, model string) *Summarizer {
 }
 
 type chatRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	Messages  []chatMessage `json:"messages"`
+	Model          string          `json:"model"`
+	MaxTokens      int             `json:"max_tokens"`
+	Messages       []chatMessage   `json:"messages"`
+	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+}
+
+type responseFormat struct {
+	Type string `json:"type"` // "json_object"
 }
 
 type chatMessage struct {
@@ -52,6 +58,21 @@ type chatResponse struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+	} `json:"choices"`
+}
+
+type chatStreamRequest struct {
+	Model     string        `json:"model"`
+	MaxTokens int           `json:"max_tokens"`
+	Stream    bool          `json:"stream"`
+	Messages  []chatMessage `json:"messages"`
+}
+
+type streamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
 	} `json:"choices"`
 }
 
@@ -132,6 +153,89 @@ func (s *Summarizer) doCall(ctx context.Context, body []byte, maxTokens int) (st
 	return "", fmt.Errorf("no content in response")
 }
 
+// callStream POSTs a streaming chat completion request and invokes onDelta
+// for each non-empty content delta. It returns the full accumulated text.
+// No retry: once any byte has been streamed to the caller, retrying would
+// produce duplicate output. Caller should re-invoke from scratch on error.
+func (s *Summarizer) callStream(ctx context.Context, prompt string, maxTokens int, onDelta func(string)) (string, error) {
+	req := chatStreamRequest{
+		Model:     s.model,
+		MaxTokens: maxTokens,
+		Stream:    true,
+		Messages: []chatMessage{
+			{Role: "system", Content: systemGuardrail},
+			{Role: "user", Content: prompt},
+		},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("AI API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var full strings.Builder
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return full.String(), err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			break
+		}
+		var chunk streamChunk
+		if jerr := json.Unmarshal([]byte(payload), &chunk); jerr != nil {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+		for _, ch := range chunk.Choices {
+			if ch.Delta.Content != "" {
+				full.WriteString(ch.Delta.Content)
+				onDelta(ch.Delta.Content)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+	}
+	return full.String(), nil
+}
+
 type SummaryResult struct {
 	Brief    string
 	Detailed string
@@ -152,6 +256,63 @@ func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*Sum
 		Brief:    brief,
 		Detailed: detailed,
 	}, nil
+}
+
+// SummarizeStream generates brief then detailed summaries, invoking
+// onBriefDelta and onDetailedDelta with token chunks as they arrive.
+func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
+	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
+	content = truncateContent(content)
+
+	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头：
+
+标题：%s
+
+内容：
+%s
+
+请只输出要点列表，不要其他内容。`, title, content)
+
+	brief, err := s.callStream(ctx, briefPrompt, 500, onBriefDelta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream brief: %w", err)
+	}
+
+	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论：
+
+标题：%s
+
+内容：
+%s
+
+请用中文输出详细总结。`, title, content)
+
+	detailed, err := s.callStream(ctx, detailedPrompt, 1000, onDetailedDelta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream detailed summary: %w", err)
+	}
+
+	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+}
+
+// SummarizeWithTemplateStream is the streaming counterpart of SummarizeWithTemplate.
+func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, content,
+	briefPromptTpl, detailedPromptTpl string,
+	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
+	content = truncateContent(content)
+	r := strings.NewReplacer("{title}", title, "{content}", content)
+
+	brief, err := s.callStream(ctx, r.Replace(briefPromptTpl), 500, onBriefDelta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream brief with template: %w", err)
+	}
+
+	detailed, err := s.callStream(ctx, r.Replace(detailedPromptTpl), 1000, onDetailedDelta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream detailed with template: %w", err)
+	}
+
+	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
 }
 
 func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (string, error) {
@@ -254,6 +415,59 @@ func (s *Summarizer) Polish(ctx context.Context, promptText string) (string, err
 		return "", err
 	}
 	return s.doCall(ctx, body, 600)
+}
+
+// GenerateUserInsight runs a non-streaming chat completion with the layered
+// prompt the worker built. maxTokens is fixed at 1500 (sufficient for the
+// 4-section markdown insight format).
+func (s *Summarizer) GenerateUserInsight(ctx context.Context, prompt string) (string, error) {
+	return s.call(ctx, prompt, 1500)
+}
+
+// GenerateUserInsightJSON asks the AI for a JSON object containing markdown +
+// recommendations. Returns the raw body for the caller to parse and validate.
+// maxTokens=2000 leaves room for the JSON envelope plus markdown plus reasons.
+func (s *Summarizer) GenerateUserInsightJSON(ctx context.Context, prompt string) (string, error) {
+	return s.callJSON(ctx, prompt, 2000)
+}
+
+// callJSON is like call but asks the API to return a JSON object. Server-side
+// schema enforcement varies by provider; the parser must still validate.
+func (s *Summarizer) callJSON(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	req := chatRequest{
+		Model:     s.model,
+		MaxTokens: maxTokens,
+		Messages: []chatMessage{
+			{Role: "system", Content: systemGuardrail},
+			{Role: "user", Content: prompt},
+		},
+		ResponseFormat: &responseFormat{Type: "json_object"},
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Duration(attempt) * 3 * time.Second):
+			}
+		}
+		result, err := s.doCall(ctx, body, maxTokens)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+	}
+	return "", lastErr
+}
+
+// Model returns the configured model id (used by user_insights.model column).
+func (s *Summarizer) Model() string {
+	return s.model
 }
 
 func (s *Summarizer) GenerateInsights(ctx context.Context, topics []string, recentArticles string) (string, error) {
