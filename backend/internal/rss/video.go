@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 // VideoEmbed describes a recognized embeddable video reference.
@@ -76,6 +78,24 @@ func extractYouTube(u *url.URL, host string) (*VideoEmbed, bool) {
 }
 
 func extractBilibili(u *url.URL, host string) (*VideoEmbed, bool) {
+	// Handle player.bilibili.com embed URLs (e.g. iframes use this host).
+	// These carry the video ID in the bvid query param, not the URL path.
+	if host == "player.bilibili.com" {
+		id := u.Query().Get("bvid")
+		if !bilibiliBVPattern.MatchString(id) {
+			return nil, false
+		}
+		v := &VideoEmbed{Platform: "bilibili", ID: id}
+		v.Start = parseStartParam(u)
+		if p := u.Query().Get("page"); p != "" {
+			if n, err := strconv.Atoi(p); err == nil && n > 0 {
+				v.Page = n
+			}
+		}
+		v.EmbedURL = v.buildEmbedURL()
+		return v, true
+	}
+
 	if host != "bilibili.com" && host != "m.bilibili.com" {
 		return nil, false
 	}
@@ -258,4 +278,24 @@ func (v *VideoEmbed) buildEmbedURL() string {
 		return s
 	}
 	return ""
+}
+
+// RewriteVideoIframes walks selection and replaces every <iframe> whose src
+// matches a recognized YouTube/Bilibili URL with a <p> containing the
+// inline placeholder. Iframes that don't match are left untouched (they
+// will continue to be dropped by the html-to-markdown converter as before).
+//
+// Call before ExtractMarkdown / mdConverter.ConvertString.
+func RewriteVideoIframes(selection *goquery.Selection) {
+	selection.Find("iframe").Each(func(_ int, s *goquery.Selection) {
+		src, _ := s.Attr("src")
+		if src == "" {
+			return
+		}
+		v, ok := ExtractVideo(src)
+		if !ok {
+			return
+		}
+		s.ReplaceWithHtml("<p>" + v.Placeholder() + "</p>")
+	})
 }

@@ -3,6 +3,8 @@ package rss
 import (
 	"strings"
 	"testing"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 func TestExtractVideo_YouTube(t *testing.T) {
@@ -56,6 +58,7 @@ func TestExtractVideo_Bilibili(t *testing.T) {
 		{"with_t", "https://www.bilibili.com/video/BV1xx411c7mD?t=15", "BV1xx411c7mD", 0, 15},
 		{"with_page_and_t", "https://www.bilibili.com/video/BV1xx411c7mD?p=3&t=42", "BV1xx411c7mD", 3, 42},
 		{"m_subdomain", "https://m.bilibili.com/video/BV1xx411c7mD", "BV1xx411c7mD", 0, 0},
+		{"player_embed", "https://player.bilibili.com/player.html?bvid=BV1xx411c7mD&page=2", "BV1xx411c7mD", 2, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,6 +189,50 @@ func TestExtractVideoMedia(t *testing.T) {
 			}
 			if !strings.Contains(got.URL, tc.wantHost) {
 				t.Errorf("URL = %q does not contain %q", got.URL, tc.wantHost)
+			}
+		})
+	}
+}
+
+func TestRewriteVideoIframes(t *testing.T) {
+	cases := []struct {
+		name     string
+		html     string
+		wantHas  string // substring expected in result
+		wantMiss string // substring that must not survive
+	}{
+		{
+			"youtube_iframe",
+			`<div><p>before</p><iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"></iframe><p>after</p></div>`,
+			"[[video:youtube:dQw4w9WgXcQ]]",
+			"<iframe",
+		},
+		{
+			"bilibili_iframe",
+			`<iframe src="https://player.bilibili.com/player.html?bvid=BV1xx411c7mD&page=2"></iframe>`,
+			"[[video:bilibili:BV1xx411c7mD?page=2]]",
+			"<iframe",
+		},
+		{
+			"unrelated_iframe_left_alone",
+			`<iframe src="https://example.com/widget"></iframe>`,
+			"<iframe",  // unchanged
+			"[[video",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader("<html><body>" + tc.html + "</body></html>"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			RewriteVideoIframes(doc.Selection)
+			out, _ := doc.Find("body").Html()
+			if !strings.Contains(out, tc.wantHas) {
+				t.Errorf("expected %q in %q", tc.wantHas, out)
+			}
+			if tc.wantMiss != "" && strings.Contains(out, tc.wantMiss) {
+				t.Errorf("expected %q to be absent in %q", tc.wantMiss, out)
 			}
 		})
 	}
