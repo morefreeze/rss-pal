@@ -226,6 +226,11 @@ func TestStripJinaMathShadow(t *testing.T) {
 			want: "a $5 burger costs $5",
 		},
 		{
+			name: "copyright not signal",
+			in:   "see $X = 7$ ©2024 Acme",
+			want: "see $X = 7$ ©2024 Acme",
+		},
+		{
 			name: "shadow with unicode minus",
 			in:   "consider $x - 1$x−1 must also satisfy",
 			want: "consider $x - 1$ must also satisfy",
