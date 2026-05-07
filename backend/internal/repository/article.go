@@ -435,7 +435,7 @@ func (r *ArticleRepository) FindArticlesNeedingClassification(limit int) ([]mode
 func (r *ArticleRepository) SetClassification(articleID int, topic string, tags []string) error {
 	_, err := r.db.Exec(
 		`UPDATE articles SET topic = $1, tags = $2 WHERE id = $3`,
-		nullableString(topic), pq.Array(tags), articleID,
+		topic, pq.Array(tags), articleID,
 	)
 	return err
 }
@@ -480,9 +480,3 @@ func (r *ArticleRepository) GetTopTopicVocabulary(limit int) ([]string, error) {
 	return out, nil
 }
 
-func nullableString(s string) interface{} {
-	if s == "" {
-		return nil
-	}
-	return s
-}
