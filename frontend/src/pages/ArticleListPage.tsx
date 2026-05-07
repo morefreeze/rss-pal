@@ -213,10 +213,15 @@ export default function ArticleListPage() {
 
   const openArticle = (id: number) => {
     try {
-      sessionStorage.setItem('articleNavList', JSON.stringify(articles.map(a => a.id)))
+      const ids = articles.map(a => a.id)
+      const i = ids.indexOf(id)
+      const start = Math.max(0, i - 50)
+      const end = Math.min(ids.length, i + 51)
+      sessionStorage.setItem('articleNavList', JSON.stringify(ids.slice(start, end)))
       sessionStorage.setItem('articleListScroll', String(window.scrollY))
+      sessionStorage.setItem('articleEntryPath', '/articles')
     } catch {}
-    navigate(`/articles/${id}`)
+    navigate(`/articles/${id}`, { state: { from: '/articles' } })
   }
 
   const formatDate = (dateStr: string | null) => {

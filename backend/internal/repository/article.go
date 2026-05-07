@@ -480,3 +480,120 @@ func (r *ArticleRepository) GetTopTopicVocabulary(limit int) ([]string, error) {
 	return out, nil
 }
 
+
+// GetInsightCandidates returns up to (unreadLimit + readLimit) candidate
+// articles for the AI prompt:
+//
+//   - unread block: visible to userID, not yet completed, ranked by score
+//     (existing user_preferences signal weighting) DESC, then published_at
+//     DESC NULLS LAST. Caps at unreadLimit. AlreadyRead=false.
+//
+//   - past-favorites block: visible to userID, is_completed=true, has at
+//     least one 'like' or 'save' signal, last_read_at between 30 and 180
+//     days ago. Same score+recency ranking. Caps at readLimit. AlreadyRead=true.
+//
+// The two blocks are concatenated (unread first). They are disjoint by
+// is_completed, so no extra dedup is needed.
+func (r *ArticleRepository) GetInsightCandidates(userID, unreadLimit, readLimit int) ([]model.InsightCandidate, error) {
+	const unreadQuery = `
+SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
+       f.title AS feed_title
+FROM articles a
+JOIN feeds f ON a.feed_id = f.id
+LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+LEFT JOIN (
+    SELECT article_id, SUM(
+        CASE signal_type
+            WHEN 'like' THEN 5.0 * signal_value
+            WHEN 'dislike' THEN -10.0 * signal_value
+            WHEN 'save' THEN 3.0 * signal_value
+            WHEN 'read_duration' THEN signal_value / 60.0
+            ELSE 1.0 * signal_value
+        END
+    ) AS score
+    FROM user_preferences
+    WHERE user_id = $1 AND created_at > NOW() - INTERVAL '30 days'
+    GROUP BY article_id
+) p ON a.id = p.article_id
+WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+  AND COALESCE(rp.is_completed, false) = false
+ORDER BY COALESCE(p.score, 0) DESC, a.published_at DESC NULLS LAST
+LIMIT $2
+`
+	const readQuery = `
+SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
+       f.title AS feed_title
+FROM articles a
+JOIN feeds f ON a.feed_id = f.id
+JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+JOIN (
+    SELECT article_id, SUM(
+        CASE signal_type
+            WHEN 'like' THEN 5.0 * signal_value
+            WHEN 'save' THEN 3.0 * signal_value
+            ELSE 0
+        END
+    ) AS score
+    FROM user_preferences
+    WHERE user_id = $1 AND signal_type IN ('like','save')
+    GROUP BY article_id
+) p ON a.id = p.article_id
+WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+  AND rp.is_completed = true
+  AND rp.last_read_at BETWEEN NOW() - INTERVAL '180 days' AND NOW() - INTERVAL '30 days'
+  AND p.score > 0
+ORDER BY p.score DESC, rp.last_read_at DESC
+LIMIT $2
+`
+
+	scan := func(rows *sql.Rows, alreadyRead bool, out *[]model.InsightCandidate) error {
+		defer rows.Close()
+		for rows.Next() {
+			var a model.Article
+			var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
+			if err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
+				&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
+				&feedTitle); err != nil {
+				return err
+			}
+			a.Content = content.String
+			a.SummaryBrief = summaryBrief.String
+			a.SummaryDetailed = summaryDetailed.String
+			a.FeedTitle = feedTitle.String
+			brief := []rune(a.SummaryBrief)
+			if len(brief) > 60 {
+				brief = brief[:60]
+			}
+			*out = append(*out, model.InsightCandidate{
+				Article:     a,
+				AlreadyRead: alreadyRead,
+				BriefShort:  string(brief),
+			})
+		}
+		return rows.Err()
+	}
+
+	var out []model.InsightCandidate
+	if unreadLimit > 0 {
+		rows, err := r.db.Query(unreadQuery, userID, unreadLimit)
+		if err != nil {
+			return nil, err
+		}
+		if err := scan(rows, false, &out); err != nil {
+			return nil, err
+		}
+	}
+	if readLimit > 0 {
+		rows, err := r.db.Query(readQuery, userID, readLimit)
+		if err != nil {
+			return nil, err
+		}
+		if err := scan(rows, true, &out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
