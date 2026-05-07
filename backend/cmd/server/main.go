@@ -119,6 +119,9 @@ func main() {
 		apiGroup.DELETE("/preferences/save", prefHandler.Unsave)
 		apiGroup.POST("/preferences/read-duration", prefHandler.RecordReadDuration)
 		apiGroup.GET("/preferences/topics", prefHandler.GetTopics)
+		apiGroup.GET("/preferences/tags", prefHandler.GetTags)
+		apiGroup.DELETE("/preferences/topics/:id", prefHandler.DeleteTopic)
+		apiGroup.DELETE("/preferences/tags/:id", prefHandler.DeleteTag)
 
 		// Progress
 		apiGroup.GET("/progress/:article_id", progressHandler.Get)

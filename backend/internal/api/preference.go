@@ -158,6 +158,49 @@ func (h *PreferenceHandler) GetTopics(c *gin.Context) {
 	c.JSON(http.StatusOK, topics)
 }
 
+func (h *PreferenceHandler) GetTags(c *gin.Context) {
+	tags, err := h.prefRepo.GetTags(getUserID(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, tags)
+}
+
+func (h *PreferenceHandler) DeleteTopic(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	rows, err := h.prefRepo.DeleteTopic(getUserID(c), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if rows == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *PreferenceHandler) DeleteTag(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	rows, err := h.prefRepo.DeleteTag(getUserID(c), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if rows == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 type ProgressHandler struct {
 	repo *repository.ProgressRepository
 }
