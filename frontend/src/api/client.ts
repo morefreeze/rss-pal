@@ -303,6 +303,88 @@ export const shareArticle = (articleId: number) =>
 export const generateSummaryWithTemplate = (articleId: number, templateId?: number) =>
   api.post(`/articles/${articleId}/summary`, templateId ? { template_id: templateId } : {}).then(res => res.data)
 
+export type SummaryStreamHandlers = {
+  onBriefDelta?: (text: string) => void
+  onBriefDone?: (full: string) => void
+  onBriefPhaseDone?: () => void
+  onDetailedDelta?: (text: string) => void
+  onDetailedDone?: (full: string) => void
+  onError?: (msg: string) => void
+  onDone?: () => void
+}
+
+export async function generateSummaryStream(
+  articleId: number,
+  templateId: number | undefined,
+  handlers: SummaryStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('token')
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/x-ndjson',
+  }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const body = templateId ? JSON.stringify({ template_id: templateId }) : '{}'
+
+  let resp: Response
+  try {
+    resp = await fetch(`/api/articles/${articleId}/summary?stream=1`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body,
+      signal,
+    })
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') handlers.onError?.(e?.message || 'network error')
+    return
+  }
+
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => '')
+    handlers.onError?.(text || `HTTP ${resp.status}`)
+    return
+  }
+
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let nl = buf.indexOf('\n')
+      while (nl !== -1) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (line) dispatchSummaryFrame(line, handlers)
+        nl = buf.indexOf('\n')
+      }
+    }
+    if (buf.trim()) dispatchSummaryFrame(buf.trim(), handlers)
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return
+    handlers.onError?.(e?.message || 'stream error')
+  }
+}
+
+function dispatchSummaryFrame(line: string, h: SummaryStreamHandlers) {
+  let frame: any
+  try { frame = JSON.parse(line) } catch { return }
+  switch (frame.type) {
+    case 'brief_delta': h.onBriefDelta?.(frame.text || ''); break
+    case 'brief_phase_done': h.onBriefPhaseDone?.(); break
+    case 'brief_done': h.onBriefDone?.(frame.text || ''); break
+    case 'detailed_delta': h.onDetailedDelta?.(frame.text || ''); break
+    case 'detailed_done': h.onDetailedDone?.(frame.text || ''); break
+    case 'error': h.onError?.(frame.msg || 'unknown error'); break
+    case 'done': h.onDone?.(); break
+  }
+}
+
 export const exportMarkdown = (articleId: number) =>
   api.get(`/articles/${articleId}/export/md`, { responseType: 'text' }).then(res => res.data as string)
 
