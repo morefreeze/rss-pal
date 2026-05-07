@@ -19,19 +19,22 @@ type Feed struct {
 }
 
 type Article struct {
-	ID              int        `json:"id" db:"id"`
-	FeedID          int        `json:"feed_id" db:"feed_id"`
-	FeedTitle       string     `json:"feed_title,omitempty" db:"feed_title"`
-	Title           string     `json:"title" db:"title"`
-	URL             string     `json:"url" db:"url"`
-	Content         string     `json:"content" db:"content"`
-	PublishedAt     *time.Time `json:"published_at" db:"published_at"`
-	SummaryBrief    string     `json:"summary_brief" db:"summary_brief"`
-	SummaryDetailed string     `json:"summary_detailed" db:"summary_detailed"`
-	FetchedAt       time.Time  `json:"fetched_at" db:"fetched_at"`
-	WordCount       int        `json:"word_count" db:"word_count"`
-	ReadingMinutes  int        `json:"reading_minutes" db:"reading_minutes"`
-	IsRead          bool       `json:"is_read" db:"is_read"`
+	ID                   int        `json:"id" db:"id"`
+	FeedID               int        `json:"feed_id" db:"feed_id"`
+	FeedTitle            string     `json:"feed_title,omitempty" db:"feed_title"`
+	Title                string     `json:"title" db:"title"`
+	URL                  string     `json:"url" db:"url"`
+	Content              string     `json:"content" db:"content"`
+	PublishedAt          *time.Time `json:"published_at" db:"published_at"`
+	SummaryBrief         string     `json:"summary_brief" db:"summary_brief"`
+	SummaryDetailed      string     `json:"summary_detailed" db:"summary_detailed"`
+	FetchedAt            time.Time  `json:"fetched_at" db:"fetched_at"`
+	WordCount            int        `json:"word_count" db:"word_count"`
+	ReadingMinutes       int        `json:"reading_minutes" db:"reading_minutes"`
+	IsRead               bool       `json:"is_read" db:"is_read"`
+	MediaURL             string     `json:"media_url,omitempty" db:"media_url"`
+	MediaType            string     `json:"media_type,omitempty" db:"media_type"`
+	MediaDurationSeconds int        `json:"media_duration_seconds,omitempty" db:"media_duration_seconds"`
 }
 
 type UserPreference struct {
@@ -123,4 +126,14 @@ type InsightCandidate struct {
 type Classification struct {
 	Topic string   `json:"topic"`
 	Tags  []string `json:"tags"`
+}
+
+// PlaybackProgress is the per-user resume position for an audio article.
+type PlaybackProgress struct {
+	ID              int       `json:"id" db:"id"`
+	UserID          int       `json:"user_id" db:"user_id"`
+	ArticleID       int       `json:"article_id" db:"article_id"`
+	PositionSeconds int       `json:"position_seconds" db:"position_seconds"`
+	LastPlayedAt    time.Time `json:"last_played_at" db:"last_played_at"`
+	IsCompleted     bool      `json:"is_completed" db:"is_completed"`
 }
