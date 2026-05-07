@@ -310,7 +310,7 @@ func (r *ArticleRepository) GetArticlesForTopicExtraction(limit int) ([]model.Ar
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds
 		FROM articles a
 		JOIN user_preferences p ON a.id = p.article_id
-		WHERE p.signal_type IN ('like', 'save')
+		WHERE p.signal_type IN ('like', 'save', 'completed_listen')
 		AND a.content IS NOT NULL AND a.content != ''
 		ORDER BY p.created_at DESC
 		LIMIT $1
