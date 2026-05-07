@@ -219,6 +219,23 @@ func ParseEmbedURL(rawURL string) (*VideoEmbed, bool) {
 	return nil, false
 }
 
+// ExtractVideoMedia is a convenience wrapper that returns a *MediaInfo
+// when rawURL is a recognized video. Returns nil otherwise. Callers that
+// already work in terms of MediaInfo (worker, feed/content APIs) can fall
+// back to ExtractMedia(item) when this returns nil. Video wins over audio
+// because video-bearing feeds occasionally also carry an audio enclosure
+// (rare; we choose visibility over completeness).
+func ExtractVideoMedia(rawURL string) *MediaInfo {
+	v, ok := ExtractVideo(rawURL)
+	if !ok {
+		return nil
+	}
+	return &MediaInfo{
+		URL:  v.EmbedURL,
+		Type: "video/" + v.Platform,
+	}
+}
+
 // buildEmbedURL constructs the canonical iframe src for the embed.
 func (v *VideoEmbed) buildEmbedURL() string {
 	switch v.Platform {
