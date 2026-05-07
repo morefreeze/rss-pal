@@ -256,6 +256,22 @@ func ExtractVideoMedia(rawURL string) *MediaInfo {
 	}
 }
 
+// StripDuplicateVideo removes any [[video:platform:id...]] placeholder in md
+// whose platform+id matches embed. Used after a top-card video is decided
+// so the body doesn't render the same video a second time. Surrounding
+// blank lines collapse so we don't leave a 3-newline gap.
+func StripDuplicateVideo(md string, embed *VideoEmbed) string {
+	if embed == nil || embed.Platform == "" || embed.ID == "" {
+		return md
+	}
+	pat := regexp.MustCompile(
+		`\n*\[\[video:` + regexp.QuoteMeta(embed.Platform) + `:` +
+			regexp.QuoteMeta(embed.ID) + `(?:\?[^\]]*)?\]\]\n*`,
+	)
+	out := pat.ReplaceAllString(md, "\n\n")
+	return strings.TrimSpace(out)
+}
+
 // buildEmbedURL constructs the canonical iframe src for the embed.
 func (v *VideoEmbed) buildEmbedURL() string {
 	switch v.Platform {
