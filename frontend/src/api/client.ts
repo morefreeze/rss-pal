@@ -108,6 +108,9 @@ export interface Article {
   word_count?: number
   reading_minutes?: number
   is_read?: boolean
+  media_url?: string
+  media_type?: string
+  media_duration_seconds?: number
 }
 
 export interface ReadingProgress {
@@ -115,6 +118,11 @@ export interface ReadingProgress {
   article_id: number
   scroll_position: number
   last_read_at: string
+  is_completed: boolean
+}
+
+export interface PlaybackProgress {
+  position_seconds: number
   is_completed: boolean
 }
 
@@ -293,6 +301,12 @@ export const updateProgress = (articleId: number, scrollPosition: number, isComp
 
 export const resetProgress = (articleId: number) =>
   api.post(`/progress/${articleId}/reset`)
+
+export const getPlayback = (articleId: number) =>
+  api.get<PlaybackProgress>(`/articles/${articleId}/playback`).then(res => res.data)
+
+export const putPlayback = (articleId: number, body: PlaybackProgress) =>
+  api.put(`/articles/${articleId}/playback`, body).then(() => undefined)
 
 // Stats
 export const getStats = () =>
