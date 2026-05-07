@@ -39,6 +39,43 @@ func TestExtractVideo_YouTube(t *testing.T) {
 	}
 }
 
+func TestExtractVideo_Bilibili(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        string
+		wantID    string
+		wantPage  int
+		wantStart int
+	}{
+		{"plain_bv", "https://www.bilibili.com/video/BV1xx411c7mD", "BV1xx411c7mD", 0, 0},
+		{"trailing_slash", "https://www.bilibili.com/video/BV1xx411c7mD/", "BV1xx411c7mD", 0, 0},
+		{"with_page", "https://www.bilibili.com/video/BV1xx411c7mD/?p=2", "BV1xx411c7mD", 2, 0},
+		{"with_t", "https://www.bilibili.com/video/BV1xx411c7mD?t=15", "BV1xx411c7mD", 0, 15},
+		{"with_page_and_t", "https://www.bilibili.com/video/BV1xx411c7mD?p=3&t=42", "BV1xx411c7mD", 3, 42},
+		{"m_subdomain", "https://m.bilibili.com/video/BV1xx411c7mD", "BV1xx411c7mD", 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ExtractVideo(tc.in)
+			if !ok {
+				t.Fatalf("ExtractVideo(%q) returned ok=false", tc.in)
+			}
+			if got.Platform != "bilibili" {
+				t.Errorf("Platform = %q, want bilibili", got.Platform)
+			}
+			if got.ID != tc.wantID {
+				t.Errorf("ID = %q, want %q", got.ID, tc.wantID)
+			}
+			if got.Page != tc.wantPage {
+				t.Errorf("Page = %d, want %d", got.Page, tc.wantPage)
+			}
+			if got.Start != tc.wantStart {
+				t.Errorf("Start = %d, want %d", got.Start, tc.wantStart)
+			}
+		})
+	}
+}
+
 func TestExtractVideo_NotAVideo(t *testing.T) {
 	cases := []string{
 		"",
