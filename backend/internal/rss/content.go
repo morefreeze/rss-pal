@@ -366,3 +366,18 @@ func isAvatarImg(s *goquery.Selection) bool {
 	}
 	return false
 }
+
+// stripAvatars removes <img> elements matching avatar heuristics from doc,
+// mutating it in place. Called before markdown conversion so avatars never
+// enter stored content.
+func stripAvatars(doc *goquery.Document) {
+	doc.Find("img").Each(func(_ int, s *goquery.Selection) {
+		if isAvatarImg(s) {
+			s.Remove()
+		}
+	})
+}
+
+// StripAvatars is the exported wrapper for callers in other packages
+// (e.g. internal/api/bookmarklet.go) that hold a goquery.Document.
+func StripAvatars(doc *goquery.Document) { stripAvatars(doc) }
