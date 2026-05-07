@@ -32,11 +32,12 @@ No new files server-side. One new file frontend-side. No DB changes.
 This algorithm is implemented twice (Go + TS). Both implementations share these exact rules:
 
 1. **Find a math span.** Walk the string. When a `$` is encountered, scan forward (without crossing `\n`) for the next `$`. If found, the body is the slice between them.
-2. **Qualify.** The body must contain at least one of `\` `{` `}` `_` `^`. Otherwise treat the `$` as a literal character (advance one) — this protects prose like `$5 burger`.
+2. **Qualify.** Body is non-empty AND its first rune is NOT an ASCII digit (0–9). Otherwise treat the `$` as a literal character (advance one) — this protects prose like `$5 burger`. Bodies without LaTeX-specific characters are still accepted because the actual gate for stripping is the signal-rune check at step 6; a non-math `$cool car$` followed by pure-ASCII text stays untouched.
 3. **Emit `$body$` unchanged** to the output.
 4. **Scan shadow** starting at the position after the closing `$`:
    - Stop at `\n` or end of string.
    - On an ASCII letter: peek the consecutive ASCII-letter run. If length ≥ 3, stop (English word). Else consume the whole run.
+   - On sentence-level punctuation `,` `.` `;` `:` `!` `?`: peek the next rune. If it is whitespace, `$`, newline, or end-of-string, STOP (the punctuation belongs to prose). If it is a digit or letter (compact math like `,3-1=2`), continue scanning.
    - Track whether any consumed character is a "signal rune" (see ranges below).
    - Otherwise consume the character.
 5. **Trim trailing space/tab** from the consumed range.
