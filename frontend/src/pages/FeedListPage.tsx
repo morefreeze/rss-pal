@@ -257,7 +257,7 @@ export default function FeedListPage() {
                   {preview.actual_url !== newUrl.trim() && (
                     <span style={{ marginLeft: 6 }}>· 已自动发现 RSS 地址</span>
                   )}
-                  · {preview.items.length} 篇文章
+                  · {(preview.items ?? []).length} 篇文章
                 </div>
               </div>
               <div className="flex gap-1">
@@ -268,14 +268,14 @@ export default function FeedListPage() {
               </div>
             </div>
             <div>
-              {preview.items.length === 0 ? (
+              {(preview.items ?? []).length === 0 ? (
                 <div className="text-muted text-sm">
                   未找到文章。可能原因：该页面使用 JavaScript 动态加载内容，或此地址不是文章列表页。
                   <br />建议尝试该网站的 RSS 直接地址（通常在页脚或设置中可找到）。
                 </div>
               ) : (
-                preview.items.map((item, i) => (
-                  <div key={i} style={{ padding: '5px 0', borderBottom: i < preview.items.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
+                (preview.items ?? []).map((item, i) => (
+                  <div key={i} style={{ padding: '5px 0', borderBottom: i < (preview.items ?? []).length - 1 ? '1px solid #f5f5f5' : 'none' }}>
                     <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm" style={{ color: '#213547' }}>
                       {item.title}
                     </a>
