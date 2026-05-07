@@ -224,8 +224,14 @@ export const searchArticles = (q: string, limit?: number) =>
 export const getUnreadCount = () =>
   api.get<{ count: number }>('/articles/unread-count').then(res => res.data.count)
 
-export const markAllRead = () =>
-  api.post('/articles/mark-all-read').then(res => res.data)
+export const markAllRead = (filters?: { feedId?: number | null; unread?: boolean; saved?: boolean }) =>
+  api.post('/articles/mark-all-read', null, {
+    params: {
+      feed_id: filters?.feedId ?? undefined,
+      unread: filters?.unread ? 'true' : undefined,
+      saved: filters?.saved ? 'true' : undefined,
+    },
+  }).then(res => res.data)
 
 export const getArticle = (id: number) =>
   api.get<{ article: Article; progress: ReadingProgress | null; signals: Record<string, number> | null; from_bookmarklet?: boolean }>(`/articles/${id}`).then(res => res.data)
