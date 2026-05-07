@@ -3,6 +3,8 @@ package rss
 import (
 	"strings"
 	"testing"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 func TestFetchContentFromReader_HeadingsAndParagraphs(t *testing.T) {
@@ -119,5 +121,43 @@ func TestFetchContentFromReader_PreservesTable(t *testing.T) {
 	}
 	if !strings.Contains(got, "120") || !strings.Contains(got, "340") {
 		t.Errorf("expected row values in table output, got:\n%s", got)
+	}
+}
+
+func TestIsAvatarImg(t *testing.T) {
+	cases := []struct {
+		name string
+		html string
+		want bool
+	}{
+		{"class avatar", `<img class="avatar" src="https://example.com/x.png">`, true},
+		{"class user-avatar", `<img class="user-avatar size-32" src="https://example.com/x.png">`, true},
+		{"id author-photo", `<img id="author-photo" src="https://example.com/x.png">`, true},
+		{"alt profile picture", `<img alt="John's profile picture" src="https://example.com/x.png">`, true},
+		{"alt headshot", `<img alt="Headshot" src="https://example.com/x.png">`, true},
+		{"gravatar host", `<img src="https://www.gravatar.com/avatar/abc123">`, true},
+		{"avatars path", `<img src="https://cdn.example.com/avatars/u123.png">`, true},
+		{"avatar path", `<img src="https://cdn.example.com/avatar/u123.png">`, true},
+		{"both dims small", `<img width="32" height="32" src="https://example.com/x.png">`, true},
+		{"both dims at threshold", `<img width="64" height="64" src="https://example.com/x.png">`, true},
+		{"only width small", `<img width="32" src="https://example.com/x.png">`, false},
+		{"only height small", `<img height="32" src="https://example.com/x.png">`, false},
+		{"large dims", `<img width="800" height="600" src="https://example.com/x.png">`, false},
+		{"plain article image", `<img src="https://example.com/screenshot.png">`, false},
+		{"unrelated class", `<img class="wp-image-123" src="https://example.com/x.png">`, false},
+		{"non-numeric width", `<img width="auto" height="32" src="https://example.com/x.png">`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(tc.html))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			img := doc.Find("img").First()
+			got := isAvatarImg(img)
+			if got != tc.want {
+				t.Errorf("isAvatarImg(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
 	}
 }

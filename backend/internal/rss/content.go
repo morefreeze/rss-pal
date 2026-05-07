@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -317,4 +318,51 @@ func StripHTML(html string) string {
 	}
 	text := doc.Text()
 	return cleanContent(text)
+}
+
+// avatarAttrKeywords are case-insensitive substrings that, when found in an
+// <img>'s class/id/alt/rel attributes, mark it as an author/profile avatar.
+var avatarAttrKeywords = []string{
+	"avatar", "gravatar", "profile", "author",
+	"user-pic", "userpic", "headshot",
+}
+
+// avatarURLKeywords are case-insensitive substrings that, when found in an
+// <img> src URL, mark it as an avatar.
+var avatarURLKeywords = []string{
+	"gravatar.com", "/avatar/", "/avatars/",
+}
+
+// avatarMaxDimension is the upper bound (inclusive) for an <img>'s declared
+// width AND height to be treated as an avatar by dimension. Both dimensions
+// must be present and parseable; one alone does not qualify.
+const avatarMaxDimension = 64
+
+// isAvatarImg reports whether an <img> selection looks like an author/profile
+// avatar. Returns true on either signal: keyword/URL match (class/id/alt/rel/src)
+// or both width AND height attributes present and ≤ avatarMaxDimension.
+func isAvatarImg(s *goquery.Selection) bool {
+	for _, attr := range []string{"class", "id", "alt", "rel"} {
+		v := strings.ToLower(s.AttrOr(attr, ""))
+		if v == "" {
+			continue
+		}
+		for _, kw := range avatarAttrKeywords {
+			if strings.Contains(v, kw) {
+				return true
+			}
+		}
+	}
+	src := strings.ToLower(s.AttrOr("src", ""))
+	for _, kw := range avatarURLKeywords {
+		if strings.Contains(src, kw) {
+			return true
+		}
+	}
+	w, wErr := strconv.Atoi(strings.TrimSpace(s.AttrOr("width", "")))
+	h, hErr := strconv.Atoi(strings.TrimSpace(s.AttrOr("height", "")))
+	if wErr == nil && hErr == nil && w > 0 && h > 0 && w <= avatarMaxDimension && h <= avatarMaxDimension {
+		return true
+	}
+	return false
 }
