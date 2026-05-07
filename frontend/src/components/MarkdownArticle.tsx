@@ -1,7 +1,11 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
+import rehypeKatex from 'rehype-katex'
 import 'highlight.js/styles/github.css'
+import 'katex/dist/katex.min.css'
+import { stripMathShadow } from '../util/mathShadow'
 
 type Props = {
   source: string
@@ -34,13 +38,16 @@ function isAvatarImg(src: string | undefined, alt: string | undefined): boolean 
 
 // Rewrites <img src="..."> to go through the backend proxy so hotlink-
 // protected sites (WeChat, Zhihu) actually render. Author/profile avatars
-// are dropped entirely (see isAvatarImg). External links open in a new tab.
+// are dropped entirely (see isAvatarImg). LaTeX math via remark-math +
+// rehype-katex; Jina Reader's shadow duplicate is removed via stripMathShadow
+// before parsing. External links open in a new tab.
 export default function MarkdownArticle({ source }: Props) {
+  const cleaned = stripMathShadow(source)
   return (
     <div className="markdown-body">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeHighlight, rehypeKatex]}
         components={{
           img: ({ src, alt, ...rest }) => {
             if (isAvatarImg(src, alt)) return null
@@ -65,7 +72,7 @@ export default function MarkdownArticle({ source }: Props) {
           ),
         }}
       >
-        {source}
+        {cleaned}
       </ReactMarkdown>
     </div>
   )
