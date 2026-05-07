@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
@@ -41,8 +42,8 @@ type insightQuota struct {
 }
 
 func (h *InsightsHandler) computeQuota(userID int) (insightQuota, bool) {
-	today, _ := h.userInsightsRepo.CountManualSince(userID, "1 day")
-	month, _ := h.userInsightsRepo.CountManualSince(userID, "30 days")
+	today, _ := h.userInsightsRepo.CountManualSince(userID, 24*time.Hour)
+	month, _ := h.userInsightsRepo.CountManualSince(userID, 30*24*time.Hour)
 	q := insightQuota{
 		RemainingToday: dailyManualLimit - today,
 		RemainingMonth: monthlyManualLimit - month,
