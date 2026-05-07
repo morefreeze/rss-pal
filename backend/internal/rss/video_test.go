@@ -194,6 +194,53 @@ func TestExtractVideoMedia(t *testing.T) {
 	}
 }
 
+func TestRewriteVideoLinks(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			"bare_youtube",
+			"Check out https://www.youtube.com/watch?v=dQw4w9WgXcQ today",
+			"Check out [[video:youtube:dQw4w9WgXcQ]] today",
+		},
+		{
+			"markdown_link",
+			"See [the video](https://youtu.be/dQw4w9WgXcQ) for more.",
+			"See [[video:youtube:dQw4w9WgXcQ]] for more.",
+		},
+		{
+			"bilibili_with_page",
+			"https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+			"[[video:bilibili:BV1xx411c7mD?page=2]]",
+		},
+		{
+			"non_video_url_untouched",
+			"https://example.com/post/abc and a [link](https://example.org/x)",
+			"https://example.com/post/abc and a [link](https://example.org/x)",
+		},
+		{
+			"existing_placeholder_idempotent",
+			"[[video:youtube:dQw4w9WgXcQ]]",
+			"[[video:youtube:dQw4w9WgXcQ]]",
+		},
+		{
+			"two_matches",
+			"a https://youtu.be/dQw4w9WgXcQ b https://youtu.be/abcdEFGHijk c",
+			"a [[video:youtube:dQw4w9WgXcQ]] b [[video:youtube:abcdEFGHijk]] c",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RewriteVideoLinks(tc.in)
+			if got != tc.want {
+				t.Errorf("RewriteVideoLinks() =\n  got:  %q\n  want: %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRewriteVideoIframes(t *testing.T) {
 	cases := []struct {
 		name     string
