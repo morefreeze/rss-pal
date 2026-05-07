@@ -22,9 +22,10 @@ func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error)
 	var articles []model.Article
 	for rows.Next() {
 		var a model.Article
-		var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
+		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+		var mediaDuration sql.NullInt64
 		var isRead sql.NullBool
-		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &feedTitle, &isRead)
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &isRead)
 		if err != nil {
 			return nil, err
 		}
@@ -33,6 +34,9 @@ func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error)
 		a.SummaryDetailed = summaryDetailed.String
 		a.FeedTitle = feedTitle.String
 		a.IsRead = isRead.Bool
+		a.MediaURL = mediaURL.String
+		a.MediaType = mediaType.String
+		a.MediaDurationSeconds = int(mediaDuration.Int64)
 		articles = append(articles, a)
 	}
 	return articles, nil
@@ -42,21 +46,25 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 	var articles []model.Article
 	for rows.Next() {
 		var a model.Article
-		var content, summaryBrief, summaryDetailed sql.NullString
-		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes)
+		var content, summaryBrief, summaryDetailed, mediaURL, mediaType sql.NullString
+		var mediaDuration sql.NullInt64
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration)
 		if err != nil {
 			return nil, err
 		}
 		a.Content = content.String
 		a.SummaryBrief = summaryBrief.String
 		a.SummaryDetailed = summaryDetailed.String
+		a.MediaURL = mediaURL.String
+		a.MediaType = mediaType.String
+		a.MediaDurationSeconds = int(mediaDuration.Int64)
 		articles = append(articles, a)
 	}
 	return articles, nil
 }
 
 func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int) ([]model.Article, error) {
-	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, articles.word_count, articles.reading_minutes, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read
+	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, articles.word_count, articles.reading_minutes, articles.media_url, articles.media_type, articles.media_duration_seconds, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read
 FROM articles
 JOIN feeds ON articles.feed_id = feeds.id
 LEFT JOIN reading_progress rp ON articles.id = rp.article_id AND rp.user_id = $1`
@@ -106,13 +114,14 @@ LEFT JOIN user_preferences up_save ON articles.id = up_save.article_id AND up_sa
 
 func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
 	var a model.Article
-	var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
-	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &feedTitle)
+	var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+	var mediaDuration sql.NullInt64
+	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle)
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +129,9 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	a.SummaryBrief = summaryBrief.String
 	a.SummaryDetailed = summaryDetailed.String
 	a.FeedTitle = feedTitle.String
+	a.MediaURL = mediaURL.String
+	a.MediaType = mediaType.String
+	a.MediaDurationSeconds = int(mediaDuration.Int64)
 	return &a, nil
 }
 
@@ -128,15 +140,17 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title, f.feed_type
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
 	var a model.Article
-	var content, summaryBrief, summaryDetailed, feedTitle, feedType sql.NullString
+	var content, summaryBrief, summaryDetailed, feedTitle, feedType, mediaURL, mediaType sql.NullString
+	var mediaDuration sql.NullInt64
 	err := r.db.QueryRow(query, id, userID).Scan(
 		&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
 		&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
+		&mediaURL, &mediaType, &mediaDuration,
 		&feedTitle, &feedType,
 	)
 	if err != nil {
@@ -146,12 +160,51 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	a.SummaryBrief = summaryBrief.String
 	a.SummaryDetailed = summaryDetailed.String
 	a.FeedTitle = feedTitle.String
+	a.MediaURL = mediaURL.String
+	a.MediaType = mediaType.String
+	a.MediaDurationSeconds = int(mediaDuration.Int64)
 	return &a, feedType.String, nil
 }
 
 func (r *ArticleRepository) Create(article *model.Article) error {
-	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fetched_at`
-	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes).Scan(&article.ID, &article.FetchedAt)
+	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, fetched_at`
+	mediaURL := nullableString(article.MediaURL)
+	mediaType := nullableString(article.MediaType)
+	mediaDuration := nullableInt(article.MediaDurationSeconds)
+	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration).Scan(&article.ID, &article.FetchedAt)
+}
+
+// nullableString returns a sql.NullString that's NULL when s is empty.
+func nullableString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+// nullableInt returns a sql.NullInt64 that's NULL when n is zero.
+func nullableInt(n int) sql.NullInt64 {
+	if n == 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(n), Valid: true}
+}
+
+// UpdateMediaIfNull fills the three media columns for an existing row, but
+// only when media_url is currently NULL. Idempotent: subsequent calls on a
+// row that already has media are no-ops. Used by the worker to backfill
+// historical podcast episodes the first time we see them after this feature
+// ships, without overwriting hand-edited or richer data.
+func (r *ArticleRepository) UpdateMediaIfNull(feedID int, url, mediaURL, mediaType string, durationSeconds int) error {
+	if mediaURL == "" {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE articles
+		SET media_url = $3, media_type = $4, media_duration_seconds = $5
+		WHERE feed_id = $1 AND url = $2 AND media_url IS NULL
+	`, feedID, url, mediaURL, nullableString(mediaType), nullableInt(durationSeconds))
+	return err
 }
 
 func (r *ArticleRepository) Exists(feedID int, url string) (bool, error) {
@@ -219,7 +272,7 @@ func (r *ArticleRepository) UpdatePublishedAtIfNull(feedID int, url string, publ
 
 func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds
 		FROM articles a
 		LEFT JOIN (
 			SELECT article_id, SUM(
@@ -253,7 +306,7 @@ func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Artic
 
 func (r *ArticleRepository) GetArticlesForTopicExtraction(limit int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds
 		FROM articles a
 		JOIN user_preferences p ON a.id = p.article_id
 		WHERE p.signal_type IN ('like', 'save')
@@ -272,7 +325,7 @@ func (r *ArticleRepository) GetArticlesForTopicExtraction(limit int) ([]model.Ar
 
 func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Article, error) {
 	query := `
-		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes
+		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds
 		FROM articles
 		WHERE (summary_brief IS NULL OR summary_brief = '')
 		AND LENGTH(content) > 100
@@ -289,7 +342,7 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 
 func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.url != '' AND a.refetch_attempts < 5
@@ -325,7 +378,7 @@ func (r *ArticleRepository) GetUnreadCount(userID int) (int, error) {
 func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Article, error) {
 	q := "%" + strings.ReplaceAll(query, "%", "\\%") + "%"
 	sqlStr := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title,
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title,
 		       COALESCE(rp.is_completed, false) as is_read
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
@@ -355,7 +408,7 @@ func (r *ArticleRepository) GetByIDsForUser(userID int, ids []int) ([]model.Arti
 		int64s[i] = int64(id)
 	}
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
@@ -376,7 +429,7 @@ func (r *ArticleRepository) GetByIDsForUser(userID int, ids []int) ([]model.Arti
 // back to recency for users with no preference signals.
 func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Time, limit int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
@@ -411,7 +464,7 @@ func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Ti
 // strong signals in the last 7 days but no cached topic.
 func (r *ArticleRepository) FindArticlesNeedingClassification(limit int) ([]model.Article, error) {
 	query := `
-		SELECT DISTINCT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes
+		SELECT DISTINCT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds
 		FROM articles a
 		JOIN user_preferences up ON up.article_id = a.id
 		WHERE a.topic IS NULL
@@ -498,6 +551,7 @@ func (r *ArticleRepository) GetInsightCandidates(userID, unreadLimit, readLimit 
 	const unreadQuery = `
 SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
        a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
+       a.media_url, a.media_type, a.media_duration_seconds,
        f.title AS feed_title
 FROM articles a
 JOIN feeds f ON a.feed_id = f.id
@@ -524,6 +578,7 @@ LIMIT $2
 	const readQuery = `
 SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
        a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
+       a.media_url, a.media_type, a.media_duration_seconds,
        f.title AS feed_title
 FROM articles a
 JOIN feeds f ON a.feed_id = f.id
@@ -552,9 +607,11 @@ LIMIT $2
 		defer rows.Close()
 		for rows.Next() {
 			var a model.Article
-			var content, summaryBrief, summaryDetailed, feedTitle sql.NullString
+			var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+			var mediaDuration sql.NullInt64
 			if err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
 				&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
+				&mediaURL, &mediaType, &mediaDuration,
 				&feedTitle); err != nil {
 				return err
 			}
@@ -562,6 +619,9 @@ LIMIT $2
 			a.SummaryBrief = summaryBrief.String
 			a.SummaryDetailed = summaryDetailed.String
 			a.FeedTitle = feedTitle.String
+			a.MediaURL = mediaURL.String
+			a.MediaType = mediaType.String
+			a.MediaDurationSeconds = int(mediaDuration.Int64)
 			brief := []rune(a.SummaryBrief)
 			if len(brief) > 60 {
 				brief = brief[:60]
