@@ -230,8 +230,6 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 
 	resolveURLs(doc, baseURL)
 
-	resolveURLs(doc, baseURL)
-
 	var content string
 	candidates := []string{
 		"article", "[role='main']", "main",
