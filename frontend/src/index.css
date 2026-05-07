@@ -224,3 +224,14 @@ body.reading-mode-active #root > div > header { display: none; }
 .reading-article .markdown-body table { border-collapse: collapse; margin: 12px 0; }
 .reading-article .markdown-body th, .reading-article .markdown-body td { border: 1px solid var(--reader-muted); padding: 6px 10px; }
 .reading-article .markdown-body a { color: var(--reader-link); }
+
+.typing-caret {
+  display: inline-block;
+  margin-left: 2px;
+  animation: typing-caret-blink 1s step-end infinite;
+  opacity: 0.7;
+  font-weight: normal;
+}
+@keyframes typing-caret-blink {
+  50% { opacity: 0; }
+}
