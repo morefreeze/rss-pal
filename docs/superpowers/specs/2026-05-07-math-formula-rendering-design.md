@@ -32,7 +32,7 @@ Each formula appears twice (LaTeX + shadow) with no whitespace between them, and
 
 ### Qualifying as a math span
 
-A `$...$` qualifies as math (and thus triggers shadow detection) only if its body contains at least one of: `\` `{` `}` `_` `^`. This excludes prose like *"a $5 burger"* or *"earn $N per hour"* from being mangled.
+A `$...$` qualifies as math (and thus triggers shadow detection) if it has a non-empty body whose first rune is not an ASCII digit. Bodies starting with `0`–`9` are rejected — this protects prose like *"a $5 burger"* and *"earn $7 per hour"* from being mangled. Bodies without LaTeX-specific characters (`\` `{` `}` `_` `^`) are still accepted; the *signal-rune* check at the end of the shadow scan (see step 6 below) is the actual gate for whether the shadow gets dropped, so a non-math span like `$cool car$` followed by pure-ASCII text remains untouched.
 
 ### Shadow boundary algorithm
 
@@ -51,7 +51,7 @@ Starting at the position immediately after the closing `$` of a qualifying math 
 - `\n` (newline)
 - End of string
 - A run of 3+ consecutive ASCII letters (looks like an English word). Implementation: when peeking past whitespace or directly, if the next non-whitespace char starts a sequence of ≥3 ASCII letters, stop before any whitespace/letter we'd otherwise consume.
-- A character not in the consume list (e.g. `(`, `[`, `*`, etc.) — stop without consuming it. Note that `.` and `,` ARE consumed; this is a known minor: a shadow ending in a sentence period is consumed, dropping the period along with the shadow. Prose punctuation following the shadow text (e.g. `must`) is preserved because the word triggers the 3-letter stop first.
+- **Sentence-level punctuation followed by a non-math char.** When the scanner hits one of `,` `.` `;` `:` `!` `?`, peek at the next rune: if it is whitespace, `$`, newline, or end-of-string, stop the scan (the punctuation belongs to prose, like `$x \geq 1$x≥1, valid for…`). If the next rune is a digit or letter — i.e. compact math notation like `3+7=10,3-1=2` — continue consuming.
 
 ### Examples (validated)
 
