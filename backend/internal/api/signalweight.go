@@ -19,6 +19,8 @@ func StrengthFromSignal(signalType string, signalValue float64) float64 {
 	switch signalType {
 	case "save":
 		return 2.0
+	case "completed_listen":
+		return 2.0
 	case "like":
 		return 1.0
 	case "read_duration":
