@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
@@ -17,7 +17,13 @@ import { useReaderSettings } from '../hooks/useReaderSettings'
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const reader = useReaderSettings()
+  const entryPath =
+    (location.state as { from?: string } | null)?.from
+    ?? (() => { try { return sessionStorage.getItem('articleEntryPath') } catch { return null } })()
+    ?? '/articles'
+  const handleBack = useCallback(() => navigate(entryPath), [navigate, entryPath])
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [loading, setLoading] = useState(true)
@@ -120,11 +126,11 @@ export default function ArticlePage() {
       // Skip if focused in an input/textarea
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
       if (e.key === 'n' || e.key === 'j') {
-        if (nextId) navigate(`/articles/${nextId}`)
+        if (nextId) navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })
       } else if (e.key === 'p' || e.key === 'k') {
-        if (prevId) navigate(`/articles/${prevId}`)
+        if (prevId) navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })
       } else if (e.key === 'Escape' || e.key === 'Backspace') {
-        navigate(-1)
+        handleBack()
       } else if (e.key === 'm') {
         if (article) {
           if (progress?.is_completed) handleMarkUnread()
@@ -136,7 +142,7 @@ export default function ArticlePage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [nextId, prevId, article, progress, navigate, reader])
+  }, [nextId, prevId, article, progress, navigate, reader, entryPath, handleBack])
 
   // Load templates on mount
   useEffect(() => {
@@ -447,7 +453,7 @@ export default function ArticlePage() {
   if (loadError || !article) return (
     <div className="card" style={{ textAlign: 'center' }}>
       <div className="text-muted">{loadError || '文章不存在'}</div>
-      <button className="secondary" style={{ marginTop: 12 }} onClick={() => navigate(-1)}>← 返回</button>
+      <button className="secondary" style={{ marginTop: 12 }} onClick={handleBack}>← 返回</button>
     </div>
   )
 
@@ -502,7 +508,7 @@ export default function ArticlePage() {
           <div className="flex gap-1">
             <button
               className="secondary"
-              onClick={() => navigate(-1)}
+              onClick={handleBack}
               style={{ fontSize: 13, padding: '4px 10px' }}
             >
               ← 返回
@@ -510,7 +516,7 @@ export default function ArticlePage() {
             {prevId && (
               <button
                 className="secondary"
-                onClick={() => navigate(`/articles/${prevId}`)}
+                onClick={() => navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
                 style={{ fontSize: 13, padding: '4px 10px' }}
                 title="上一篇"
               >
@@ -520,7 +526,7 @@ export default function ArticlePage() {
             {nextId && (
               <button
                 className="secondary"
-                onClick={() => navigate(`/articles/${nextId}`)}
+                onClick={() => navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
                 style={{ fontSize: 13, padding: '4px 10px' }}
                 title="下一篇"
               >
