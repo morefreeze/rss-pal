@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { logout, getUnreadCount } from '../api/client'
 import Toaster from './Toaster'
+import { PlayerProvider } from '../player/PlayerContext'
+import MiniPlayer from './MiniPlayer'
 
 interface LayoutProps {
   user: { id: number; username: string; is_admin: boolean } | null
@@ -57,7 +59,8 @@ export default function Layout({ user, onLogout }: LayoutProps) {
   )
 
   return (
-    <div>
+    <PlayerProvider>
+      <div>
       <header style={{ marginBottom: 16 }}>
         <div className="flex-between">
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#0066cc' }}>RSS Pal</h1>
@@ -120,10 +123,12 @@ export default function Layout({ user, onLogout }: LayoutProps) {
           </nav>
         )}
       </header>
-      <main>
+      <main style={{ paddingBottom: 80 }}>
         <Outlet />
       </main>
       <Toaster />
+      <MiniPlayer />
     </div>
+    </PlayerProvider>
   )
 }
