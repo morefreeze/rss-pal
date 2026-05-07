@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -20,9 +21,16 @@ const decayFactor = 0.98
 // scheduleDailyInsightCron arranges generateDailyInsights to run every 24h at
 // 04:00 UTC+8. Stop the returned cancel func to abort. Survives missed wakeups
 // (always reschedules from "now → next 04:00").
+//
+// Dev hook: setting INSIGHTS_RUN_NOW=1 fires runDailyInsightJob once on startup
+// before entering the regular schedule loop.
 func scheduleDailyInsightCron(deps insightCronDeps) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
+		if os.Getenv("INSIGHTS_RUN_NOW") == "1" {
+			log.Printf("daily insight cron: INSIGHTS_RUN_NOW=1 → firing immediately")
+			runDailyInsightJob(ctx, deps)
+		}
 		for {
 			next := nextDaily0400CST(time.Now())
 			select {
