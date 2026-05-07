@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,7 +47,7 @@ func main() {
 	templateRepo := repository.NewTemplateRepository(db)
 	userInsightsRepo := repository.NewUserInsightRepository(db)
 
-	fetcher := rss.NewFetcher()
+	fetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
 	contentFetcher := rss.NewContentFetcher()
 
 	var summarizer *ai.Summarizer
@@ -226,7 +227,10 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 		}
 
 		exists, _ := articleRepo.Exists(feed.ID, item.Link)
-		mediaInfo := rss.ExtractMedia(item)
+		mediaInfo := rss.ExtractVideoMedia(item.Link)
+		if mediaInfo == nil {
+			mediaInfo = rss.ExtractMedia(item)
+		}
 		if exists {
 			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, parsePublishedTime(item.PublishedParsed, item.UpdatedParsed))
 			if mediaInfo != nil {
@@ -274,6 +278,13 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				article.MediaURL = mediaInfo.URL
 				article.MediaType = mediaInfo.Type
 				article.MediaDurationSeconds = mediaInfo.Duration
+				// If this is a video and the body also mentions the same video,
+				// strip the in-body placeholder so it isn't rendered twice.
+				if strings.HasPrefix(mediaInfo.Type, "video/") {
+					if v, ok := rss.ParseEmbedURL(mediaInfo.URL); ok {
+						article.Content = rss.StripDuplicateVideo(article.Content, v)
+					}
+				}
 			}
 
 			if err := articleRepo.Create(article); err != nil {

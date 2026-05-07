@@ -10,6 +10,7 @@ type Config struct {
 	Claude   ClaudeConfig
 	Auth     AuthConfig
 	JWT      JWTConfig
+	RSSHub   RSSHubConfig
 }
 
 type ServerConfig struct {
@@ -38,6 +39,10 @@ type JWTConfig struct {
 	Secret string
 }
 
+type RSSHubConfig struct {
+	BaseURL string
+}
+
 func Load() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -60,6 +65,9 @@ func Load() *Config {
 		},
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "rss-pal-default-secret-change-me"),
+		},
+		RSSHub: RSSHubConfig{
+			BaseURL: getEnv("RSSHUB_BASE_URL", "http://rsshub:1200"),
 		},
 	}
 }
