@@ -38,9 +38,14 @@ func NewSummarizerWithModel(apiKey, baseURL, model string) *Summarizer {
 }
 
 type chatRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	Messages  []chatMessage `json:"messages"`
+	Model          string          `json:"model"`
+	MaxTokens      int             `json:"max_tokens"`
+	Messages       []chatMessage   `json:"messages"`
+	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+}
+
+type responseFormat struct {
+	Type string `json:"type"` // "json_object"
 }
 
 type chatMessage struct {
@@ -417,6 +422,47 @@ func (s *Summarizer) Polish(ctx context.Context, promptText string) (string, err
 // 4-section markdown insight format).
 func (s *Summarizer) GenerateUserInsight(ctx context.Context, prompt string) (string, error) {
 	return s.call(ctx, prompt, 1500)
+}
+
+// GenerateUserInsightJSON asks the AI for a JSON object containing markdown +
+// recommendations. Returns the raw body for the caller to parse and validate.
+// maxTokens=2000 leaves room for the JSON envelope plus markdown plus reasons.
+func (s *Summarizer) GenerateUserInsightJSON(ctx context.Context, prompt string) (string, error) {
+	return s.callJSON(ctx, prompt, 2000)
+}
+
+// callJSON is like call but asks the API to return a JSON object. Server-side
+// schema enforcement varies by provider; the parser must still validate.
+func (s *Summarizer) callJSON(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	req := chatRequest{
+		Model:     s.model,
+		MaxTokens: maxTokens,
+		Messages: []chatMessage{
+			{Role: "system", Content: systemGuardrail},
+			{Role: "user", Content: prompt},
+		},
+		ResponseFormat: &responseFormat{Type: "json_object"},
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Duration(attempt) * 3 * time.Second):
+			}
+		}
+		result, err := s.doCall(ctx, body, maxTokens)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+	}
+	return "", lastErr
 }
 
 // Model returns the configured model id (used by user_insights.model column).
