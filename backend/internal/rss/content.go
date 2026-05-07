@@ -142,7 +142,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 	for _, selector := range selectors {
 		if doc.Find(selector).Length() > 0 {
 			selection := doc.Find(selector).First()
-			content = extractMarkdown(selection)
+			content = ExtractMarkdown(selection)
 			if len(content) > 200 {
 				break
 			}
@@ -220,10 +220,10 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 	return content, nil
 }
 
-// extractMarkdown converts the HTML inside the goquery selection into Markdown.
+// ExtractMarkdown converts the HTML inside the goquery selection into Markdown.
 // Falls back to the selection's plain text if conversion fails (which should
 // not happen under normal use but keeps the pipeline robust).
-func extractMarkdown(selection *goquery.Selection) string {
+func ExtractMarkdown(selection *goquery.Selection) string {
 	html, err := selection.Html()
 	if err != nil || strings.TrimSpace(html) == "" {
 		return strings.TrimSpace(selection.Text())
@@ -285,7 +285,7 @@ func (f *ContentFetcher) FetchContentFromReader(r io.Reader) (string, error) {
 		if doc.Find(sel).Length() == 0 {
 			continue
 		}
-		md := extractMarkdown(doc.Find(sel).First())
+		md := ExtractMarkdown(doc.Find(sel).First())
 		if len(md) > 50 {
 			content = md
 			break
