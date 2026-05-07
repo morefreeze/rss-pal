@@ -187,13 +187,19 @@ func generateDailyInsights(ctx context.Context, deps insightCronDeps) {
 			log.Printf("daily cron: user %d prompt too long, skipping", u.ID)
 			continue
 		}
+		id, err := deps.userInsightsRepo.InsertPending(u.ID, "auto", deps.defaultModel)
+		if err != nil {
+			log.Printf("daily cron: user %d InsertPending: %v", u.ID, err)
+			continue
+		}
 		content, err := deps.summarizer.GenerateUserInsight(ctx, prompt)
 		if err != nil {
 			log.Printf("daily cron: user %d generate: %v", u.ID, err)
+			_ = deps.userInsightsRepo.MarkFailed(id, err.Error())
 			continue
 		}
-		if err := deps.userInsightsRepo.Insert(u.ID, content, "auto", deps.defaultModel); err != nil {
-			log.Printf("daily cron: user %d insert: %v", u.ID, err)
+		if err := deps.userInsightsRepo.MarkDone(id, content); err != nil {
+			log.Printf("daily cron: user %d MarkDone: %v", u.ID, err)
 			continue
 		}
 		log.Printf("daily cron: user %d ok (topics=%d tags=%d, %dB)", u.ID, len(topics), len(tags), len(content))

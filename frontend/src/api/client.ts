@@ -135,6 +135,8 @@ export interface InterestTag {
 export interface PersistedInsight {
   id: number
   content: string
+  status: 'pending' | 'done' | 'failed'
+  error_msg?: string
   triggered_by: 'auto' | 'manual'
   model?: string
   generated_at: string
@@ -238,13 +240,19 @@ export const getTopics = () =>
 export const getLatestInsights = () =>
   api.get<InsightsLatest>('/insights/latest').then(res => res.data)
 
+export interface GenerateInsightsResp {
+  status: 'pending' | 'no_data'
+  id?: number
+  message?: string
+  remaining_today: number
+  remaining_month: number
+}
+
+// generateInsights kicks off an async insight job. Returns immediately;
+// poll /insights/latest to observe transition from pending → done|failed.
+// Throws on HTTP error (e.g. 429 quota_exceeded, 409 already_pending).
 export const generateInsights = () =>
-  api.post<{
-    insights: string
-    message?: string
-    remaining_today: number
-    remaining_month: number
-  }>('/insights/generate').then(res => res.data)
+  api.post<GenerateInsightsResp>('/insights/generate').then(res => res.data)
 
 export const getTags = () =>
   api.get<InterestTag[]>('/preferences/tags').then(res => res.data)
@@ -254,87 +262,6 @@ export const deleteTopic = (id: number) =>
 
 export const deleteTag = (id: number) =>
   api.delete(`/preferences/tags/${id}`)
-
-export type InsightStreamHandlers = {
-  onDelta?: (text: string) => void
-  onDone?: (full: string, quota: { remaining_today: number; remaining_month: number }) => void
-  onError?: (msg: string, quota?: { remaining_today: number; remaining_month: number }) => void
-}
-
-export async function generateInsightsStream(
-  handlers: InsightStreamHandlers,
-  signal?: AbortSignal,
-): Promise<void> {
-  const token = localStorage.getItem('token')
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/x-ndjson',
-  }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-
-  let resp: Response
-  try {
-    resp = await fetch('/api/insights/generate?stream=1', {
-      method: 'POST',
-      credentials: 'include',
-      headers,
-      signal,
-    })
-  } catch (e: any) {
-    if (e?.name !== 'AbortError') handlers.onError?.(e?.message || 'network error')
-    return
-  }
-
-  if (!resp.ok || !resp.body) {
-    const text = await resp.text().catch(() => '')
-    handlers.onError?.(text || `HTTP ${resp.status}`)
-    return
-  }
-
-  const reader = resp.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      let nl = buf.indexOf('\n')
-      while (nl !== -1) {
-        const line = buf.slice(0, nl).trim()
-        buf = buf.slice(nl + 1)
-        if (line) dispatchInsightFrame(line, handlers)
-        nl = buf.indexOf('\n')
-      }
-    }
-    if (buf.trim()) dispatchInsightFrame(buf.trim(), handlers)
-  } catch (e: any) {
-    if (e?.name === 'AbortError') return
-    handlers.onError?.(e?.message || 'stream error')
-  }
-}
-
-function dispatchInsightFrame(line: string, h: InsightStreamHandlers) {
-  let frame: any
-  try { frame = JSON.parse(line) } catch { return }
-  switch (frame.type) {
-    case 'delta':
-      h.onDelta?.(frame.text || '')
-      break
-    case 'done':
-      h.onDone?.(frame.full || '', {
-        remaining_today: frame.remaining_today ?? 0,
-        remaining_month: frame.remaining_month ?? 0,
-      })
-      break
-    case 'error':
-      h.onError?.(frame.msg || 'unknown error', {
-        remaining_today: frame.remaining_today ?? 0,
-        remaining_month: frame.remaining_month ?? 0,
-      })
-      break
-  }
-}
 
 // Progress
 export const getProgress = (articleId: number) =>
