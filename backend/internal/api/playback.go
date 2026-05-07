@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -41,7 +42,9 @@ func (h *PlaybackHandler) Get(c *gin.Context) {
 
 // Put upserts the user's position. On the first transition false→true, also
 // writes a completed_listen user_preferences row so the recommender treats
-// "listened all the way through" as a strong positive signal (value=8).
+// "listened all the way through" as a strong positive signal. The weight is
+// applied in the scoring SQL (Task 7 of the podcast plan); the row itself
+// stores SignalValue=1.0 as a count.
 //
 // Body: { "position_seconds": int, "is_completed": bool }
 func (h *PlaybackHandler) Put(c *gin.Context) {
@@ -70,12 +73,15 @@ func (h *PlaybackHandler) Put(c *gin.Context) {
 	}
 
 	if result.NewlyCompleted {
-		_ = h.prefRepo.Add(&model.UserPreference{
+		err := h.prefRepo.Add(&model.UserPreference{
 			UserID:      userID,
 			ArticleID:   articleID,
 			SignalType:  "completed_listen",
-			SignalValue: 1.0, // weight is applied in the scoring CASE; value is the count
+			SignalValue: 1.0, // weight is applied in the scoring SQL; this row stores the count.
 		})
+		if err != nil {
+			log.Printf("playback: completed_listen signal failed user=%d article=%d: %v", userID, articleID, err)
+		}
 	}
 	c.Status(http.StatusOK)
 }
