@@ -208,3 +208,70 @@ func TestIsAvatarImg(t *testing.T) {
 		})
 	}
 }
+
+func TestStripJinaMathShadow(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "no math",
+			in:   "Just plain text with no math.",
+			want: "Just plain text with no math.",
+		},
+		{
+			name: "price not math",
+			in:   "a $5 burger costs $5",
+			want: "a $5 burger costs $5",
+		},
+		{
+			name: "shadow with unicode minus",
+			in:   "consider $x - 1$x−1 must also satisfy",
+			want: "consider $x - 1$ must also satisfy",
+		},
+		{
+			name: "shadow with zero-width space",
+			in:   "so $\\sqrt{3 + 7} = \\sqrt{10}$3+7​=10​,3-1=2\nnext line",
+			want: "so $\\sqrt{3 + 7} = \\sqrt{10}$\nnext line",
+		},
+		{
+			name: "shadow before end of line",
+			in:   "and $\\sqrt{10} \\neq 2$10​=2\nmore",
+			want: "and $\\sqrt{10} \\neq 2$\nmore",
+		},
+		{
+			name: "pure ascii shadow kept",
+			in:   "we get $x = 3$x=3 is the answer",
+			want: "we get $x = 3$x=3 is the answer",
+		},
+		{
+			name: "fraction shadow",
+			in:   "result $x = \\frac{3 \\pm \\sqrt{33}}{2}$x=2 3±33​​\nend",
+			want: "result $x = \\frac{3 \\pm \\sqrt{33}}{2}$\nend",
+		},
+		{
+			name: "no closing dollar",
+			in:   "stray $5 dollar bill",
+			want: "stray $5 dollar bill",
+		},
+		{
+			name: "newline inside dollars",
+			in:   "$x \nstuff$ shadow",
+			want: "$x \nstuff$ shadow",
+		},
+		{
+			name: "multiple math on one line",
+			in:   "$x \\geq 1$x≥1, valid for $x = 3$x=3.",
+			want: "$x \\geq 1$, valid for $x = 3$x=3.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripJinaMathShadow(tc.in)
+			if got != tc.want {
+				t.Errorf("stripJinaMathShadow(%q)\n  got:  %q\n  want: %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

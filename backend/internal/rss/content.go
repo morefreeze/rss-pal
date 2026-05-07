@@ -379,3 +379,124 @@ func StripAvatars(doc *goquery.Document) {
 		}
 	})
 }
+
+// stripJinaMathShadow removes the Unicode "shadow" that Jina Reader appends
+// immediately after each LaTeX math span in scraped markdown. See
+// docs/superpowers/specs/2026-05-07-math-formula-rendering-design.md for the
+// detection rules. Pure function: idempotent and safe on inputs without math.
+func stripJinaMathShadow(md string) string {
+	r := []rune(md)
+	var b strings.Builder
+	b.Grow(len(md))
+	i := 0
+	for i < len(r) {
+		if r[i] != '$' {
+			b.WriteRune(r[i])
+			i++
+			continue
+		}
+		// Look for a closing $ on the same line.
+		j := i + 1
+		for j < len(r) && r[j] != '$' && r[j] != '\n' {
+			j++
+		}
+		if j >= len(r) || r[j] == '\n' {
+			b.WriteRune(r[i])
+			i++
+			continue
+		}
+		body := r[i+1 : j]
+		if !mathBodyQualifies(body) {
+			b.WriteRune(r[i])
+			i++
+			continue
+		}
+		// Emit $body$ verbatim.
+		b.WriteString(string(r[i : j+1]))
+		i = j + 1
+		// Scan and possibly drop the shadow that follows.
+		end, hasSignal := scanMathShadow(r, i)
+		if hasSignal {
+			i = end
+		}
+	}
+	return b.String()
+}
+
+func mathBodyQualifies(body []rune) bool {
+	if len(body) == 0 {
+		return false
+	}
+	// Body starting with a digit is likely a price like $5, not LaTeX.
+	if body[0] >= '0' && body[0] <= '9' {
+		return false
+	}
+	for _, c := range body {
+		switch c {
+		case '\\', '{', '}', '_', '^':
+			return true
+		}
+	}
+	// A body without LaTeX specials may still be math if its shadow carries a
+	// Unicode signal (e.g. "$x - 1$x−1"). We accept such bodies here and rely
+	// on scanMathShadow's hasSignal to decide whether to actually drop them.
+	return true
+}
+
+func scanMathShadow(r []rune, start int) (end int, hasSignal bool) {
+	end = start
+	for end < len(r) {
+		c := r[end]
+		if c == '\n' {
+			break
+		}
+		// Sentence-level punctuation (comma, period, etc.) terminates the shadow
+		// only when followed by whitespace, another $, or end of input — meaning
+		// it is sentence punctuation rather than part of a compact notation like
+		// "3+7​=10​,3-1=2".
+		if c == ',' || c == '.' || c == ';' || c == ':' || c == '!' || c == '?' {
+			next := end + 1
+			if next >= len(r) || r[next] == ' ' || r[next] == '\t' || r[next] == '\n' || r[next] == '$' {
+				break
+			}
+		}
+		if isAsciiLetterRune(c) {
+			k := end
+			for k < len(r) && isAsciiLetterRune(r[k]) {
+				k++
+			}
+			if k-end >= 3 {
+				break
+			}
+			end = k
+			continue
+		}
+		if isMathSignalRune(c) {
+			hasSignal = true
+		}
+		end++
+	}
+	for end > start && (r[end-1] == ' ' || r[end-1] == '\t') {
+		end--
+	}
+	return end, hasSignal
+}
+
+func isAsciiLetterRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+func isMathSignalRune(r rune) bool {
+	switch {
+	case r == 0x200B,
+		r == 0x2212:
+		return true
+	case r >= 0x00A0 && r <= 0x00FF,
+		r >= 0x2200 && r <= 0x23FF,
+		r >= 0x2A00 && r <= 0x2AFF,
+		r >= 0x2070 && r <= 0x209F,
+		r >= 0x0391 && r <= 0x03C9:
+		return true
+	}
+	return false
+}
