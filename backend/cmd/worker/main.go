@@ -226,7 +226,10 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 		}
 
 		exists, _ := articleRepo.Exists(feed.ID, item.Link)
-		mediaInfo := rss.ExtractMedia(item)
+		mediaInfo := rss.ExtractVideoMedia(item.Link)
+		if mediaInfo == nil {
+			mediaInfo = rss.ExtractMedia(item)
+		}
 		if exists {
 			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, parsePublishedTime(item.PublishedParsed, item.UpdatedParsed))
 			if mediaInfo != nil {
