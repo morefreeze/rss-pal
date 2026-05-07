@@ -29,7 +29,7 @@ func ExtractVideo(rawURL string) (*VideoEmbed, bool) {
 	if err != nil || u.Host == "" {
 		return nil, false
 	}
-	host := strings.ToLower(strings.TrimPrefix(u.Host, "www."))
+	host := strings.TrimPrefix(strings.ToLower(u.Host), "www.")
 
 	if v, ok := extractYouTube(u, host); ok {
 		return v, true
@@ -42,8 +42,7 @@ func extractYouTube(u *url.URL, host string) (*VideoEmbed, bool) {
 	switch host {
 	case "youtu.be":
 		id = strings.Trim(u.Path, "/")
-	case "youtube.com", "m.youtube.com", "music.youtube.com",
-		"youtube-nocookie.com", "www.youtube-nocookie.com":
+	case "youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com":
 		switch {
 		case u.Path == "/watch":
 			id = u.Query().Get("v")
