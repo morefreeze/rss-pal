@@ -241,6 +241,47 @@ func TestRewriteVideoLinks(t *testing.T) {
 	}
 }
 
+func TestStripDuplicateVideo(t *testing.T) {
+	embed := &VideoEmbed{Platform: "youtube", ID: "dQw4w9WgXcQ"}
+
+	t.Run("removes_matching_placeholder", func(t *testing.T) {
+		in := "Intro paragraph.\n\n[[video:youtube:dQw4w9WgXcQ]]\n\nMore text."
+		want := "Intro paragraph.\n\nMore text."
+		if got := StripDuplicateVideo(in, embed); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("removes_with_query_params", func(t *testing.T) {
+		in := "[[video:youtube:dQw4w9WgXcQ?start=42]]\n\nbody"
+		want := "body"
+		if got := StripDuplicateVideo(in, embed); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("keeps_different_id", func(t *testing.T) {
+		in := "[[video:youtube:abcdEFGHijk]]\n\nbody"
+		if got := StripDuplicateVideo(in, embed); got != in {
+			t.Errorf("expected unchanged, got %q", got)
+		}
+	})
+
+	t.Run("keeps_different_platform", func(t *testing.T) {
+		in := "[[video:bilibili:BV1xx411c7mD]]\n\nbody"
+		if got := StripDuplicateVideo(in, embed); got != in {
+			t.Errorf("expected unchanged, got %q", got)
+		}
+	})
+
+	t.Run("nil_embed_passthrough", func(t *testing.T) {
+		in := "[[video:youtube:dQw4w9WgXcQ]]"
+		if got := StripDuplicateVideo(in, nil); got != in {
+			t.Errorf("expected unchanged, got %q", got)
+		}
+	})
+}
+
 func TestRewriteVideoIframes(t *testing.T) {
 	cases := []struct {
 		name     string
