@@ -106,6 +106,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 
 	// Remove unwanted elements
 	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Remove()
+	StripAvatars(doc)
 
 	// Try to find main content
 	var content string
@@ -279,6 +280,7 @@ func (f *ContentFetcher) FetchContentFromReader(r io.Reader) (string, error) {
 	}
 
 	doc.Find("script, style, nav, header, footer, aside").Remove()
+	StripAvatars(doc)
 
 	selectors := []string{"article", "[role='main']", "main", ".content", ".post", "#content", "body"}
 	var content string
@@ -367,17 +369,13 @@ func isAvatarImg(s *goquery.Selection) bool {
 	return false
 }
 
-// stripAvatars removes <img> elements matching avatar heuristics from doc,
+// StripAvatars removes <img> elements matching avatar heuristics from doc,
 // mutating it in place. Called before markdown conversion so avatars never
 // enter stored content.
-func stripAvatars(doc *goquery.Document) {
+func StripAvatars(doc *goquery.Document) {
 	doc.Find("img").Each(func(_ int, s *goquery.Selection) {
 		if isAvatarImg(s) {
 			s.Remove()
 		}
 	})
 }
-
-// StripAvatars is the exported wrapper for callers in other packages
-// (e.g. internal/api/bookmarklet.go) that hold a goquery.Document.
-func StripAvatars(doc *goquery.Document) { stripAvatars(doc) }
