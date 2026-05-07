@@ -96,3 +96,60 @@ func TestExtractVideo_NotAVideo(t *testing.T) {
 		})
 	}
 }
+
+func TestVideoEmbed_Placeholder(t *testing.T) {
+	cases := []struct {
+		name string
+		v    VideoEmbed
+		want string
+	}{
+		{"yt_basic", VideoEmbed{Platform: "youtube", ID: "dQw4w9WgXcQ"}, "[[video:youtube:dQw4w9WgXcQ]]"},
+		{"yt_start", VideoEmbed{Platform: "youtube", ID: "dQw4w9WgXcQ", Start: 42}, "[[video:youtube:dQw4w9WgXcQ?start=42]]"},
+		{"bili_basic", VideoEmbed{Platform: "bilibili", ID: "BV1xx411c7mD"}, "[[video:bilibili:BV1xx411c7mD]]"},
+		{"bili_page", VideoEmbed{Platform: "bilibili", ID: "BV1xx411c7mD", Page: 2}, "[[video:bilibili:BV1xx411c7mD?page=2]]"},
+		{"bili_page_start", VideoEmbed{Platform: "bilibili", ID: "BV1xx411c7mD", Page: 2, Start: 15}, "[[video:bilibili:BV1xx411c7mD?page=2&start=15]]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.v.Placeholder(); got != tc.want {
+				t.Errorf("Placeholder() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseEmbedURL(t *testing.T) {
+	cases := []struct {
+		in   string
+		want VideoEmbed // EmbedURL ignored
+	}{
+		{
+			"https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0",
+			VideoEmbed{Platform: "youtube", ID: "dQw4w9WgXcQ"},
+		},
+		{
+			"https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&start=42",
+			VideoEmbed{Platform: "youtube", ID: "dQw4w9WgXcQ", Start: 42},
+		},
+		{
+			"https://player.bilibili.com/player.html?bvid=BV1xx411c7mD&high_quality=1&autoplay=0&page=1",
+			VideoEmbed{Platform: "bilibili", ID: "BV1xx411c7mD", Page: 1},
+		},
+		{
+			"https://player.bilibili.com/player.html?bvid=BV1xx411c7mD&high_quality=1&autoplay=0&page=2&t=15",
+			VideoEmbed{Platform: "bilibili", ID: "BV1xx411c7mD", Page: 2, Start: 15},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, ok := ParseEmbedURL(tc.in)
+			if !ok {
+				t.Fatalf("ParseEmbedURL(%q) ok=false", tc.in)
+			}
+			if got.Platform != tc.want.Platform || got.ID != tc.want.ID ||
+				got.Start != tc.want.Start || got.Page != tc.want.Page {
+				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

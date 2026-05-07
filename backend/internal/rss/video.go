@@ -151,6 +151,74 @@ func parseDurationSpec(s string) int {
 	return total + cur
 }
 
+// Placeholder returns the markdown-safe inline placeholder used to represent
+// this embed inside article content. Form: [[video:<platform>:<id>(?query)?]]
+// where the optional query carries `page` (bilibili) and `start` keys.
+func (v *VideoEmbed) Placeholder() string {
+	if v == nil || v.Platform == "" || v.ID == "" {
+		return ""
+	}
+	var params []string
+	if v.Platform == "bilibili" && v.Page > 0 {
+		params = append(params, "page="+strconv.Itoa(v.Page))
+	}
+	if v.Start > 0 {
+		params = append(params, "start="+strconv.Itoa(v.Start))
+	}
+	if len(params) == 0 {
+		return "[[video:" + v.Platform + ":" + v.ID + "]]"
+	}
+	return "[[video:" + v.Platform + ":" + v.ID + "?" + strings.Join(params, "&") + "]]"
+}
+
+// ParseEmbedURL is the inverse of buildEmbedURL: given a stored embed URL
+// (as written into media_url), return the VideoEmbed components.
+func ParseEmbedURL(rawURL string) (*VideoEmbed, bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return nil, false
+	}
+	host := strings.TrimPrefix(strings.ToLower(u.Host), "www.")
+	switch host {
+	case "youtube-nocookie.com", "youtube.com":
+		if !strings.HasPrefix(u.Path, "/embed/") {
+			return nil, false
+		}
+		id := strings.TrimPrefix(u.Path, "/embed/")
+		if i := strings.Index(id, "/"); i >= 0 {
+			id = id[:i]
+		}
+		if !youTubeIDPattern.MatchString(id) {
+			return nil, false
+		}
+		v := &VideoEmbed{Platform: "youtube", ID: id, EmbedURL: rawURL}
+		if s := u.Query().Get("start"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil && n > 0 {
+				v.Start = n
+			}
+		}
+		return v, true
+	case "player.bilibili.com":
+		id := u.Query().Get("bvid")
+		if !bilibiliBVPattern.MatchString(id) {
+			return nil, false
+		}
+		v := &VideoEmbed{Platform: "bilibili", ID: id, EmbedURL: rawURL}
+		if p := u.Query().Get("page"); p != "" {
+			if n, err := strconv.Atoi(p); err == nil && n > 0 {
+				v.Page = n
+			}
+		}
+		if s := u.Query().Get("t"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil && n > 0 {
+				v.Start = n
+			}
+		}
+		return v, true
+	}
+	return nil, false
+}
+
 // buildEmbedURL constructs the canonical iframe src for the embed.
 func (v *VideoEmbed) buildEmbedURL() string {
 	switch v.Platform {
