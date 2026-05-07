@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { usePlayer } from '../player/PlayerContext'
+import Spinner from './Spinner'
 
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2] as const
 
@@ -38,8 +39,13 @@ export default function MiniPlayer() {
         zIndex: 1000,
       }}
     >
-      <button onClick={p.toggle} aria-label={p.playing ? '暂停' : '播放'} style={{ fontSize: 20, padding: '4px 10px' }}>
-        {p.playing ? '⏸' : '▶'}
+      <button
+        onClick={p.toggle}
+        aria-label={p.loading ? '加载中' : p.playing ? '暂停' : '播放'}
+        disabled={p.loading && !p.playing}
+        style={{ fontSize: 20, padding: '4px 10px', minWidth: 40, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        {p.loading ? <Spinner size={16} /> : p.playing ? '⏸' : '▶'}
       </button>
       <button onClick={() => p.skip(-5)} aria-label="后退5秒" style={{ padding: '4px 8px' }}>⏪5</button>
       <button onClick={() => p.skip(10)} aria-label="前进10秒" style={{ padding: '4px 8px' }}>⏩10</button>

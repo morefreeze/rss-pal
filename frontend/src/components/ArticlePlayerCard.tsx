@@ -1,5 +1,6 @@
 import { Article } from '../api/client'
 import { usePlayer } from '../player/PlayerContext'
+import Spinner from './Spinner'
 
 function fmtMinSec(sec: number): string {
   if (!sec || sec <= 0) return ''
@@ -30,7 +31,8 @@ export default function ArticlePlayerCard({ article }: { article: Article }) {
     >
       <button
         onClick={() => (isCurrent ? p.toggle() : p.playArticle(article))}
-        aria-label={playing ? '暂停' : '播放'}
+        aria-label={isCurrent && p.loading ? '加载中' : playing ? '暂停' : '播放'}
+        disabled={isCurrent && p.loading && !playing}
         style={{
           width: 56,
           height: 56,
@@ -41,9 +43,12 @@ export default function ArticlePlayerCard({ article }: { article: Article }) {
           fontSize: 24,
           cursor: 'pointer',
           flexShrink: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
-        {playing ? '⏸' : '▶'}
+        {isCurrent && p.loading ? <Spinner size={24} color="#fff" /> : playing ? '⏸' : '▶'}
       </button>
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: 600, fontSize: 15 }}>音频节目</div>
