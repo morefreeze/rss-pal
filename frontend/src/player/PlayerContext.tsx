@@ -50,6 +50,7 @@ const initial: PlayerState = {
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement>(null)
+  const pendingResumeListenerRef = useRef<(() => void) | null>(null)
   const [state, setState] = useState<PlayerState>(initial)
   const stateRef = useRef(state)
   stateRef.current = state
@@ -103,6 +104,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [flush])
 
+  const clearPendingResume = useCallback(() => {
+    const el = audioRef.current
+    const listener = pendingResumeListenerRef.current
+    if (el && listener) {
+      el.removeEventListener('loadedmetadata', listener)
+    }
+    pendingResumeListenerRef.current = null
+  }, [])
+
   const playArticle = useCallback(async (article: Article) => {
     if (!article.media_url) return
     const el = audioRef.current
@@ -134,17 +144,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       error: null,
     })
 
+    // Drop any previous pending resume seek before binding a new one — under
+    // rapid switches the old listener would otherwise fire against the new src.
+    clearPendingResume()
+
     el.src = article.media_url
     el.playbackRate = stateRef.current.speed
     // Wait for the metadata before seeking — otherwise the seek is dropped.
     const playFromResume = () => {
+      pendingResumeListenerRef.current = null
       el.currentTime = resumeAt
       el.play().catch(() => {})
       el.removeEventListener('loadedmetadata', playFromResume)
     }
+    pendingResumeListenerRef.current = playFromResume
     el.addEventListener('loadedmetadata', playFromResume)
     el.load()
-  }, [flush])
+  }, [flush, clearPendingResume])
 
   const toggle = useCallback(() => {
     const el = audioRef.current
@@ -172,6 +188,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const close = useCallback(() => {
+    clearPendingResume()
     const el = audioRef.current
     if (el) {
       el.pause()
@@ -180,7 +197,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
     flush()
     setState(initial)
-  }, [flush])
+  }, [flush, clearPendingResume])
 
   // MediaSession (lock-screen / hardware keys).
   useEffect(() => {
