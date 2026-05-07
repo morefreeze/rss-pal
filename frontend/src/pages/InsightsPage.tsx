@@ -4,8 +4,9 @@ import ReactMarkdown from 'react-markdown'
 import {
   getTopics, getTags, getLatestInsights, generateInsights,
   deleteTopic, deleteTag,
-  InterestTopic, InterestTag, PersistedInsight,
+  InterestTopic, InterestTag, PersistedInsight, RecArticleMeta,
 } from '../api/client'
+import RecommendationsCard from '../components/RecommendationsCard'
 
 type Phase = 'loading' | 'empty' | 'has'
 
@@ -17,6 +18,7 @@ export default function InsightsPage() {
   const [topics, setTopics] = useState<InterestTopic[]>([])
   const [tags, setTags] = useState<InterestTag[]>([])
   const [insight, setInsight] = useState<PersistedInsight | null>(null)
+  const [recArticles, setRecArticles] = useState<Record<string, RecArticleMeta>>({})
   const [remainingToday, setRemainingToday] = useState(3)
   const [remainingMonth, setRemainingMonth] = useState(100)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -29,6 +31,7 @@ export default function InsightsPage() {
     setRemainingToday(latest.remaining_today)
     setRemainingMonth(latest.remaining_month)
     setInsight(latest.insight)
+    setRecArticles(latest.rec_articles || {})
     return latest.insight
   }
 
@@ -44,6 +47,7 @@ export default function InsightsPage() {
         setRemainingToday(latest.remaining_today)
         setRemainingMonth(latest.remaining_month)
         setInsight(latest.insight)
+        setRecArticles(latest.rec_articles || {})
       }
       const empty = t.length === 0 && g.length === 0 && (!latest || !latest.insight)
       setPhase(empty ? 'empty' : 'has')
@@ -159,6 +163,13 @@ export default function InsightsPage() {
           <div className="text-muted text-sm">点击右上角生成洞察</div>
         )}
       </div>
+
+      {insight?.status === 'done' && insight.recommendations && (
+        <RecommendationsCard
+          recommendations={insight.recommendations}
+          articles={recArticles}
+        />
+      )}
 
       <div className="card">
         <h3 className="mb-2">提升推荐质量</h3>
