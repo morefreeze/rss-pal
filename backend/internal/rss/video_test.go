@@ -1,6 +1,9 @@
 package rss
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExtractVideo_YouTube(t *testing.T) {
 	cases := []struct {
@@ -149,6 +152,40 @@ func TestParseEmbedURL(t *testing.T) {
 			if got.Platform != tc.want.Platform || got.ID != tc.want.ID ||
 				got.Start != tc.want.Start || got.Page != tc.want.Page {
 				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractVideoMedia(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantNil  bool
+		wantType string
+		wantHost string // substring assertion on URL
+	}{
+		{"https://www.youtube.com/watch?v=dQw4w9WgXcQ", false, "video/youtube", "youtube-nocookie.com"},
+		{"https://www.bilibili.com/video/BV1xx411c7mD?p=2", false, "video/bilibili", "player.bilibili.com"},
+		{"https://example.com/post/abc", true, "", ""},
+		{"", true, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got := ExtractVideoMedia(tc.in)
+			if tc.wantNil {
+				if got != nil {
+					t.Fatalf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("expected MediaInfo, got nil")
+			}
+			if got.Type != tc.wantType {
+				t.Errorf("Type = %q, want %q", got.Type, tc.wantType)
+			}
+			if !strings.Contains(got.URL, tc.wantHost) {
+				t.Errorf("URL = %q does not contain %q", got.URL, tc.wantHost)
 			}
 		})
 	}
