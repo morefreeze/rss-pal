@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -277,6 +278,13 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				article.MediaURL = mediaInfo.URL
 				article.MediaType = mediaInfo.Type
 				article.MediaDurationSeconds = mediaInfo.Duration
+				// If this is a video and the body also mentions the same video,
+				// strip the in-body placeholder so it isn't rendered twice.
+				if strings.HasPrefix(mediaInfo.Type, "video/") {
+					if v, ok := rss.ParseEmbedURL(mediaInfo.URL); ok {
+						article.Content = rss.StripDuplicateVideo(article.Content, v)
+					}
+				}
 			}
 
 			if err := articleRepo.Create(article); err != nil {

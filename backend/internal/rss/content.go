@@ -227,6 +227,10 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 // Falls back to the selection's plain text if conversion fails (which should
 // not happen under normal use but keeps the pipeline robust).
 func ExtractMarkdown(selection *goquery.Selection) string {
+	// Pre-conversion: rewrite recognized video iframes to placeholder paragraphs
+	// so the html-to-markdown converter doesn't drop them.
+	RewriteVideoIframes(selection)
+
 	html, err := selection.Html()
 	if err != nil || strings.TrimSpace(html) == "" {
 		return strings.TrimSpace(selection.Text())
@@ -235,6 +239,8 @@ func ExtractMarkdown(selection *goquery.Selection) string {
 	if err != nil {
 		return strings.TrimSpace(selection.Text())
 	}
+	// Post-conversion: catch YouTube/Bilibili URLs that were links rather than iframes.
+	md = RewriteVideoLinks(md)
 	return strings.TrimSpace(md)
 }
 
