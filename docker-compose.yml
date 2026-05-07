@@ -64,13 +64,16 @@ services:
         condition: service_started
 
   rsshub:
-    image: diygod/rsshub:latest
+    # chromium-bundled tag ships Playwright + headless Chromium so routes
+    # that need browser-mode (e.g. Bilibili user/video which now requires
+    # signing) actually work end-to-end.
+    image: diygod/rsshub:chromium-bundled
     restart: unless-stopped
     environment:
       NODE_ENV: production
       CACHE_TYPE: memory
       CACHE_EXPIRE: 3600
-      REQUEST_TIMEOUT: 15000
+      REQUEST_TIMEOUT: 30000
 
   frontend:
     build:
