@@ -125,6 +125,29 @@ export interface InterestTopic {
   last_reinforced_at: string
 }
 
+export interface InterestTag {
+  id: number
+  tag: string
+  weight: number
+  last_reinforced_at: string
+}
+
+export interface PersistedInsight {
+  id: number
+  content: string
+  status: 'pending' | 'done' | 'failed'
+  error_msg?: string
+  triggered_by: 'auto' | 'manual'
+  model?: string
+  generated_at: string
+}
+
+export interface InsightsLatest {
+  insight: PersistedInsight | null
+  remaining_today: number
+  remaining_month: number
+}
+
 export interface InviteCode {
   id: number
   code: string
@@ -214,8 +237,31 @@ export const recordReadDuration = (articleId: number, durationSeconds: number) =
 export const getTopics = () =>
   api.get<InterestTopic[]>('/preferences/topics').then(res => res.data)
 
+export const getLatestInsights = () =>
+  api.get<InsightsLatest>('/insights/latest').then(res => res.data)
+
+export interface GenerateInsightsResp {
+  status: 'pending' | 'no_data'
+  id?: number
+  message?: string
+  remaining_today: number
+  remaining_month: number
+}
+
+// generateInsights kicks off an async insight job. Returns immediately;
+// poll /insights/latest to observe transition from pending → done|failed.
+// Throws on HTTP error (e.g. 429 quota_exceeded, 409 already_pending).
 export const generateInsights = () =>
-  api.post<{ insights: string; message?: string }>('/insights/generate').then(res => res.data)
+  api.post<GenerateInsightsResp>('/insights/generate').then(res => res.data)
+
+export const getTags = () =>
+  api.get<InterestTag[]>('/preferences/tags').then(res => res.data)
+
+export const deleteTopic = (id: number) =>
+  api.delete(`/preferences/topics/${id}`)
+
+export const deleteTag = (id: number) =>
+  api.delete(`/preferences/tags/${id}`)
 
 // Progress
 export const getProgress = (articleId: number) =>

@@ -215,6 +215,24 @@ func (r *UserRepository) SetBookmarkletToken(userID int, token string) error {
 	return err
 }
 
+// ListAll returns every user (id-ordered). Used by daily cron.
+func (r *UserRepository) ListAll() ([]model.User, error) {
+	rows, err := r.db.Query(`SELECT id, username, COALESCE(is_admin, false) FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.User
+	for rows.Next() {
+		var u model.User
+		if err := rows.Scan(&u.ID, &u.Username, &u.IsAdmin); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, nil
+}
+
 func generateCode(length int) string {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	b := make([]byte, length)
