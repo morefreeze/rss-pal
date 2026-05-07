@@ -134,12 +134,6 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 	})
 }
 
-// GenerateStream is implemented in insights_stream.go (Task 13). For now this
-// stub returns 501 so Generate can call it without the package failing to build.
-func (h *InsightsHandler) GenerateStream(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "streaming not implemented yet"})
-}
-
 // parseIDParam parses :id from the route. Returns (id, true) on success;
 // writes 400 + returns (0, false) on failure.
 func parseIDParam(c *gin.Context, key string) (int, bool) {
