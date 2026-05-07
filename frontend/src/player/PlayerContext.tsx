@@ -79,18 +79,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const el = audioRef.current
     if (!el) return
-    const onLoaded = () => setState(s => ({ ...s, duration: el.duration || s.duration, loading: false }))
+    const onLoaded = () => setState(s => ({ ...s, duration: el.duration || s.duration }))
     const onTime = () => setState(s => ({ ...s, position: el.currentTime }))
-    const onPlay = () => setState(s => ({ ...s, playing: true }))
-    const onPause = () => { setState(s => ({ ...s, playing: false })); flush() }
+    const onPlay = () => setState(s => ({ ...s, playing: true, loading: true }))
+    const onPlaying = () => setState(s => ({ ...s, playing: true, loading: false }))
+    const onWaiting = () => setState(s => ({ ...s, loading: true }))
+    const onPause = () => { setState(s => ({ ...s, playing: false, loading: false })); flush() }
     const onEnded = () => {
-      setState(s => ({ ...s, playing: false }))
+      setState(s => ({ ...s, playing: false, loading: false }))
       flush({ position: stateRef.current.duration, isCompleted: true })
     }
     const onError = () => setState(s => ({ ...s, error: '无法加载音频', loading: false, playing: false }))
     el.addEventListener('loadedmetadata', onLoaded)
     el.addEventListener('timeupdate', onTime)
     el.addEventListener('play', onPlay)
+    el.addEventListener('playing', onPlaying)
+    el.addEventListener('waiting', onWaiting)
     el.addEventListener('pause', onPause)
     el.addEventListener('ended', onEnded)
     el.addEventListener('error', onError)
@@ -98,6 +102,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       el.removeEventListener('loadedmetadata', onLoaded)
       el.removeEventListener('timeupdate', onTime)
       el.removeEventListener('play', onPlay)
+      el.removeEventListener('playing', onPlaying)
+      el.removeEventListener('waiting', onWaiting)
       el.removeEventListener('pause', onPause)
       el.removeEventListener('ended', onEnded)
       el.removeEventListener('error', onError)
@@ -154,7 +160,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const playFromResume = () => {
       pendingResumeListenerRef.current = null
       el.currentTime = resumeAt
-      el.play().catch(() => {})
+      el.play().catch(() => { setState(s => ({ ...s, loading: false, playing: false })) })
       el.removeEventListener('loadedmetadata', playFromResume)
     }
     pendingResumeListenerRef.current = playFromResume
@@ -165,7 +171,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const toggle = useCallback(() => {
     const el = audioRef.current
     if (!el || !stateRef.current.articleId) return
-    if (el.paused) el.play().catch(() => {})
+    if (el.paused) el.play().catch(() => { setState(s => ({ ...s, loading: false, playing: false })) })
     else el.pause()
   }, [])
 
