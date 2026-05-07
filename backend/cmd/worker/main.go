@@ -42,6 +42,9 @@ func main() {
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
 	prefRepo := repository.NewPreferenceRepository(db)
+	userRepo := repository.NewUserRepository(db)
+	templateRepo := repository.NewTemplateRepository(db)
+	userInsightsRepo := repository.NewUserInsightRepository(db)
 
 	fetcher := rss.NewFetcher()
 	contentFetcher := rss.NewContentFetcher()
@@ -52,6 +55,19 @@ func main() {
 		log.Println("AI summarizer initialized")
 	} else {
 		log.Println("CLAUDE_API_KEY not set, AI summarization disabled")
+	}
+
+	if summarizer != nil {
+		stopCron := scheduleDailyInsightCron(insightCronDeps{
+			userRepo:         userRepo,
+			prefRepo:         prefRepo,
+			articleRepo:      articleRepo,
+			userInsightsRepo: userInsightsRepo,
+			templateRepo:     templateRepo,
+			summarizer:       summarizer,
+			defaultModel:     ai.DefaultModel,
+		})
+		defer stopCron()
 	}
 
 	ticker := time.NewTicker(1 * time.Minute)
