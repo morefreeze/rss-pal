@@ -8,6 +8,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 )
 
 type PlaybackHandler struct {
@@ -80,7 +81,12 @@ func (h *PlaybackHandler) Put(c *gin.Context) {
 			SignalValue: 1.0, // weight is applied in the scoring SQL; this row stores the count.
 		})
 		if err != nil {
-			log.Printf("playback: completed_listen signal failed user=%d article=%d: %v", userID, articleID, err)
+			// Unique violation = a concurrent PUT already wrote this signal. Expected and benign.
+			if pgErr, ok := err.(*pq.Error); ok && pgErr.Code == "23505" {
+				// ignore
+			} else {
+				log.Printf("playback: completed_listen signal failed user=%d article=%d: %v", userID, articleID, err)
+			}
 		}
 	}
 	c.Status(http.StatusOK)
