@@ -33,7 +33,16 @@ func (h *ArticleHandler) GetUnreadCount(c *gin.Context) {
 }
 
 func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
-	if err := h.progressRepo.MarkAllRead(getUserID(c)); err != nil {
+	var feedID *int
+	if fid := c.Query("feed_id"); fid != "" {
+		if id, err := strconv.Atoi(fid); err == nil {
+			feedID = &id
+		}
+	}
+	unreadOnly := c.Query("unread") == "true"
+	savedOnly := c.Query("saved") == "true"
+
+	if err := h.progressRepo.MarkAllRead(getUserID(c), feedID, unreadOnly, savedOnly); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
