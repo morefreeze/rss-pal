@@ -23,6 +23,7 @@ func main() {
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
 	prefRepo := repository.NewPreferenceRepository(db)
+	playbackRepo := repository.NewPlaybackProgressRepository(db)
 	progressRepo := repository.NewProgressRepository(db)
 	statsRepo := repository.NewStatsRepository(db)
 	userRepo := repository.NewUserRepository(db)
@@ -49,6 +50,7 @@ func main() {
 	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
+	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
 
 	router := gin.Default()
 	// Trust only requests from localhost/private networks (running behind nginx)
@@ -111,6 +113,8 @@ func main() {
 		apiGroup.POST("/articles/:id/content", contentHandler.FetchContent)
 		apiGroup.GET("/articles/:id/export/md", contentHandler.ExportMarkdown)
 		apiGroup.POST("/articles/:id/share", shareHandler.Create)
+		apiGroup.GET("/articles/:id/playback", playbackHandler.Get)
+		apiGroup.PUT("/articles/:id/playback", playbackHandler.Put)
 
 		// Preferences
 		apiGroup.POST("/preferences/like", prefHandler.Like)
