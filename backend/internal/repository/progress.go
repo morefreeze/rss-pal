@@ -33,12 +33,12 @@ func (r *ProgressRepository) Upsert(progress *model.ReadingProgress) error {
 		INSERT INTO reading_progress (user_id, article_id, scroll_position, last_read_at, is_completed)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (article_id, user_id) DO UPDATE SET
-			scroll_position = EXCLUDED.scroll_position,
+			scroll_position = GREATEST(reading_progress.scroll_position, EXCLUDED.scroll_position),
 			last_read_at = EXCLUDED.last_read_at,
-			is_completed = EXCLUDED.is_completed
-		RETURNING id
+			is_completed = reading_progress.is_completed OR EXCLUDED.is_completed
+		RETURNING id, scroll_position, is_completed
 	`
-	return r.db.QueryRow(query, progress.UserID, progress.ArticleID, progress.ScrollPosition, progress.LastReadAt, progress.IsCompleted).Scan(&progress.ID)
+	return r.db.QueryRow(query, progress.UserID, progress.ArticleID, progress.ScrollPosition, progress.LastReadAt, progress.IsCompleted).Scan(&progress.ID, &progress.ScrollPosition, &progress.IsCompleted)
 }
 
 func (r *ProgressRepository) Reset(articleID, userID int) error {
