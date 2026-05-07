@@ -124,6 +124,32 @@ func TestFetchContentFromReader_PreservesTable(t *testing.T) {
 	}
 }
 
+func TestStripAvatars(t *testing.T) {
+	html := `<html><body><article>
+		<p>Intro paragraph.</p>
+		<p><img class="avatar" src="https://example.com/me.png" alt="me"></p>
+		<p><img src="https://www.gravatar.com/avatar/abc"></p>
+		<p><img width="32" height="32" src="https://example.com/tiny.png"></p>
+		<p><img src="https://example.com/screenshot.png" alt="a real screenshot"></p>
+		<p>Trailing paragraph.</p>
+	</article></body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	stripAvatars(doc)
+
+	imgs := doc.Find("img")
+	if imgs.Length() != 1 {
+		t.Fatalf("expected 1 surviving img, got %d", imgs.Length())
+	}
+	src, _ := imgs.First().Attr("src")
+	if src != "https://example.com/screenshot.png" {
+		t.Errorf("wrong img survived: src=%q", src)
+	}
+}
+
 func TestIsAvatarImg(t *testing.T) {
 	cases := []struct {
 		name string
