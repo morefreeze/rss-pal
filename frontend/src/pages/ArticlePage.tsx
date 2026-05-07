@@ -513,26 +513,24 @@ export default function ArticlePage() {
             >
               ← 返回
             </button>
-            {prevId && (
-              <button
-                className="secondary"
-                onClick={() => navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
-                style={{ fontSize: 13, padding: '4px 10px' }}
-                title="上一篇"
-              >
-                ‹ 上一篇
-              </button>
-            )}
-            {nextId && (
-              <button
-                className="secondary"
-                onClick={() => navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
-                style={{ fontSize: 13, padding: '4px 10px' }}
-                title="下一篇"
-              >
-                下一篇 ›
-              </button>
-            )}
+            <button
+              className="secondary"
+              disabled={!prevId}
+              onClick={() => prevId && navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
+              style={{ fontSize: 13, padding: '4px 10px' }}
+              title="上一篇"
+            >
+              ‹ 上一篇
+            </button>
+            <button
+              className="secondary"
+              disabled={!nextId}
+              onClick={() => nextId && navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
+              style={{ fontSize: 13, padding: '4px 10px' }}
+              title="下一篇"
+            >
+              下一篇 ›
+            </button>
           </div>
           {article.feed_title && (
             <div className="text-sm" style={{ color: '#4b6bcc' }}>{article.feed_title}</div>
