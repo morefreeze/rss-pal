@@ -125,6 +125,50 @@ export interface InterestTopic {
   last_reinforced_at: string
 }
 
+export interface InterestTag {
+  id: number
+  tag: string
+  weight: number
+  last_reinforced_at: string
+}
+
+export interface ArticleRecommendation {
+  article_id: number
+  reason: string
+}
+
+export interface RecommendationDirection {
+  direction: string
+  direction_kind: 'core' | 'emerging'
+  articles: ArticleRecommendation[]
+}
+
+export interface RecArticleMeta {
+  id: number
+  title: string
+  feed_title: string
+  brief: string
+  is_read: boolean
+}
+
+export interface PersistedInsight {
+  id: number
+  content: string
+  status: 'pending' | 'done' | 'failed'
+  error_msg?: string
+  triggered_by: 'auto' | 'manual'
+  model?: string
+  generated_at: string
+  recommendations?: RecommendationDirection[]
+}
+
+export interface InsightsLatest {
+  insight: PersistedInsight | null
+  remaining_today: number
+  remaining_month: number
+  rec_articles?: Record<string, RecArticleMeta>
+}
+
 export interface InviteCode {
   id: number
   code: string
@@ -214,8 +258,31 @@ export const recordReadDuration = (articleId: number, durationSeconds: number) =
 export const getTopics = () =>
   api.get<InterestTopic[]>('/preferences/topics').then(res => res.data)
 
+export const getLatestInsights = () =>
+  api.get<InsightsLatest>('/insights/latest').then(res => res.data)
+
+export interface GenerateInsightsResp {
+  status: 'pending' | 'no_data'
+  id?: number
+  message?: string
+  remaining_today: number
+  remaining_month: number
+}
+
+// generateInsights kicks off an async insight job. Returns immediately;
+// poll /insights/latest to observe transition from pending → done|failed.
+// Throws on HTTP error (e.g. 429 quota_exceeded, 409 already_pending).
 export const generateInsights = () =>
-  api.post<{ insights: string; message?: string }>('/insights/generate').then(res => res.data)
+  api.post<GenerateInsightsResp>('/insights/generate').then(res => res.data)
+
+export const getTags = () =>
+  api.get<InterestTag[]>('/preferences/tags').then(res => res.data)
+
+export const deleteTopic = (id: number) =>
+  api.delete(`/preferences/topics/${id}`)
+
+export const deleteTag = (id: number) =>
+  api.delete(`/preferences/tags/${id}`)
 
 // Progress
 export const getProgress = (articleId: number) =>
@@ -302,6 +369,88 @@ export const shareArticle = (articleId: number) =>
 
 export const generateSummaryWithTemplate = (articleId: number, templateId?: number) =>
   api.post(`/articles/${articleId}/summary`, templateId ? { template_id: templateId } : {}).then(res => res.data)
+
+export type SummaryStreamHandlers = {
+  onBriefDelta?: (text: string) => void
+  onBriefDone?: (full: string) => void
+  onBriefPhaseDone?: () => void
+  onDetailedDelta?: (text: string) => void
+  onDetailedDone?: (full: string) => void
+  onError?: (msg: string) => void
+  onDone?: () => void
+}
+
+export async function generateSummaryStream(
+  articleId: number,
+  templateId: number | undefined,
+  handlers: SummaryStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('token')
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/x-ndjson',
+  }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const body = templateId ? JSON.stringify({ template_id: templateId }) : '{}'
+
+  let resp: Response
+  try {
+    resp = await fetch(`/api/articles/${articleId}/summary?stream=1`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body,
+      signal,
+    })
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') handlers.onError?.(e?.message || 'network error')
+    return
+  }
+
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => '')
+    handlers.onError?.(text || `HTTP ${resp.status}`)
+    return
+  }
+
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let nl = buf.indexOf('\n')
+      while (nl !== -1) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (line) dispatchSummaryFrame(line, handlers)
+        nl = buf.indexOf('\n')
+      }
+    }
+    if (buf.trim()) dispatchSummaryFrame(buf.trim(), handlers)
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return
+    handlers.onError?.(e?.message || 'stream error')
+  }
+}
+
+function dispatchSummaryFrame(line: string, h: SummaryStreamHandlers) {
+  let frame: any
+  try { frame = JSON.parse(line) } catch { return }
+  switch (frame.type) {
+    case 'brief_delta': h.onBriefDelta?.(frame.text || ''); break
+    case 'brief_phase_done': h.onBriefPhaseDone?.(); break
+    case 'brief_done': h.onBriefDone?.(frame.text || ''); break
+    case 'detailed_delta': h.onDetailedDelta?.(frame.text || ''); break
+    case 'detailed_done': h.onDetailedDone?.(frame.text || ''); break
+    case 'error': h.onError?.(frame.msg || 'unknown error'); break
+    case 'done': h.onDone?.(); break
+  }
+}
 
 export const exportMarkdown = (articleId: number) =>
   api.get(`/articles/${articleId}/export/md`, { responseType: 'text' }).then(res => res.data as string)

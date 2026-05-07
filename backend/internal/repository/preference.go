@@ -149,3 +149,115 @@ func (r *PreferenceRepository) GetArticleScore(articleID int) (float64, error) {
 	err := r.db.QueryRow(query, articleID).Scan(&score)
 	return score, err
 }
+
+// --- interest_tags (mirror of interest_topics, finer grain) ---
+
+func (r *PreferenceRepository) GetTags(userID int) ([]model.InterestTag, error) {
+	rows, err := r.db.Query(
+		`SELECT id, tag, weight, last_reinforced_at FROM interest_tags
+		 WHERE user_id = $1 ORDER BY weight DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.InterestTag
+	for rows.Next() {
+		var t model.InterestTag
+		if err := rows.Scan(&t.ID, &t.Tag, &t.Weight, &t.LastReinforcedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (r *PreferenceRepository) UpsertTag(userID int, tag string, weightDelta float64) error {
+	if tag == "" {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		INSERT INTO interest_tags (user_id, tag, weight, last_reinforced_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (user_id, tag) DO UPDATE SET
+		  weight = interest_tags.weight + $3,
+		  last_reinforced_at = NOW()
+	`, userID, tag, weightDelta)
+	return err
+}
+
+func (r *PreferenceRepository) DeleteTopic(userID, id int) (int64, error) {
+	res, err := r.db.Exec(
+		`DELETE FROM interest_topics WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (r *PreferenceRepository) DeleteTag(userID, id int) (int64, error) {
+	res, err := r.db.Exec(
+		`DELETE FROM interest_tags WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// --- decay (all users) ---
+
+func (r *PreferenceRepository) DecayAllTopics(factor float64) error {
+	_, err := r.db.Exec(
+		`UPDATE interest_topics SET weight = weight * $1 WHERE weight > 0.01`, factor)
+	return err
+}
+
+func (r *PreferenceRepository) DecayAllTags(factor float64) error {
+	_, err := r.db.Exec(
+		`UPDATE interest_tags SET weight = weight * $1 WHERE weight > 0.01`, factor)
+	return err
+}
+
+// --- signal strength aggregation (used by worker) ---
+
+type UserSignalStrength struct {
+	UserID   int
+	Strength float64
+}
+
+// GetUsersWithStrongSignal returns each user's MAX signal strength against an article.
+// Used by the worker after classifying to attribute the topic/tags to all interested users.
+func (r *PreferenceRepository) GetUsersWithStrongSignal(articleID int) ([]UserSignalStrength, error) {
+	rows, err := r.db.Query(`
+		SELECT user_id,
+		       MAX(CASE signal_type
+		           WHEN 'save' THEN 2.0
+		           WHEN 'like' THEN 1.0
+		           WHEN 'read_duration' THEN
+		             CASE WHEN signal_value >= 60 THEN 0.5 ELSE 0 END
+		           ELSE 0
+		       END) AS strength
+		FROM user_preferences
+		WHERE article_id = $1
+		GROUP BY user_id
+		HAVING MAX(CASE signal_type
+		           WHEN 'save' THEN 2.0
+		           WHEN 'like' THEN 1.0
+		           WHEN 'read_duration' THEN
+		             CASE WHEN signal_value >= 60 THEN 0.5 ELSE 0 END
+		           ELSE 0
+		       END) > 0
+	`, articleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserSignalStrength
+	for rows.Next() {
+		var u UserSignalStrength
+		if err := rows.Scan(&u.UserID, &u.Strength); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, nil
+}

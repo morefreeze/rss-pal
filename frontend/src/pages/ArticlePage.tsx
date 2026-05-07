@@ -1,22 +1,29 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
-  getTemplates, generateSummaryWithTemplate, shareArticle, exportMarkdown,
+  getTemplates, generateSummaryStream, shareArticle, exportMarkdown,
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
 import ReadingLayout from '../components/ReadingLayout'
+import BackToTopButton from '../components/BackToTopButton'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const reader = useReaderSettings()
+  const entryPath =
+    (location.state as { from?: string } | null)?.from
+    ?? (() => { try { return sessionStorage.getItem('articleEntryPath') } catch { return null } })()
+    ?? '/articles'
+  const handleBack = useCallback(() => navigate(entryPath), [navigate, entryPath])
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [loading, setLoading] = useState(true)
@@ -41,7 +48,12 @@ export default function ArticlePage() {
   // Template selector state
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined)
-  const [regenerating, setRegenerating] = useState(false)
+
+  // Streaming summary state
+  const [streamingBrief, setStreamingBrief] = useState('')
+  const [streamingDetailed, setStreamingDetailed] = useState('')
+  const [streamPhase, setStreamPhase] = useState<'idle' | 'brief' | 'detailed'>('idle')
+  const streamAbortRef = useRef<AbortController | null>(null)
 
   // Share state
   const [shareToken, setShareToken] = useState<string>('')
@@ -103,6 +115,7 @@ export default function ArticlePage() {
       if (id && duration > 5) {
         recordReadDuration(Number(id), duration)
       }
+      streamAbortRef.current?.abort()
     }
   }, [id])
 
@@ -112,11 +125,11 @@ export default function ArticlePage() {
       // Skip if focused in an input/textarea
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
       if (e.key === 'n' || e.key === 'j') {
-        if (nextId) navigate(`/articles/${nextId}`)
+        if (nextId) navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })
       } else if (e.key === 'p' || e.key === 'k') {
-        if (prevId) navigate(`/articles/${prevId}`)
+        if (prevId) navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })
       } else if (e.key === 'Escape' || e.key === 'Backspace') {
-        navigate(-1)
+        handleBack()
       } else if (e.key === 'm') {
         if (article) {
           if (progress?.is_completed) handleMarkUnread()
@@ -128,14 +141,41 @@ export default function ArticlePage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [nextId, prevId, article, progress, navigate, reader])
+  }, [nextId, prevId, article, progress, navigate, reader, entryPath, handleBack])
 
   // Load templates on mount
   useEffect(() => {
     getTemplates().then(ts => setTemplates(ts || [])).catch(() => {})
   }, [])
 
-  const handleScroll = useCallback(async () => {
+  const pendingProgressRef = useRef<{ scrollPosition: number; isCompleted: boolean } | null>(null)
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushProgress = useCallback(async () => {
+    if (!article) return
+    const pending = pendingProgressRef.current
+    if (!pending) return
+    pendingProgressRef.current = null
+    if (progressTimerRef.current) {
+      clearTimeout(progressTimerRef.current)
+      progressTimerRef.current = null
+    }
+    try {
+      const newProgress = await updateProgress(article.id, pending.scrollPosition, pending.isCompleted)
+      setProgress(newProgress)
+    } catch {
+      // network blip — let the next scroll re-schedule
+    }
+  }, [article])
+
+  const scheduleProgressFlush = useCallback(() => {
+    if (progressTimerRef.current) clearTimeout(progressTimerRef.current)
+    progressTimerRef.current = setTimeout(() => {
+      flushProgress()
+    }, 1500)
+  }, [flushProgress])
+
+  const handleScroll = useCallback(() => {
     if (!article || !contentRef.current) return
 
     const scrollTop = window.scrollY
@@ -148,8 +188,15 @@ export default function ArticlePage() {
 
     const isCompleted = scrollPosition > 0.9
     const wasCompleted = progress?.is_completed
-    const newProgress = await updateProgress(article.id, scrollPosition, isCompleted)
-    setProgress(newProgress)
+
+    setProgress(prev => prev ? {
+      ...prev,
+      scroll_position: scrollPosition,
+      is_completed: isCompleted,
+    } : prev)
+
+    pendingProgressRef.current = { scrollPosition, isCompleted }
+
     if (isCompleted && !wasCompleted) {
       try {
         const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
@@ -159,25 +206,76 @@ export default function ArticlePage() {
         }
       } catch {}
       window.dispatchEvent(new Event('refresh-unread'))
+      flushProgress()
+      return
     }
-  }, [article, progress])
+
+    scheduleProgressFlush()
+  }, [article, progress, flushProgress, scheduleProgressFlush])
 
   useEffect(() => {
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
 
+  useEffect(() => {
+    const onVisibility = () => { if (document.hidden) flushProgress() }
+    const onBeforeUnload = () => { flushProgress() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      flushProgress()
+    }
+  }, [flushProgress])
+
   const handleRegenerateWithTemplate = async () => {
     if (!article) return
-    setRegenerating(true)
-    try {
-      const result = await generateSummaryWithTemplate(article.id, selectedTemplateId)
-      setArticle({ ...article, summary_brief: result.summary_brief, summary_detailed: result.summary_detailed })
-    } catch {
-      toast.error('重新生成总结失败')
-    } finally {
-      setRegenerating(false)
-    }
+    streamAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    streamAbortRef.current = ctrl
+
+    setStreamingBrief('')
+    setStreamingDetailed('')
+    setStreamPhase('brief')
+
+    let finalBrief = ''
+    let finalDetailed = ''
+
+    await generateSummaryStream(
+      article.id,
+      selectedTemplateId,
+      {
+        onBriefDelta: (t) => setStreamingBrief(prev => prev + t),
+        onBriefPhaseDone: () => setStreamPhase('detailed'),
+        onBriefDone: (full) => {
+          finalBrief = full
+          setStreamingBrief(full)
+        },
+        onDetailedDelta: (t) => {
+          setStreamPhase(prev => prev === 'brief' ? 'detailed' : prev)
+          setStreamingDetailed(prev => prev + t)
+        },
+        onDetailedDone: (full) => {
+          finalDetailed = full
+          setStreamingDetailed(full)
+        },
+        onDone: () => {
+          setArticle(a => a ? { ...a, summary_brief: finalBrief, summary_detailed: finalDetailed } : a)
+          setStreamPhase('idle')
+          setStreamingBrief('')
+          setStreamingDetailed('')
+        },
+        onError: (msg) => {
+          toast.error('生成总结失败：' + msg)
+          setStreamPhase('idle')
+          setStreamingBrief('')
+          setStreamingDetailed('')
+        },
+      },
+      ctrl.signal,
+    )
   }
 
   const handleFetchContent = async () => {
@@ -342,7 +440,7 @@ export default function ArticlePage() {
   if (loadError || !article) return (
     <div className="card" style={{ textAlign: 'center' }}>
       <div className="text-muted">{loadError || '文章不存在'}</div>
-      <button className="secondary" style={{ marginTop: 12 }} onClick={() => navigate(-1)}>← 返回</button>
+      <button className="secondary" style={{ marginTop: 12 }} onClick={handleBack}>← 返回</button>
     </div>
   )
 
@@ -397,31 +495,29 @@ export default function ArticlePage() {
           <div className="flex gap-1">
             <button
               className="secondary"
-              onClick={() => navigate(-1)}
+              onClick={handleBack}
               style={{ fontSize: 13, padding: '4px 10px' }}
             >
               ← 返回
             </button>
-            {prevId && (
-              <button
-                className="secondary"
-                onClick={() => navigate(`/articles/${prevId}`)}
-                style={{ fontSize: 13, padding: '4px 10px' }}
-                title="上一篇"
-              >
-                ‹ 上一篇
-              </button>
-            )}
-            {nextId && (
-              <button
-                className="secondary"
-                onClick={() => navigate(`/articles/${nextId}`)}
-                style={{ fontSize: 13, padding: '4px 10px' }}
-                title="下一篇"
-              >
-                下一篇 ›
-              </button>
-            )}
+            <button
+              className="secondary"
+              disabled={!prevId}
+              onClick={() => prevId && navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
+              style={{ fontSize: 13, padding: '4px 10px' }}
+              title="上一篇"
+            >
+              ‹ 上一篇
+            </button>
+            <button
+              className="secondary"
+              disabled={!nextId}
+              onClick={() => nextId && navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
+              style={{ fontSize: 13, padding: '4px 10px' }}
+              title="下一篇"
+            >
+              下一篇 ›
+            </button>
           </div>
           {article.feed_title && (
             <div className="text-sm" style={{ color: '#4b6bcc' }}>{article.feed_title}</div>
@@ -503,15 +599,36 @@ export default function ArticlePage() {
             <button
               className={article.summary_brief || article.summary_detailed ? 'secondary' : ''}
               onClick={handleRegenerateWithTemplate}
-              disabled={regenerating}
+              disabled={streamPhase !== 'idle'}
               style={{ fontSize: 13, padding: '4px 12px' }}
             >
-              {(regenerating) ? '生成中...' : (article.summary_brief || article.summary_detailed) ? '重新生成' : '生成总结'}
+              {streamPhase !== 'idle' ? '生成中...' : (article.summary_brief || article.summary_detailed) ? '重新生成' : '生成总结'}
             </button>
           </div>
         </div>
 
-        {(article.summary_brief || article.summary_detailed) ? (
+        {streamPhase !== 'idle' ? (
+          <div className="markdown-body">
+            {streamingBrief && (
+              <div style={{ whiteSpace: 'pre-wrap' }}>
+                {streamingBrief}
+                {streamPhase === 'brief' && <span className="typing-caret">▍</span>}
+              </div>
+            )}
+            {streamingDetailed && (
+              <>
+                <hr style={{ margin: '12px 0', borderColor: '#eee' }} />
+                <div style={{ whiteSpace: 'pre-wrap' }}>
+                  {streamingDetailed}
+                  {streamPhase === 'detailed' && <span className="typing-caret">▍</span>}
+                </div>
+              </>
+            )}
+            {!streamingBrief && !streamingDetailed && (
+              <div className="text-muted text-sm" style={{ padding: '8px 0' }}>正在生成总结...</div>
+            )}
+          </div>
+        ) : (article.summary_brief || article.summary_detailed) ? (
           <div className="markdown-body">
             {article.summary_brief && (
               <ReactMarkdown>{article.summary_brief}</ReactMarkdown>
@@ -525,7 +642,7 @@ export default function ArticlePage() {
           </div>
         ) : (
           <div className="text-muted text-sm" style={{ padding: '8px 0' }}>
-            {(regenerating) ? '正在生成总结...' : '暂无总结，点击右上角"生成总结"按钮'}
+            暂无总结，点击右上角"生成总结"按钮
           </div>
         )}
       </div>
@@ -589,6 +706,7 @@ export default function ArticlePage() {
           </div>
         </div>
       </div>
+      <BackToTopButton />
     </div>
   )
 }

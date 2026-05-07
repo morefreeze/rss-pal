@@ -226,6 +226,9 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 		return "", err
 	}
 	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Remove()
+	rss.StripAvatars(doc)
+
+	resolveURLs(doc, baseURL)
 
 	resolveURLs(doc, baseURL)
 
