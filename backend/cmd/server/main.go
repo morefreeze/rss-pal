@@ -44,7 +44,8 @@ func main() {
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
-	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, summarizer, cfg)
+	userInsightsRepo := repository.NewUserInsightRepository(db)
+	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, userInsightsRepo, summarizer, cfg)
 	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
@@ -129,6 +130,7 @@ func main() {
 		apiGroup.GET("/stats/progress", statsHandler.GetProgress)
 
 		// Insights
+		apiGroup.GET("/insights/latest", insightsHandler.Latest)
 		apiGroup.POST("/insights/generate", insightsHandler.Generate)
 
 		// Recommended feeds (catalog)
