@@ -2,11 +2,42 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
+import { usePlayer } from '../player/PlayerContext'
 
 const PAGE_SIZE = 20
 
+function PlayButton({ article, onPlay }: { article: Article; onPlay: (a: Article) => void }) {
+  if (!article.media_url) return null
+  return (
+    <button
+      type="button"
+      aria-label="播放"
+      title="播放"
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onPlay(article)
+      }}
+      style={{
+        marginRight: 8,
+        padding: '2px 8px',
+        borderRadius: 999,
+        border: '1px solid #0066cc',
+        background: '#fff',
+        color: '#0066cc',
+        fontSize: 12,
+        cursor: 'pointer',
+        flexShrink: 0,
+      }}
+    >
+      ▶
+    </button>
+  )
+}
+
 export default function ArticleListPage() {
   const navigate = useNavigate()
+  const player = usePlayer()
   const [articles, setArticles] = useState<Article[]>([])
   const [recommended, setRecommended] = useState<Article[]>([])
   const [feeds, setFeeds] = useState<Feed[]>([])
@@ -351,7 +382,10 @@ export default function ArticleListPage() {
             <Link key={article.id} to={`/articles/${article.id}`} className="card" style={{ display: 'block' }}>
               <div className="flex-between">
                 <div style={{ flex: 1 }}>
-                  <div className="text-bold">{article.title}</div>
+                  <div className="text-bold" style={{ display: 'flex', alignItems: 'center' }}>
+                    <PlayButton article={article} onPlay={player.playArticle} />
+                    <span>{article.title}</span>
+                  </div>
                   <div className="flex gap-2 mt-1">
                     <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
                     {article.feed_title && (
@@ -400,7 +434,10 @@ export default function ArticleListPage() {
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
                     )}
                     <div style={{ flex: 1 }}>
-                      <div className={isRead(article) ? 'text-muted' : 'text-bold'}>{article.title}</div>
+                      <div className={isRead(article) ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
+                        <PlayButton article={article} onPlay={player.playArticle} />
+                        <span>{article.title}</span>
+                      </div>
                       {article.summary_brief && (
                         <div className="text-muted text-sm mt-1">
                           {stripMarkdown(article.summary_brief).slice(0, 120)}...
@@ -460,7 +497,10 @@ export default function ArticleListPage() {
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
                 )}
                 <div style={{ flex: 1 }}>
-                  <div className={isRead(article) ? 'text-muted' : 'text-bold'}>{article.title}</div>
+                  <div className={isRead(article) ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
+                    <PlayButton article={article} onPlay={player.playArticle} />
+                    <span>{article.title}</span>
+                  </div>
                   {article.summary_brief && (
                     <div className="text-muted text-sm mt-1">
                       {stripMarkdown(article.summary_brief).slice(0, 120)}...
