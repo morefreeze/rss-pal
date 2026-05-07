@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -499,4 +500,137 @@ func isMathSignalRune(r rune) bool {
 		return true
 	}
 	return false
+}
+
+// mediaURLRegex matches absolute and protocol-relative audio/video URLs.
+// Captures the full URL including any query string.
+var mediaURLRegex = regexp.MustCompile(`(?:https?:)?//[^\s"'<>]*\.(?:mp3|m4a|mp4)(?:\?[^\s"'<>]*)?`)
+
+// mediaExtTypeMap maps lowercase file extensions to MIME types.
+var mediaExtTypeMap = map[string]string{
+	"mp3": "audio/mpeg",
+	"m4a": "audio/mp4",
+	"mp4": "video/mp4",
+}
+
+// mediaBasenameMinLen is the minimum number of characters required in the
+// basename (without extension) of a media URL to avoid trivial UI-sound filenames.
+const mediaBasenameMinLen = 6
+
+// mediaDenyList is a set of exact (case-insensitive) basenames that are
+// almost certainly UI sounds rather than real media content.
+var mediaDenyList = map[string]bool{
+	"notification": true,
+	"click":        true,
+	"bell":         true,
+	"intro":        true,
+	"outro":        true,
+	"loading":      true,
+	"error":        true,
+	"popup":        true,
+	"chime":        true,
+	"tick":         true,
+	"ding":         true,
+	"beep":         true,
+}
+
+// mediaTypeFromExt returns the MIME type for the given lowercase extension,
+// or empty string if unknown.
+func mediaTypeFromExt(ext string) string {
+	return mediaExtTypeMap[strings.ToLower(ext)]
+}
+
+// mediaBasename extracts the filename base (no extension) from a URL path.
+// E.g. "https://cdn/foo/bar.mp3?x=1" → "bar"
+func mediaBasename(rawURL string) string {
+	// Strip query string for path operations
+	u := rawURL
+	if i := strings.Index(u, "?"); i >= 0 {
+		u = u[:i]
+	}
+	base := path.Base(u)
+	if dot := strings.LastIndex(base, "."); dot >= 0 {
+		return base[:dot]
+	}
+	return base
+}
+
+// findMediaInBytes scans body for the first plausible audio/video URL and
+// returns its MediaInfo, or nil. baseURL is unused currently but kept for
+// future relative-URL resolution.
+func findMediaInBytes(body []byte, _ string) *MediaInfo {
+	matches := mediaURLRegex.FindAll(body, -1)
+	for _, m := range matches {
+		raw := string(m)
+
+		// Resolve protocol-relative URLs to https
+		if strings.HasPrefix(raw, "//") {
+			raw = "https:" + raw
+		}
+
+		// Determine extension (strip query string first)
+		pathPart := raw
+		if i := strings.Index(pathPart, "?"); i >= 0 {
+			pathPart = pathPart[:i]
+		}
+		dot := strings.LastIndex(pathPart, ".")
+		if dot < 0 {
+			continue
+		}
+		ext := strings.ToLower(pathPart[dot+1:])
+		mimeType := mediaTypeFromExt(ext)
+		if mimeType == "" {
+			continue
+		}
+
+		// Basename length filter
+		base := mediaBasename(raw)
+		if len(base) < mediaBasenameMinLen {
+			continue
+		}
+
+		// Deny-list filter (case-insensitive exact match)
+		if mediaDenyList[strings.ToLower(base)] {
+			continue
+		}
+
+		return &MediaInfo{
+			URL:      raw,
+			Type:     mimeType,
+			Duration: 0,
+		}
+	}
+	return nil
+}
+
+// FindMediaInHTML fetches pageURL and returns the first plausible audio/video
+// URL found in the response body. Returns nil if none found. Used as a
+// fallback when the RSS layer didn't yield an <enclosure> for an article —
+// e.g., BBC programme pages embed mediaselector mp3 URLs in JSON blobs that
+// survive in the raw HTML.
+func (f *ContentFetcher) FindMediaInHTML(ctx context.Context, pageURL string) *MediaInfo {
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB cap
+	if err != nil {
+		return nil
+	}
+
+	return findMediaInBytes(body, pageURL)
 }
