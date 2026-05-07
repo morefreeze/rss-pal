@@ -43,6 +43,33 @@ func (s *SummarizerService) SummarizeWithTemplate(ctx context.Context, article *
 	return result.Brief, result.Detailed, nil
 }
 
+func (s *SummarizerService) SummarizeStream(ctx context.Context, article *model.Article,
+	onBriefDelta, onDetailedDelta func(string)) (brief, detailed string, err error) {
+	content := article.Content
+	if content == "" {
+		content = article.Title
+	}
+	result, err := s.summarizer.SummarizeStream(ctx, article.Title, content, onBriefDelta, onDetailedDelta)
+	if err != nil {
+		return "", "", err
+	}
+	return result.Brief, result.Detailed, nil
+}
+
+func (s *SummarizerService) SummarizeWithTemplateStream(ctx context.Context, article *model.Article,
+	briefPrompt, detailedPrompt string,
+	onBriefDelta, onDetailedDelta func(string)) (brief, detailed string, err error) {
+	content := article.Content
+	if content == "" {
+		content = article.Title
+	}
+	result, err := s.summarizer.SummarizeWithTemplateStream(ctx, article.Title, content, briefPrompt, detailedPrompt, onBriefDelta, onDetailedDelta)
+	if err != nil {
+		return "", "", err
+	}
+	return result.Brief, result.Detailed, nil
+}
+
 func (s *SummarizerService) ExtractTopics(ctx context.Context, article *model.Article) ([]string, error) {
 	content := article.Content
 	if content == "" {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -163,41 +164,43 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		}
 	}
 
-	// Check optional template_id — accept from either JSON body or query param
-	var brief, detailed string
+	// Parse optional template_id from JSON body or query
+	var bodyReq struct {
+		TemplateID int `json:"template_id"`
+	}
 	if h.templateRepo != nil {
-		var bodyReq struct {
-			TemplateID int `json:"template_id"`
-		}
-		// ShouldBindJSON is non-fatal here; fall through if body has no template_id
 		_ = c.ShouldBindJSON(&bodyReq)
-		templateIDStr := c.Query("template_id")
-		if bodyReq.TemplateID == 0 && templateIDStr != "" {
+		if templateIDStr := c.Query("template_id"); bodyReq.TemplateID == 0 && templateIDStr != "" {
 			bodyReq.TemplateID, _ = strconv.Atoi(templateIDStr)
 		}
-		if bodyReq.TemplateID > 0 {
-			templateID := bodyReq.TemplateID
-			{
-				tpl, err := h.templateRepo.GetByID(templateID)
-				if err == nil && tpl != nil {
-					brief, detailed, err = summarizerToUse.SummarizeWithTemplate(
-						c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt,
-					)
-					if err != nil {
-						c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-						return
-					}
-					if err := h.articleRepo.UpdateSummary(id, brief, detailed); err != nil {
-						c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-						return
-					}
-					c.JSON(http.StatusOK, gin.H{
-						"summary_brief":    brief,
-						"summary_detailed": detailed,
-					})
-					return
-				}
+	}
+
+	if c.Query("stream") == "1" {
+		h.streamSummary(c, id, article, summarizerToUse, bodyReq.TemplateID)
+		return
+	}
+
+	var brief, detailed string
+
+	if h.templateRepo != nil && bodyReq.TemplateID > 0 {
+		tpl, terr := h.templateRepo.GetByID(bodyReq.TemplateID)
+		if terr == nil && tpl != nil {
+			brief, detailed, err = summarizerToUse.SummarizeWithTemplate(
+				c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt,
+			)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
 			}
+			if err := h.articleRepo.UpdateSummary(id, brief, detailed); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"summary_brief":    brief,
+				"summary_detailed": detailed,
+			})
+			return
 		}
 	}
 
@@ -217,6 +220,78 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		"summary_brief":    brief,
 		"summary_detailed": detailed,
 	})
+}
+
+func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Article, summarizerToUse *service.SummarizerService, templateID int) {
+	c.Writer.Header().Set("Content-Type", "application/x-ndjson")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.WriteHeader(http.StatusOK)
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		writeFrame(c, map[string]any{"type": "error", "msg": "streaming unsupported"})
+		return
+	}
+
+	writeAndFlush := func(frame map[string]any) {
+		writeFrame(c, frame)
+		flusher.Flush()
+	}
+
+	briefDone := false
+	onBrief := func(delta string) {
+		writeAndFlush(map[string]any{"type": "brief_delta", "text": delta})
+	}
+	onDetailed := func(delta string) {
+		// First detailed delta marks brief phase complete on the wire so the
+		// client can switch its rendering pane even before we know the full text.
+		if !briefDone {
+			briefDone = true
+			writeAndFlush(map[string]any{"type": "brief_phase_done"})
+		}
+		writeAndFlush(map[string]any{"type": "detailed_delta", "text": delta})
+	}
+
+	var brief, detailed string
+	var serr error
+	if h.templateRepo != nil && templateID > 0 {
+		tpl, terr := h.templateRepo.GetByID(templateID)
+		if terr == nil && tpl != nil {
+			brief, detailed, serr = summarizerToUse.SummarizeWithTemplateStream(
+				c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt, onBrief, onDetailed,
+			)
+		} else {
+			brief, detailed, serr = summarizerToUse.SummarizeStream(c.Request.Context(), article, onBrief, onDetailed)
+		}
+	} else {
+		brief, detailed, serr = summarizerToUse.SummarizeStream(c.Request.Context(), article, onBrief, onDetailed)
+	}
+
+	if serr != nil {
+		writeAndFlush(map[string]any{"type": "error", "msg": serr.Error()})
+		return
+	}
+
+	writeAndFlush(map[string]any{"type": "brief_done", "text": brief})
+	writeAndFlush(map[string]any{"type": "detailed_done", "text": detailed})
+
+	if err := h.articleRepo.UpdateSummary(id, brief, detailed); err != nil {
+		writeAndFlush(map[string]any{"type": "error", "msg": err.Error()})
+		return
+	}
+
+	writeAndFlush(map[string]any{"type": "done"})
+}
+
+func writeFrame(c *gin.Context, frame map[string]any) {
+	bs, err := json.Marshal(frame)
+	if err != nil {
+		return
+	}
+	c.Writer.Write(bs)
+	c.Writer.Write([]byte("\n"))
 }
 
 func (h *ArticleHandler) RecordClick(c *gin.Context) {
