@@ -41,6 +41,7 @@ func main() {
 
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
+	prefRepo := repository.NewPreferenceRepository(db)
 
 	fetcher := rss.NewFetcher()
 	contentFetcher := rss.NewContentFetcher()
@@ -56,14 +57,14 @@ func main() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	runFetchCycle(context.Background(), feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
+	runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer)
 
 	for range ticker.C {
-		runFetchCycle(context.Background(), feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
+		runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer)
 	}
 }
 
-func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer) {
+func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer) {
 	if !cycleMu.TryLock() {
 		log.Println("Previous fetch cycle still running, skipping")
 		return
@@ -74,6 +75,7 @@ func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, art
 	refetchShortContent(ctx, articleRepo, contentFetcher, summarizer)
 	if summarizer != nil {
 		backfillSummaries(ctx, articleRepo, summarizer)
+		runClassifyCycle(ctx, articleRepo, prefRepo, summarizer)
 	}
 }
 
