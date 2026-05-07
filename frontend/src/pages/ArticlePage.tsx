@@ -35,7 +35,8 @@ export default function ArticlePage() {
   const [saved, setSaved] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
   const readStartTime = useRef<number>(Date.now())
-  const topTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // High-water mark so scrolling up (e.g. to nav buttons) can't regress saved progress.
+  const maxScrollRef = useRef<number>(0)
 
   // Template selector state
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
@@ -57,6 +58,7 @@ export default function ArticlePage() {
       const data = await getArticle(Number(id))
       setArticle(data.article)
       setProgress(data.progress)
+      maxScrollRef.current = data.progress?.scroll_position ?? 0
       setFromBookmarklet(Boolean(data.from_bookmarklet))
       if (data.signals) {
         setLiked((data.signals['like'] ?? 0) > 0)
@@ -101,9 +103,6 @@ export default function ArticlePage() {
       if (id && duration > 5) {
         recordReadDuration(Number(id), duration)
       }
-      if (topTimer.current) {
-        clearTimeout(topTimer.current)
-      }
     }
   }, [id])
 
@@ -143,40 +142,25 @@ export default function ArticlePage() {
     const scrollHeight = contentRef.current.scrollHeight - window.innerHeight
     const scrollPosition = scrollHeight > 0 ? scrollTop / scrollHeight : 0
 
-    // Detect if scrolled to top for 10+ seconds (reset progress)
-    if (scrollTop === 0) {
-      if (!topTimer.current) {
-        topTimer.current = setTimeout(async () => {
-          if (id) {
-            await resetProgress(Number(id))
-            setProgress(prev => prev ? { ...prev, scroll_position: 0, is_completed: false } : null)
-          }
-        }, 10000)
-      }
-    } else {
-      if (topTimer.current) {
-        clearTimeout(topTimer.current)
-        topTimer.current = null
-      }
+    // Monotonic: only persist when we've read further than before.
+    if (scrollPosition <= maxScrollRef.current) return
+    maxScrollRef.current = scrollPosition
 
-      // Update progress
-      const isCompleted = scrollPosition > 0.9
-      const wasCompleted = progress?.is_completed
-      const newProgress = await updateProgress(article.id, scrollPosition, isCompleted)
-      setProgress(newProgress)
-      if (isCompleted && !wasCompleted) {
-        // Track as read in session storage so article list can reflect the change
-        try {
-          const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
-          if (!read.includes(article.id)) {
-            read.push(article.id)
-            sessionStorage.setItem('readArticles', JSON.stringify(read))
-          }
-        } catch {}
-        window.dispatchEvent(new Event('refresh-unread'))
-      }
+    const isCompleted = scrollPosition > 0.9
+    const wasCompleted = progress?.is_completed
+    const newProgress = await updateProgress(article.id, scrollPosition, isCompleted)
+    setProgress(newProgress)
+    if (isCompleted && !wasCompleted) {
+      try {
+        const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+        if (!read.includes(article.id)) {
+          read.push(article.id)
+          sessionStorage.setItem('readArticles', JSON.stringify(read))
+        }
+      } catch {}
+      window.dispatchEvent(new Event('refresh-unread'))
     }
-  }, [article, id])
+  }, [article, progress])
 
   useEffect(() => {
     window.addEventListener('scroll', handleScroll)
@@ -258,6 +242,7 @@ export default function ArticlePage() {
     if (!article) return
     const newProgress = await updateProgress(article.id, 1.0, true)
     setProgress(newProgress)
+    maxScrollRef.current = 1.0
     try {
       const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
       if (!read.includes(article.id)) {
@@ -272,6 +257,7 @@ export default function ArticlePage() {
     if (!article) return
     await resetProgress(article.id)
     setProgress(null)
+    maxScrollRef.current = 0
     try {
       const read: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
       sessionStorage.setItem('readArticles', JSON.stringify(read.filter(id => id !== article.id)))
