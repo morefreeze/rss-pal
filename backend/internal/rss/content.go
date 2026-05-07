@@ -215,7 +215,7 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 		return "", err
 	}
 
-	content := strings.TrimSpace(string(body))
+	content := stripJinaMathShadow(strings.TrimSpace(string(body)))
 	if len(content) > 50000 {
 		content = content[:50000] + "..."
 	}
