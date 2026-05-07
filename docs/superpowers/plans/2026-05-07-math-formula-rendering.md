@@ -49,7 +49,7 @@ This algorithm is implemented twice (Go + TS). Both implementations share these 
 |---|---|
 | U+200B | Zero-width space (Jina's fraction/radical artefact) |
 | U+2212 | Unicode minus sign |
-| U+00A0–U+00FF | Latin-1 supplement (`±`, `·`, `÷`, `×`, `°`, etc.) |
+| U+00B0–U+00FF | Latin-1 supplement math chars (`°`, `±`, `²`, `³`, `·`, `×`, `÷`, etc.) — bound starts at U+00B0 to skip currency/copyright |
 | U+2200–U+23FF | Mathematical Operators block (`≠`, `≤`, `≥`, `⇒`, `√`, …) |
 | U+2A00–U+2AFF | Supplemental Mathematical Operators |
 | U+2070–U+209F | Sub/superscripts |
@@ -238,7 +238,7 @@ func isMathSignalRune(r rune) bool {
 	case r == 0x200B,
 		r == 0x2212:
 		return true
-	case r >= 0x00A0 && r <= 0x00FF,
+	case r >= 0x00B0 && r <= 0x00FF,
 		r >= 0x2200 && r <= 0x23FF,
 		r >= 0x2A00 && r <= 0x2AFF,
 		r >= 0x2070 && r <= 0x209F,
