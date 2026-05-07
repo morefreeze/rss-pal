@@ -118,10 +118,16 @@ export default function ArticleListPage() {
   const handleMarkAllRead = async () => {
     setMarkingAllRead(true)
     try {
-      await markAllRead()
-      // Clear session read tracking — everything is now read
-      try { sessionStorage.removeItem('readArticles') } catch {}
-      setSessionReadIds(new Set())
+      await markAllRead({ feedId: selectedFeed, unread: unreadOnly, saved: savedOnly })
+      // Mirror the per-article session tracking so the list still reflects the
+      // change before the next fetch, without clobbering reads from other filters.
+      const markedIds = articles.map(a => a.id)
+      try {
+        const stored: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+        const merged = Array.from(new Set([...stored, ...markedIds]))
+        sessionStorage.setItem('readArticles', JSON.stringify(merged))
+        setSessionReadIds(new Set(merged))
+      } catch {}
       if (unreadOnly) {
         setArticles([])
         setHasMore(false)
