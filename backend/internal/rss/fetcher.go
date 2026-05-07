@@ -467,6 +467,9 @@ func (f *Fetcher) scrapeHTMLArticles(doc *goquery.Document, baseURL string) *Pre
 		}
 	}
 
+	if items == nil {
+		items = []PreviewItem{}
+	}
 	return &PreviewResult{
 		FeedTitle: pageTitle,
 		FeedType:  "html",
@@ -476,7 +479,7 @@ func (f *Fetcher) scrapeHTMLArticles(doc *goquery.Document, baseURL string) *Pre
 }
 
 func rssToPreview(feed *gofeed.Feed, feedURL string) *PreviewResult {
-	var items []PreviewItem
+	items := make([]PreviewItem, 0, len(feed.Items))
 	for i, item := range feed.Items {
 		if i >= 10 {
 			break
