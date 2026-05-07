@@ -7,6 +7,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -23,6 +24,7 @@ func main() {
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
 	prefRepo := repository.NewPreferenceRepository(db)
+	playbackRepo := repository.NewPlaybackProgressRepository(db)
 	progressRepo := repository.NewProgressRepository(db)
 	statsRepo := repository.NewStatsRepository(db)
 	userRepo := repository.NewUserRepository(db)
@@ -40,7 +42,8 @@ func main() {
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo)
-	contentHandler := api.NewContentHandler(articleRepo)
+	rssFetcher := rss.NewFetcher()
+	contentHandler := api.NewContentHandler(articleRepo, feedRepo, rssFetcher)
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
@@ -49,6 +52,7 @@ func main() {
 	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
+	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
 
 	router := gin.Default()
 	// Trust only requests from localhost/private networks (running behind nginx)
@@ -111,6 +115,8 @@ func main() {
 		apiGroup.POST("/articles/:id/content", contentHandler.FetchContent)
 		apiGroup.GET("/articles/:id/export/md", contentHandler.ExportMarkdown)
 		apiGroup.POST("/articles/:id/share", shareHandler.Create)
+		apiGroup.GET("/articles/:id/playback", playbackHandler.Get)
+		apiGroup.PUT("/articles/:id/playback", playbackHandler.Put)
 
 		// Preferences
 		apiGroup.POST("/preferences/like", prefHandler.Like)

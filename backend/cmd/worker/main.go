@@ -226,15 +226,21 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 		}
 
 		exists, _ := articleRepo.Exists(feed.ID, item.Link)
+		mediaInfo := rss.ExtractMedia(item)
 		if exists {
 			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, parsePublishedTime(item.PublishedParsed, item.UpdatedParsed))
+			if mediaInfo != nil {
+				if err := articleRepo.UpdateMediaIfNull(feed.ID, item.Link, mediaInfo.URL, mediaInfo.Type, mediaInfo.Duration); err != nil {
+					log.Printf("Failed to backfill media for %s: %v", item.Link, err)
+				}
+			}
 			continue
 		}
 
 		queuedCount++
 
 		wg.Add(1)
-		go func(item *gofeed.Item) {
+		go func(item *gofeed.Item, mediaInfo *rss.MediaInfo) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -264,6 +270,11 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				PublishedAt: parsePublishedTime(item.PublishedParsed, item.UpdatedParsed),
 			}
 			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
+			if mediaInfo != nil {
+				article.MediaURL = mediaInfo.URL
+				article.MediaType = mediaInfo.Type
+				article.MediaDurationSeconds = mediaInfo.Duration
+			}
 
 			if err := articleRepo.Create(article); err != nil {
 				log.Printf("Failed to create article: %v", err)
@@ -273,7 +284,7 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
 				}
 			}
-		}(item)
+		}(item, mediaInfo)
 	}
 
 	wg.Wait()

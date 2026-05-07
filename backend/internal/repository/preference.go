@@ -131,6 +131,11 @@ func (r *PreferenceRepository) GetUserSignals(userID, articleID int) (map[string
 	return signals, nil
 }
 
+// GetArticleScore returns the per-article recommendation rank score over the
+// last 30 days. Note that completed_listen carries weight 8.0 here (a 30-min
+// listen is high-cost engagement and should rank a podcast strongly) but only
+// 2.0 in topic-strength scoring, where it stays at parity with `save` so a
+// single completed podcast doesn't dominate a user's interest profile.
 func (r *PreferenceRepository) GetArticleScore(articleID int) (float64, error) {
 	query := `
 		SELECT COALESCE(SUM(
@@ -139,6 +144,7 @@ func (r *PreferenceRepository) GetArticleScore(articleID int) (float64, error) {
 				WHEN 'dislike' THEN -10.0 * signal_value
 				WHEN 'save' THEN 3.0 * signal_value
 				WHEN 'read_duration' THEN signal_value / 60.0
+				WHEN 'completed_listen' THEN 8.0 * signal_value
 				ELSE 1.0 * signal_value
 			END
 		), 0)
@@ -232,6 +238,7 @@ func (r *PreferenceRepository) GetUsersWithStrongSignal(articleID int) ([]UserSi
 		       MAX(CASE signal_type
 		           WHEN 'save' THEN 2.0
 		           WHEN 'like' THEN 1.0
+		           WHEN 'completed_listen' THEN 2.0
 		           WHEN 'read_duration' THEN
 		             CASE WHEN signal_value >= 60 THEN 0.5 ELSE 0 END
 		           ELSE 0
@@ -242,6 +249,7 @@ func (r *PreferenceRepository) GetUsersWithStrongSignal(articleID int) ([]UserSi
 		HAVING MAX(CASE signal_type
 		           WHEN 'save' THEN 2.0
 		           WHEN 'like' THEN 1.0
+		           WHEN 'completed_listen' THEN 2.0
 		           WHEN 'read_duration' THEN
 		             CASE WHEN signal_value >= 60 THEN 0.5 ELSE 0 END
 		           ELSE 0

@@ -280,8 +280,14 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 		}
 
 		exists, _ := h.articleRepo.Exists(feed.ID, item.Link)
+		mediaInfo := rss.ExtractMedia(item)
 		if exists {
 			h.articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedTime(item.PublishedParsed, item.UpdatedParsed))
+			if mediaInfo != nil {
+				if err := h.articleRepo.UpdateMediaIfNull(feed.ID, item.Link, mediaInfo.URL, mediaInfo.Type, mediaInfo.Duration); err != nil {
+					log.Printf("Failed to backfill media for %s: %v", item.Link, err)
+				}
+			}
 			continue
 		}
 
@@ -306,6 +312,11 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			PublishedAt: publishedTime(item.PublishedParsed, item.UpdatedParsed),
 		}
 		article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
+		if mediaInfo != nil {
+			article.MediaURL = mediaInfo.URL
+			article.MediaType = mediaInfo.Type
+			article.MediaDurationSeconds = mediaInfo.Duration
+		}
 
 		if err := h.articleRepo.Create(article); err != nil {
 			log.Printf("Failed to create article: %v", err)
