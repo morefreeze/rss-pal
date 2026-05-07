@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/gin-gonic/gin"
@@ -13,12 +16,16 @@ import (
 
 type ContentHandler struct {
 	articleRepo    *repository.ArticleRepository
+	feedRepo       *repository.FeedRepository
+	fetcher        *rss.Fetcher
 	contentFetcher *rss.ContentFetcher
 }
 
-func NewContentHandler(articleRepo *repository.ArticleRepository) *ContentHandler {
+func NewContentHandler(articleRepo *repository.ArticleRepository, feedRepo *repository.FeedRepository, fetcher *rss.Fetcher) *ContentHandler {
 	return &ContentHandler{
 		articleRepo:    articleRepo,
+		feedRepo:       feedRepo,
+		fetcher:        fetcher,
 		contentFetcher: rss.NewContentFetcher(),
 	}
 }
@@ -59,7 +66,52 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 		return
 	}
 
+	// Best-effort: re-read the parent feed's RSS to backfill media_url for
+	// audio/video enclosures. Failures are logged and swallowed — the content
+	// update is what the user really asked for.
+	h.tryBackfillMedia(c.Request.Context(), article)
+
 	c.JSON(http.StatusOK, gin.H{"content": content})
+}
+
+// tryBackfillMedia re-fetches the article's parent feed (ignoring HTTP cache
+// headers) and, if an audio/video enclosure exists for this article's URL,
+// fills the media_* columns via UpdateMediaIfNull. All failures are logged
+// and swallowed — this is opportunistic.
+func (h *ContentHandler) tryBackfillMedia(ctx context.Context, article *model.Article) {
+	if h.feedRepo == nil || h.fetcher == nil {
+		return
+	}
+	feed, err := h.feedRepo.GetByID(article.FeedID)
+	if err != nil || feed == nil {
+		return
+	}
+	// Only RSS-shaped feeds carry enclosures.
+	if feed.FeedType != "rss" && feed.FeedType != "podcast" && feed.FeedType != "youtube" {
+		return
+	}
+	if feed.URL == "" {
+		return
+	}
+	// Pass empty etag/lastModified to force a true fresh re-read.
+	result, err := h.fetcher.Fetch(ctx, feed.URL, "", "")
+	if err != nil || result == nil || result.Feed == nil {
+		log.Printf("re-fetch RSS for media backfill failed feed=%d: %v", feed.ID, err)
+		return
+	}
+	for _, item := range result.Feed.Items {
+		if item == nil || item.Link == "" || item.Link != article.URL {
+			continue
+		}
+		mi := rss.ExtractMedia(item)
+		if mi == nil {
+			return
+		}
+		if err := h.articleRepo.UpdateMediaIfNull(feed.ID, article.URL, mi.URL, mi.Type, mi.Duration); err != nil {
+			log.Printf("UpdateMediaIfNull failed article=%d feed=%d: %v", article.ID, feed.ID, err)
+		}
+		return
+	}
 }
 
 func (h *ContentHandler) ExportMarkdown(c *gin.Context) {

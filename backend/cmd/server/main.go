@@ -7,6 +7,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -41,7 +42,8 @@ func main() {
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo)
-	contentHandler := api.NewContentHandler(articleRepo)
+	rssFetcher := rss.NewFetcher()
+	contentHandler := api.NewContentHandler(articleRepo, feedRepo, rssFetcher)
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
