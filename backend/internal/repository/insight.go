@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -78,22 +79,55 @@ func (r *UserInsightRepository) MarkFailed(id int, errMsg string) error {
 func (r *UserInsightRepository) GetLatest(userID int) (*model.UserInsight, error) {
 	row := r.db.QueryRow(`
 		SELECT id, user_id, COALESCE(content, ''), status, COALESCE(error_msg, ''),
-		       triggered_by, COALESCE(model, ''), generated_at
+		       triggered_by, COALESCE(model, ''), generated_at, recommendations
 		FROM user_insights
 		WHERE user_id = $1
 		ORDER BY generated_at DESC
 		LIMIT 1
 	`, userID)
 	var ui model.UserInsight
+	var recsRaw sql.NullString
 	err := row.Scan(&ui.ID, &ui.UserID, &ui.Content, &ui.Status, &ui.ErrorMsg,
-		&ui.TriggeredBy, &ui.Model, &ui.GeneratedAt)
+		&ui.TriggeredBy, &ui.Model, &ui.GeneratedAt, &recsRaw)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	if recsRaw.Valid && recsRaw.String != "" && recsRaw.String != "null" {
+		if jerr := json.Unmarshal([]byte(recsRaw.String), &ui.Recommendations); jerr != nil {
+			ui.Recommendations = nil
+		}
+	}
 	return &ui, nil
+}
+
+// MarkDoneWithRecs upgrades a pending row to status='done' with both the
+// markdown content and the validated recommendations slice (may be empty).
+func (r *UserInsightRepository) MarkDoneWithRecs(id int, content string, recs []model.RecommendationDirection) error {
+	var recsArg interface{}
+	if len(recs) > 0 {
+		b, err := json.Marshal(recs)
+		if err != nil {
+			return fmt.Errorf("marshal recs: %w", err)
+		}
+		recsArg = string(b)
+	}
+	res, err := r.db.Exec(`
+		UPDATE user_insights
+		SET content = $2, status = 'done', error_msg = NULL,
+		    recommendations = $3::jsonb, generated_at = NOW()
+		WHERE id = $1 AND status = 'pending'
+	`, id, content, recsArg)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("no pending insight with id=%d", id)
+	}
+	return nil
 }
 
 // CountManualSince counts only completed (status='done') manual generations

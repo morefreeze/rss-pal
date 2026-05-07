@@ -54,6 +54,19 @@ button.secondary:hover {
   background-color: #d0d0d0;
 }
 
+button:disabled,
+button.secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background-color: #e0e0e0;
+  color: #888;
+}
+
+button:disabled:hover,
+button.secondary:disabled:hover {
+  background-color: #e0e0e0;
+}
+
 input, textarea {
   padding: 8px 12px;
   border: 1px solid #ccc;

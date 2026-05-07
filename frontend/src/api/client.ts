@@ -132,6 +132,25 @@ export interface InterestTag {
   last_reinforced_at: string
 }
 
+export interface ArticleRecommendation {
+  article_id: number
+  reason: string
+}
+
+export interface RecommendationDirection {
+  direction: string
+  direction_kind: 'core' | 'emerging'
+  articles: ArticleRecommendation[]
+}
+
+export interface RecArticleMeta {
+  id: number
+  title: string
+  feed_title: string
+  brief: string
+  is_read: boolean
+}
+
 export interface PersistedInsight {
   id: number
   content: string
@@ -140,12 +159,14 @@ export interface PersistedInsight {
   triggered_by: 'auto' | 'manual'
   model?: string
   generated_at: string
+  recommendations?: RecommendationDirection[]
 }
 
 export interface InsightsLatest {
   insight: PersistedInsight | null
   remaining_today: number
   remaining_month: number
+  rec_articles?: Record<string, RecArticleMeta>
 }
 
 export interface InviteCode {

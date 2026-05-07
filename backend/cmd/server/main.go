@@ -45,7 +45,7 @@ func main() {
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
 	userInsightsRepo := repository.NewUserInsightRepository(db)
-	insightsHandler := api.NewInsightsHandler(prefRepo, templateRepo, userInsightsRepo, summarizer, cfg)
+	insightsHandler := api.NewInsightsHandler(prefRepo, articleRepo, templateRepo, userInsightsRepo, summarizer, cfg)
 	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
