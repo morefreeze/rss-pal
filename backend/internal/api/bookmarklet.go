@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -110,7 +111,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	normalized := util.NormalizeURL(req.URL)
-	content, err := extractContentFromHTML(req.HTML)
+	content, err := extractContentFromHTML(req.HTML, req.URL)
 	if err != nil || strings.TrimSpace(content) == "" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "无法从页面提取正文"})
 		return
@@ -215,14 +216,18 @@ func (h *BookmarkletHandler) authenticate(c *gin.Context) (*model.User, error) {
 }
 
 // extractContentFromHTML parses the captured outerHTML through goquery and
-// pulls out the largest body of text it can find using the same selector
-// strategy as internal/rss/content.go::fetchDirect.
-func extractContentFromHTML(html string) (string, error) {
+// pulls out the largest body of content it can find as Markdown, using the
+// same selector strategy as internal/rss/content.go::fetchDirect. Image and
+// link URLs are resolved against baseURL so images render correctly when the
+// source page used relative or protocol-relative paths (typical for SPAs).
+func extractContentFromHTML(html, baseURL string) (string, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return "", err
 	}
 	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Remove()
+
+	resolveURLs(doc, baseURL)
 
 	var content string
 	candidates := []string{
@@ -239,7 +244,7 @@ func extractContentFromHTML(html string) (string, error) {
 		if nodes.Length() == 0 {
 			continue
 		}
-		c := selectionText(nodes.First())
+		c := rss.ExtractMarkdown(nodes.First())
 		if len(c) > len(content) {
 			content = c
 		}
@@ -251,9 +256,9 @@ func extractContentFromHTML(html string) (string, error) {
 	if strings.TrimSpace(content) == "" {
 		var b strings.Builder
 		doc.Find("p").Each(func(i int, s *goquery.Selection) {
-			t := strings.TrimSpace(s.Text())
-			if len(t) > 30 {
-				b.WriteString(t)
+			md := rss.ExtractMarkdown(s)
+			if len(md) > 30 {
+				b.WriteString(md)
 				b.WriteString("\n\n")
 			}
 		})
@@ -266,23 +271,34 @@ func extractContentFromHTML(html string) (string, error) {
 	return strings.TrimSpace(content), nil
 }
 
-// selectionText pulls block-level text out of a goquery Selection in a way
-// that preserves paragraph breaks. Bookmarklet captures user-selected
-// text and intentionally stays plain-text (the article-content
-// scraper now produces Markdown — different goal).
-func selectionText(s *goquery.Selection) string {
-	var b strings.Builder
-	s.Find("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre").Each(func(i int, sel *goquery.Selection) {
-		t := strings.TrimSpace(sel.Text())
-		if len(t) > 20 {
-			b.WriteString(t)
-			b.WriteString("\n\n")
-		}
-	})
-	if b.Len() > 200 {
-		return b.String()
+// resolveURLs rewrites relative img[src] and a[href] attributes to absolute
+// URLs against baseURL. Bookmarklet captures send the source page's
+// outerHTML, which often contains site-relative ("/foo.jpg"),
+// protocol-relative ("//cdn/foo.jpg"), or path-relative ("foo.jpg") URLs —
+// these would otherwise render as broken links once the article is viewed
+// on the RSS Pal host. data: URIs are preserved as-is.
+func resolveURLs(doc *goquery.Document, baseURL string) {
+	base, err := url.Parse(baseURL)
+	if err != nil || !base.IsAbs() {
+		return
 	}
-	return strings.TrimSpace(s.Text())
+	rewrite := func(s *goquery.Selection, attr string) {
+		raw, ok := s.Attr(attr)
+		if !ok {
+			return
+		}
+		raw = strings.TrimSpace(raw)
+		if raw == "" || strings.HasPrefix(raw, "data:") {
+			return
+		}
+		ref, err := url.Parse(raw)
+		if err != nil {
+			return
+		}
+		s.SetAttr(attr, base.ResolveReference(ref).String())
+	}
+	doc.Find("img[src]").Each(func(_ int, s *goquery.Selection) { rewrite(s, "src") })
+	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) { rewrite(s, "href") })
 }
 
 // GenerateBookmarkletToken returns a 32-byte random hex string suitable for
