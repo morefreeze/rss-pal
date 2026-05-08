@@ -1,11 +1,11 @@
 import { Feed, UserTag } from '../api/client'
 
-// Saved page sidebar selection state. Single-select for Phase 12.
-// Phase 13 will widen the 'tag' variant to multi-select with AND/OR mode.
+// Saved page sidebar selection state. The 'tag' variant carries an array
+// of ids + a mode so the same shape covers both single and multi select.
 export type SavedSelection =
   | { kind: 'all' }
   | { kind: 'untagged' }
-  | { kind: 'tag'; id: number }
+  | { kind: 'tag'; ids: number[]; mode: 'and' | 'or' }
   | { kind: 'source'; feedId: number }
 
 interface Props {
@@ -13,17 +13,38 @@ interface Props {
   feeds: Feed[]
   selection: SavedSelection
   onSelect: (sel: SavedSelection) => void
+  multi: boolean
+  onToggleMulti: () => void
+  onToggleTag: (tagId: number) => void
+  onModeChange: (mode: 'and' | 'or') => void
 }
 
 function isTagActive(sel: SavedSelection, tagId: number): boolean {
-  return sel.kind === 'tag' && sel.id === tagId
+  return sel.kind === 'tag' && sel.ids.includes(tagId)
 }
 
 function isSourceActive(sel: SavedSelection, feedId: number): boolean {
   return sel.kind === 'source' && sel.feedId === feedId
 }
 
-export default function SavedTagSidebar({ tags, feeds, selection, onSelect }: Props) {
+export default function SavedTagSidebar({
+  tags,
+  feeds,
+  selection,
+  onSelect,
+  multi,
+  onToggleMulti,
+  onToggleTag,
+  onModeChange,
+}: Props) {
+  const tagMode = selection.kind === 'tag' ? selection.mode : 'and'
+  const tagSelectedCount = selection.kind === 'tag' ? selection.ids.length : 0
+
+  const handleTagClick = (tagId: number) => {
+    if (multi) onToggleTag(tagId)
+    else onSelect({ kind: 'tag', ids: [tagId], mode: 'and' })
+  }
+
   return (
     <aside
       style={{
@@ -52,7 +73,47 @@ export default function SavedTagSidebar({ tags, feeds, selection, onSelect }: Pr
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <div className="saved-section-title">Tags</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+          }}
+        >
+          <div className="saved-section-title">Tags</div>
+          <button
+            type="button"
+            onClick={onToggleMulti}
+            className="secondary"
+            style={{ fontSize: 11, padding: '2px 8px', margin: '0 0 4px 0' }}
+            title={multi ? '关闭多选' : '开启多选'}
+          >
+            {multi ? '✓ 多选' : '多选'}
+          </button>
+        </div>
+        {multi && tagSelectedCount > 1 && (
+          <div style={{ marginBottom: 6 }}>
+            <span className="saved-mode-toggle">
+              <button
+                type="button"
+                className={tagMode === 'and' ? 'active' : ''}
+                onClick={() => onModeChange('and')}
+                title="同时包含全部 tag"
+              >
+                AND
+              </button>
+              <button
+                type="button"
+                className={tagMode === 'or' ? 'active' : ''}
+                onClick={() => onModeChange('or')}
+                title="包含任意 tag"
+              >
+                OR
+              </button>
+            </span>
+          </div>
+        )}
         {tags.length === 0 ? (
           <div className="text-muted text-sm" style={{ padding: '4px 8px' }}>
             暂无 tag
@@ -63,7 +124,7 @@ export default function SavedTagSidebar({ tags, feeds, selection, onSelect }: Pr
               key={t.id}
               type="button"
               className={'saved-row' + (isTagActive(selection, t.id) ? ' active' : '')}
-              onClick={() => onSelect({ kind: 'tag', id: t.id })}
+              onClick={() => handleTagClick(t.id)}
             >
               <span className="saved-row-label">{t.name}</span>
               <span className="saved-row-count">{t.article_count}</span>
