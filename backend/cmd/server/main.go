@@ -133,6 +133,9 @@ func main() {
 		apiGroup.POST("/articles/:id/share", shareHandler.Create)
 		apiGroup.GET("/articles/:id/playback", playbackHandler.Get)
 		apiGroup.PUT("/articles/:id/playback", playbackHandler.Put)
+		apiGroup.GET("/articles/:id/tags", userTagHandler.GetArticleTags)
+		apiGroup.POST("/articles/:id/tags", userTagHandler.AddArticleTag)
+		apiGroup.DELETE("/articles/:id/tags/:tagId", userTagHandler.RemoveArticleTag)
 
 		// Preferences
 		apiGroup.POST("/preferences/like", prefHandler.Like)
