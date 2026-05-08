@@ -246,11 +246,37 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 		return "", err
 	}
 
-	content := stripJinaMathShadow(strings.TrimSpace(string(body)))
+	content := flattenImageAltBlankLines(stripJinaMathShadow(strings.TrimSpace(string(body))))
 	if len(content) > 50000 {
 		content = content[:50000] + "..."
 	}
 	return content, nil
+}
+
+// imageAltWithBlankLineRE matches an image whose alt text contains a blank
+// line, e.g. ![caption\n\n](url). Jina Reader sometimes emits this for
+// figures with multi-line captions, and CommonMark treats the blank line as
+// a paragraph break — so the image renders as literal text instead of an
+// <img>. Alt is constrained to runs without ']' to avoid disturbing
+// legitimate prose with bracketed link runs across paragraphs.
+var imageAltWithBlankLineRE = regexp.MustCompile(`!\[([^\]]*\n[ \t]*\n[^\]]*)\]\(([^)\s]+)\)`)
+
+// blankLineRunRE matches one or more consecutive blank lines (with optional
+// surrounding inline whitespace), used to collapse them into a single space.
+var blankLineRunRE = regexp.MustCompile(`[ \t]*\n([ \t]*\n)+[ \t]*`)
+
+// flattenImageAltBlankLines collapses blank lines inside markdown image alt
+// text so the image syntax stays on a single logical line. Idempotent.
+func flattenImageAltBlankLines(md string) string {
+	return imageAltWithBlankLineRE.ReplaceAllStringFunc(md, func(match string) string {
+		sub := imageAltWithBlankLineRE.FindStringSubmatch(match)
+		if len(sub) != 3 {
+			return match
+		}
+		alt := blankLineRunRE.ReplaceAllString(sub[1], " ")
+		alt = strings.TrimSpace(alt)
+		return "![" + alt + "](" + sub[2] + ")"
+	})
 }
 
 // ExtractMarkdown converts the HTML inside the goquery selection into Markdown.

@@ -280,3 +280,75 @@ func TestStripJinaMathShadow(t *testing.T) {
 		})
 	}
 }
+
+func TestFlattenImageAltBlankLines(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "no images",
+			in:   "Just plain text.\n\nMore text.",
+			want: "Just plain text.\n\nMore text.",
+		},
+		{
+			name: "single-line alt unchanged",
+			in:   "![alt](https://example.com/x.png)",
+			want: "![alt](https://example.com/x.png)",
+		},
+		{
+			name: "single newline in alt unchanged",
+			in:   "![first\nsecond](https://example.com/x.png)",
+			want: "![first\nsecond](https://example.com/x.png)",
+		},
+		{
+			name: "trailing blank line collapsed",
+			in:   "![Image 1: caption text.\n\n](https://ichef.bbci.co.uk/x.jpg.webp)",
+			want: "![Image 1: caption text.](https://ichef.bbci.co.uk/x.jpg.webp)",
+		},
+		{
+			name: "blank line in middle collapsed",
+			in:   "![first line\n\nsecond line](https://example.com/x.png)",
+			want: "![first line second line](https://example.com/x.png)",
+		},
+		{
+			name: "multiple blank lines collapsed",
+			in:   "![alt\n\n\n\n](https://example.com/x.png)",
+			want: "![alt](https://example.com/x.png)",
+		},
+		{
+			name: "indented blank line collapsed",
+			in:   "![alt\n  \n  ](https://example.com/x.png)",
+			want: "![alt](https://example.com/x.png)",
+		},
+		{
+			name: "image inside paragraph context",
+			in:   "Lead in.\n\n![cap\n\n](https://example.com/x.png)\n\nFollow up.",
+			want: "Lead in.\n\n![cap](https://example.com/x.png)\n\nFollow up.",
+		},
+		{
+			name: "two broken images on a page",
+			in:   "![a\n\n](https://e.com/1.png)\n\n![b\n\n](https://e.com/2.png)",
+			want: "![a](https://e.com/1.png)\n\n![b](https://e.com/2.png)",
+		},
+		{
+			name: "good image after broken one untouched",
+			in:   "![a\n\n](https://e.com/1.png)\n\n![ok](https://e.com/2.png)",
+			want: "![a](https://e.com/1.png)\n\n![ok](https://e.com/2.png)",
+		},
+		{
+			name: "idempotent on already-fixed input",
+			in:   "![Image 1: caption text.](https://ichef.bbci.co.uk/x.jpg.webp)",
+			want: "![Image 1: caption text.](https://ichef.bbci.co.uk/x.jpg.webp)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := flattenImageAltBlankLines(tc.in)
+			if got != tc.want {
+				t.Errorf("flattenImageAltBlankLines(%q)\n  got:  %q\n  want: %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
