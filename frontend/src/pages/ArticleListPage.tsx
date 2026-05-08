@@ -448,6 +448,7 @@ export default function ArticleListPage() {
   const isRead = (article: Article) => article.is_read || sessionReadIds.has(article.id)
 
   const openArticle = (id: number) => {
+    reportClick(id)
     try {
       const ids = articles.map(a => a.id)
       const i = ids.indexOf(id)
