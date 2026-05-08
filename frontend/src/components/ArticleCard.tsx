@@ -140,7 +140,7 @@ export default function ArticleCard({
             </div>
           )}
           {(showSourceTag && article.feed_title) || manualTags.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2 mt-1" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4 }}>
               {showSourceTag && article.feed_title && (
                 <TagChip name={article.feed_title} variant="source" />
               )}
