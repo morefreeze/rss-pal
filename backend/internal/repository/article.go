@@ -261,6 +261,52 @@ func (r *ArticleRepository) IncrementRefetchAttempts(id int) error {
 	return err
 }
 
+// GetMediaArticlesWithoutTranscript returns up to limit video/audio
+// articles that have not yet had a transcript fetch attempt.
+func (r *ArticleRepository) GetMediaArticlesWithoutTranscript(limit int) ([]model.Article, error) {
+	query := `
+		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds
+		FROM articles
+		WHERE transcript_fetched_at IS NULL
+		  AND media_type IS NOT NULL
+		  AND (media_type LIKE 'video/%' OR media_type LIKE 'audio/%')
+		ORDER BY fetched_at DESC
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+// UpdateContentAndResetSummary atomically updates content + recomputed
+// metrics, clears any existing summary, and stamps transcript_fetched_at.
+// Used when transcript fetching succeeds. Clearing the summary is what
+// feeds the article back to backfillSummaries on the next worker cycle.
+func (r *ArticleRepository) UpdateContentAndResetSummary(id int, content string, wordCount, readingMinutes int) error {
+	_, err := r.db.Exec(`
+		UPDATE articles
+		SET content = $1,
+		    word_count = $2,
+		    reading_minutes = $3,
+		    summary_brief = NULL,
+		    summary_detailed = NULL,
+		    transcript_fetched_at = NOW(),
+		    refetch_attempts = 0
+		WHERE id = $4
+	`, content, wordCount, readingMinutes, id)
+	return err
+}
+
+// MarkTranscriptFetchAttempted records that we tried and failed to find
+// a transcript for the article, preventing retries.
+func (r *ArticleRepository) MarkTranscriptFetchAttempted(id int) error {
+	_, err := r.db.Exec(`UPDATE articles SET transcript_fetched_at = NOW() WHERE id = $1`, id)
+	return err
+}
+
 func (r *ArticleRepository) UpdatePublishedAtIfNull(feedID int, url string, publishedAt *time.Time) error {
 	if publishedAt == nil {
 		return nil
@@ -348,6 +394,7 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.url != '' AND a.refetch_attempts < 5
 		  AND f.feed_type NOT IN ('youtube', 'podcast')
+		  AND (a.media_type IS NULL OR (a.media_type NOT LIKE 'video/%' AND a.media_type NOT LIKE 'audio/%'))
 		  AND ((LENGTH(a.content) < $1 OR a.content IS NULL AND a.fetched_at > NOW() - INTERVAL '7 days')
 		       OR (a.content LIKE '%<%>%' AND a.fetched_at > NOW() - INTERVAL '30 days'))
 		ORDER BY a.fetched_at DESC
