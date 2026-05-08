@@ -81,17 +81,13 @@ func findInlineTranscript(doc *goquery.Document) string {
 			return true
 		}
 		var b strings.Builder
-		for s := h.Next(); s.Length() > 0; s = s.Next() {
-			tag := goquery.NodeName(s)
-			if tag == "h1" || tag == "h2" || tag == "h3" || tag == "h4" {
-				break
-			}
-			text := strings.TrimSpace(s.Text())
-			if text == "" {
-				continue
-			}
-			b.WriteString(text)
-			b.WriteString("\n\n")
+		// Walk forward from the heading itself. Some sites (e.g. BBC
+		// Learning English) wrap the heading in a layout div whose siblings
+		// are NOT the transcript paragraphs, so if direct siblings don't
+		// yield enough, also walk siblings of the heading's parent.
+		walkSiblingsForwardCollecting(h, &b)
+		if len([]rune(b.String())) < inlineMinChars && h.Parent().Length() > 0 {
+			walkSiblingsForwardCollecting(h.Parent(), &b)
 		}
 		text := strings.TrimSpace(b.String())
 		if len([]rune(text)) >= inlineMinChars {
@@ -101,6 +97,23 @@ func findInlineTranscript(doc *goquery.Document) string {
 		return true
 	})
 	return found
+}
+
+// walkSiblingsForwardCollecting appends sibling text after start until it
+// reaches a heading element (which marks the next section).
+func walkSiblingsForwardCollecting(start *goquery.Selection, b *strings.Builder) {
+	for s := start.Next(); s.Length() > 0; s = s.Next() {
+		tag := goquery.NodeName(s)
+		if tag == "h1" || tag == "h2" || tag == "h3" || tag == "h4" {
+			return
+		}
+		text := strings.TrimSpace(s.Text())
+		if text == "" {
+			continue
+		}
+		b.WriteString(text)
+		b.WriteString("\n\n")
+	}
 }
 
 func (f *HTMLPageScraper) tryLinkedSubtitle(ctx context.Context, doc *goquery.Document, baseURL string) (string, string) {

@@ -44,6 +44,23 @@ func TestHTMLPageScraper_InlineTranscript(t *testing.T) {
 	}
 }
 
+func TestHTMLPageScraper_InlineHeadingInWrapper(t *testing.T) {
+	html, _ := os.ReadFile(filepath.Join("testdata", "page_inline_in_wrapper.html"))
+	stub := &stubDocFetcher{pages: map[string]string{"http://example.com/ep2": string(html)}}
+	f := &HTMLPageScraper{Docs: stub}
+
+	got, err := f.Fetch(context.Background(), &model.Article{
+		URL:       "http://example.com/ep2",
+		MediaType: "audio/mpeg",
+	})
+	if err != nil || got == nil {
+		t.Fatalf("expected Result, got (%+v, %v)", got, err)
+	}
+	if !strings.Contains(got.Text, "first speaker line") {
+		t.Errorf("inline transcript missing expected text: %q", got.Text)
+	}
+}
+
 func TestHTMLPageScraper_LinkedVTT(t *testing.T) {
 	html, _ := os.ReadFile(filepath.Join("testdata", "page_linked_vtt.html"))
 
