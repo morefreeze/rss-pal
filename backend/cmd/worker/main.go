@@ -13,19 +13,21 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
+	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/mmcdole/gofeed"
 )
 
 var cycleMu sync.Mutex
 
 const (
-	maxConcurrentFeeds    = 5
-	maxConcurrentContent  = 3
-	maxConcurrentSummary  = 2
-	feedTimeout           = 3 * time.Minute
-	maxRefetchPerCycle    = 20
-	maxNewArticlesPerFeed = 10
-	maxBackfillPerCycle   = 5
+	maxConcurrentFeeds            = 5
+	maxConcurrentContent          = 3
+	maxConcurrentSummary          = 2
+	feedTimeout                   = 3 * time.Minute
+	maxRefetchPerCycle            = 20
+	maxNewArticlesPerFeed         = 10
+	maxBackfillPerCycle           = 5
+	maxTranscriptBackfillPerCycle = 5
 )
 
 // Global semaphore for AI summary calls to avoid hammering the API
@@ -49,6 +51,14 @@ func main() {
 
 	fetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
 	contentFetcher := rss.NewContentFetcher()
+
+	transcriptFetcher := &transcript.MultiFetcher{
+		Strategies: []transcript.Fetcher{
+			&transcript.YouTubeCC{},
+			&transcript.BilibiliCC{},
+			&transcript.HTMLPageScraper{Docs: contentFetcher},
+		},
+	}
 
 	var summarizer *ai.Summarizer
 	if cfg.Claude.APIKey != "" {
@@ -74,14 +84,14 @@ func main() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer)
+	runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher)
 
 	for range ticker.C {
-		runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer)
+		runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher)
 	}
 }
 
-func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer) {
+func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher) {
 	if !cycleMu.TryLock() {
 		log.Println("Previous fetch cycle still running, skipping")
 		return
@@ -90,6 +100,9 @@ func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, art
 
 	fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
 	refetchShortContent(ctx, articleRepo, contentFetcher, summarizer)
+	if transcriptFetcher != nil {
+		backfillTranscripts(ctx, articleRepo, transcriptFetcher)
+	}
 	if summarizer != nil {
 		backfillSummaries(ctx, articleRepo, summarizer)
 		runClassifyCycle(ctx, articleRepo, prefRepo, summarizer)
@@ -154,6 +167,72 @@ func backfillSummaries(ctx context.Context, articleRepo *repository.ArticleRepos
 		}(a)
 	}
 	wg.Wait()
+}
+
+func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRepository, fetcher transcript.Fetcher) {
+	articles, err := articleRepo.GetMediaArticlesWithoutTranscript(maxTranscriptBackfillPerCycle)
+	if err != nil {
+		log.Printf("Failed to get media articles without transcript: %v", err)
+		return
+	}
+	if len(articles) == 0 {
+		return
+	}
+	log.Printf("Fetching transcripts for %d media articles", len(articles))
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxConcurrentContent)
+	for i := range articles {
+		a := &articles[i]
+		wg.Add(1)
+		go func(article *model.Article) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			tCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			defer cancel()
+
+			result, err := fetcher.Fetch(tCtx, article)
+			if err != nil {
+				log.Printf("Transcript fetch error for article %d: %v", article.ID, err)
+				return // leave transcript_fetched_at NULL → retried next cycle
+			}
+			if result == nil || strings.TrimSpace(result.Text) == "" {
+				if err := articleRepo.MarkTranscriptFetchAttempted(article.ID); err != nil {
+					log.Printf("Failed to mark transcript attempt for article %d: %v", article.ID, err)
+				}
+				return
+			}
+			newContent := buildContentWithTranscript(article.Content, result)
+			wc, rm := rss.ComputeMetrics(newContent)
+			if err := articleRepo.UpdateContentAndResetSummary(article.ID, newContent, wc, rm); err != nil {
+				log.Printf("Failed to save transcript for article %d: %v", article.ID, err)
+				return
+			}
+			log.Printf("Transcript fetched for article %d (source=%s, %d chars)", article.ID, result.Source, len(result.Text))
+		}(a)
+	}
+	wg.Wait()
+}
+
+// buildContentWithTranscript appends the transcript to existing article
+// content using the markdown separator pattern documented in the spec.
+func buildContentWithTranscript(existing string, r *transcript.Result) string {
+	existing = strings.TrimSpace(existing)
+	var b strings.Builder
+	if existing != "" {
+		b.WriteString(existing)
+		b.WriteString("\n\n---\n\n")
+	}
+	b.WriteString("## 字幕\n\n")
+	if r.Source != "" {
+		b.WriteString("> 来源：")
+		b.WriteString(r.Source)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(strings.TrimSpace(r.Text))
+	return b.String()
 }
 
 func fetchAllFeeds(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer) {
