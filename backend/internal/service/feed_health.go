@@ -38,10 +38,10 @@ type FeedMetrics struct {
 
 // PruningRule is a hint about an unhealthy feed.
 type PruningRule struct {
-	ID               string   // R1..R5
-	Label            string   // 中文人类标签
-	Reason           string   // 一句解释，给抽屉直接展示
-	SuggestedActions []string // ["归档","暂停","降权"] 中的子集
+	ID               string   `json:"id"`               // R1..R5
+	Label            string   `json:"label"`            // 中文人类标签
+	Reason           string   `json:"reason"`           // 一句解释，给抽屉直接展示
+	SuggestedActions []string `json:"suggested_actions"` // ["归档","暂停","降权"] 中的子集
 }
 
 // ComputeValueScore returns NaN for cold-start metrics, else the weighted score.
