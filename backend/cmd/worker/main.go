@@ -333,7 +333,13 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				content = rss.StripHTML(item.Content)
 			}
 
+			// Skip deep-fetch for video articles too — the watch page is
+			// JS-heavy and the scraped content is unusable. The transcript
+			// pipeline (backfillTranscripts) is the right path for these.
 			skipDeepFetch := feed.FeedType == "youtube" || feed.FeedType == "podcast"
+			if mediaInfo != nil && strings.HasPrefix(mediaInfo.Type, "video/") {
+				skipDeepFetch = true
+			}
 			if !skipDeepFetch && item.Link != "" {
 				log.Printf("Fetching full content for: %s", item.Link)
 				fullContent, err := contentFetcher.FetchContent(ctx, item.Link)
