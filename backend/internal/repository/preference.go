@@ -209,6 +209,34 @@ func (r *PreferenceRepository) DeleteTag(userID, id int) (int64, error) {
 	return res.RowsAffected()
 }
 
+// DampenTopic reduces the weight of an existing interest_topics row, clamped at 0.
+// No-op if the (user_id, topic) row does not exist — disliking a topic the user has
+// never engaged with should not create a zero-weight entry. Only acts on negative deltas.
+func (r *PreferenceRepository) DampenTopic(userID int, topic string, delta float64) error {
+	if topic == "" || delta >= 0 {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE interest_topics
+		SET weight = GREATEST(weight + $3, 0), last_reinforced_at = NOW()
+		WHERE user_id = $1 AND topic = $2
+	`, userID, topic, delta)
+	return err
+}
+
+// DampenTag mirrors DampenTopic for interest_tags.
+func (r *PreferenceRepository) DampenTag(userID int, tag string, delta float64) error {
+	if tag == "" || delta >= 0 {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE interest_tags
+		SET weight = GREATEST(weight + $3, 0), last_reinforced_at = NOW()
+		WHERE user_id = $1 AND tag = $2
+	`, userID, tag, delta)
+	return err
+}
+
 // --- decay (all users) ---
 
 func (r *PreferenceRepository) DecayAllTopics(factor float64) error {
