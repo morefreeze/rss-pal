@@ -115,3 +115,85 @@ func (h *UserTagHandler) DeleteTag(c *gin.Context) {
 		c.Status(http.StatusOK)
 	}
 }
+
+// GET /api/articles/:id/tags
+func (h *UserTagHandler) GetArticleTags(c *gin.Context) {
+	articleID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	userID := getUserID(c)
+
+	source, err := h.bindRepo.GetSourceForArticle(articleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	manual, err := h.bindRepo.GetManualForArticle(articleID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if manual == nil {
+		manual = []model.UserTag{}
+	}
+	resp := model.ArticleTagsResponse{
+		Source:      source,
+		Manual:      manual,
+		Suggestions: []string{}, // populated in Phase 3
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// POST /api/articles/:id/tags
+func (h *UserTagHandler) AddArticleTag(c *gin.Context) {
+	articleID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req model.AddArticleTagRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	name, err := validateTagName(req.Name)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	tagID, err := h.bindRepo.BindByName(articleID, getUserID(c), name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": tagID, "name": name})
+}
+
+// DELETE /api/articles/:id/tags/:tagId
+func (h *UserTagHandler) RemoveArticleTag(c *gin.Context) {
+	articleID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	tagID, err := strconv.Atoi(c.Param("tagId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tagId"})
+		return
+	}
+	err = h.bindRepo.Unbind(articleID, tagID, getUserID(c))
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		c.JSON(http.StatusNotFound, gin.H{"error": "binding not found"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	default:
+		c.Status(http.StatusOK)
+	}
+}
