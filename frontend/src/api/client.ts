@@ -553,10 +553,16 @@ export interface FeedHealthKPI {
   completed_reads_w: number
 }
 
+export interface ArchivedFeed {
+  feed_id: number
+  feed_title: string
+}
+
 export interface FeedHealthResponse {
   window: '30d' | '90d'
   kpi: FeedHealthKPI
   rows: FeedHealthRow[]
+  archived: ArchivedFeed[]
 }
 
 export const getFeedHealth = (window: '30d' | '90d' = '30d') =>
