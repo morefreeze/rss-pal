@@ -79,14 +79,6 @@ export default function ArticlePage() {
         setDisliked((data.signals['dislike'] ?? 0) > 0)
         setSaved((data.signals['save'] ?? 0) > 0)
       }
-      // Track as viewed in session so list can show it as read on back-navigation
-      try {
-        const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
-        if (!read.includes(Number(id))) {
-          read.push(Number(id))
-          sessionStorage.setItem('readArticles', JSON.stringify(read))
-        }
-      } catch {}
 
       // Scroll to saved position
       const savedProgress = data.progress?.scroll_position
