@@ -3,6 +3,8 @@ package repository
 import (
 	"database/sql"
 	"errors"
+	"strconv"
+	"strings"
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/lib/pq"
@@ -224,4 +226,113 @@ func (r *ArticleUserTagRepository) GetManualForArticles(articleIDs []int, userID
 		out[aid] = append(out[aid], t)
 	}
 	return out, rows.Err()
+}
+
+type SavedRepository struct {
+	db *sql.DB
+}
+
+func NewSavedRepository(db *sql.DB) *SavedRepository {
+	return &SavedRepository{db: db}
+}
+
+// SavedQuery describes a /api/saved request.
+type SavedQuery struct {
+	UserID       int
+	TagIDs       []int  // empty = "all"
+	Mode         string // "and" | "or"; only honored when len(TagIDs)>1
+	Untagged     bool   // overrides TagIDs when true
+	SourceFeedID int    // 0 = no filter
+	Limit        int
+	Offset       int
+}
+
+// ListSaved returns the article IDs (in published order) and a total count.
+func (r *SavedRepository) ListSaved(q SavedQuery) ([]model.Article, int, error) {
+	args := []interface{}{q.UserID}
+	where := []string{`p.user_id = $1 AND p.signal_type = 'save'`}
+	// Tenancy: never expose articles from feeds owned by another user.
+	// Mirrors the pattern used by every other articles query in this codebase.
+	where = append(where, `(f.owner_id IS NULL OR f.owner_id = $1)`)
+
+	if q.Untagged {
+		where = append(where, `NOT EXISTS (
+			SELECT 1 FROM article_user_tags aut
+			WHERE aut.article_id = a.id AND aut.user_id = $1
+		)`)
+	} else if len(q.TagIDs) > 0 {
+		args = append(args, pq.Array(q.TagIDs))
+		idsParam := "$" + strconv.Itoa(len(args))
+		if q.Mode == "and" && len(q.TagIDs) > 1 {
+			args = append(args, len(q.TagIDs))
+			countParam := "$" + strconv.Itoa(len(args))
+			where = append(where, `(
+				SELECT COUNT(DISTINCT aut.tag_id) FROM article_user_tags aut
+				WHERE aut.article_id = a.id AND aut.user_id = $1
+				  AND aut.tag_id = ANY(`+idsParam+`::int[])
+			) = `+countParam)
+		} else {
+			where = append(where, `EXISTS (
+				SELECT 1 FROM article_user_tags aut
+				WHERE aut.article_id = a.id AND aut.user_id = $1
+				  AND aut.tag_id = ANY(`+idsParam+`::int[])
+			)`)
+		}
+	}
+
+	if q.SourceFeedID > 0 {
+		args = append(args, q.SourceFeedID)
+		where = append(where, `a.feed_id = $`+strconv.Itoa(len(args)))
+	}
+
+	whereSQL := strings.Join(where, " AND ")
+
+	// Count
+	var total int
+	if err := r.db.QueryRow(`
+		SELECT COUNT(*) FROM articles a
+		JOIN feeds f ON f.id = a.feed_id
+		JOIN user_preferences p ON p.article_id = a.id
+		WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Page
+	args = append(args, q.Limit, q.Offset)
+	limitParam := "$" + strconv.Itoa(len(args)-1)
+	offsetParam := "$" + strconv.Itoa(len(args))
+	rows, err := r.db.Query(`
+		SELECT a.id, a.feed_id, f.title AS feed_title, a.title, a.url,
+		       a.published_at, a.summary_brief, a.fetched_at,
+		       COALESCE(a.word_count, 0), COALESCE(a.reading_minutes, 0),
+		       COALESCE(a.media_type, '')
+		FROM articles a
+		JOIN feeds f ON f.id = a.feed_id
+		JOIN user_preferences p ON p.article_id = a.id
+		WHERE `+whereSQL+`
+		ORDER BY a.published_at DESC NULLS LAST, a.id DESC
+		LIMIT `+limitParam+` OFFSET `+offsetParam, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []model.Article
+	for rows.Next() {
+		var a model.Article
+		var summary, mediaType sql.NullString
+		var feedTitle sql.NullString
+		if err := rows.Scan(
+			&a.ID, &a.FeedID, &feedTitle, &a.Title, &a.URL,
+			&a.PublishedAt, &summary, &a.FetchedAt,
+			&a.WordCount, &a.ReadingMinutes, &mediaType,
+		); err != nil {
+			return nil, 0, err
+		}
+		a.FeedTitle = feedTitle.String
+		a.SummaryBrief = summary.String
+		a.MediaType = mediaType.String
+		out = append(out, a)
+	}
+	return out, total, rows.Err()
 }
