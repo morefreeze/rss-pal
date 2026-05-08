@@ -135,7 +135,7 @@ function BookmarkletSection() {
       <h3 className="mb-1">📌 浏览器抓取</h3>
       <p className="text-muted text-sm mb-2">
         把下方按钮拖到浏览器书签栏。在任何网页点一下，就把当前页发回 RSS Pal —
-        匹配到已有文章则更新内容，否则保存到「⭐ 收藏」feed。结果会在新标签页提示，成功后自动关闭。
+        匹配到已有文章则更新内容，否则保存到「⭐ 网摘」feed。结果会在新标签页提示，成功后自动关闭。
       </p>
 
       {token ? (

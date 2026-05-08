@@ -199,7 +199,7 @@ func (r *ArticleUserTagRepository) Unbind(articleID, tagID, userID int) error {
 // a feed owned by another user.
 //
 // For bookmarklet (feed_type='saved') articles the human-readable title is
-// the article URL's host, not the bin's own "⭐ 收藏". The FeedID stays the
+// the article URL's host, not the bin's own "⭐ 网摘". The FeedID stays the
 // real feeds.id so any caller mapping back to a feed still works.
 func (r *ArticleUserTagRepository) GetSourceForArticle(articleID, userID int) (model.ArticleTagSource, error) {
 	var s model.ArticleTagSource

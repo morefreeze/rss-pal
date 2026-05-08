@@ -208,7 +208,7 @@ func (r *FeedRepository) UpdateWeight(id int, weight float64) error {
 	return err
 }
 
-// GetOrCreateSavedFeed returns the user's "⭐ 收藏" feed, creating it if it
+// GetOrCreateSavedFeed returns the user's "⭐ 网摘" feed, creating it if it
 // doesn't exist. Saved feeds are the destination for articles captured via
 // the browser bookmarklet when no existing article matches the captured URL.
 // The url column has a global UNIQUE constraint, so we use a per-user
@@ -244,7 +244,7 @@ func (r *FeedRepository) GetOrCreateSavedFeed(ownerID int) (*model.Feed, error) 
 	owner := ownerID
 	newFeed := &model.Feed{
 		URL:              fmt.Sprintf("bookmarklet://user/%d", ownerID),
-		Title:            "⭐ 收藏",
+		Title:            "⭐ 网摘",
 		FetchIntervalMin: 60,
 		IsActive:         true,
 		OwnerID:          &owner,
