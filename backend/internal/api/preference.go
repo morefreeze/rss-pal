@@ -42,6 +42,28 @@ func (h *PreferenceHandler) applyCachedClassification(userID, articleID int, sig
 	}
 }
 
+// dampenCachedClassification mirrors applyCachedClassification but with a negative
+// magnitude. Used for `dislike` to nudge the user's interest profile away from the
+// article's topic/tags. No-op when the article has no cached classification (worker
+// will pick it up later, by which time the article is already hidden via the per-article
+// dislike score).
+func (h *PreferenceHandler) dampenCachedClassification(userID, articleID int) {
+	if h.articleRepo == nil {
+		return
+	}
+	topic, tags, err := h.articleRepo.GetClassification(articleID)
+	if err != nil || topic == "" {
+		return
+	}
+	const dampenStrength = 0.5
+	topicDelta := -SignalToTopicWeight(dampenStrength)
+	tagDelta := -SignalToTagWeight(dampenStrength)
+	_ = h.prefRepo.DampenTopic(userID, topic, topicDelta)
+	for _, t := range tags {
+		_ = h.prefRepo.DampenTag(userID, t, tagDelta)
+	}
+}
+
 func (h *PreferenceHandler) Like(c *gin.Context) {
 	var req model.PreferenceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -84,6 +106,7 @@ func (h *PreferenceHandler) Dislike(c *gin.Context) {
 		return
 	}
 
+	h.dampenCachedClassification(pref.UserID, pref.ArticleID)
 	c.Status(http.StatusOK)
 }
 
