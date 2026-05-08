@@ -6,6 +6,7 @@ import RegisterPage from './pages/RegisterPage'
 import FeedListPage from './pages/FeedListPage'
 import ArticleListPage from './pages/ArticleListPage'
 import ArticlePage from './pages/ArticlePage'
+import SavedPage from './pages/SavedPage'
 import InsightsPage from './pages/InsightsPage'
 import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
@@ -69,6 +70,7 @@ function App() {
           <Route path="weekly" element={<WeeklyPage />} />
           <Route path="articles" element={<ArticleListPage />} />
           <Route path="articles/:id" element={<ArticlePage />} />
+          <Route path="saved" element={<SavedPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="stats" element={<StatsPage />} />
           <Route path="settings" element={<SettingsPage user={user} />} />
