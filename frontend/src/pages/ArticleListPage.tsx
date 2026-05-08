@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds, likeArticle, dislikeArticle } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
+import SavedPage from './SavedPage'
 import { usePlayer } from '../player/PlayerContext'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 
@@ -186,6 +187,14 @@ export default function ArticleListPage() {
   const [focusedIdx, setFocusedIdx] = useState<number>(-1)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // 网摘 (clipping) mode: when the selected feed is the user's saved-clip
+  // bin, swap the regular article list for the tag-sidebar layout that
+  // used to live at /saved. The dropdown stays so the user can switch
+  // back to other feeds, but unread/saved checkboxes, search, and
+  // mark-all-read are hidden because /api/saved doesn't support them.
+  const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
+  const isClippingMode = selectedFeedObj?.feed_type === 'saved'
+
   useEffect(() => {
     loadFeeds()
     loadRecommended()
@@ -199,11 +208,15 @@ export default function ArticleListPage() {
   }, [])
 
   useEffect(() => {
+    // SavedPage component owns its own data fetching when in clipping
+    // mode, so skip the regular /api/articles call to avoid a wasted
+    // request and to keep the flicker out.
+    if (isClippingMode) return
     setOffset(0)
     setHasMore(true)
     setFocusedIdx(-1)
     loadArticles(0, true)
-  }, [selectedFeed, unreadOnly, savedOnly])
+  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode])
 
   const loadFeeds = async () => {
     const data = await getFeeds()
@@ -426,16 +439,18 @@ export default function ArticleListPage() {
   return (
     <div>
       <div className="flex-between mb-2">
-        <h2>文章列表</h2>
+        <h2>{isClippingMode ? '网摘' : '文章列表'}</h2>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-          <input
-            ref={searchRef}
-            type="search"
-            placeholder="搜索文章... ( / 聚焦)"
-            value={searchQuery}
-            onChange={handleSearchChange}
-            style={{ padding: '6px 12px', width: 200 }}
-          />
+          {!isClippingMode && (
+            <input
+              ref={searchRef}
+              type="search"
+              placeholder="搜索文章... ( / 聚焦)"
+              value={searchQuery}
+              onChange={handleSearchChange}
+              style={{ padding: '6px 12px', width: 200 }}
+            />
+          )}
           <select
             value={selectedFeed || ''}
             onChange={e => {
@@ -451,33 +466,37 @@ export default function ArticleListPage() {
               <option key={f.id} value={f.id}>{f.title || f.url}{f.unread_count > 0 ? ` (${f.unread_count})` : ''}</option>
             ))}
           </select>
-          <label className="flex gap-1" style={{ alignItems: 'center' }}>
-            <input
-              type="checkbox"
-              checked={unreadOnly}
-              onChange={e => {
-                setUnreadOnly(e.target.checked)
-                if (e.target.checked) setSavedOnly(false)
-                try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
-              }}
-              disabled={!!searchQuery}
-            />
-            仅未读
-          </label>
-          <label className="flex gap-1" style={{ alignItems: 'center' }}>
-            <input
-              type="checkbox"
-              checked={savedOnly}
-              onChange={e => {
-                setSavedOnly(e.target.checked)
-                if (e.target.checked) setUnreadOnly(false)
-                try { sessionStorage.setItem('savedOnly', String(e.target.checked)) } catch {}
-              }}
-              disabled={!!searchQuery}
-            />
-            收藏
-          </label>
-          {!searchQuery && (
+          {!isClippingMode && (
+            <label className="flex gap-1" style={{ alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                checked={unreadOnly}
+                onChange={e => {
+                  setUnreadOnly(e.target.checked)
+                  if (e.target.checked) setSavedOnly(false)
+                  try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
+                }}
+                disabled={!!searchQuery}
+              />
+              仅未读
+            </label>
+          )}
+          {!isClippingMode && (
+            <label className="flex gap-1" style={{ alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                checked={savedOnly}
+                onChange={e => {
+                  setSavedOnly(e.target.checked)
+                  if (e.target.checked) setUnreadOnly(false)
+                  try { sessionStorage.setItem('savedOnly', String(e.target.checked)) } catch {}
+                }}
+                disabled={!!searchQuery}
+              />
+              收藏
+            </label>
+          )}
+          {!isClippingMode && !searchQuery && (
             <button
               className="secondary"
               style={{ fontSize: 12, padding: '4px 10px' }}
@@ -488,7 +507,7 @@ export default function ArticleListPage() {
               ↻
             </button>
           )}
-          {!searchQuery && articles.length > 0 && (
+          {!isClippingMode && !searchQuery && articles.length > 0 && (
             <button
               className="secondary"
               style={{ fontSize: 12, padding: '4px 10px' }}
@@ -501,7 +520,11 @@ export default function ArticleListPage() {
         </div>
       </div>
 
-      {recommended.length > 0 && !searchQuery && (
+      {isClippingMode && selectedFeed != null && (
+        <SavedPage restrictToFeedId={selectedFeed} entryPath="/articles" />
+      )}
+
+      {!isClippingMode && recommended.length > 0 && !searchQuery && (
         <div className="rec-panel">
           <button
             type="button"
@@ -566,7 +589,7 @@ export default function ArticleListPage() {
       )}
 
       {/* Search results */}
-      {searchQuery && (
+      {!isClippingMode && searchQuery && (
         searching ? (
           <div className="card text-muted text-sm">搜索中...</div>
         ) : searchResults !== null ? (
@@ -595,20 +618,20 @@ export default function ArticleListPage() {
         ) : null
       )}
 
-      {!searchQuery && loading ? (
+      {!isClippingMode && !searchQuery && loading ? (
         <div className="card">Loading...</div>
-      ) : !searchQuery && articles.length === 0 && feeds.length === 0 ? (
+      ) : !isClippingMode && !searchQuery && articles.length === 0 && feeds.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📰</div>
           <div className="text-bold" style={{ marginBottom: 8, fontSize: 16 }}>还没有订阅</div>
           <div className="text-muted" style={{ marginBottom: 16 }}>去「订阅」页面添加你感兴趣的 RSS 源或网站，系统会自动抓取并生成 AI 摘要</div>
           <Link to="/feeds"><button>去添加订阅</button></Link>
         </div>
-      ) : !searchQuery && articles.length === 0 ? (
+      ) : !isClippingMode && !searchQuery && articles.length === 0 ? (
         <div className="card text-muted">
           {unreadOnly ? '没有未读文章 🎉' : '暂无文章，订阅源正在抓取中...'}
         </div>
-      ) : !searchQuery ? (() => {
+      ) : !isClippingMode && !searchQuery ? (() => {
         const filtered = articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id))
         // Prefetch trigger sits PREFETCH_OFFSET items before the end so
         // the next page starts loading while the user still has reading
