@@ -14,6 +14,7 @@ import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
+import TagBar from '../components/TagBar'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
@@ -545,6 +546,8 @@ export default function ArticlePage() {
           <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
           {progressPercent > 0 && <span>· 阅读进度 {progressPercent}%</span>}
         </div>
+
+        <TagBar articleId={article.id} />
 
         <ArticlePlayerCard article={article} />
 
