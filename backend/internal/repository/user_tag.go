@@ -336,3 +336,68 @@ func (r *SavedRepository) ListSaved(q SavedQuery) ([]model.Article, int, error) 
 	}
 	return out, total, rows.Err()
 }
+
+type TagSuggestionRepository struct {
+	db *sql.DB
+}
+
+func NewTagSuggestionRepository(db *sql.DB) *TagSuggestionRepository {
+	return &TagSuggestionRepository{db: db}
+}
+
+// SuggestionsForArticle returns up to 5 candidate names from articles.tags,
+// filtered to remove tags the user has already adopted (in user_tags + bound)
+// or dismissed. Returns empty slice if articles.tags is null/empty.
+//
+// Tenancy guard: the inner SELECT joins feeds and requires the article to
+// belong to a feed owned by the user (or owner_id IS NULL for legacy/global
+// feeds). If the article is not visible to the user, the inner SELECT yields
+// no rows and unnest(COALESCE(..., ARRAY[]::TEXT[])) yields zero rows, so
+// the function returns []. This prevents probing other users' articles.
+func (r *TagSuggestionRepository) SuggestionsForArticle(articleID, userID int) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT t AS name
+		FROM unnest(COALESCE(
+			(SELECT a.tags FROM articles a
+			 JOIN feeds f ON f.id = a.feed_id
+			 WHERE a.id = $2 AND (f.owner_id IS NULL OR f.owner_id = $1)),
+			ARRAY[]::TEXT[]
+		)) AS t
+		WHERE NOT EXISTS (
+			SELECT 1 FROM tag_suggestion_dismissals d
+			WHERE d.article_id = $2 AND d.user_id = $1 AND d.name = t
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM user_tags ut
+			JOIN article_user_tags aut
+			       ON aut.tag_id = ut.id AND aut.user_id = ut.user_id
+			WHERE ut.user_id = $1 AND ut.name = t AND aut.article_id = $2
+		)
+		LIMIT 5
+	`, userID, articleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DismissSuggestion records (article_id, user_id, name) so the user does not
+// see this candidate again. Idempotent. Dismissal is harmless (only affects
+// this user's view of suggestions), so no separate ownership check is needed.
+func (r *TagSuggestionRepository) DismissSuggestion(articleID, userID int, name string) error {
+	_, err := r.db.Exec(`
+		INSERT INTO tag_suggestion_dismissals (article_id, user_id, name)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (article_id, user_id, name) DO NOTHING
+	`, articleID, userID, name)
+	return err
+}
