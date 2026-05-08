@@ -512,3 +512,58 @@ export interface WeeklyDigest {
 
 export const getWeeklyDigest = (week?: string) =>
   api.get<WeeklyDigest>('/weekly-digest', { params: week ? { week } : {} }).then(res => res.data)
+
+// === Feed governance Phase 1 ===
+
+export type EventType = 'exposure' | 'click'
+
+export const postEvent = (articleId: number, eventType: EventType) =>
+  api.post('/events', { article_id: articleId, event_type: eventType })
+
+export interface PruningRule {
+  id: 'R1' | 'R2' | 'R3' | 'R4' | 'R5'
+  label: string
+  reason: string
+  suggested_actions: string[]
+}
+
+export interface FeedHealthRow {
+  feed_id: number
+  feed_title: string
+  status: 'active' | 'paused' | 'archived'
+  priority_weight: number
+  produced: number
+  exposures: number
+  clicks: number
+  completed_reads: number
+  ctr: number | null
+  read_completion: number | null
+  avg_duration_min: number
+  feedback_density: number
+  last_active_at: string | null
+  last_fetched_at: string | null
+  value_score: number | null
+  pruning_rule?: PruningRule | null
+}
+
+export interface FeedHealthKPI {
+  total_active: number
+  healthy: number
+  dormant: number
+  completed_reads_w: number
+}
+
+export interface FeedHealthResponse {
+  window: '30d' | '90d'
+  kpi: FeedHealthKPI
+  rows: FeedHealthRow[]
+}
+
+export const getFeedHealth = (window: '30d' | '90d' = '30d') =>
+  api.get<FeedHealthResponse>(`/feeds/health?window=${window}`).then(r => r.data)
+
+export const updateFeedStatus = (feedId: number, status: 'active' | 'paused' | 'archived') =>
+  api.patch(`/feeds/${feedId}/status`, { status })
+
+export const updateFeedWeight = (feedId: number, weight: number) =>
+  api.patch(`/feeds/${feedId}/weight`, { priority_weight: weight })
