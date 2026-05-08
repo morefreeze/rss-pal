@@ -470,9 +470,10 @@ export default function ArticleListPage() {
       </div>
 
       {recommended.length > 0 && !searchQuery && (
-        <div className="mb-2">
+        <div className="rec-panel">
           <button
             type="button"
+            className="rec-panel-header"
             aria-expanded={showRecommended}
             title={showRecommended ? '收起' : '展开'}
             onClick={() => {
@@ -480,27 +481,15 @@ export default function ArticleListPage() {
               setShowRecommended(next)
               try { localStorage.setItem('showRecommended', String(next)) } catch {}
             }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              width: '100%',
-              padding: '6px 0',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              textAlign: 'left',
-              color: 'inherit',
-            }}
           >
-            <span aria-hidden style={{ fontSize: 12, color: '#888', width: 14, display: 'inline-block', textAlign: 'center' }}>
-              {showRecommended ? '▼' : '◀'}
+            <span aria-hidden className="rec-panel-arrow">
+              {showRecommended ? '▼' : '▶'}
             </span>
-            <h3 style={{ margin: 0 }}>为你推荐</h3>
+            <h3 className="rec-panel-title">为你推荐</h3>
             <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({recommended.length})</span>
           </button>
           {showRecommended && recommended.map(article => (
-            <Link key={article.id} to={`/articles/${article.id}`} className="card" style={{ display: 'block' }}>
+            <Link key={article.id} to={`/articles/${article.id}`} className="rec-row">
               <div className="flex-between">
                 <div style={{ flex: 1 }}>
                   <div className="text-bold" style={{ display: 'flex', alignItems: 'center' }}>
