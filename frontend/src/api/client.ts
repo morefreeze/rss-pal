@@ -295,7 +295,7 @@ export const getTags = () =>
 export const deleteTopic = (id: number) =>
   api.delete(`/preferences/topics/${id}`)
 
-export const deleteTag = (id: number) =>
+export const deleteInterestTag = (id: number) =>
   api.delete(`/preferences/tags/${id}`)
 
 // Progress
@@ -573,3 +573,38 @@ export const updateFeedStatus = (feedId: number, status: 'active' | 'paused' | '
 
 export const updateFeedWeight = (feedId: number, weight: number) =>
   api.patch(`/feeds/${feedId}/weight`, { priority_weight: weight })
+
+// === Tags ===
+
+export interface UserTag {
+  id: number
+  user_id: number
+  name: string
+  created_at: string
+  article_count: number
+}
+
+export interface ArticleTagSource {
+  feed_id: number
+  title: string
+}
+
+export interface ArticleTagsResponse {
+  source: ArticleTagSource
+  manual: UserTag[]
+  suggestions: string[]
+}
+
+export const listTags = () => api.get<UserTag[]>('/tags').then(r => r.data)
+export const createTag = (name: string) =>
+  api.post<{ id: number; name: string }>('/tags', { name }).then(r => r.data)
+export const renameTag = (id: number, name: string) =>
+  api.patch(`/tags/${id}`, { name })
+export const deleteTag = (id: number) => api.delete(`/tags/${id}`)
+
+export const getArticleTags = (articleId: number) =>
+  api.get<ArticleTagsResponse>(`/articles/${articleId}/tags`).then(r => r.data)
+export const addArticleTag = (articleId: number, name: string) =>
+  api.post<{ id: number; name: string }>(`/articles/${articleId}/tags`, { name }).then(r => r.data)
+export const removeArticleTag = (articleId: number, tagId: number) =>
+  api.delete(`/articles/${articleId}/tags/${tagId}`)
