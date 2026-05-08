@@ -105,6 +105,8 @@ func main() {
 		apiGroup.PUT("/feeds/:id", feedHandler.Update)
 		apiGroup.DELETE("/feeds/:id", feedHandler.Delete)
 		apiGroup.POST("/feeds/:id/fetch", feedHandler.FetchNow)
+		apiGroup.PATCH("/feeds/:id/status", feedHandler.UpdateStatus)
+		apiGroup.PATCH("/feeds/:id/weight", feedHandler.UpdateWeight)
 
 		// Articles
 		apiGroup.GET("/articles", articleHandler.GetAll)

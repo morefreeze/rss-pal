@@ -172,7 +172,7 @@ func (r *FeedRepository) UpdateTitle(id int, title string) error {
 }
 
 func (r *FeedRepository) GetAllActive() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at FROM feeds WHERE is_active = true AND feed_type IN ('rss', 'html', 'youtube', 'podcast')`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at FROM feeds WHERE status = 'active' AND feed_type IN ('rss', 'html', 'youtube', 'podcast')`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -180,6 +180,32 @@ func (r *FeedRepository) GetAllActive() ([]model.Feed, error) {
 	defer rows.Close()
 
 	return r.scanFeeds(rows)
+}
+
+// UpdateStatus changes a feed's lifecycle state. Mirrors to is_active for
+// backward compat with existing queries: status='active' ↔ is_active=true,
+// paused/archived ↔ is_active=false. The is_active column will be dropped
+// after Phase 2 once all callers migrate.
+func (r *FeedRepository) UpdateStatus(id int, status string) error {
+	if status != "active" && status != "paused" && status != "archived" {
+		return fmt.Errorf("invalid status: %s", status)
+	}
+	isActive := status == "active"
+	_, err := r.db.Exec(
+		`UPDATE feeds SET status = $1, is_active = $2 WHERE id = $3`,
+		status, isActive, id,
+	)
+	return err
+}
+
+// UpdateWeight changes a feed's priority weight. Phase 1 stores only;
+// Phase 2 verdict scoring multiplies by this value.
+func (r *FeedRepository) UpdateWeight(id int, weight float64) error {
+	if weight < 0 || weight > 2.0 {
+		return fmt.Errorf("priority_weight must be in [0, 2.0]")
+	}
+	_, err := r.db.Exec(`UPDATE feeds SET priority_weight = $1 WHERE id = $2`, weight, id)
+	return err
 }
 
 // GetOrCreateSavedFeed returns the user's "📑 收藏" feed, creating it if it
