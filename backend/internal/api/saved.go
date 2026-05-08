@@ -49,25 +49,32 @@ func (h *SavedHandler) List(c *gin.Context) {
 			}
 		}
 	}
-	if v := c.Query("source_feed_id"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			q.SourceFeedID = n
+	// New: source=<kind>:<value>, e.g. "feed:8" or "host:walkinglabs.github.io".
+	// Replaces the old source_feed_id query param (this branch hasn't shipped).
+	if v := c.Query("source"); v != "" {
+		if i := strings.Index(v, ":"); i > 0 {
+			kind := v[:i]
+			value := v[i+1:]
+			if kind == "feed" || kind == "host" {
+				q.SourceKind = kind
+				q.SourceValue = value
+			}
 		}
 	}
 
-	articles, total, err := h.saved.ListSaved(q)
+	rows, total, err := h.saved.ListSaved(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if articles == nil {
-		articles = []model.Article{}
+	if rows == nil {
+		rows = []repository.SavedRow{}
 	}
 
 	// Attach manual tags per article
-	ids := make([]int, len(articles))
-	for i, a := range articles {
-		ids[i] = a.ID
+	ids := make([]int, len(rows))
+	for i, r := range rows {
+		ids[i] = r.Article.ID
 	}
 	tagMap, err := h.bindRepo.GetManualForArticles(ids, userID)
 	if err != nil {
@@ -77,11 +84,16 @@ func (h *SavedHandler) List(c *gin.Context) {
 
 	type item struct {
 		model.Article
-		ManualTags []model.UserTag `json:"manual_tags"`
+		ManualTags      []model.UserTag            `json:"manual_tags"`
+		EffectiveSource repository.EffectiveSource `json:"effective_source"`
 	}
-	out := make([]item, len(articles))
-	for i, a := range articles {
-		out[i] = item{Article: a, ManualTags: tagMap[a.ID]}
+	out := make([]item, len(rows))
+	for i, r := range rows {
+		out[i] = item{
+			Article:         r.Article,
+			ManualTags:      tagMap[r.Article.ID],
+			EffectiveSource: r.EffectiveSource,
+		}
 		if out[i].ManualTags == nil {
 			out[i].ManualTags = []model.UserTag{}
 		}
