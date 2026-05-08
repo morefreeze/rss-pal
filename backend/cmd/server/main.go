@@ -33,6 +33,7 @@ func main() {
 	recommendedRepo := repository.NewRecommendedFeedRepository(db)
 	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
 	eventRepo := repository.NewEventRepository(db)
+	feedHealthRepo := repository.NewFeedHealthRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	summarizerService := service.NewSummarizerService(summarizer)
@@ -55,6 +56,7 @@ func main() {
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
 	eventHandler := api.NewEventHandler(eventRepo)
+	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
 
 	router := gin.Default()
 	// Trust only requests from localhost/private networks (running behind nginx)
@@ -107,6 +109,7 @@ func main() {
 		apiGroup.POST("/feeds/:id/fetch", feedHandler.FetchNow)
 		apiGroup.PATCH("/feeds/:id/status", feedHandler.UpdateStatus)
 		apiGroup.PATCH("/feeds/:id/weight", feedHandler.UpdateWeight)
+		apiGroup.GET("/feeds/health", feedHealthHandler.Get)
 
 		// Articles
 		apiGroup.GET("/articles", articleHandler.GetAll)
