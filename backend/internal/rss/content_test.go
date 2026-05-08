@@ -281,6 +281,73 @@ func TestStripJinaMathShadow(t *testing.T) {
 	}
 }
 
+func TestExtractTexAnnotations_KatexInline(t *testing.T) {
+	html := `<div><p>Since <span class="katex"><span class="katex-mathml"><math><semantics><annotation encoding="application/x-tex">\sqrt{x+7} \ge 0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">x+7​≥0</span></span> the right side.</p></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	want := `Since $\sqrt{x+7} \ge 0$ the right side.`
+	if got != want {
+		t.Errorf("ExtractMarkdown\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestExtractTexAnnotations_KatexDisplay(t *testing.T) {
+	html := `<div><p>Result:</p><span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block"><semantics><annotation encoding="application/x-tex">x = \frac{3 \pm \sqrt{33}}{2}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">x=2 3±33​​</span></span></span></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	if !strings.Contains(got, `$$x = \frac{3 \pm \sqrt{33}}{2}$$`) {
+		t.Errorf("expected display math block, got:\n%s", got)
+	}
+	if strings.Contains(got, "x=2 3±33") {
+		t.Errorf("shadow should be removed, got:\n%s", got)
+	}
+}
+
+func TestExtractTexAnnotations_MathJaxV3(t *testing.T) {
+	html := `<div><p>Inline <mjx-container class="MathJax" jax="CHTML"><mjx-assistive-mml display="inline"><math><semantics><annotation encoding="application/x-tex">a^2 + b^2 = c^2</annotation></semantics></math></mjx-assistive-mml><mjx-math>a²+b²=c²</mjx-math></mjx-container> here.</p></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	want := `Inline $a^2 + b^2 = c^2$ here.`
+	if got != want {
+		t.Errorf("ExtractMarkdown\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestExtractTexAnnotations_MathJaxV2WithScript(t *testing.T) {
+	html := `<div><p>See <span class="MathJax_Preview"></span><span class="MathJax" id="MathJax-Element-1-Frame">x≥1</span><script type="math/tex" id="MathJax-Element-1">x \ge 1</script> always.</p></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	want := `See $x \ge 1$ always.`
+	if got != want {
+		t.Errorf("ExtractMarkdown\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestExtractTexAnnotations_NoMathPassthrough(t *testing.T) {
+	html := `<div><p>Just normal prose with no math at all.</p></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	want := `Just normal prose with no math at all.`
+	if got != want {
+		t.Errorf("ExtractMarkdown\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
 func TestFlattenImageAltBlankLines(t *testing.T) {
 	cases := []struct {
 		name string
