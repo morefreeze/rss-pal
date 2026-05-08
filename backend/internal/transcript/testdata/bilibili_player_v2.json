@@ -1,0 +1,13 @@
+{
+  "code": 0,
+  "data": {
+    "subtitle": {
+      "subtitles": [
+        {
+          "lan": "zh-CN",
+          "subtitle_url": "//PLACEHOLDER/sub.json"
+        }
+      ]
+    }
+  }
+}
