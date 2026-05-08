@@ -5,7 +5,7 @@ import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import 'highlight.js/styles/github.css'
 import 'katex/dist/katex.min.css'
-import { stripMathShadow } from '../util/mathShadow'
+import { stripMathShadow, escapeAmbiguousMathDollars } from '../util/mathShadow'
 import { flattenImageAltBlankLines } from '../util/imageAlt'
 import VideoEmbed from './VideoEmbed'
 import { parsePlaceholder } from './parseVideoPlaceholder'
@@ -57,7 +57,7 @@ function extractParagraphText(children: unknown): string | null {
 // rehype-katex; Jina Reader's shadow duplicate is removed via stripMathShadow
 // before parsing. External links open in a new tab.
 export default function MarkdownArticle({ source }: Props) {
-  const cleaned = flattenImageAltBlankLines(stripMathShadow(source))
+  const cleaned = flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source)))
   return (
     <div className="markdown-body">
       <ReactMarkdown

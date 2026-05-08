@@ -246,7 +246,7 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 		return "", err
 	}
 
-	content := flattenImageAltBlankLines(stripJinaMathShadow(strings.TrimSpace(string(body))))
+	content := escapeAmbiguousMathDollars(flattenImageAltBlankLines(stripJinaMathShadow(strings.TrimSpace(string(body)))))
 	if len(content) > 50000 {
 		content = content[:50000] + "..."
 	}
@@ -303,6 +303,7 @@ func ExtractMarkdown(selection *goquery.Selection) string {
 	// Post-conversion: catch YouTube/Bilibili URLs that were links rather than iframes.
 	md = RewriteVideoLinks(md)
 	md = reinsertMathPlaceholders(md, mathPHs)
+	md = escapeAmbiguousMathDollars(md)
 	return strings.TrimSpace(md)
 }
 
@@ -531,6 +532,86 @@ func reinsertMathPlaceholders(md string, phs []mathPlaceholder) string {
 		md = strings.ReplaceAll(md, p.key, rep)
 	}
 	return md
+}
+
+// escapeAmbiguousMathDollars escapes pairs of literal `$` whose body is almost
+// certainly prose (e.g. "$9 ... $200" — two prices on one line). Without
+// escaping, remark-math greedily pairs them into a single inline-math span.
+//
+// A pair is escaped when its body starts with an ASCII digit AND contains no
+// LaTeX specials (`\` `{` `}` `_` `^`). Real math like `$\sqrt{x}$` keeps its
+// `$` because of the LaTeX specials; algebra like `$x = 1$` keeps its `$`
+// because it doesn't start with a digit. False positives only occur on the
+// rare case of digit-led pure-arithmetic math like `$5x+3$`, which degrades
+// gracefully to readable plain text rather than a broken span.
+//
+// Idempotent: an already-escaped `\$...\$` is not re-escaped because the
+// scanner treats `\$` as an escape and skips it.
+func escapeAmbiguousMathDollars(md string) string {
+	r := []rune(md)
+	var b strings.Builder
+	b.Grow(len(md))
+	i := 0
+	for i < len(r) {
+		c := r[i]
+		// Pass-through for backslash escapes (in particular `\$`).
+		if c == '\\' && i+1 < len(r) {
+			b.WriteRune(c)
+			b.WriteRune(r[i+1])
+			i += 2
+			continue
+		}
+		if c != '$' {
+			b.WriteRune(c)
+			i++
+			continue
+		}
+		// Look for a closing `$` on the same line, skipping escaped `\$`.
+		j := i + 1
+		for j < len(r) && r[j] != '\n' {
+			if r[j] == '\\' && j+1 < len(r) {
+				j += 2
+				continue
+			}
+			if r[j] == '$' {
+				break
+			}
+			j++
+		}
+		if j >= len(r) || r[j] != '$' {
+			b.WriteRune(c)
+			i++
+			continue
+		}
+		body := r[i+1 : j]
+		if shouldEscapeProseDollarPair(body) {
+			b.WriteString(`\$`)
+			b.WriteString(string(body))
+			b.WriteString(`\$`)
+			i = j + 1
+			continue
+		}
+		// Real-math pair: emit verbatim, advance past the closing `$`.
+		b.WriteString(string(r[i : j+1]))
+		i = j + 1
+	}
+	return b.String()
+}
+
+func shouldEscapeProseDollarPair(body []rune) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if !(body[0] >= '0' && body[0] <= '9') {
+		return false
+	}
+	for _, c := range body {
+		switch c {
+		case '\\', '{', '}', '_', '^':
+			return false
+		}
+	}
+	return true
 }
 
 // stripJinaMathShadow removes the Unicode "shadow" that Jina Reader appends
