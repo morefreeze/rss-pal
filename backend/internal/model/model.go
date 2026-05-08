@@ -155,3 +155,42 @@ const (
 	EventTypeClick         = "click"
 	EventTypeCompletedRead = "completed_read"
 )
+
+// UserTag is a per-user manual tag (the "tag" the user types into the article page).
+// Distinct from InterestTag (which is a system-tracked weighted signal).
+type UserTag struct {
+	ID        int       `json:"id" db:"id"`
+	UserID    int       `json:"user_id" db:"user_id"`
+	Name      string    `json:"name" db:"name"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	// ArticleCount is filled by GetTagsForUser; 0 elsewhere.
+	ArticleCount int `json:"article_count,omitempty" db:"article_count"`
+}
+
+// ArticleTagsResponse is what GET /api/articles/:id/tags returns.
+type ArticleTagsResponse struct {
+	Source      ArticleTagSource `json:"source"`
+	Manual      []UserTag        `json:"manual"`
+	Suggestions []string         `json:"suggestions"` // names only; AI candidates minus accepted/dismissed
+}
+
+type ArticleTagSource struct {
+	FeedID int    `json:"feed_id"`
+	Title  string `json:"title"`
+}
+
+type CreateTagRequest struct {
+	Name string `json:"name"`
+}
+
+type RenameTagRequest struct {
+	Name string `json:"name"`
+}
+
+type AddArticleTagRequest struct {
+	Name string `json:"name"`
+}
+
+type DismissSuggestionRequest struct {
+	Name string `json:"name"`
+}
