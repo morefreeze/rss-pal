@@ -29,7 +29,18 @@ func (r *ProgressRepository) GetByArticleAndUser(articleID, userID int) (*model.
 	return &p, nil
 }
 
-func (r *ProgressRepository) Upsert(progress *model.ReadingProgress) error {
+// ProgressUpsertResult exposes whether is_completed flipped false→true on this call.
+type ProgressUpsertResult struct {
+	NewlyCompleted bool
+}
+
+func (r *ProgressRepository) Upsert(progress *model.ReadingProgress) (ProgressUpsertResult, error) {
+	var prev sql.NullBool
+	_ = r.db.QueryRow(
+		`SELECT is_completed FROM reading_progress WHERE article_id = $1 AND user_id = $2`,
+		progress.ArticleID, progress.UserID,
+	).Scan(&prev)
+
 	query := `
 		INSERT INTO reading_progress (user_id, article_id, scroll_position, last_read_at, is_completed)
 		VALUES ($1, $2, $3, $4, $5)
@@ -39,7 +50,12 @@ func (r *ProgressRepository) Upsert(progress *model.ReadingProgress) error {
 			is_completed = reading_progress.is_completed OR EXCLUDED.is_completed
 		RETURNING id, scroll_position, is_completed
 	`
-	return r.db.QueryRow(query, progress.UserID, progress.ArticleID, progress.ScrollPosition, progress.LastReadAt, progress.IsCompleted).Scan(&progress.ID, &progress.ScrollPosition, &progress.IsCompleted)
+	err := r.db.QueryRow(query, progress.UserID, progress.ArticleID, progress.ScrollPosition, progress.LastReadAt, progress.IsCompleted).Scan(&progress.ID, &progress.ScrollPosition, &progress.IsCompleted)
+	if err != nil {
+		return ProgressUpsertResult{}, err
+	}
+	wasCompleted := prev.Valid && prev.Bool
+	return ProgressUpsertResult{NewlyCompleted: !wasCompleted && progress.IsCompleted}, nil
 }
 
 func (r *ProgressRepository) Reset(articleID, userID int) error {
