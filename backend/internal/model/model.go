@@ -139,3 +139,19 @@ type PlaybackProgress struct {
 	LastPlayedAt    time.Time `json:"last_played_at" db:"last_played_at"`
 	IsCompleted     bool      `json:"is_completed" db:"is_completed"`
 }
+
+// ArticleEvent records a behavioral signal about a user-article interaction.
+// event_type ∈ {"exposure", "click", "completed_read"}.
+type ArticleEvent struct {
+	ID         int64     `json:"id" db:"id"`
+	UserID     int       `json:"user_id" db:"user_id"`
+	ArticleID  int       `json:"article_id" db:"article_id"`
+	EventType  string    `json:"event_type" db:"event_type"`
+	OccurredAt time.Time `json:"occurred_at" db:"occurred_at"`
+}
+
+const (
+	EventTypeExposure      = "exposure"
+	EventTypeClick         = "click"
+	EventTypeCompletedRead = "completed_read"
+)
