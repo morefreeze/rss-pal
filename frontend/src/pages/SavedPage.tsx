@@ -208,7 +208,7 @@ export default function SavedPage() {
   const headerLabel = (() => {
     switch (selection.kind) {
       case 'all':
-        return '全部收藏'
+        return '所有 Tag'
       case 'untagged':
         return '未打 tag 的收藏'
       case 'tag': {
