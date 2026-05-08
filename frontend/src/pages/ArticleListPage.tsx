@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds } from '../api/client'
+import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds, likeArticle, dislikeArticle } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
 import { usePlayer } from '../player/PlayerContext'
@@ -154,6 +154,7 @@ export default function ArticleListPage() {
   const player = usePlayer()
   const [articles, setArticles] = useState<Article[]>([])
   const [recommended, setRecommended] = useState<Article[]>([])
+  const [boostedIds, setBoostedIds] = useState<Set<number>>(new Set())
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -293,6 +294,37 @@ export default function ArticleListPage() {
       setRecommended(data || [])
     } catch {
       // Ignore errors for recommended
+    }
+  }
+
+  const handleBoost = async (articleId: number, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setBoostedIds(prev => {
+      const next = new Set(prev)
+      next.add(articleId)
+      return next
+    })
+    try {
+      await likeArticle(articleId)
+    } catch {
+      setBoostedIds(prev => {
+        const next = new Set(prev)
+        next.delete(articleId)
+        return next
+      })
+    }
+  }
+
+  const handleDampen = async (articleId: number, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setRecommended(prev => prev.filter(a => a.id !== articleId))
+    try {
+      await dislikeArticle(articleId)
+      await loadRecommended()
+    } catch {
+      // Keep the row removed locally; next page load will resync.
     }
   }
 
@@ -504,6 +536,28 @@ export default function ArticleListPage() {
                       </span>
                     )}
                   </div>
+                </div>
+                <div className="rec-feedback">
+                  {boostedIds.has(article.id) ? (
+                    <span className="rec-feedback-badge">✓ 已多推</span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="rec-feedback-btn"
+                        title="多推这类"
+                        aria-label="多推这类"
+                        onClick={(e) => handleBoost(article.id, e)}
+                      >👍</button>
+                      <button
+                        type="button"
+                        className="rec-feedback-btn"
+                        title="少推这类"
+                        aria-label="少推这类"
+                        onClick={(e) => handleDampen(article.id, e)}
+                      >👎</button>
+                    </>
+                  )}
                 </div>
               </div>
             </Link>
