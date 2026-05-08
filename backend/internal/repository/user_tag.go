@@ -68,18 +68,19 @@ func (r *UserTagRepository) CreateTag(userID int, name string) (int, error) {
 // RenameTag changes the name. Returns ErrTagNameConflict on unique violation.
 // Returns sql.ErrNoRows if the tag does not belong to the user.
 func (r *UserTagRepository) RenameTag(userID, tagID int, name string) error {
-	res, err := r.db.Exec(`
-		UPDATE user_tags SET name = $1 WHERE id = $2 AND user_id = $3
-	`, name, tagID, userID)
+	var id int
+	err := r.db.QueryRow(`
+		UPDATE user_tags SET name = $1 WHERE id = $2 AND user_id = $3 RETURNING id
+	`, name, tagID, userID).Scan(&id)
 	if err != nil {
-		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
 			return ErrTagNameConflict
 		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return sql.ErrNoRows
+		}
 		return err
-	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		return sql.ErrNoRows
 	}
 	return nil
 }
@@ -157,14 +158,16 @@ func (r *ArticleUserTagRepository) Unbind(articleID, tagID, userID int) error {
 }
 
 // GetSourceForArticle returns the feed-derived source tag (id + title).
-func (r *ArticleUserTagRepository) GetSourceForArticle(articleID int) (model.ArticleTagSource, error) {
+// Enforces feed ownership: returns sql.ErrNoRows if the article belongs to
+// a feed owned by another user.
+func (r *ArticleUserTagRepository) GetSourceForArticle(articleID, userID int) (model.ArticleTagSource, error) {
 	var s model.ArticleTagSource
 	err := r.db.QueryRow(`
 		SELECT f.id, f.title
 		FROM articles a
 		JOIN feeds f ON f.id = a.feed_id
-		WHERE a.id = $1
-	`, articleID).Scan(&s.FeedID, &s.Title)
+		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)
+	`, articleID, userID).Scan(&s.FeedID, &s.Title)
 	return s, err
 }
 
