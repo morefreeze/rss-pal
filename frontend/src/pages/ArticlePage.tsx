@@ -650,28 +650,36 @@ export default function ArticlePage() {
         )}
       </div>
 
-      {/* Content section */}
-      <div className="card">
-        <div className="flex-between mb-1">
-          <h3>原文内容</h3>
-          {fromBookmarklet ? (
-            <button onClick={handleRescrapeViaBookmarklet} title="在新标签打开原网页，由你点击书签来更新">
-              🔁 通过书签重新抓取
-            </button>
-          ) : (
-            <button onClick={handleFetchContent} disabled={fetchingContent}>
-              {fetchingContent ? '获取中...' : '重新抓取'}
-            </button>
-          )}
-        </div>
-        {article.content ? (
-          <div style={{ lineHeight: 1.8, fontSize: 15 }}>
-            <MarkdownArticle source={article.content} />
+      {/* Content section: hidden entirely for video articles without
+           transcript yet (the worker handles them; original-page scraping
+           produces useless boilerplate for YouTube/Bilibili watch pages). */}
+      {(() => {
+        const isVideo = article.media_type?.startsWith('video/')
+        if (isVideo && !article.content) return null
+        return (
+          <div className="card">
+            <div className="flex-between mb-1">
+              <h3>{isVideo ? '字幕' : '原文内容'}</h3>
+              {!isVideo && (fromBookmarklet ? (
+                <button onClick={handleRescrapeViaBookmarklet} title="在新标签打开原网页，由你点击书签来更新">
+                  🔁 通过书签重新抓取
+                </button>
+              ) : (
+                <button onClick={handleFetchContent} disabled={fetchingContent}>
+                  {fetchingContent ? '获取中...' : '重新抓取'}
+                </button>
+              ))}
+            </div>
+            {article.content ? (
+              <div style={{ lineHeight: 1.8, fontSize: 15 }}>
+                <MarkdownArticle source={article.content} />
+              </div>
+            ) : (
+              <div className="text-muted">暂无内容，点击"重新抓取"从原文链接抓取</div>
+            )}
           </div>
-        ) : (
-          <div className="text-muted">暂无内容，点击"重新抓取"从原文链接抓取</div>
-        )}
-      </div>
+        )
+      })()}
 
       {/* Share section */}
       <div className="card">

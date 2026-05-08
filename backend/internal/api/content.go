@@ -48,6 +48,14 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 		return
 	}
 
+	// Video articles' source pages are JS-heavy and scrape into useless
+	// boilerplate (Google footer, Bilibili nav). The transcript pipeline
+	// (worker backfillTranscripts) is the only useful path for these.
+	if strings.HasPrefix(article.MediaType, "video/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "视频文章不支持抓取原文，字幕由后台自动获取"})
+		return
+	}
+
 	content, err := h.contentFetcher.FetchContent(c.Request.Context(), article.URL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
