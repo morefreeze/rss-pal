@@ -3,6 +3,7 @@ import { getFeedHealth, FeedHealthResponse } from '../api/client'
 import { Link } from 'react-router-dom'
 import FeedHealthKPI from '../components/FeedHealthKPI'
 import FeedHealthTable from '../components/FeedHealthTable'
+import PruningDrawer from '../components/PruningDrawer'
 
 const WINDOW_KEY = 'feedHealthWindow'
 
@@ -46,6 +47,10 @@ export default function FeedHealthPage() {
       {error && <div className="error">{error}</div>}
       {data && (
         <>
+          <PruningDrawer rows={data.rows} onChange={() => {
+            setLoading(true)
+            getFeedHealth(timeWindow).then(setData).finally(() => setLoading(false))
+          }} />
           <FeedHealthKPI kpi={data.kpi} window={data.window} />
           <FeedHealthTable rows={data.rows} onChange={() => {
             // refetch
