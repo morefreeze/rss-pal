@@ -32,6 +32,8 @@ func main() {
 	shareRepo := repository.NewShareRepository(db)
 	recommendedRepo := repository.NewRecommendedFeedRepository(db)
 	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
+	eventRepo := repository.NewEventRepository(db)
+	feedHealthRepo := repository.NewFeedHealthRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	summarizerService := service.NewSummarizerService(summarizer)
@@ -41,7 +43,7 @@ func main() {
 	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
-	progressHandler := api.NewProgressHandler(progressRepo)
+	progressHandler := api.NewProgressHandler(progressRepo, eventRepo)
 	rssFetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
 	contentHandler := api.NewContentHandler(articleRepo, feedRepo, rssFetcher)
 	statsHandler := api.NewStatsHandler(statsRepo)
@@ -53,6 +55,8 @@ func main() {
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
+	eventHandler := api.NewEventHandler(eventRepo)
+	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
 
 	router := gin.Default()
 	// Trust only requests from localhost/private networks (running behind nginx)
@@ -103,6 +107,9 @@ func main() {
 		apiGroup.PUT("/feeds/:id", feedHandler.Update)
 		apiGroup.DELETE("/feeds/:id", feedHandler.Delete)
 		apiGroup.POST("/feeds/:id/fetch", feedHandler.FetchNow)
+		apiGroup.PATCH("/feeds/:id/status", feedHandler.UpdateStatus)
+		apiGroup.PATCH("/feeds/:id/weight", feedHandler.UpdateWeight)
+		apiGroup.GET("/feeds/health", feedHealthHandler.Get)
 
 		// Articles
 		apiGroup.GET("/articles", articleHandler.GetAll)
@@ -133,6 +140,9 @@ func main() {
 		apiGroup.GET("/progress/:article_id", progressHandler.Get)
 		apiGroup.POST("/progress/:article_id", progressHandler.Update)
 		apiGroup.POST("/progress/:article_id/reset", progressHandler.Reset)
+
+		// Behavioral events (exposure/click)
+		apiGroup.POST("/events", eventHandler.Create)
 
 		// Stats
 		apiGroup.GET("/stats", statsHandler.GetStats)

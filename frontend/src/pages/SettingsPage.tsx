@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
 
@@ -404,6 +405,13 @@ export default function SettingsPage({ user }: SettingsPageProps) {
   return (
     <div>
       <h2 className="mb-2">设置</h2>
+
+      {/* 工具入口 */}
+      <div className="card mb-2">
+        <h3 className="mb-1">工具</h3>
+        <p className="text-muted text-sm mb-2">订阅源治理与阅读行为分析</p>
+        <Link to="/feeds/health">📊 Feed 健康度面板 →</Link>
+      </div>
 
       {/* 邀请码管理（仅管理员可见） */}
       {user?.is_admin && (

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
 
@@ -185,6 +186,9 @@ export default function FeedListPage() {
 
   return (
     <div>
+      <div style={{ marginBottom: 12 }}>
+        <Link to="/feeds/health">健康度面板 →</Link>
+      </div>
       <div className="flex-between mb-2">
         <h2>订阅管理</h2>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

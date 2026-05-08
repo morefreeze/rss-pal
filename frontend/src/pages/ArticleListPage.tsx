@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import { usePlayer } from '../player/PlayerContext'
+import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 
 const PAGE_SIZE = 20
 
@@ -68,6 +69,168 @@ function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Art
         </button>
       )}
     </span>
+  )
+}
+
+// ArticleRow renders a single article card in the main list.
+// It owns the exposure-tracking ref and reports a click event before
+// navigation. The optional prefetchRef is merged onto the same element
+// to keep the infinite-scroll observer working.
+function ArticleRow({
+  article,
+  isRead,
+  isFocused,
+  idx,
+  prefetchRef,
+  onPlay,
+  formatDate,
+  stripMarkdown,
+  onOpen,
+  onFocus,
+}: {
+  article: Article
+  isRead: boolean
+  isFocused: boolean
+  idx: number
+  prefetchRef?: React.RefObject<HTMLDivElement>
+  onPlay: (a: Article) => void
+  formatDate: (d: string | null) => string
+  stripMarkdown: (t: string) => string
+  onOpen: (id: number) => void
+  onFocus: (idx: number) => void
+}) {
+  const exposureRef = useExposureTracking(article.id)
+
+  // Merge the exposure ref with the optional prefetch (infinite-scroll) ref.
+  const mergedRef = (el: HTMLDivElement | null) => {
+    ;(exposureRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+    if (prefetchRef) {
+      ;(prefetchRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+    }
+  }
+
+  return (
+    <div
+      ref={mergedRef}
+      className="card"
+      data-article-card
+      style={{
+        display: 'block',
+        opacity: isRead ? 0.6 : 1,
+        cursor: 'pointer',
+        outline: isFocused ? '2px solid #0066cc' : 'none',
+        outlineOffset: -2,
+      }}
+      onClick={() => {
+        onFocus(idx)
+        reportClick(article.id)
+        onOpen(article.id)
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        {!isRead && (
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
+        )}
+        <div style={{ flex: 1 }}>
+          <div className={isRead ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
+            <MediaIndicator article={article} onPlay={onPlay} />
+            <span>{article.title}</span>
+          </div>
+          {article.summary_brief && (
+            <div className="text-muted text-sm mt-1">
+              {stripMarkdown(article.summary_brief).slice(0, 120)}...
+            </div>
+          )}
+          <div className="flex-between mt-1">
+            <div className="flex gap-2" style={{ alignItems: 'center' }}>
+              <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+              <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+            </div>
+            {article.feed_title && (
+              <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
+                {article.feed_title}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// SearchArticleRow renders a single article card in the search-results panel.
+function SearchArticleRow({
+  article,
+  isRead,
+  isFocused,
+  idx,
+  onPlay,
+  formatDate,
+  stripMarkdown,
+  onNavigate,
+  onFocus,
+  navList,
+}: {
+  article: Article
+  isRead: boolean
+  isFocused: boolean
+  idx: number
+  onPlay: (a: Article) => void
+  formatDate: (d: string | null) => string
+  stripMarkdown: (t: string) => string
+  onNavigate: (id: number) => void
+  onFocus: (idx: number) => void
+  navList: number[]
+}) {
+  const exposureRef = useExposureTracking(article.id)
+
+  return (
+    <div
+      ref={exposureRef}
+      className="card"
+      data-article-card
+      style={{
+        display: 'block',
+        opacity: isRead ? 0.6 : 1,
+        cursor: 'pointer',
+        outline: isFocused ? '2px solid #0066cc' : 'none',
+        outlineOffset: -2,
+      }}
+      onClick={() => {
+        onFocus(idx)
+        reportClick(article.id)
+        try { sessionStorage.setItem('articleNavList', JSON.stringify(navList)) } catch {}
+        onNavigate(article.id)
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        {!isRead && (
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
+        )}
+        <div style={{ flex: 1 }}>
+          <div className={isRead ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
+            <MediaIndicator article={article} onPlay={onPlay} />
+            <span>{article.title}</span>
+          </div>
+          {article.summary_brief && (
+            <div className="text-muted text-sm mt-1">
+              {stripMarkdown(article.summary_brief).slice(0, 120)}...
+            </div>
+          )}
+          <div className="flex-between mt-1">
+            <div className="flex gap-2" style={{ alignItems: 'center' }}>
+              <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+              <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+            </div>
+            {article.feed_title && (
+              <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
+                {article.feed_title}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -285,6 +448,7 @@ export default function ArticleListPage() {
   const isRead = (article: Article) => article.is_read || sessionReadIds.has(article.id)
 
   const openArticle = (id: number) => {
+    reportClick(id)
     try {
       const ids = articles.map(a => a.id)
       const i = ids.indexOf(id)
@@ -454,51 +618,19 @@ export default function ArticleListPage() {
             <>
               <div className="text-muted text-sm mb-1" style={{ padding: '0 4px' }}>找到 {searchResults.length} 篇文章</div>
               {searchResults.map((article, idx) => (
-                <div
+                <SearchArticleRow
                   key={article.id}
-                  className="card"
-                  data-article-card
-                  style={{
-                    display: 'block',
-                    opacity: isRead(article) ? 0.6 : 1,
-                    cursor: 'pointer',
-                    outline: focusedIdx === idx ? '2px solid #0066cc' : 'none',
-                    outlineOffset: -2,
-                  }}
-                  onClick={() => {
-                    setFocusedIdx(idx)
-                    try { sessionStorage.setItem('articleNavList', JSON.stringify(searchResults.map(a => a.id))) } catch {}
-                    navigate(`/articles/${article.id}`)
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    {!isRead(article) && (
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
-                    )}
-                    <div style={{ flex: 1 }}>
-                      <div className={isRead(article) ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
-                        <MediaIndicator article={article} onPlay={player.playArticle} />
-                        <span>{article.title}</span>
-                      </div>
-                      {article.summary_brief && (
-                        <div className="text-muted text-sm mt-1">
-                          {stripMarkdown(article.summary_brief).slice(0, 120)}...
-                        </div>
-                      )}
-                      <div className="flex-between mt-1">
-                        <div className="flex gap-2" style={{ alignItems: 'center' }}>
-                          <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
-                          <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
-                        </div>
-                        {article.feed_title && (
-                          <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
-                            {article.feed_title}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                  article={article}
+                  isRead={isRead(article)}
+                  isFocused={focusedIdx === idx}
+                  idx={idx}
+                  onPlay={player.playArticle}
+                  formatDate={formatDate}
+                  stripMarkdown={stripMarkdown}
+                  onNavigate={(id) => navigate(`/articles/${id}`)}
+                  onFocus={setFocusedIdx}
+                  navList={searchResults.map(a => a.id)}
+                />
               ))}
             </>
           )
@@ -531,48 +663,19 @@ export default function ArticleListPage() {
         return (
         <>
           {filtered.map((article, idx) => (
-            <div
+            <ArticleRow
               key={article.id}
-              ref={idx === prefetchIdx ? loadMoreRef : undefined}
-              className="card"
-              data-article-card
-              style={{
-                display: 'block',
-                opacity: isRead(article) ? 0.6 : 1,
-                cursor: 'pointer',
-                outline: focusedIdx === idx ? '2px solid #0066cc' : 'none',
-                outlineOffset: -2,
-              }}
-              onClick={() => { setFocusedIdx(idx); openArticle(article.id) }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                {!isRead(article) && (
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
-                )}
-                <div style={{ flex: 1 }}>
-                  <div className={isRead(article) ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
-                    <MediaIndicator article={article} onPlay={player.playArticle} />
-                    <span>{article.title}</span>
-                  </div>
-                  {article.summary_brief && (
-                    <div className="text-muted text-sm mt-1">
-                      {stripMarkdown(article.summary_brief).slice(0, 120)}...
-                    </div>
-                  )}
-                  <div className="flex-between mt-1">
-                    <div className="flex gap-2" style={{ alignItems: 'center' }}>
-                      <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
-                      <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
-                    </div>
-                    {article.feed_title && (
-                      <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
-                        {article.feed_title}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+              article={article}
+              isRead={isRead(article)}
+              isFocused={focusedIdx === idx}
+              idx={idx}
+              prefetchRef={idx === prefetchIdx ? loadMoreRef : undefined}
+              onPlay={player.playArticle}
+              formatDate={formatDate}
+              stripMarkdown={stripMarkdown}
+              onOpen={openArticle}
+              onFocus={setFocusedIdx}
+            />
           ))}
           {hasMore ? (
             <div style={{ textAlign: 'center', padding: '12px', color: '#999', fontSize: 13 }}>

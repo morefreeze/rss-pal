@@ -13,6 +13,8 @@ type Feed struct {
 	IsActive         bool       `json:"is_active" db:"is_active"`
 	OwnerID          *int       `json:"owner_id" db:"owner_id"`
 	FeedType         string     `json:"feed_type" db:"feed_type"` // "rss" or "html"
+	Status           string     `json:"status" db:"status"`
+	PriorityWeight   float64    `json:"priority_weight" db:"priority_weight"`
 	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
 	ArticleCount     int        `json:"article_count" db:"article_count"`
 	UnreadCount      int        `json:"unread_count" db:"unread_count"`
@@ -137,3 +139,19 @@ type PlaybackProgress struct {
 	LastPlayedAt    time.Time `json:"last_played_at" db:"last_played_at"`
 	IsCompleted     bool      `json:"is_completed" db:"is_completed"`
 }
+
+// ArticleEvent records a behavioral signal about a user-article interaction.
+// event_type ∈ {"exposure", "click", "completed_read"}.
+type ArticleEvent struct {
+	ID         int64     `json:"id" db:"id"`
+	UserID     int       `json:"user_id" db:"user_id"`
+	ArticleID  int       `json:"article_id" db:"article_id"`
+	EventType  string    `json:"event_type" db:"event_type"`
+	OccurredAt time.Time `json:"occurred_at" db:"occurred_at"`
+}
+
+const (
+	EventTypeExposure      = "exposure"
+	EventTypeClick         = "click"
+	EventTypeCompletedRead = "completed_read"
+)

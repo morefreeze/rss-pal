@@ -202,11 +202,12 @@ func (h *PreferenceHandler) DeleteTag(c *gin.Context) {
 }
 
 type ProgressHandler struct {
-	repo *repository.ProgressRepository
+	repo      *repository.ProgressRepository
+	eventRepo *repository.EventRepository
 }
 
-func NewProgressHandler(repo *repository.ProgressRepository) *ProgressHandler {
-	return &ProgressHandler{repo: repo}
+func NewProgressHandler(repo *repository.ProgressRepository, eventRepo *repository.EventRepository) *ProgressHandler {
+	return &ProgressHandler{repo: repo, eventRepo: eventRepo}
 }
 
 func (h *ProgressHandler) Get(c *gin.Context) {
@@ -243,17 +244,23 @@ func (h *ProgressHandler) Update(c *gin.Context) {
 		return
 	}
 
+	userID := getUserID(c)
 	progress := &model.ReadingProgress{
-		UserID:        getUserID(c),
-		ArticleID:     articleID,
+		UserID:         userID,
+		ArticleID:      articleID,
 		ScrollPosition: req.ScrollPosition,
-		LastReadAt:    time.Now(),
-		IsCompleted:   req.IsCompleted,
+		LastReadAt:     time.Now(),
+		IsCompleted:    req.IsCompleted,
 	}
 
-	if err := h.repo.Upsert(progress); err != nil {
+	result, err := h.repo.Upsert(progress)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	if result.NewlyCompleted && h.eventRepo != nil {
+		_ = h.eventRepo.Insert(userID, articleID, model.EventTypeCompletedRead)
 	}
 
 	c.JSON(http.StatusOK, progress)

@@ -383,6 +383,48 @@ func xmlEscape(s string) string {
 	return s
 }
 
+// UpdateStatus PATCH /api/feeds/:id/status
+func (h *FeedHandler) UpdateStatus(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.repo.UpdateStatus(id, req.Status); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// UpdateWeight PATCH /api/feeds/:id/weight
+func (h *FeedHandler) UpdateWeight(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req struct {
+		PriorityWeight float64 `json:"priority_weight"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.repo.UpdateWeight(id, req.PriorityWeight); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // validatePublicURL blocks SSRF by rejecting non-HTTP(S) schemes and private/loopback IPs.
 func validatePublicURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
