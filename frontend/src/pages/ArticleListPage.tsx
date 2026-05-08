@@ -6,32 +6,63 @@ import { usePlayer } from '../player/PlayerContext'
 
 const PAGE_SIZE = 20
 
-function PlayButton({ article, onPlay }: { article: Article; onPlay: (a: Article) => void }) {
+// MediaIndicator shows a per-article badge for media articles. Audio
+// articles get a clickable ▶ play button (starts inline playback); video
+// articles get a non-interactive 🎬 marker (video must play inside the
+// article page where the embed lives). Rendered as siblings rather than
+// either/or so an article that ever has both kinds of media displays
+// both icons.
+function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Article) => void }) {
   if (!article.media_url) return null
+  const t = article.media_type ?? ''
+  const isVideo = t.startsWith('video/')
+  const isAudio = t.startsWith('audio/')
+  // Articles with media_url but no recognised type fall back to the
+  // play-button shape (the original behaviour).
+  const audioFallback = !isVideo && !isAudio
+
   return (
-    <button
-      type="button"
-      aria-label="播放"
-      title="播放"
-      onClick={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        onPlay(article)
-      }}
-      style={{
-        marginRight: 8,
-        padding: '2px 8px',
-        borderRadius: 999,
-        border: '1px solid #0066cc',
-        background: '#fff',
-        color: '#0066cc',
-        fontSize: 12,
-        cursor: 'pointer',
-        flexShrink: 0,
-      }}
-    >
-      ▶
-    </button>
+    <span style={{ display: 'inline-flex', gap: 4, marginRight: 8, flexShrink: 0 }}>
+      {isVideo && (
+        <span
+          title="视频"
+          aria-label="视频"
+          style={{
+            padding: '2px 8px',
+            borderRadius: 999,
+            border: '1px solid #cc3a3a',
+            background: '#fff5f5',
+            color: '#cc3a3a',
+            fontSize: 12,
+          }}
+        >
+          🎬
+        </span>
+      )}
+      {(isAudio || audioFallback) && (
+        <button
+          type="button"
+          aria-label="播放"
+          title="音频 · 点击播放"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onPlay(article)
+          }}
+          style={{
+            padding: '2px 8px',
+            borderRadius: 999,
+            border: '1px solid #0066cc',
+            background: '#fff',
+            color: '#0066cc',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          ▶
+        </button>
+      )}
+    </span>
   )
 }
 
@@ -389,7 +420,7 @@ export default function ArticleListPage() {
               <div className="flex-between">
                 <div style={{ flex: 1 }}>
                   <div className="text-bold" style={{ display: 'flex', alignItems: 'center' }}>
-                    <PlayButton article={article} onPlay={player.playArticle} />
+                    <MediaIndicator article={article} onPlay={player.playArticle} />
                     <span>{article.title}</span>
                   </div>
                   <div className="flex gap-2 mt-1">
@@ -441,7 +472,7 @@ export default function ArticleListPage() {
                     )}
                     <div style={{ flex: 1 }}>
                       <div className={isRead(article) ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
-                        <PlayButton article={article} onPlay={player.playArticle} />
+                        <MediaIndicator article={article} onPlay={player.playArticle} />
                         <span>{article.title}</span>
                       </div>
                       {article.summary_brief && (
@@ -504,7 +535,7 @@ export default function ArticleListPage() {
                 )}
                 <div style={{ flex: 1 }}>
                   <div className={isRead(article) ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
-                    <PlayButton article={article} onPlay={player.playArticle} />
+                    <MediaIndicator article={article} onPlay={player.playArticle} />
                     <span>{article.title}</span>
                   </div>
                   {article.summary_brief && (

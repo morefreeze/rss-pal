@@ -77,6 +77,36 @@ func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, 
 	return content, nil
 }
 
+// FetchHTMLDocument fetches the URL and returns a parsed goquery document.
+// Used by callers that need DOM-level access (e.g. transcript discovery)
+// rather than a clean markdown extraction. No content cleanup is applied
+// — script/style/avatar removal is the caller's responsibility.
+//
+// Returns (nil, nil) on a non-200 response so callers can treat HTTP errors
+// the same way as "no transcript available". Returns a non-nil error only
+// for transport-level failures.
+func (f *ContentFetcher) FetchHTMLDocument(ctx context.Context, pageURL string) (*goquery.Document, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil
+	}
+
+	return goquery.NewDocumentFromReader(resp.Body)
+}
+
 // fetchDirect performs the original direct HTTP scrape. Returns the extracted
 // content, the HTTP status code, and any transport error.
 func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, int, error) {
