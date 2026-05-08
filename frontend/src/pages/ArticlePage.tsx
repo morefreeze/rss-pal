@@ -149,6 +149,17 @@ export default function ArticlePage() {
     getTemplates().then(ts => setTemplates(ts || [])).catch(() => {})
   }, [])
 
+  // Accumulates active (visible) seconds on this page for the stay-time gate.
+  const activeReadSecondsRef = useRef(0)
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        activeReadSecondsRef.current += 1
+      }
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [])
+
   const pendingProgressRef = useRef<{ scrollPosition: number; isCompleted: boolean } | null>(null)
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -187,7 +198,9 @@ export default function ArticlePage() {
     if (scrollPosition <= maxScrollRef.current) return
     maxScrollRef.current = scrollPosition
 
-    const isCompleted = scrollPosition > 0.9
+    const readMin = article?.reading_minutes || 1
+    const minSeconds = Math.min(30, Math.floor(readMin * 30))
+    const isCompleted = scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds
     const wasCompleted = progress?.is_completed
 
     setProgress(prev => prev ? {
