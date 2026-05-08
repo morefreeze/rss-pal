@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getFeedHealth, FeedHealthResponse } from '../api/client'
 import { Link } from 'react-router-dom'
+import FeedHealthKPI from '../components/FeedHealthKPI'
 
 const WINDOW_KEY = 'feedHealthWindow'
 
@@ -44,9 +45,9 @@ export default function FeedHealthPage() {
       {error && <div className="error">{error}</div>}
       {data && (
         <>
-          <pre style={{ fontSize: 12, background: '#f5f5f5', padding: 8 }}>
-            {JSON.stringify(data, null, 2)}
-          </pre>
+          <FeedHealthKPI kpi={data.kpi} window={data.window} />
+          {/* table will go here in Task 17 */}
+          <pre style={{ fontSize: 11 }}>{JSON.stringify(data.rows, null, 2)}</pre>
         </>
       )}
     </div>
