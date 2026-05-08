@@ -317,7 +317,17 @@ type SavedRow struct {
 // ListSaved returns one SavedRow per saved article (in published order) and a total count.
 func (r *SavedRepository) ListSaved(q SavedQuery) ([]SavedRow, int, error) {
 	args := []interface{}{q.UserID}
-	where := []string{`p.user_id = $1 AND p.signal_type = 'save'`}
+	// "In my collection" = either I save-signaled it, or it's in my bookmarklet
+	// (网摘) feed. Both branches are user-scoped via $1.
+	where := []string{`(
+		EXISTS (
+			SELECT 1 FROM user_preferences p
+			WHERE p.article_id = a.id
+			  AND p.user_id = $1
+			  AND p.signal_type = 'save'
+		)
+		OR (f.feed_type = 'saved' AND f.owner_id = $1)
+	)`}
 	// Tenancy: never expose articles from feeds owned by another user.
 	// Mirrors the pattern used by every other articles query in this codebase.
 	where = append(where, `(f.owner_id IS NULL OR f.owner_id = $1)`)
@@ -369,7 +379,6 @@ func (r *SavedRepository) ListSaved(q SavedQuery) ([]SavedRow, int, error) {
 	if err := r.db.QueryRow(`
 		SELECT COUNT(*) FROM articles a
 		JOIN feeds f ON f.id = a.feed_id
-		JOIN user_preferences p ON p.article_id = a.id
 		WHERE `+whereSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -387,7 +396,6 @@ func (r *SavedRepository) ListSaved(q SavedQuery) ([]SavedRow, int, error) {
 		       COALESCE(a.media_type, '')
 		FROM articles a
 		JOIN feeds f ON f.id = a.feed_id
-		JOIN user_preferences p ON p.article_id = a.id
 		WHERE `+whereSQL+`
 		ORDER BY a.published_at DESC NULLS LAST, a.id DESC
 		LIMIT `+limitParam+` OFFSET `+offsetParam, args...)
