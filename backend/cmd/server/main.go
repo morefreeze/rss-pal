@@ -36,6 +36,7 @@ func main() {
 	feedHealthRepo := repository.NewFeedHealthRepository(db)
 	userTagRepo := repository.NewUserTagRepository(db)
 	articleUserTagRepo := repository.NewArticleUserTagRepository(db)
+	tagSuggestRepo := repository.NewTagSuggestionRepository(db)
 	savedRepo := repository.NewSavedRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
@@ -60,7 +61,7 @@ func main() {
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
 	eventHandler := api.NewEventHandler(eventRepo)
 	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
-	userTagHandler := api.NewUserTagHandler(userTagRepo, articleUserTagRepo)
+	userTagHandler := api.NewUserTagHandler(userTagRepo, articleUserTagRepo, tagSuggestRepo)
 	savedHandler := api.NewSavedHandler(savedRepo, articleUserTagRepo)
 
 	router := gin.Default()
@@ -138,6 +139,7 @@ func main() {
 		apiGroup.GET("/articles/:id/tags", userTagHandler.GetArticleTags)
 		apiGroup.POST("/articles/:id/tags", userTagHandler.AddArticleTag)
 		apiGroup.DELETE("/articles/:id/tags/:tagId", userTagHandler.RemoveArticleTag)
+		apiGroup.POST("/articles/:id/suggestions/dismiss", userTagHandler.DismissSuggestion)
 
 		// Saved articles (filtered by tags / source / untagged)
 		apiGroup.GET("/saved", savedHandler.List)

@@ -16,12 +16,17 @@ import (
 const maxTagNameChars = 64
 
 type UserTagHandler struct {
-	tagRepo  *repository.UserTagRepository
-	bindRepo *repository.ArticleUserTagRepository
+	tagRepo     *repository.UserTagRepository
+	bindRepo    *repository.ArticleUserTagRepository
+	suggestRepo *repository.TagSuggestionRepository
 }
 
-func NewUserTagHandler(tagRepo *repository.UserTagRepository, bindRepo *repository.ArticleUserTagRepository) *UserTagHandler {
-	return &UserTagHandler{tagRepo: tagRepo, bindRepo: bindRepo}
+func NewUserTagHandler(
+	tagRepo *repository.UserTagRepository,
+	bindRepo *repository.ArticleUserTagRepository,
+	suggestRepo *repository.TagSuggestionRepository,
+) *UserTagHandler {
+	return &UserTagHandler{tagRepo: tagRepo, bindRepo: bindRepo, suggestRepo: suggestRepo}
 }
 
 func validateTagName(name string) (string, error) {
@@ -142,12 +147,44 @@ func (h *UserTagHandler) GetArticleTags(c *gin.Context) {
 	if manual == nil {
 		manual = []model.UserTag{}
 	}
+	suggestions, err := h.suggestRepo.SuggestionsForArticle(articleID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if suggestions == nil {
+		suggestions = []string{}
+	}
 	resp := model.ArticleTagsResponse{
 		Source:      source,
 		Manual:      manual,
-		Suggestions: []string{}, // populated in Phase 3
+		Suggestions: suggestions,
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// POST /api/articles/:id/suggestions/dismiss
+func (h *UserTagHandler) DismissSuggestion(c *gin.Context) {
+	articleID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req model.DismissSuggestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	name, err := validateTagName(req.Name)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.suggestRepo.DismissSuggestion(articleID, getUserID(c), name); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusOK)
 }
 
 // POST /api/articles/:id/tags
