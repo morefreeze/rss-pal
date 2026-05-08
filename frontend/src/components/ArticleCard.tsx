@@ -79,7 +79,7 @@ interface Props {
   showSourceTag?: boolean
   // Override for the source chip text. /saved passes effective_source.title
   // here so bookmarklet articles show their real host instead of the
-  // shared "⭐ 收藏" bin name.
+  // shared "⭐ 网摘" bin name.
   sourceLabel?: string
 }
 
