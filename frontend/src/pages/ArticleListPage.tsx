@@ -6,6 +6,11 @@ import { usePlayer } from '../player/PlayerContext'
 
 const PAGE_SIZE = 20
 
+// PREFETCH_OFFSET attaches the IntersectionObserver to the Nth-from-last
+// article rather than a sentinel below the list, so the next page starts
+// fetching while the user still has ~5 articles left to read.
+const PREFETCH_OFFSET = 5
+
 // MediaIndicator shows a per-article badge for media articles. Audio
 // articles get a clickable ▶ play button (starts inline playback); video
 // articles get a non-interactive 🎬 marker (video must play inside the
@@ -513,11 +518,22 @@ export default function ArticleListPage() {
         <div className="card text-muted">
           {unreadOnly ? '没有未读文章 🎉' : '暂无文章，订阅源正在抓取中...'}
         </div>
-      ) : !searchQuery ? (
+      ) : !searchQuery ? (() => {
+        const filtered = articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id))
+        // Prefetch trigger sits PREFETCH_OFFSET items before the end so
+        // the next page starts loading while the user still has reading
+        // left. Falls back to position 0 when the list is shorter than
+        // the offset, ensuring the observer attaches to *some* card and
+        // the bottom-of-list visual indicator is purely informational.
+        const prefetchIdx = hasMore && filtered.length > 0
+          ? Math.max(0, filtered.length - PREFETCH_OFFSET)
+          : -1
+        return (
         <>
-          {articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id)).map((article, idx) => (
+          {filtered.map((article, idx) => (
             <div
               key={article.id}
+              ref={idx === prefetchIdx ? loadMoreRef : undefined}
               className="card"
               data-article-card
               style={{
@@ -559,7 +575,7 @@ export default function ArticleListPage() {
             </div>
           ))}
           {hasMore ? (
-            <div ref={loadMoreRef} style={{ textAlign: 'center', padding: '12px', color: '#999', fontSize: 13 }}>
+            <div style={{ textAlign: 'center', padding: '12px', color: '#999', fontSize: 13 }}>
               {loadingMore ? '加载中...' : ''}
             </div>
           ) : articles.length > 0 ? (
@@ -568,7 +584,8 @@ export default function ArticleListPage() {
             </div>
           ) : null}
         </>
-      ) : null}
+        )
+      })() : null}
     </div>
   )
 }
