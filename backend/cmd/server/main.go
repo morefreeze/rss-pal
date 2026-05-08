@@ -36,6 +36,7 @@ func main() {
 	feedHealthRepo := repository.NewFeedHealthRepository(db)
 	userTagRepo := repository.NewUserTagRepository(db)
 	articleUserTagRepo := repository.NewArticleUserTagRepository(db)
+	savedRepo := repository.NewSavedRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	summarizerService := service.NewSummarizerService(summarizer)
@@ -60,6 +61,7 @@ func main() {
 	eventHandler := api.NewEventHandler(eventRepo)
 	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
 	userTagHandler := api.NewUserTagHandler(userTagRepo, articleUserTagRepo)
+	savedHandler := api.NewSavedHandler(savedRepo, articleUserTagRepo)
 
 	router := gin.Default()
 	// Trust only requests from localhost/private networks (running behind nginx)
@@ -136,6 +138,9 @@ func main() {
 		apiGroup.GET("/articles/:id/tags", userTagHandler.GetArticleTags)
 		apiGroup.POST("/articles/:id/tags", userTagHandler.AddArticleTag)
 		apiGroup.DELETE("/articles/:id/tags/:tagId", userTagHandler.RemoveArticleTag)
+
+		// Saved articles (filtered by tags / source / untagged)
+		apiGroup.GET("/saved", savedHandler.List)
 
 		// Preferences
 		apiGroup.POST("/preferences/like", prefHandler.Like)
