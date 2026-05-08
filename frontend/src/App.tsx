@@ -12,6 +12,7 @@ import SettingsPage from './pages/SettingsPage'
 import SharePage from './pages/SharePage'
 import RecommendedPage from './pages/RecommendedPage'
 import WeeklyPage from './pages/WeeklyPage'
+import FeedHealthPage from './pages/FeedHealthPage'
 import Layout from './components/Layout'
 
 interface User {
@@ -63,6 +64,7 @@ function App() {
         <Route element={<RequireAuth user={user} onLogout={handleLogout} />}>
           <Route index element={<Navigate to="/articles" replace />} />
           <Route path="feeds" element={<FeedListPage />} />
+          <Route path="feeds/health" element={<FeedHealthPage />} />
           <Route path="recommended" element={<RecommendedPage />} />
           <Route path="weekly" element={<WeeklyPage />} />
           <Route path="articles" element={<ArticleListPage />} />
