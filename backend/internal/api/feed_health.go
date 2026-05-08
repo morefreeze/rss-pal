@@ -41,9 +41,15 @@ type FeedHealthRow struct {
 }
 
 type FeedHealthResponse struct {
-	Window string          `json:"window"`
-	KPI    FeedHealthKPI   `json:"kpi"`
-	Rows   []FeedHealthRow `json:"rows"`
+	Window   string          `json:"window"`
+	KPI      FeedHealthKPI   `json:"kpi"`
+	Rows     []FeedHealthRow `json:"rows"`
+	Archived []ArchivedFeed  `json:"archived"`
+}
+
+type ArchivedFeed struct {
+	FeedID    int    `json:"feed_id"`
+	FeedTitle string `json:"feed_title"`
 }
 
 type FeedHealthKPI struct {
@@ -148,9 +154,13 @@ func (h *FeedHealthHandler) Get(c *gin.Context) {
 	}
 
 	totalActive := 0
+	archived := []ArchivedFeed{}
 	for _, f := range feeds {
 		if f.Status == "active" {
 			totalActive++
+		}
+		if f.Status == "archived" {
+			archived = append(archived, ArchivedFeed{FeedID: f.ID, FeedTitle: f.Title})
 		}
 	}
 
@@ -162,7 +172,8 @@ func (h *FeedHealthHandler) Get(c *gin.Context) {
 			Dormant:         dormant,
 			CompletedReadsW: totalReads,
 		},
-		Rows: rows,
+		Rows:     rows,
+		Archived: archived,
 	})
 }
 

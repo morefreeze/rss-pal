@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getFeedHealth, FeedHealthResponse } from '../api/client'
+import { getFeedHealth, FeedHealthResponse, updateFeedStatus } from '../api/client'
 import { Link } from 'react-router-dom'
 import FeedHealthKPI from '../components/FeedHealthKPI'
 import FeedHealthTable from '../components/FeedHealthTable'
@@ -57,6 +57,30 @@ export default function FeedHealthPage() {
             setLoading(true)
             getFeedHealth(timeWindow).then(setData).finally(() => setLoading(false))
           }} />
+          {data.archived.length > 0 && (
+            <details style={{ marginTop: 24 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 14, color: '#666' }}>
+                已归档 ({data.archived.length})
+              </summary>
+              <ul>
+                {data.archived.map(a => (
+                  <li key={a.feed_id} style={{ padding: '4px 0' }}>
+                    {a.feed_title}{' '}
+                    <button
+                      onClick={async () => {
+                        await updateFeedStatus(a.feed_id, 'active')
+                        setLoading(true)
+                        getFeedHealth(timeWindow).then(setData).finally(() => setLoading(false))
+                      }}
+                      style={{ fontSize: 12, marginLeft: 8 }}
+                    >
+                      恢复
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </>
       )}
     </div>
