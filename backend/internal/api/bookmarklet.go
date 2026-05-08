@@ -168,7 +168,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	feed, err := h.feedRepo.GetOrCreateSavedFeed(user.ID)
 	if err != nil {
 		log.Printf("bookmarklet: GetOrCreateSavedFeed failed for user=%d: %v", user.ID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建收藏 feed 失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建网摘 feed 失败"})
 		return
 	}
 
@@ -188,7 +188,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"status":     "created",
 		"article_id": article.ID,
-		"message":    "已收藏: " + title,
+		"message":    "已加入网摘: " + title,
 	})
 }
 
