@@ -74,46 +74,77 @@ func (f *HTMLPageScraper) Fetch(ctx context.Context, article *model.Article) (*R
 	return nil, nil
 }
 
+// findInlineTranscript walks the document in document order, finds the
+// best transcript-marker node (a heading or short <p> whose text is
+// dominantly the word "transcript" / "字幕" / "逐字稿"), then collects
+// the text of every <p> after it until the next heading. Uses document
+// order rather than DOM-sibling traversal because real-world HTML often
+// wraps the marker and the transcript paragraphs in different parents
+// (e.g. BBC Learning English uses widget divs and a <p>TRANSCRIPT</p>
+// label rather than an <h*> heading).
+//
+// We choose the marker by preferring later-occurring matches over
+// earlier ones, since some pages have a "download transcript" link at
+// the top and the actual transcript marker further down.
 func findInlineTranscript(doc *goquery.Document) string {
-	var found string
-	doc.Find("h1, h2, h3, h4").EachWithBreak(func(_ int, h *goquery.Selection) bool {
-		if !transcriptHeadingRe.MatchString(h.Text()) {
-			return true
-		}
-		var b strings.Builder
-		// Walk forward from the heading itself. Some sites (e.g. BBC
-		// Learning English) wrap the heading in a layout div whose siblings
-		// are NOT the transcript paragraphs, so if direct siblings don't
-		// yield enough, also walk siblings of the heading's parent.
-		walkSiblingsForwardCollecting(h, &b)
-		if len([]rune(b.String())) < inlineMinChars && h.Parent().Length() > 0 {
-			walkSiblingsForwardCollecting(h.Parent(), &b)
-		}
-		text := strings.TrimSpace(b.String())
-		if len([]rune(text)) >= inlineMinChars {
-			found = text
-			return false
-		}
-		return true
-	})
-	return found
-}
+	nodes := doc.Find("h1, h2, h3, h4, p")
 
-// walkSiblingsForwardCollecting appends sibling text after start until it
-// reaches a heading element (which marks the next section).
-func walkSiblingsForwardCollecting(start *goquery.Selection, b *strings.Builder) {
-	for s := start.Next(); s.Length() > 0; s = s.Next() {
-		tag := goquery.NodeName(s)
-		if tag == "h1" || tag == "h2" || tag == "h3" || tag == "h4" {
+	startIdx := -1
+	nodes.Each(func(i int, n *goquery.Selection) {
+		text := strings.TrimSpace(n.Text())
+		if !isTranscriptMarker(goquery.NodeName(n), text) {
 			return
 		}
-		text := strings.TrimSpace(s.Text())
+		// Prefer the latest matching marker — labels like "TRANSCRIPT" are
+		// usually the last marker before the actual content; "download a
+		// transcript" links higher up are not real markers.
+		startIdx = i
+	})
+	if startIdx < 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	nodes.EachWithBreak(func(i int, n *goquery.Selection) bool {
+		if i <= startIdx {
+			return true
+		}
+		tag := goquery.NodeName(n)
+		if tag == "h1" || tag == "h2" || tag == "h3" || tag == "h4" {
+			return false
+		}
+		text := strings.TrimSpace(n.Text())
 		if text == "" {
-			continue
+			return true
 		}
 		b.WriteString(text)
 		b.WriteString("\n\n")
+		return true
+	})
+
+	text := strings.TrimSpace(b.String())
+	if len([]rune(text)) >= inlineMinChars {
+		return text
 	}
+	return ""
+}
+
+// isTranscriptMarker reports whether a heading or short paragraph element
+// is a transcript section marker. Headings always qualify when they
+// contain the keyword. Paragraphs qualify only when their entire text is
+// dominantly the keyword (≤30 chars), to avoid matching inline mentions
+// like "Find a transcript at: <URL>".
+func isTranscriptMarker(tag, text string) bool {
+	if !transcriptHeadingRe.MatchString(text) {
+		return false
+	}
+	switch tag {
+	case "h1", "h2", "h3", "h4":
+		return true
+	case "p":
+		return len([]rune(text)) <= 30
+	}
+	return false
 }
 
 func (f *HTMLPageScraper) tryLinkedSubtitle(ctx context.Context, doc *goquery.Document, baseURL string) (string, string) {
