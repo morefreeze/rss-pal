@@ -13,6 +13,8 @@ type Feed struct {
 	IsActive         bool       `json:"is_active" db:"is_active"`
 	OwnerID          *int       `json:"owner_id" db:"owner_id"`
 	FeedType         string     `json:"feed_type" db:"feed_type"` // "rss" or "html"
+	Status           string     `json:"status" db:"status"`
+	PriorityWeight   float64    `json:"priority_weight" db:"priority_weight"`
 	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
 	ArticleCount     int        `json:"article_count" db:"article_count"`
 	UnreadCount      int        `json:"unread_count" db:"unread_count"`
