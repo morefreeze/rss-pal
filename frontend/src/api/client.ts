@@ -609,6 +609,9 @@ export const addArticleTag = (articleId: number, name: string) =>
 export const removeArticleTag = (articleId: number, tagId: number) =>
   api.delete(`/articles/${articleId}/tags/${tagId}`)
 
+export const dismissSuggestion = (articleId: number, name: string) =>
+  api.post(`/articles/${articleId}/suggestions/dismiss`, { name })
+
 // === Saved (Phase 2) ===
 
 export type SavedItem = Article & { manual_tags: UserTag[] }

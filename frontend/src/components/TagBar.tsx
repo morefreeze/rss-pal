@@ -3,6 +3,7 @@ import {
   ArticleTagsResponse,
   UserTag,
   addArticleTag,
+  dismissSuggestion,
   getArticleTags,
   listTags,
   removeArticleTag,
@@ -54,54 +55,98 @@ export default function TagBar({ articleId }: Props) {
   }
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '12px 0' }}>
-      <TagChip name={data.source.title} variant="source" />
-      {data.manual.map(t => (
-        <TagChip
-          key={t.id}
-          name={t.name}
-          variant="manual"
-          onRemove={() => removeManual(t.id)}
-        />
-      ))}
-      {!editing ? (
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="tag-add-btn"
-        >
-          + 添加
-        </button>
-      ) : (
-        <div style={{ position: 'relative' }}>
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') submit()
-              if (e.key === 'Escape') { setEditing(false); setDraft('') }
-            }}
-            onBlur={() => setTimeout(() => setEditing(false), 150)}
-            placeholder="输入新建或选择已有"
-            maxLength={64}
-            className="tag-input"
+    <>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '12px 0' }}>
+        <TagChip name={data.source.title} variant="source" />
+        {data.manual.map(t => (
+          <TagChip
+            key={t.id}
+            name={t.name}
+            variant="manual"
+            onRemove={() => removeManual(t.id)}
           />
-          {suggestions.length > 0 && (
-            <div className="tag-suggest-dropdown">
-              {suggestions.map(s => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onMouseDown={e => { e.preventDefault(); submit(s.name) }}
-                >
-                  {s.name}
-                </button>
-              ))}
-            </div>
-          )}
+        ))}
+        {!editing ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="tag-add-btn"
+          >
+            + 添加
+          </button>
+        ) : (
+          <div style={{ position: 'relative' }}>
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') submit()
+                if (e.key === 'Escape') { setEditing(false); setDraft('') }
+              }}
+              onBlur={() => setTimeout(() => setEditing(false), 150)}
+              placeholder="输入新建或选择已有"
+              maxLength={64}
+              className="tag-input"
+            />
+            {suggestions.length > 0 && (
+              <div className="tag-suggest-dropdown">
+                {suggestions.map(s => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onMouseDown={e => { e.preventDefault(); submit(s.name) }}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {data.suggestions.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '4px 0 12px', fontSize: 12, color: '#64748b' }}>
+          <span>AI 建议:</span>
+          {data.suggestions.map(name => (
+            <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              <TagChip
+                name={name}
+                variant="suggestion"
+                onAdopt={async () => {
+                  await addArticleTag(articleId, name)
+                  const fresh = await getArticleTags(articleId)
+                  setData(fresh)
+                  listTags().then(setAllTags)
+                }}
+              />
+              <button
+                type="button"
+                title="忽略此建议"
+                onClick={async () => {
+                  await dismissSuggestion(articleId, name)
+                  const fresh = await getArticleTags(articleId)
+                  setData(fresh)
+                }}
+                style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 11, padding: 0 }}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          <button
+            type="button"
+            onClick={async () => {
+              await Promise.all(data.suggestions.map(n => dismissSuggestion(articleId, n)))
+              const fresh = await getArticleTags(articleId)
+              setData(fresh)
+            }}
+            style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', textDecoration: 'underline', fontSize: 12 }}
+          >
+            全部忽略
+          </button>
         </div>
       )}
-    </div>
+    </>
   )
 }
