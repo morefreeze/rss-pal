@@ -77,6 +77,10 @@ interface Props {
   onOpen: (id: number) => void
   onFocus: (idx: number) => void
   showSourceTag?: boolean
+  // Override for the source chip text. /saved passes effective_source.title
+  // here so bookmarklet articles show their real host instead of the
+  // shared "⭐ 收藏" bin name.
+  sourceLabel?: string
 }
 
 // ArticleCard renders a single article row in the main list. It owns the
@@ -96,8 +100,10 @@ export default function ArticleCard({
   onOpen,
   onFocus,
   showSourceTag = true,
+  sourceLabel,
 }: Props) {
   const exposureRef = useExposureTracking(article.id)
+  const effectiveSourceLabel = sourceLabel ?? article.feed_title
 
   // Merge the exposure ref with the optional prefetch (infinite-scroll) ref.
   const mergedRef = (el: HTMLDivElement | null) => {
@@ -139,10 +145,10 @@ export default function ArticleCard({
               {stripMarkdown(article.summary_brief).slice(0, 120)}...
             </div>
           )}
-          {(showSourceTag && article.feed_title) || manualTags.length > 0 ? (
+          {(showSourceTag && effectiveSourceLabel) || manualTags.length > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4 }}>
-              {showSourceTag && article.feed_title && (
-                <TagChip name={article.feed_title} variant="source" />
+              {showSourceTag && effectiveSourceLabel && (
+                <TagChip name={effectiveSourceLabel} variant="source" />
               )}
               {manualTags.map(t => (
                 <TagChip key={t.id} name={t.name} variant="manual" />

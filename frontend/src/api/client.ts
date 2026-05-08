@@ -614,7 +614,18 @@ export const dismissSuggestion = (articleId: number, name: string) =>
 
 // === Saved (Phase 2) ===
 
-export type SavedItem = Article & { manual_tags: UserTag[] }
+// EffectiveSource: what the source-tag chip on a saved article should say.
+// `key` is "feed:<id>" or "host:<host>" — opaque to the UI, passed back as
+// the `source` filter on /api/saved.
+export interface EffectiveSource {
+  key: string
+  title: string
+}
+
+export type SavedItem = Article & {
+  manual_tags: UserTag[]
+  effective_source: EffectiveSource
+}
 
 export interface SavedListResponse {
   items: SavedItem[]
@@ -625,7 +636,7 @@ export interface GetSavedParams {
   tag_ids?: number[]
   mode?: 'and' | 'or'
   untagged?: boolean
-  source_feed_id?: number
+  source?: string // EffectiveSource.key, e.g. "feed:8" or "host:github.com"
   limit?: number
   offset?: number
 }
@@ -640,7 +651,7 @@ export const getSaved = (params: GetSavedParams = {}) => {
       query.mode = params.mode
     }
   }
-  if (params.source_feed_id !== undefined) query.source_feed_id = params.source_feed_id
+  if (params.source) query.source = params.source
   if (params.limit !== undefined) query.limit = params.limit
   if (params.offset !== undefined) query.offset = params.offset
   return api.get<SavedListResponse>('/saved', { params: query }).then(r => r.data)

@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Feed,
   GetSavedParams,
   SavedItem,
   SavedListResponse,
   UserTag,
-  getFeeds,
   getSaved,
   listTags,
 } from '../api/client'
 import ArticleCard from '../components/ArticleCard'
-import SavedTagSidebar, { SavedSelection } from '../components/SavedTagSidebar'
+import SavedTagSidebar, {
+  SavedSelection,
+  SavedSourceRow,
+} from '../components/SavedTagSidebar'
 import { usePlayer } from '../player/PlayerContext'
 import { reportClick } from '../hooks/useExposureTracking'
 
@@ -50,7 +51,7 @@ function selectionToParams(sel: SavedSelection): GetSavedParams {
         mode: sel.ids.length > 1 ? sel.mode : undefined,
       }
     case 'source':
-      return { source_feed_id: sel.feedId }
+      return { source: sel.key }
   }
 }
 
@@ -58,7 +59,11 @@ export default function SavedPage() {
   const navigate = useNavigate()
   const player = usePlayer()
   const [tags, setTags] = useState<UserTag[]>([])
-  const [feeds, setFeeds] = useState<Feed[]>([])
+  // Sources are aggregated client-side from saved items' effective_source.
+  // We only refresh this aggregation when the user is viewing an unfiltered
+  // ('all' or 'untagged') list — filtering by source/tag would otherwise
+  // collapse the sidebar to one row and lose the navigation tree.
+  const [sources, setSources] = useState<SavedSourceRow[]>([])
   const [selection, setSelection] = useState<SavedSelection>({ kind: 'all' })
   const [multi, setMulti] = useState(false)
   const [items, setItems] = useState<SavedItem[]>([])
@@ -68,10 +73,9 @@ export default function SavedPage() {
   const [offset, setOffset] = useState(0)
   const [focusedIdx, setFocusedIdx] = useState(-1)
 
-  // Initial sidebar data
+  // Initial sidebar tag list
   useEffect(() => {
     listTags().then(setTags).catch(() => setTags([]))
-    getFeeds().then(setFeeds).catch(() => setFeeds([]))
   }, [])
 
   const params = useMemo(() => selectionToParams(selection), [selection])
@@ -108,6 +112,40 @@ export default function SavedPage() {
   useEffect(() => {
     loadPage(0, true)
   }, [loadPage])
+
+  // Refresh the source list whenever we look at an unfiltered set, so the
+  // sidebar reflects the user's full saved-source taxonomy. We also load
+  // a wider page (100) here because the page-size of 20 would otherwise
+  // hide many distinct sources behind pagination.
+  useEffect(() => {
+    if (selection.kind !== 'all' && selection.kind !== 'untagged') return
+    let cancelled = false
+    getSaved({
+      ...(selection.kind === 'untagged' ? { untagged: true } : {}),
+      limit: 100,
+      offset: 0,
+    })
+      .then(resp => {
+        if (cancelled) return
+        const counts = new Map<string, SavedSourceRow>()
+        for (const it of resp.items || []) {
+          const es = it.effective_source
+          if (!es?.key) continue
+          const cur = counts.get(es.key)
+          if (cur) cur.count += 1
+          else counts.set(es.key, { key: es.key, title: es.title, count: 1 })
+        }
+        setSources(
+          [...counts.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title)),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setSources([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selection.kind])
 
   const hasMore = items.length < total
 
@@ -167,11 +205,6 @@ export default function SavedPage() {
     setSelection(sel)
   }
 
-  const sourceFeedTitle = (feedId: number) => {
-    const f = feeds.find(x => x.id === feedId)
-    return f ? f.title || f.url : `订阅 #${feedId}`
-  }
-
   const headerLabel = (() => {
     switch (selection.kind) {
       case 'all':
@@ -188,7 +221,7 @@ export default function SavedPage() {
         return `Tag: ${names.join(op)}`
       }
       case 'source':
-        return `来源: ${sourceFeedTitle(selection.feedId)}`
+        return `来源: ${selection.title}`
     }
   })()
 
@@ -203,7 +236,7 @@ export default function SavedPage() {
     >
       <SavedTagSidebar
         tags={tags}
-        feeds={feeds}
+        sources={sources}
         selection={selection}
         onSelect={handleSelect}
         multi={multi}
@@ -235,6 +268,7 @@ export default function SavedPage() {
                 stripMarkdown={stripMarkdown}
                 onOpen={openArticle}
                 onFocus={setFocusedIdx}
+                sourceLabel={it.effective_source?.title}
               />
             ))}
             {hasMore && (
