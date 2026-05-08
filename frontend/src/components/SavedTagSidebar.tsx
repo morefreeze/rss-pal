@@ -1,4 +1,14 @@
-import { Feed, UserTag } from '../api/client'
+import { UserTag } from '../api/client'
+
+// Source row aggregated from /api/saved items by EffectiveSource.key.
+// `key` is what we pass to the API as the `source` filter; `title` is what
+// we render. We can't precompute these from the feeds list because saved
+// articles share one feed but split across many hosts.
+export interface SavedSourceRow {
+  key: string
+  title: string
+  count: number
+}
 
 // Saved page sidebar selection state. The 'tag' variant carries an array
 // of ids + a mode so the same shape covers both single and multi select.
@@ -6,11 +16,11 @@ export type SavedSelection =
   | { kind: 'all' }
   | { kind: 'untagged' }
   | { kind: 'tag'; ids: number[]; mode: 'and' | 'or' }
-  | { kind: 'source'; feedId: number }
+  | { kind: 'source'; key: string; title: string }
 
 interface Props {
   tags: UserTag[]
-  feeds: Feed[]
+  sources: SavedSourceRow[]
   selection: SavedSelection
   onSelect: (sel: SavedSelection) => void
   multi: boolean
@@ -23,13 +33,13 @@ function isTagActive(sel: SavedSelection, tagId: number): boolean {
   return sel.kind === 'tag' && sel.ids.includes(tagId)
 }
 
-function isSourceActive(sel: SavedSelection, feedId: number): boolean {
-  return sel.kind === 'source' && sel.feedId === feedId
+function isSourceActive(sel: SavedSelection, key: string): boolean {
+  return sel.kind === 'source' && sel.key === key
 }
 
 export default function SavedTagSidebar({
   tags,
-  feeds,
+  sources,
   selection,
   onSelect,
   multi,
@@ -135,20 +145,21 @@ export default function SavedTagSidebar({
 
       <div style={{ marginTop: 12 }}>
         <div className="saved-section-title">Sources</div>
-        {feeds.length === 0 ? (
+        {sources.length === 0 ? (
           <div className="text-muted text-sm" style={{ padding: '4px 8px' }}>
             暂无来源
           </div>
         ) : (
-          feeds.map(f => (
+          sources.map(s => (
             <button
-              key={f.id}
+              key={s.key}
               type="button"
-              className={'saved-row' + (isSourceActive(selection, f.id) ? ' active' : '')}
-              onClick={() => onSelect({ kind: 'source', feedId: f.id })}
-              title={f.title || f.url}
+              className={'saved-row' + (isSourceActive(selection, s.key) ? ' active' : '')}
+              onClick={() => onSelect({ kind: 'source', key: s.key, title: s.title })}
+              title={s.title}
             >
-              <span className="saved-row-label">{f.title || f.url}</span>
+              <span className="saved-row-label">{s.title}</span>
+              <span className="saved-row-count">{s.count}</span>
             </button>
           ))
         )}
