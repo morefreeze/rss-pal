@@ -11,6 +11,24 @@ export const TAG_PALETTE = [
 
 export type TagColor = (typeof TAG_PALETTE)[number]
 
+export interface TagChipColors {
+  background: string
+  color: string
+}
+
+// Same 8-color palette, but as concrete hex values: <color>-100 background
+// paired with <color>-700 text from the original Tailwind plan.
+const PALETTE_COLORS: Record<TagColor, TagChipColors> = {
+  rose:    { background: '#ffe4e6', color: '#9f1239' },
+  amber:   { background: '#fef3c7', color: '#92400e' },
+  emerald: { background: '#d1fae5', color: '#065f46' },
+  sky:     { background: '#e0f2fe', color: '#075985' },
+  violet:  { background: '#ede9fe', color: '#5b21b6' },
+  pink:    { background: '#fce7f3', color: '#9d174d' },
+  lime:    { background: '#ecfccb', color: '#3f6212' },
+  indigo:  { background: '#e0e7ff', color: '#3730a3' },
+}
+
 // FNV-1a 32-bit hash. Stable across browsers and runs.
 function hashName(name: string): number {
   let h = 0x811c9dc5
@@ -26,20 +44,8 @@ export function tagColorFor(name: string): TagColor {
   return TAG_PALETTE[idx]
 }
 
-// Tailwind classes for a tag chip. Both bg and text shades from the same color.
-export function tagChipClasses(name: string): string {
-  const c = tagColorFor(name)
-  // Note: keep these literal so Tailwind JIT can detect them.
-  switch (c) {
-    case 'rose': return 'bg-rose-100 text-rose-700'
-    case 'amber': return 'bg-amber-100 text-amber-700'
-    case 'emerald': return 'bg-emerald-100 text-emerald-700'
-    case 'sky': return 'bg-sky-100 text-sky-700'
-    case 'violet': return 'bg-violet-100 text-violet-700'
-    case 'pink': return 'bg-pink-100 text-pink-700'
-    case 'lime': return 'bg-lime-100 text-lime-700'
-    case 'indigo': return 'bg-indigo-100 text-indigo-700'
-  }
+export function tagChipColors(name: string): TagChipColors {
+  return PALETTE_COLORS[tagColorFor(name)]
 }
 
 // Determinism self-check: in dev, fail loud if the palette stops being stable.

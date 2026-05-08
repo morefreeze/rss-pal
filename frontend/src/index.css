@@ -248,3 +248,90 @@ body.reading-mode-active #root > div > header { display: none; }
 @keyframes typing-caret-blink {
   50% { opacity: 0; }
 }
+
+/* ===== Tag chips ===== */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.tag-chip-source {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.tag-chip-suggestion {
+  background: transparent;
+  color: #64748b;
+  border: 1px dashed #cbd5e1;
+  cursor: pointer;
+}
+.tag-chip-suggestion:hover {
+  background: #f8fafc;
+  border-style: solid;
+}
+
+.tag-chip-remove {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 11px;
+  color: rgba(0,0,0,0.4);
+  cursor: pointer;
+  line-height: 1;
+}
+.tag-chip-remove:hover { color: rgba(0,0,0,0.8); }
+
+.tag-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.3;
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  color: #64748b;
+  cursor: pointer;
+}
+.tag-add-btn:hover { background: #f8fafc; }
+
+.tag-input {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.3;
+  border: 1px solid #93c5fd;
+  outline: none;
+}
+
+.tag-suggest-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  z-index: 10;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  font-size: 12px;
+  min-width: 120px;
+}
+.tag-suggest-dropdown button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.tag-suggest-dropdown button:hover { background: #f1f5f9; }

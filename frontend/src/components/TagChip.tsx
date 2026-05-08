@@ -1,4 +1,4 @@
-import { tagChipClasses } from '../utils/tagColor'
+import { tagChipColors } from '../utils/tagColor'
 
 type Variant = 'manual' | 'source' | 'suggestion'
 
@@ -14,12 +14,9 @@ export default function TagChip({ name, variant = 'manual', onRemove, onAdopt, o
   if (variant === 'source') {
     return (
       <span
+        className="tag-chip tag-chip-source"
         onClick={onClick}
-        className={
-          'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ' +
-          'bg-slate-100 text-slate-600 ' +
-          (onClick ? 'cursor-pointer hover:bg-slate-200' : '')
-        }
+        style={onClick ? { cursor: 'pointer' } : undefined}
       >
         <span>📡</span>
         <span>{name}</span>
@@ -30,8 +27,8 @@ export default function TagChip({ name, variant = 'manual', onRemove, onAdopt, o
     return (
       <button
         type="button"
+        className="tag-chip tag-chip-suggestion"
         onClick={onAdopt}
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-dashed border-slate-300 text-slate-500 hover:bg-slate-50 hover:border-solid"
       >
         <span>⊕</span>
         <span>{name}</span>
@@ -39,14 +36,18 @@ export default function TagChip({ name, variant = 'manual', onRemove, onAdopt, o
     )
   }
   // manual
+  const colors = tagChipColors(name)
   return (
-    <span className={'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ' + tagChipClasses(name)}>
-      <span onClick={onClick} className={onClick ? 'cursor-pointer' : undefined}>{name}</span>
+    <span
+      className="tag-chip"
+      style={{ background: colors.background, color: colors.color }}
+    >
+      <span onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined}>{name}</span>
       {onRemove && (
         <button
           type="button"
+          className="tag-chip-remove"
           onClick={onRemove}
-          className="opacity-60 hover:opacity-100"
           aria-label={`移除 ${name}`}
         >
           ✕
