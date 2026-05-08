@@ -43,6 +43,67 @@ function isSentencePunctCp(cp: number): boolean {
     cp === 0x21 /* ! */ || cp === 0x3f /* ? */
 }
 
+// escapeAmbiguousMathDollars mirrors backend/internal/rss/content.go.
+// Escapes pairs of literal `$` whose body looks like prose (digit-led, no
+// LaTeX specials) so remark-math doesn't pair them into a math span. Keeps
+// real math (`$\sqrt{x}$`, `$x = 1$`) untouched. Idempotent on already-
+// escaped input. Applied client-side so articles stored before the
+// server-side escape is deployed render correctly.
+export function escapeAmbiguousMathDollars(md: string): string {
+  const r = Array.from(md)
+  let out = ''
+  let i = 0
+  while (i < r.length) {
+    const c = r[i]
+    if (c === '\\' && i + 1 < r.length) {
+      out += c + r[i + 1]
+      i += 2
+      continue
+    }
+    if (c !== '$') {
+      out += c
+      i++
+      continue
+    }
+    let j = i + 1
+    while (j < r.length && r[j] !== '\n') {
+      if (r[j] === '\\' && j + 1 < r.length) {
+        j += 2
+        continue
+      }
+      if (r[j] === '$') break
+      j++
+    }
+    if (j >= r.length || r[j] !== '$') {
+      out += c
+      i++
+      continue
+    }
+    const body = r.slice(i + 1, j).join('')
+    if (shouldEscapeProseDollarPair(body)) {
+      out += '\\$' + body + '\\$'
+      i = j + 1
+      continue
+    }
+    out += r.slice(i, j + 1).join('')
+    i = j + 1
+  }
+  return out
+}
+
+function shouldEscapeProseDollarPair(body: string): boolean {
+  if (body.length === 0) return false
+  const first = body.codePointAt(0)
+  if (first === undefined) return false
+  if (!isAsciiDigitCp(first)) return false
+  for (const ch of body) {
+    if (ch === '\\' || ch === '{' || ch === '}' || ch === '_' || ch === '^') {
+      return false
+    }
+  }
+  return true
+}
+
 export function stripMathShadow(md: string): string {
   const r = Array.from(md)
   let out = ''

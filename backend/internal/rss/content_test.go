@@ -348,6 +348,63 @@ func TestExtractTexAnnotations_NoMathPassthrough(t *testing.T) {
 	}
 }
 
+func TestEscapeAmbiguousMathDollars(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "no dollars",
+			in:   "Just plain prose with no symbols.",
+			want: "Just plain prose with no symbols.",
+		},
+		{
+			name: "two prices on one line are escaped",
+			in:   "第一次让它裸跑——20 分钟，花了 $9，游戏核心功能根本跑不起来。第二次给它配上完整的 harness——6 小时，花了 $200，游戏可以正常游玩。",
+			want: "第一次让它裸跑——20 分钟，花了 \\$9，游戏核心功能根本跑不起来。第二次给它配上完整的 harness——6 小时，花了 \\$200，游戏可以正常游玩。",
+		},
+		{
+			name: "real LaTeX math left intact",
+			in:   "result $\\sqrt{x+7} \\ge 0$ end",
+			want: "result $\\sqrt{x+7} \\ge 0$ end",
+		},
+		{
+			name: "math with braces left intact",
+			in:   "see $a_{i+1}$ here",
+			want: "see $a_{i+1}$ here",
+		},
+		{
+			name: "single unpaired dollar untouched",
+			in:   "earn $9 a day",
+			want: "earn $9 a day",
+		},
+		{
+			name: "letter-led body left intact",
+			in:   "we know $x = 1$ holds",
+			want: "we know $x = 1$ holds",
+		},
+		{
+			name: "already escaped dollars untouched",
+			in:   "earn \\$9 plus \\$200",
+			want: "earn \\$9 plus \\$200",
+		},
+		{
+			name: "newline between dollars not paired",
+			in:   "$9\n$200",
+			want: "$9\n$200",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := escapeAmbiguousMathDollars(tc.in)
+			if got != tc.want {
+				t.Errorf("escapeAmbiguousMathDollars\n  in:   %q\n  got:  %q\n  want: %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFlattenImageAltBlankLines(t *testing.T) {
 	cases := []struct {
 		name string
