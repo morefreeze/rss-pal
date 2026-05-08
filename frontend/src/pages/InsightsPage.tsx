@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
   getTopics, getTags, getLatestInsights, generateInsights,
-  deleteTopic, deleteTag,
+  deleteTopic, deleteInterestTag,
   InterestTopic, InterestTag, PersistedInsight, RecArticleMeta,
 } from '../api/client'
 import RecommendationsCard from '../components/RecommendationsCard'
@@ -97,7 +97,7 @@ export default function InsightsPage() {
   }
   const handleDeleteTag = async (id: number) => {
     setTags(prev => prev.filter(t => t.id !== id))
-    try { await deleteTag(id) }
+    try { await deleteInterestTag(id) }
     catch { /* keep optimistic UI */ }
   }
 
