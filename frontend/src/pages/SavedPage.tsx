@@ -45,11 +45,9 @@ function selectionToParams(sel: SavedSelection): GetSavedParams {
     case 'untagged':
       return { untagged: true }
     case 'tag':
-      // Backend only honours `mode` when more than one tag id is supplied.
-      return {
-        tag_ids: sel.ids,
-        mode: sel.ids.length > 1 ? sel.mode : undefined,
-      }
+      // Single-tag select. Backend still accepts `mode` and array form,
+      // but we always send a single id so `mode` is irrelevant.
+      return { tag_ids: [sel.id] }
     case 'source':
       return { source: sel.key }
   }
@@ -77,7 +75,6 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: Sa
   // collapse the sidebar to one row and lose the navigation tree.
   const [sources, setSources] = useState<SavedSourceRow[]>([])
   const [selection, setSelection] = useState<SavedSelection>({ kind: 'all' })
-  const [multi, setMulti] = useState(false)
   const [items, setItems] = useState<SavedItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -195,38 +192,7 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: Sa
     navigate(`/articles/${id}`, { state: { from: entryPath } })
   }
 
-  const handleToggleMulti = () => {
-    setMulti(prev => {
-      const next = !prev
-      // Leaving multi mode: collapse a multi-tag selection down to a
-      // single-tag pick (or 'all' if nothing was selected).
-      if (!next && selection.kind === 'tag' && selection.ids.length > 1) {
-        setSelection({ kind: 'tag', ids: [selection.ids[0]], mode: 'and' })
-      }
-      return next
-    })
-  }
-
-  const handleToggleTag = (tagId: number) => {
-    setSelection(curr => {
-      if (curr.kind !== 'tag') {
-        return { kind: 'tag', ids: [tagId], mode: 'and' }
-      }
-      const has = curr.ids.includes(tagId)
-      const nextIds = has ? curr.ids.filter(x => x !== tagId) : [...curr.ids, tagId]
-      if (nextIds.length === 0) return { kind: 'all' }
-      return { kind: 'tag', ids: nextIds, mode: curr.mode }
-    })
-  }
-
-  const handleModeChange = (mode: 'and' | 'or') => {
-    setSelection(curr => (curr.kind === 'tag' ? { ...curr, mode } : curr))
-  }
-
   const handleSelect = (sel: SavedSelection) => {
-    // Picking a non-tag scope while multi is on auto-disables multi to keep
-    // the toolbar/list consistent.
-    if (sel.kind !== 'tag' && multi) setMulti(false)
     setSelection(sel)
   }
 
@@ -237,13 +203,8 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: Sa
       case 'untagged':
         return '未打 tag 的收藏'
       case 'tag': {
-        const names = selection.ids
-          .map(id => tags.find(t => t.id === id)?.name)
-          .filter((n): n is string => !!n)
-        if (names.length === 0) return '收藏'
-        if (names.length === 1) return `Tag: ${names[0]}`
-        const op = selection.mode === 'and' ? ' AND ' : ' OR '
-        return `Tag: ${names.join(op)}`
+        const name = tags.find(t => t.id === selection.id)?.name
+        return name ? `Tag: ${name}` : '收藏'
       }
       case 'source':
         return `来源: ${selection.title}`
@@ -264,10 +225,6 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: Sa
         sources={sources}
         selection={selection}
         onSelect={handleSelect}
-        multi={multi}
-        onToggleMulti={handleToggleMulti}
-        onToggleTag={handleToggleTag}
-        onModeChange={handleModeChange}
       />
       <section style={{ flex: 1, minWidth: 0, paddingLeft: 16 }}>
         <div className="flex-between mb-2">
