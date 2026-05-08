@@ -608,3 +608,37 @@ export const addArticleTag = (articleId: number, name: string) =>
   api.post<{ id: number; name: string }>(`/articles/${articleId}/tags`, { name }).then(r => r.data)
 export const removeArticleTag = (articleId: number, tagId: number) =>
   api.delete(`/articles/${articleId}/tags/${tagId}`)
+
+// === Saved (Phase 2) ===
+
+export type SavedItem = Article & { manual_tags: UserTag[] }
+
+export interface SavedListResponse {
+  items: SavedItem[]
+  total: number
+}
+
+export interface GetSavedParams {
+  tag_ids?: number[]
+  mode?: 'and' | 'or'
+  untagged?: boolean
+  source_feed_id?: number
+  limit?: number
+  offset?: number
+}
+
+export const getSaved = (params: GetSavedParams = {}) => {
+  const query: Record<string, string | number | boolean> = {}
+  if (params.untagged) {
+    query.untagged = 'true'
+  } else if (params.tag_ids && params.tag_ids.length > 0) {
+    query.tag_ids = params.tag_ids.join(',')
+    if (params.tag_ids.length > 1 && params.mode) {
+      query.mode = params.mode
+    }
+  }
+  if (params.source_feed_id !== undefined) query.source_feed_id = params.source_feed_id
+  if (params.limit !== undefined) query.limit = params.limit
+  if (params.offset !== undefined) query.offset = params.offset
+  return api.get<SavedListResponse>('/saved', { params: query }).then(r => r.data)
+}
