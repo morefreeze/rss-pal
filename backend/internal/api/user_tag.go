@@ -125,7 +125,7 @@ func (h *UserTagHandler) GetArticleTags(c *gin.Context) {
 	}
 	userID := getUserID(c)
 
-	source, err := h.bindRepo.GetSourceForArticle(articleID)
+	source, err := h.bindRepo.GetSourceForArticle(articleID, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
