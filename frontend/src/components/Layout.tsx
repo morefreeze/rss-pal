@@ -68,7 +68,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
           {/* Desktop nav */}
           <nav className="flex gap-2 desktop-nav" style={{ alignItems: 'center' }}>
             <NavLink to="/articles" className={navLinkClass}>{articlesLabel}</NavLink>
-            <NavLink to="/saved" className={navLinkClass}>⭐ 收藏</NavLink>
+            <NavLink to="/saved" className={navLinkClass}>Tags</NavLink>
             <NavLink to="/weekly" className={navLinkClass}>周刊</NavLink>
             <NavLink to="/feeds" className={navLinkClass}>订阅</NavLink>
             <NavLink to="/recommended" className={navLinkClass}>推荐</NavLink>
@@ -98,7 +98,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
           <nav className="mobile-nav" style={{ marginTop: 8, padding: '8px 0', background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
             {[
               { to: '/articles', label: articlesLabel },
-              { to: '/saved', label: '⭐ 收藏' },
+              { to: '/saved', label: 'Tags' },
               { to: '/weekly', label: '周刊' },
               { to: '/feeds', label: '订阅' },
               { to: '/recommended', label: '推荐' },
