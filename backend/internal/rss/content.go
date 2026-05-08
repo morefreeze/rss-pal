@@ -286,6 +286,11 @@ func ExtractMarkdown(selection *goquery.Selection) string {
 	// Pre-conversion: rewrite recognized video iframes to placeholder paragraphs
 	// so the html-to-markdown converter doesn't drop them.
 	RewriteVideoIframes(selection)
+	// Pre-conversion: extract LaTeX from KaTeX/MathJax/MathML containers and
+	// stash behind sentinel placeholders so html-to-markdown's text-escape pass
+	// can't mangle the source (e.g. doubling \ to \\, which KaTeX renders as a
+	// line break).
+	mathPHs := extractTexAnnotations(selection)
 
 	html, err := selection.Html()
 	if err != nil || strings.TrimSpace(html) == "" {
@@ -297,6 +302,7 @@ func ExtractMarkdown(selection *goquery.Selection) string {
 	}
 	// Post-conversion: catch YouTube/Bilibili URLs that were links rather than iframes.
 	md = RewriteVideoLinks(md)
+	md = reinsertMathPlaceholders(md, mathPHs)
 	return strings.TrimSpace(md)
 }
 
@@ -441,6 +447,90 @@ func StripAvatars(doc *goquery.Document) {
 			s.Remove()
 		}
 	})
+}
+
+type mathPlaceholder struct {
+	key     string
+	latex   string
+	display bool
+}
+
+// extractTexAnnotations finds KaTeX, MathJax (v2/v3), and MathML containers in
+// the selection and replaces each with a sentinel text node. The original
+// LaTeX source is captured from the embedded
+// <annotation encoding="application/x-tex"> element (or the MathJax v2
+// <script type="math/tex"> body) and returned alongside the sentinel key.
+// Callers must invoke reinsertMathPlaceholders on the converted markdown to
+// substitute the sentinels back to $..$ / $$..$$. Routing the LaTeX around the
+// markdown converter is the only reliable way to keep \sqrt etc. from being
+// escaped to \\sqrt by html-to-markdown.
+func extractTexAnnotations(selection *goquery.Selection) []mathPlaceholder {
+	var phs []mathPlaceholder
+	add := func(target *goquery.Selection, latex string, display bool) {
+		latex = strings.TrimSpace(latex)
+		if latex == "" {
+			return
+		}
+		// U+2063 INVISIBLE SEPARATOR — passes through html-to-markdown unescaped
+		// and is exceedingly unlikely to appear in real article prose.
+		key := fmt.Sprintf("⁣RSSPALMATH%d⁣", len(phs))
+		phs = append(phs, mathPlaceholder{key: key, latex: latex, display: display})
+		target.ReplaceWithHtml(key)
+	}
+
+	// KaTeX display first (.katex-display wraps a .katex), so the inner .katex
+	// pass below skips already-replaced subtrees.
+	selection.Find(".katex-display").Each(func(_ int, s *goquery.Selection) {
+		latex := s.Find(`annotation[encoding="application/x-tex"]`).First().Text()
+		add(s, latex, true)
+	})
+	selection.Find(".katex").Each(func(_ int, s *goquery.Selection) {
+		latex := s.Find(`annotation[encoding="application/x-tex"]`).First().Text()
+		add(s, latex, false)
+	})
+
+	// MathJax v3.
+	selection.Find("mjx-container").Each(func(_ int, s *goquery.Selection) {
+		latex := s.Find(`annotation[encoding="application/x-tex"]`).First().Text()
+		display := s.AttrOr("display", "") == "true"
+		add(s, latex, display)
+	})
+
+	// MathJax v2: <script type="math/tex"> holds the source; surrounding visible
+	// MathJax/MathJax_Preview spans are decorations we drop.
+	selection.Find("span.MathJax, span.MathJax_Preview, span.MathJax_SVG, span.MathJax_CHTML").Remove()
+	selection.Find(`script[type^="math/tex"]`).Each(func(_ int, s *goquery.Selection) {
+		latex := s.Text()
+		t, _ := s.Attr("type")
+		display := strings.Contains(t, "mode=display")
+		add(s, latex, display)
+	})
+
+	// Bare MathML with annotation (after MathJax/KaTeX wrappers have already
+	// been replaced — any remaining <math> is standalone).
+	selection.Find("math").Each(func(_ int, s *goquery.Selection) {
+		latex := s.Find(`annotation[encoding="application/x-tex"]`).First().Text()
+		display := s.AttrOr("display", "") == "block"
+		add(s, latex, display)
+	})
+
+	return phs
+}
+
+func reinsertMathPlaceholders(md string, phs []mathPlaceholder) string {
+	if len(phs) == 0 {
+		return md
+	}
+	for _, p := range phs {
+		var rep string
+		if p.display {
+			rep = "\n\n$$" + p.latex + "$$\n\n"
+		} else {
+			rep = "$" + p.latex + "$"
+		}
+		md = strings.ReplaceAll(md, p.key, rep)
+	}
+	return md
 }
 
 // stripJinaMathShadow removes the Unicode "shadow" that Jina Reader appends
