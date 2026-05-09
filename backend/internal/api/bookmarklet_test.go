@@ -55,6 +55,19 @@ func TestExtractContentFromHTMLPreservesImages(t *testing.T) {
 			</article></body></html>`,
 			mustHave: []string{"![a](https://cdn.example.com/a.jpg)", "![b](https://cdn.example.com/b.jpg)"},
 		},
+		{
+			// WeChat-style lazy-load: real image URL is in data-src, src is
+			// missing entirely (or a 1×1 placeholder). Without lazy-attr
+			// promotion the article would render with no images at all.
+			name:    "wechat data-src promoted to img",
+			baseURL: "https://mp.weixin.qq.com/s/abc",
+			html: `<html><body><div id="js_content">
+				<p>开头段落足够长以便选择器命中正文部分内容内容内容内容内容内容内容内容内容内容内容内容内容内容。</p>
+				<p><img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/foo.png" data-type="png"></p>
+				<p>尾部段落同样足够长以便保证整体长度满足提取阈值内容内容内容内容内容内容内容内容内容内容。</p>
+			</div></body></html>`,
+			mustHave: []string{"https://mmbiz.qpic.cn/foo.png"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,6 +84,30 @@ func TestExtractContentFromHTMLPreservesImages(t *testing.T) {
 				t.Errorf("countMarkdownImages = %d, want >= %d\n--- got ---\n%s", n, len(tc.mustHave), got)
 			}
 		})
+	}
+}
+
+// TestExtractContentFromHTML_PreservesContainerWithJunkClass guards against
+// the cleanup phase wiping a top-level container (html/body/head/main/article)
+// just because its class attribute happens to match an attribute-substring
+// selector. WeChat sets <body class="… comment_feature …"> which used to be
+// matched by [class*=comment] and dropped, returning empty content.
+func TestExtractContentFromHTML_PreservesContainerWithJunkClass(t *testing.T) {
+	html := `<html><body class="zh_CN wx_wap_page mm_appmsg comment_feature discuss_tab"><div id="js_content">
+		<p>开头段落足够长以便选择器命中正文部分内容内容内容内容内容内容内容内容内容内容内容内容内容内容。</p>
+		<p>第二段也足够长以保证最终提取的正文长度超过判定阈值内容内容内容内容内容内容内容内容内容。</p>
+	</div></body></html>`
+	got, err := extractContentFromHTML(html, "https://mp.weixin.qq.com/s/abc")
+	if err != nil {
+		t.Fatalf("extractContentFromHTML: %v", err)
+	}
+	if strings.TrimSpace(got) == "" {
+		t.Fatalf("expected non-empty content, got empty")
+	}
+	for _, want := range []string{"开头段落", "第二段"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
 	}
 }
 
