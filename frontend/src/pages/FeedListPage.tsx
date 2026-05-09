@@ -23,7 +23,7 @@ const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; u
   {
     category: '播客', emoji: '🎙️', items: [
       { name: '商业就是这样', url: 'http://rsshub:1200/xiaoyuzhou/podcast/6022a180ef5fdaddc30bb101', desc: '第一财经商业播客' },
-      { name: '故事 FM', url: 'http://rsshub:1200/apple-podcasts/podcast/1256399960/cn', desc: '第一人称叙事' },
+      { name: '不合时宜', url: 'http://rsshub:1200/xiaoyuzhou/podcast/5e280fb8418a84a0461fd076', desc: '国际政经文化对谈' },
       { name: "Lenny's Newsletter", url: 'https://www.lennysnewsletter.com/feed', desc: '产品经理访谈' },
       { name: 'Acquired', url: 'https://www.acquired.fm/episodes?format=rss', desc: '公司商业史长谈' },
     ],
@@ -39,14 +39,14 @@ const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; u
   {
     category: 'AI', emoji: '🤖', items: [
       { name: '量子位', url: 'https://www.qbitai.com/feed', desc: 'AI 业界动向' },
-      { name: '机器之心', url: 'http://rsshub:1200/jiqizhixin/articles', desc: 'AI 研究综述' },
+      { name: '36氪 AI', url: 'http://rsshub:1200/36kr/news/AI', desc: '36氪 AI 产业资讯' },
       { name: 'Anthropic News', url: 'https://www.anthropic.com/news/feed.xml', desc: 'Anthropic 官方' },
       { name: 'One Useful Thing', url: 'https://www.oneusefulthing.org/feed', desc: 'Ethan Mollick 的 AI 实用解读' },
     ],
   },
   {
     category: '健康', emoji: '💊', items: [
-      { name: '丁香医生', url: 'http://rsshub:1200/wechat/ce/dingxiangyisheng', desc: '医学辟谣科普' },
+      { name: '思想健康', url: 'http://rsshub:1200/xiaoyuzhou/podcast/63d49e8c531dadd2b1b37fa3', desc: '营养师健康科普' },
       { name: '果壳科学人', url: 'http://rsshub:1200/guokr/scientific', desc: '科学/健康频道' },
       { name: 'Harvard Health Blog', url: 'https://www.health.harvard.edu/blog/feed', desc: '哈佛医学院' },
       { name: 'STAT News', url: 'https://www.statnews.com/feed/', desc: '医学健康新闻' },

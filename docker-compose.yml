@@ -74,6 +74,9 @@ services:
       CACHE_TYPE: memory
       CACHE_EXPIRE: 3600
       REQUEST_TIMEOUT: 30000
+      # Bilibili needs a logged-in cookie to bypass anti-bot; set BILIBILI_COOKIE
+      # in .env (DevTools → Cookies → bilibili.com → copy the full cookie string).
+      BILIBILI_COOKIE_DEFAULT: ${BILIBILI_COOKIE:-}
 
   frontend:
     build:
