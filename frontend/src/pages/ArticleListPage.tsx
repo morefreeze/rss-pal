@@ -660,8 +660,19 @@ export default function ArticleListPage() {
             />
           ))}
           {hasMore ? (
-            <div style={{ textAlign: 'center', padding: '12px', color: '#999', fontSize: 13 }}>
-              {loadingMore ? '加载中...' : ''}
+            <div style={{ textAlign: 'center', padding: '12px' }}>
+              {loadingMore ? (
+                <span style={{ color: '#999', fontSize: 13 }}>加载中...</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  className="secondary"
+                  style={{ fontSize: 13, padding: '6px 16px' }}
+                >
+                  加载更多
+                </button>
+              )}
             </div>
           ) : articles.length > 0 ? (
             <div style={{ textAlign: 'center', padding: '16px', color: '#ccc', fontSize: 13 }}>

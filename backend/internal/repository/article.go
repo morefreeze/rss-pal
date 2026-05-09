@@ -100,7 +100,11 @@ LEFT JOIN user_preferences up_save ON articles.id = up_save.article_id AND up_sa
 		}
 	}
 
-	query += fmt.Sprintf(" ORDER BY COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	// Sort by GREATEST(published_at, fetched_at): typical articles
+	// (published ≤ fetched) keep chronological feel, but backfilled articles
+	// from newly-added feeds (old published_at, recent fetched_at) bubble up
+	// briefly so the new subscription is visible on /articles page 1.
+	query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) DESC, COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
 	args = append(args, limit, offset)
 
 	rows, err := r.db.Query(query, args...)
@@ -433,7 +437,8 @@ func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Art
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $2
 		WHERE (f.owner_id IS NULL OR f.owner_id = $2)
 		  AND (a.title ILIKE $1 OR a.summary_brief ILIKE $1 OR a.content ILIKE $1)
-		ORDER BY COALESCE(a.published_at, a.fetched_at) DESC
+		ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(a.published_at, a.fetched_at), a.fetched_at - INTERVAL '7 days')) DESC,
+		         COALESCE(a.published_at, a.fetched_at) DESC
 		LIMIT $3
 	`
 	rows, err := r.db.Query(sqlStr, q, userID, limit)
