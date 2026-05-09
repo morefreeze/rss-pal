@@ -23,7 +23,7 @@ const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; u
   {
     category: '播客', emoji: '🎙️', items: [
       { name: '商业就是这样', url: 'http://rsshub:1200/xiaoyuzhou/podcast/6022a180ef5fdaddc30bb101', desc: '第一财经商业播客' },
-      { name: '故事FM', url: 'http://rsshub:1200/apple-podcasts/podcast/1256399960/cn', desc: '第一人称叙事' },
+      { name: '故事 FM', url: 'http://rsshub:1200/apple-podcasts/podcast/1256399960/cn', desc: '第一人称叙事' },
       { name: "Lenny's Newsletter", url: 'https://www.lennysnewsletter.com/feed', desc: '产品经理访谈' },
       { name: 'Acquired', url: 'https://www.acquired.fm/episodes?format=rss', desc: '公司商业史长谈' },
     ],
@@ -41,7 +41,7 @@ const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; u
       { name: '量子位', url: 'https://www.qbitai.com/feed', desc: 'AI 业界动向' },
       { name: '机器之心', url: 'http://rsshub:1200/jiqizhixin/articles', desc: 'AI 研究综述' },
       { name: 'Anthropic News', url: 'https://www.anthropic.com/news/feed.xml', desc: 'Anthropic 官方' },
-      { name: 'One Useful Thing', url: 'https://www.oneusefulthing.org/feed', desc: 'Mollick 的 AI 实用解读' },
+      { name: 'One Useful Thing', url: 'https://www.oneusefulthing.org/feed', desc: 'Ethan Mollick 的 AI 实用解读' },
     ],
   },
   {
