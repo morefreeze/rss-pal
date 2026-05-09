@@ -310,6 +310,7 @@ export default function FeedListPage() {
                     {group.items.map(f => (
                       <button
                         key={f.url}
+                        type="button"
                         className="secondary"
                         style={{ fontSize: 12, padding: '3px 10px' }}
                         title={f.desc}
