@@ -82,7 +82,7 @@ func (h *FeedHandler) Preview(c *gin.Context) {
 	defer cancel()
 	result, err := h.fetcher.Preview(ctx, req.URL)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无法获取该地址: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": classifyPreviewError(err)})
 		return
 	}
 
@@ -423,6 +423,51 @@ func (h *FeedHandler) UpdateWeight(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// classifyPreviewError turns an internal fetch/parse error into a user-facing
+// Chinese message. The fetcher emits errors like "server returned 429" or
+// "failed to fetch URL: ... context deadline exceeded" which are unfriendly
+// to non-engineers. Rate-limit and transient upstream failures are surfaced
+// distinctly so users know to retry.
+func classifyPreviewError(err error) string {
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "server returned 429"):
+		return "源站限流，请稍后重试（HTTP 429）"
+	case strings.Contains(s, "server returned 503"):
+		return "源站暂时不可用，请稍后重试（HTTP 503）"
+	case strings.Contains(s, "server returned 403"):
+		return "源站拒绝访问（HTTP 403），可能需要登录或被反爬拦截"
+	case strings.Contains(s, "server returned 404"):
+		return "URL 不存在（HTTP 404），请检查地址"
+	case strings.Contains(s, "server returned 5"):
+		return "源站异常（" + extractStatusFromErr(s) + "），请稍后重试"
+	case strings.Contains(s, "context deadline exceeded") || strings.Contains(s, "Timeout"):
+		return "请求超时，请稍后重试"
+	case strings.Contains(s, "no such host"):
+		return "无法解析域名，请检查 URL 拼写"
+	case strings.Contains(s, "connection refused"):
+		return "无法连接到该地址"
+	case strings.Contains(s, "failed to parse"):
+		return "无法解析该地址的内容，可能不是有效的 RSS/Atom"
+	default:
+		return "无法获取该地址: " + s
+	}
+}
+
+// extractStatusFromErr pulls "HTTP NNN" from a "server returned NNN" error.
+func extractStatusFromErr(s string) string {
+	const prefix = "server returned "
+	i := strings.Index(s, prefix)
+	if i < 0 {
+		return "HTTP 5xx"
+	}
+	rest := s[i+len(prefix):]
+	if len(rest) >= 3 {
+		return "HTTP " + rest[:3]
+	}
+	return "HTTP 5xx"
 }
 
 // validatePublicURL blocks SSRF by rejecting non-HTTP(S) schemes and private/loopback IPs.
