@@ -135,9 +135,13 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 		return "", resp.StatusCode, err
 	}
 
-	// Remove unwanted elements
-	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Remove()
+	// Remove unwanted elements. Exclude top-level containers from the
+	// attribute-substring matchers — e.g. WeChat sets
+	// <body class="… comment_feature …"> which would otherwise be wiped by
+	// [class*=comment], leaving the document empty.
+	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
 	StripAvatars(doc)
+	PromoteLazyImages(doc)
 
 	// Try to find main content
 	var content string
@@ -351,6 +355,7 @@ func (f *ContentFetcher) FetchContentFromReader(r io.Reader) (string, error) {
 
 	doc.Find("script, style, nav, header, footer, aside").Remove()
 	StripAvatars(doc)
+	PromoteLazyImages(doc)
 
 	selectors := []string{"article", "[role='main']", "main", ".content", ".post", "#content", "body"}
 	var content string
@@ -448,6 +453,67 @@ func StripAvatars(doc *goquery.Document) {
 			s.Remove()
 		}
 	})
+}
+
+// lazyImgAttrs are common lazy-load attributes used by sites like WeChat
+// (mp.weixin.qq.com), Medium, Substack, Zhihu — each populates the real image
+// URL into a data-* attribute and leaves src empty (or as a transparent
+// placeholder) until JS swaps it on scroll. Order matters: first non-empty
+// match wins.
+var lazyImgAttrs = []string{
+	"data-src",
+	"data-original",
+	"data-actual-src",
+	"data-lazy-src",
+	"data-original-src",
+}
+
+// lazySrcsetAttrs mirrors lazyImgAttrs for srcset.
+var lazySrcsetAttrs = []string{
+	"data-srcset",
+	"data-lazy-srcset",
+}
+
+// PromoteLazyImages promotes lazy-load attributes (data-src, etc.) into src
+// when src is missing, empty, or a placeholder (data: URI / 1px gif). Mutates
+// doc in place. Called before markdown extraction so lazy-loaded images on
+// WeChat/Medium/Substack pages don't disappear from the captured content.
+func PromoteLazyImages(doc *goquery.Document) {
+	doc.Find("img").Each(func(_ int, s *goquery.Selection) {
+		promoteOneImg(s)
+	})
+}
+
+func promoteOneImg(s *goquery.Selection) {
+	if srcNeedsPromotion(s.AttrOr("src", "")) {
+		for _, attr := range lazyImgAttrs {
+			if v := strings.TrimSpace(s.AttrOr(attr, "")); v != "" {
+				s.SetAttr("src", v)
+				break
+			}
+		}
+	}
+	if _, hasSrcset := s.Attr("srcset"); !hasSrcset {
+		for _, attr := range lazySrcsetAttrs {
+			if v := strings.TrimSpace(s.AttrOr(attr, "")); v != "" {
+				s.SetAttr("srcset", v)
+				break
+			}
+		}
+	}
+}
+
+func srcNeedsPromotion(src string) bool {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return true
+	}
+	// data: URIs in src are usually 1×1 transparent placeholders left by
+	// lazy-load libraries; treat them as missing so a real data-src wins.
+	if strings.HasPrefix(src, "data:") {
+		return true
+	}
+	return false
 }
 
 type mathPlaceholder struct {

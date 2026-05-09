@@ -171,6 +171,99 @@ func TestFetchContentFromReader_StripsAvatars(t *testing.T) {
 	}
 }
 
+func TestPromoteLazyImages(t *testing.T) {
+	cases := []struct {
+		name    string
+		html    string
+		wantSrc string
+	}{
+		{
+			name:    "data-src promoted when src missing",
+			html:    `<img data-src="https://example.com/a.png">`,
+			wantSrc: "https://example.com/a.png",
+		},
+		{
+			name:    "data-src promoted when src empty",
+			html:    `<img src="" data-src="https://example.com/b.png">`,
+			wantSrc: "https://example.com/b.png",
+		},
+		{
+			name:    "data-src promoted when src is data: placeholder",
+			html:    `<img src="data:image/svg+xml;base64,abc" data-src="https://example.com/c.png">`,
+			wantSrc: "https://example.com/c.png",
+		},
+		{
+			name:    "real src wins, data-src ignored",
+			html:    `<img src="https://example.com/real.png" data-src="https://example.com/lazy.png">`,
+			wantSrc: "https://example.com/real.png",
+		},
+		{
+			name:    "data-original used when data-src absent",
+			html:    `<img data-original="https://example.com/orig.png">`,
+			wantSrc: "https://example.com/orig.png",
+		},
+		{
+			name:    "data-actual-src (WeChat) used when others absent",
+			html:    `<img data-actual-src="https://mmbiz.qpic.cn/x.png">`,
+			wantSrc: "https://mmbiz.qpic.cn/x.png",
+		},
+		{
+			name:    "first non-empty wins (data-src before data-original)",
+			html:    `<img data-src="https://example.com/first.png" data-original="https://example.com/second.png">`,
+			wantSrc: "https://example.com/first.png",
+		},
+		{
+			name:    "no lazy attrs leaves img untouched",
+			html:    `<img src="">`,
+			wantSrc: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader("<html><body>" + tc.html + "</body></html>"))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			PromoteLazyImages(doc)
+			got := doc.Find("img").AttrOr("src", "")
+			if got != tc.wantSrc {
+				t.Errorf("PromoteLazyImages src = %q, want %q", got, tc.wantSrc)
+			}
+		})
+	}
+}
+
+func TestPromoteLazyImages_Srcset(t *testing.T) {
+	html := `<img data-src="https://example.com/x.png" data-srcset="https://example.com/x.png 1x, https://example.com/x@2x.png 2x">`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader("<html><body>" + html + "</body></html>"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	PromoteLazyImages(doc)
+	img := doc.Find("img").First()
+	if got := img.AttrOr("srcset", ""); got != "https://example.com/x.png 1x, https://example.com/x@2x.png 2x" {
+		t.Errorf("expected data-srcset promoted, got %q", got)
+	}
+}
+
+func TestFetchContentFromReader_PromotesLazyImage(t *testing.T) {
+	// Mimics WeChat: img has data-src but no real src.
+	html := `<html><body><article>
+		<p>Intro paragraph long enough to keep around for the selector.</p>
+		<p><img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/foo.png" data-type="png"></p>
+		<p>Trailing paragraph long enough to keep around as well.</p>
+	</article></body></html>`
+
+	f := NewContentFetcher()
+	got, err := f.FetchContentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("FetchContentFromReader: %v", err)
+	}
+	if !strings.Contains(got, "mmbiz.qpic.cn/foo.png") {
+		t.Errorf("expected lazy-loaded img URL preserved, got:\n%s", got)
+	}
+}
+
 func TestIsAvatarImg(t *testing.T) {
 	cases := []struct {
 		name string

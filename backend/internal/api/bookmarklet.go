@@ -21,10 +21,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// captureMaxBodyBytes caps the JSON body the bookmarklet can send. 1 MiB is
-// generous for outerHTML on a typical article page; abusive payloads are
-// truncated and produce a 413.
-const captureMaxBodyBytes = 1 << 20 // 1 MiB
+// captureMaxBodyBytes caps the JSON body the bookmarklet can send. 4 MiB
+// accommodates script/style-heavy article pages (e.g. mp.weixin.qq.com,
+// which routinely ships ~3 MiB of inline JS/CSS) even before the bookmarklet's
+// client-side trim runs; abusive payloads above this cap produce a 413.
+const captureMaxBodyBytes = 4 << 20 // 4 MiB
 
 // duplicateOverwriteRatio is the threshold at which a re-captured article's
 // new content is considered a clear improvement and we silently overwrite.
@@ -225,8 +226,13 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Remove()
+	// Cleanup must not strip top-level containers even if their class happens
+	// to match an attribute-substring selector. WeChat sets
+	// <body class="… comment_feature …"> which would otherwise be wiped by
+	// [class*=comment], leaving the document empty.
+	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
 	rss.StripAvatars(doc)
+	rss.PromoteLazyImages(doc)
 
 	resolveURLs(doc, baseURL)
 

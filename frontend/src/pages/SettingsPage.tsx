@@ -88,8 +88,26 @@ function buildBookmarkletJS(apiBase: string, token: string): string {
   // to HTTP is *not* blocked, so we open a same-origin receiver page on
   // the RSS Pal host, hand the captured payload over via postMessage,
   // and let the receiver POST same-origin (no CSP, no mixed content).
+  //
+  // Pre-trim on a clone of documentElement: drops script/style/link/noscript
+  // (≈60× shrink on mp.weixin.qq.com — 3 MiB → 50 KiB — keeping us under the
+  // server's body cap) and promotes data-src into src so lazy-loaded article
+  // images survive the round trip. The live DOM is not mutated.
   const code = `(function(){
-var data={token:'${token}',url:location.href,title:document.title,html:document.documentElement.outerHTML};
+var c=document.documentElement.cloneNode(true);
+c.querySelectorAll('script,style,link,noscript,template').forEach(function(n){n.remove();});
+c.querySelectorAll('img').forEach(function(i){
+  var s=(i.getAttribute('src')||'').trim();
+  if(!s||s.indexOf('data:')===0){
+    var lazy=i.getAttribute('data-src')||i.getAttribute('data-original')||i.getAttribute('data-actual-src')||i.getAttribute('data-lazy-src')||i.getAttribute('data-original-src');
+    if(lazy)i.setAttribute('src',lazy.trim());
+  }
+  if(!i.getAttribute('srcset')){
+    var ss=i.getAttribute('data-srcset')||i.getAttribute('data-lazy-srcset');
+    if(ss)i.setAttribute('srcset',ss.trim());
+  }
+});
+var data={token:'${token}',url:location.href,title:document.title,html:c.outerHTML};
 var w=window.open('${apiBase}/bookmarklet-receiver.html','_blank');
 if(!w){alert('RSS Pal: 请允许此页面弹窗后再试');return;}
 function onMsg(e){
