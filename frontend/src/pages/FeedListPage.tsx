@@ -3,12 +3,63 @@ import { Link } from 'react-router-dom'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
 
-const POPULAR_FEEDS = [
-  { name: 'Hacker News', url: 'https://hnrss.org/frontpage', desc: '全球科技社区热帖聚合' },
-  { name: '36氪', url: 'https://36kr.com/feed', desc: '中国科技商业资讯聚合' },
-  { name: '少数派', url: 'https://sspai.com/feed', desc: '数字生活方式与效率工具' },
-  { name: 'BBC 中文', url: 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', desc: '国际新闻中文报道' },
-  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', desc: '英文科技新闻聚合' },
+const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; url: string; desc: string }[] }[] = [
+  {
+    category: '视频', emoji: '📺', items: [
+      { name: '影视飓风', url: 'http://rsshub:1200/bilibili/user/video/946974', desc: '影视科技测评' },
+      { name: '罗翔说刑法', url: 'http://rsshub:1200/bilibili/user/video/517327498', desc: '法律普法精品' },
+      { name: 'Kurzgesagt', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsXVk37bltHxD1rDPwtNM8Q', desc: '顶级科普动画' },
+      { name: 'Fireship', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsBjURrPoezykLs9EqgamOA', desc: '高密度技术教学' },
+    ],
+  },
+  {
+    category: '博客', emoji: '✍️', items: [
+      { name: '阮一峰的网络日志', url: 'https://www.ruanyifeng.com/blog/atom.xml', desc: '科技爱好者周刊' },
+      { name: '宝玉的分享', url: 'https://baoyu.io/feed.xml', desc: 'AI/工程译介' },
+      { name: 'Astral Codex Ten', url: 'https://astralcodexten.substack.com/feed', desc: '理性主义通才博客' },
+      { name: 'The Honest Broker', url: 'https://www.honest-broker.com/feed', desc: '文化与音乐评论' },
+    ],
+  },
+  {
+    category: '播客', emoji: '🎙️', items: [
+      { name: '商业就是这样', url: 'http://rsshub:1200/xiaoyuzhou/podcast/6022a180ef5fdaddc30bb101', desc: '第一财经商业播客' },
+      { name: '故事FM', url: 'http://rsshub:1200/apple-podcasts/podcast/1256399960/cn', desc: '第一人称叙事' },
+      { name: "Lenny's Newsletter", url: 'https://www.lennysnewsletter.com/feed', desc: '产品经理访谈' },
+      { name: 'Acquired', url: 'https://www.acquired.fm/episodes?format=rss', desc: '公司商业史长谈' },
+    ],
+  },
+  {
+    category: '科技', emoji: '💻', items: [
+      { name: '极客公园', url: 'https://www.geekpark.net/rss', desc: '中文产品趋势' },
+      { name: 'Solidot', url: 'https://www.solidot.org/index.rss', desc: '奇客新闻' },
+      { name: 'Stratechery', url: 'https://stratechery.com/feed/', desc: '科技商业策略' },
+      { name: 'Platformer', url: 'https://www.platformer.news/feed', desc: '平台与社交媒体' },
+    ],
+  },
+  {
+    category: 'AI', emoji: '🤖', items: [
+      { name: '量子位', url: 'https://www.qbitai.com/feed', desc: 'AI 业界动向' },
+      { name: '机器之心', url: 'http://rsshub:1200/jiqizhixin/articles', desc: 'AI 研究综述' },
+      { name: 'Anthropic News', url: 'https://www.anthropic.com/news/feed.xml', desc: 'Anthropic 官方' },
+      { name: 'One Useful Thing', url: 'https://www.oneusefulthing.org/feed', desc: 'Mollick 的 AI 实用解读' },
+    ],
+  },
+  {
+    category: '健康', emoji: '💊', items: [
+      { name: '丁香医生', url: 'http://rsshub:1200/wechat/ce/dingxiangyisheng', desc: '医学辟谣科普' },
+      { name: '果壳科学人', url: 'http://rsshub:1200/guokr/scientific', desc: '科学/健康频道' },
+      { name: 'Harvard Health Blog', url: 'https://www.health.harvard.edu/blog/feed', desc: '哈佛医学院' },
+      { name: 'STAT News', url: 'https://www.statnews.com/feed/', desc: '医学健康新闻' },
+    ],
+  },
+  {
+    category: '新闻', emoji: '📰', items: [
+      { name: '少数派', url: 'https://sspai.com/feed', desc: '数字生活方式' },
+      { name: '澎湃新闻', url: 'http://rsshub:1200/thepaper/featured', desc: '时政深度' },
+      { name: 'The Free Press', url: 'https://www.thefp.com/feed', desc: 'Bari Weiss 中立独立新闻' },
+      { name: 'Letters from an American', url: 'https://heathercoxrichardson.substack.com/feed', desc: '美国时政历史视角' },
+    ],
+  },
 ]
 
 export default function FeedListPage() {
@@ -23,6 +74,7 @@ export default function FeedListPage() {
   const [adding, setAdding] = useState(false)
   const [addSuccess, setAddSuccess] = useState('')
   const [importing, setImporting] = useState(false)
+  const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { loadFeeds() }, [])
@@ -227,22 +279,50 @@ export default function FeedListPage() {
           </button>
         </form>
 
-        {/* Popular feeds */}
+        {/* Popular feeds — grouped + collapsible */}
         <div className="mb-2">
           <div className="text-sm text-muted mb-1">热门推荐：</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {POPULAR_FEEDS.map(f => (
-              <button
-                key={f.url}
-                className="secondary"
-                style={{ fontSize: 12, padding: '3px 10px' }}
-                title={f.desc}
-                onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
-              >
-                {f.name}
-              </button>
-            ))}
-          </div>
+          {POPULAR_FEEDS.map(group => {
+            const folded = foldedGroups[group.category] === true
+            return (
+              <div key={group.category} style={{ marginBottom: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setFoldedGroups(s => ({ ...s, [group.category]: !folded }))}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: '2px 0',
+                    fontSize: 12,
+                    color: '#666',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <span>{group.emoji}</span>
+                  <span>{group.category}</span>
+                  <span style={{ fontSize: 10 }}>{folded ? '▸' : '▾'}</span>
+                </button>
+                {!folded && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                    {group.items.map(f => (
+                      <button
+                        key={f.url}
+                        className="secondary"
+                        style={{ fontSize: 12, padding: '3px 10px' }}
+                        title={f.desc}
+                        onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
+                      >
+                        {f.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
 
         {/* Preview error */}
