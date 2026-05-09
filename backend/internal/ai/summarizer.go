@@ -33,7 +33,7 @@ func NewSummarizerWithModel(apiKey, baseURL, model string) *Summarizer {
 		apiKey:     apiKey,
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		model:      model,
-		httpClient: &http.Client{Timeout: 90 * time.Second},
+		httpClient: &http.Client{Timeout: 3 * time.Minute},
 	}
 }
 

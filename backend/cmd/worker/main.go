@@ -113,7 +113,7 @@ func asyncSummarize(summarizer *ai.Summarizer, articleRepo *repository.ArticleRe
 	go func() {
 		sumSem <- struct{}{}
 		defer func() { <-sumSem }()
-		sCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		sCtx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 		defer cancel()
 		result, err := summarizer.Summarize(sCtx, title, content)
 		if err != nil {
@@ -152,7 +152,7 @@ func backfillSummaries(ctx context.Context, articleRepo *repository.ArticleRepos
 			defer wg.Done()
 			sumSem <- struct{}{}
 			defer func() { <-sumSem }()
-			sCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			sCtx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 			defer cancel()
 			result, err := summarizer.Summarize(sCtx, article.Title, article.Content)
 			if err != nil {
