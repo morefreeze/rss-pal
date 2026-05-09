@@ -4,12 +4,13 @@ import { toast } from '../utils/toast'
 
 const CATEGORY_LABELS: Record<string, string> = {
   ai_eng: 'AI 工程',
+  ai: 'AI',
   cn_tech: '中文科技',
   enterprise: '企业基建',
   podcast: '播客',
   youtube: '视频',
 }
-const CATEGORY_ORDER = ['ai_eng', 'cn_tech', 'enterprise', 'youtube', 'podcast']
+const CATEGORY_ORDER = ['ai_eng', 'ai', 'cn_tech', 'enterprise', 'youtube', 'podcast']
 
 export default function RecommendedPage() {
   const [items, setItems] = useState<RecommendedFeed[]>([])
