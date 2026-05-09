@@ -110,19 +110,25 @@ This lets the `/recommended` page render `category='ai'` rows correctly **if** a
 
 ## Known risks
 
-1. **B 站 RSSHub** routes (影视飓风 / 罗翔) need `BILIBILI_COOKIE_*` env vars on the rsshub container. If absent, content may be empty. Verify post-deploy.
-2. **健康 zh** (丁香医生 公众号 + 果壳 官方 RSS 已停服 → RSSHub) is the weakest pair. If both 404 in production, fall back to one chip + accept this group having 3 entries until a better candidate is found.
-3. **故事 FM** uses RSSHub `apple-podcasts` route — uncommon. If broken, swap to its `xiaoyuzhou/podcast/<id>` route.
-4. **Anthropic News** RSS URL comes from the existing project seed (`backend/cmd/seed/main.go:33`), trusted as known-working in this project's environment despite some external fetch tools reporting 404 (CDN UA blocks).
-5. **Substack `/feed` URLs** mostly return free-tier post summaries even when the publication is paywalled — that's the expected behavior, not a bug.
+1. ✅ **B 站 RSSHub** routes (影视飓风 / 罗翔) — resolved. `BILIBILI_COOKIE_DEFAULT` env passthrough wired in `docker-compose.yml`; user provides cookie via `BILIBILI_COOKIE` in `.env` (commit `62cb597`). Live-verified `feed_title="影视飓风 的 bilibili 空间"` returns real content after cookie.
+2. ⚠️ **健康 zh** — partly resolved. 丁香医生 (`wechat/ce/dingxiangyisheng`) returned 503 because the `careerengine.us` 3rd-party 公众号 aggregator went down; replaced with **思想健康** (xiaoyuzhou podcast `63d49e8c531dadd2b1b37fa3`, commit `62cb597`). 果壳 (`/guokr/scientific`) verified working. Substituting in a podcast means 健康 group is now 1 article-style + 1 podcast + 2 EN articles — still 4 chips, 2-zh + 2-en, but content type mixed.
+3. ✅ **故事 FM** — resolved. `apple-podcasts` route doesn't exist on this RSSHub build (`NotFoundError`); replaced with **不合时宜** (xiaoyuzhou podcast `5e280fb8418a84a0461fd076`, commit `62cb597`). Live-verified.
+4. ✅ **机器之心** (added during deploy) — resolved. `/jiqizhixin/articles` route doesn't exist; replaced with **36氪 AI** (`/36kr/news/AI`, commit `62cb597`). Live-verified.
+5. ✅ **Anthropic News** RSS URL works as expected; no fix needed.
+6. ✅ **Substack `/feed` URLs** all live-verified through preview API; no fix needed.
 
 ## Acceptance
 
-Verify by docker-rebuilding frontend (`docker-compose up -d --build frontend`) and:
+Verified post-deploy via curl against `/api/feeds/preview`:
 
-- [ ] `/feeds` page shows 7 grouped sections under 「热门推荐」 with the right emoji + label.
-- [ ] Each section header collapses/expands its chips on click.
-- [ ] All 28 chips render with the correct title; tooltip shows `desc`.
-- [ ] Clicking each chip fills the URL input and triggers preview.
-- [ ] At least one chip per group successfully previews (full coverage probe is a follow-up — risks above explain why we don't gate on 100%).
-- [ ] `/recommended` page still renders correctly (no regression from the CATEGORY_LABELS addition).
+- [x] `/feeds` page shows 7 grouped sections under 「热门推荐」 with the right emoji + label (build artifact contains all 28 names + 7 emojis + 7 categories).
+- [x] All 28 chips have working URLs — 27 verified through preview API (200 + parsed `feed_title`); B 站 2 routes verified after `BILIBILI_COOKIE` was set.
+- [x] `/recommended` page still renders correctly (smoke-tested; existing categories unchanged).
+- [ ] Section collapse/expand interaction (visual smoke — browser session was locked during automated check; user verified manually).
+
+## Follow-ups (out of original scope but landed during this push)
+
+- `bb09df3` Friendly preview error messages: 429 → "源站限流"; 503 → "源站暂时不可用"; 5xx → "源站异常"; etc., with table-driven test (11 cases). Replaces raw `server returned NNN`.
+- `f31c840` Article list ordering boost: `ORDER BY GREATEST(published_at, fetched_at - 7d) DESC, published_at DESC`. Newly-fetched backfilled articles bubble up briefly so a freshly-added feed becomes visible on `/articles` without burying today's actually-published news. After 7 days they sink to chronological position.
+- `f31c840` `/articles` list now has an explicit 「加载更多」 button (was an empty placeholder); existing IntersectionObserver-based infinite scroll preserved.
+- `a1bc610` Prefetch trigger moved from "5 items before end" to "7 items before end".
