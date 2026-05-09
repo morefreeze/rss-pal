@@ -11,8 +11,8 @@ const PAGE_SIZE = 20
 
 // PREFETCH_OFFSET attaches the IntersectionObserver to the Nth-from-last
 // article rather than a sentinel below the list, so the next page starts
-// fetching while the user still has ~5 articles left to read.
-const PREFETCH_OFFSET = 5
+// fetching while the user still has ~7 articles left to read.
+const PREFETCH_OFFSET = 7
 
 // MediaIndicator shows a per-article badge for media articles. Audio
 // articles get a clickable ▶ play button (starts inline playback); video
