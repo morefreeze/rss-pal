@@ -39,6 +39,21 @@ type Article struct {
 	MediaDurationSeconds int        `json:"media_duration_seconds,omitempty" db:"media_duration_seconds"`
 }
 
+// TopicGroup is one bucket in the /articles 分组 view.
+type TopicGroup struct {
+	Topic      string    `json:"topic"`
+	TotalCount int       `json:"total_count"`
+	Articles   []Article `json:"articles"`
+}
+
+// GroupedArticles is the response for GET /api/articles/grouped.
+// Unclassified is always present, even when empty, so the frontend can
+// rely on its shape without null-checks.
+type GroupedArticles struct {
+	Groups       []TopicGroup `json:"groups"`
+	Unclassified TopicGroup   `json:"unclassified"`
+}
+
 type UserPreference struct {
 	ID          int       `json:"id" db:"id"`
 	UserID      int       `json:"user_id" db:"user_id"`
