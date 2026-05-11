@@ -51,6 +51,24 @@ func (r *PreferenceRepository) UpsertTopic(userID int, topic string, weightDelta
 	return err
 }
 
+// UpsertCategory reinforces a user's interest weight for a coarse category.
+// Mirror of UpsertTopic, against the interest_categories table. Same
+// signal-weight semantics, so callers can reuse api.SignalToTopicWeight.
+func (r *PreferenceRepository) UpsertCategory(userID int, category string, weightDelta float64) error {
+	if category == "" {
+		return nil
+	}
+	query := `
+		INSERT INTO interest_categories (user_id, category, weight, last_reinforced_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (user_id, category) DO UPDATE SET
+			weight = interest_categories.weight + $3,
+			last_reinforced_at = NOW()
+	`
+	_, err := r.db.Exec(query, userID, category, weightDelta)
+	return err
+}
+
 func (r *PreferenceRepository) DecayTopics(userID int, decayFactor float64) error {
 	query := `UPDATE interest_topics SET weight = weight * $1 WHERE user_id = $2 AND weight > 0.01`
 	_, err := r.db.Exec(query, decayFactor, userID)

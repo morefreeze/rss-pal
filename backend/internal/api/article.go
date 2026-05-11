@@ -64,8 +64,11 @@ func (h *ArticleHandler) SetTemplateRepo(templateRepo *repository.TemplateReposi
 	h.cfg = cfg
 }
 
-// GetGrouped returns the /articles 分组 view: top-N topic buckets plus
-// an unclassified bucket. Filter semantics mirror GetAll.
+// GetGrouped returns the /articles 分组 view: top-N category buckets plus
+// an unclassified bucket. Filter semantics mirror GetAll. The response
+// JSON keeps the "topic" key (now carrying a category enum slug, e.g.
+// "ai_eng") for backward compatibility with the v1 frontend; the label
+// map on the frontend renders it into the displayed Chinese name.
 func (h *ArticleHandler) GetGrouped(c *gin.Context) {
 	var feedID *int
 	if fid := c.Query("feed_id"); fid != "" {
@@ -76,7 +79,7 @@ func (h *ArticleHandler) GetGrouped(c *gin.Context) {
 	unreadOnly := c.Query("unread") == "true"
 	savedOnly := c.Query("saved") == "true"
 
-	grouped, err := h.articleRepo.GetGroupedByTopic(getUserID(c), feedID, unreadOnly, savedOnly)
+	grouped, err := h.articleRepo.GetGroupedByCategory(getUserID(c), feedID, unreadOnly, savedOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

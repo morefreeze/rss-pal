@@ -67,6 +67,12 @@ func parseClassification(raw string) (*model.Classification, error) {
 		}
 	}
 	cls.Tags = cleaned
+	// Category must be a known enum value — out-of-enum values are coerced
+	// to "" so the worker writes NULL rather than polluting the schema.
+	cls.Category = strings.TrimSpace(cls.Category)
+	if !model.IsValidCategory(cls.Category) {
+		cls.Category = ""
+	}
 	return &cls, nil
 }
 
@@ -76,22 +82,32 @@ func (s *Summarizer) ClassifyArticle(ctx context.Context, title, content string,
 	recommendedTopics []string) (*model.Classification, error) {
 	content = truncateContent(content)
 	rec := strings.Join(recommendedTopics, ", ")
+	cats := strings.Join(model.ValidCategories, ", ")
 	prompt := fmt.Sprintf(`你是文章分类助手。请分析以下文章并返回 JSON：
 
-{"topic": "...", "tags": ["...", "...", "..."]}
+{"topic": "...", "tags": ["...", "...", "..."], "category": "..."}
 
-- topic：单选，最贴合的主题。优先从已有主题中选：[%s]，
+- topic：单选，最贴合的细粒度主题。优先从已有主题中选：[%s]，
   如均不贴合可创建新主题（控制在 2-4 字的中文名词）。
 - tags：3-5 个具体关键词（人名、产品名、公司、概念）。
+- category：从以下闭合列表里**必选一个**，不允许新建：[%s]。
+  含义：ai_eng=AI 工程实践 / ai=AI 通用资讯 / cn_tech=中文科技动态 /
+        enterprise=企业基建与开发工具 / youtube=视频 / podcast=播客 /
+        news=时事新闻 / blog=博客随笔评论 / health=健康 / business=商业财经。
 
 仅输出 JSON，无其他内容。
 
 标题：%s
 
 内容：
-%s`, rec, title, content)
+%s`, rec, cats, title, content)
 
-	raw, err := s.call(ctx, prompt, 200)
+	// Use callJSON (response_format=json_object) so GLM-4.5 emits a parseable
+	// object instead of spending tokens on chain-of-thought prose. 1500
+	// max_tokens leaves comfortable headroom for reasoning + the short JSON
+	// payload; the previous 200-token budget was being entirely consumed by
+	// reasoning, leaving Content empty.
+	raw, err := s.callJSON(ctx, prompt, 1500)
 	if err != nil {
 		return nil, err
 	}

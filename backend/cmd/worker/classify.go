@@ -50,7 +50,7 @@ func runClassifyCycle(ctx context.Context, articleRepo *repository.ArticleReposi
 		}
 
 		// Always cache (even empty) so we don't retry forever.
-		if err := articleRepo.SetClassification(art.ID, cls.Topic, cls.Tags); err != nil {
+		if err := articleRepo.SetClassification(art.ID, cls.Topic, cls.Tags, cls.Category); err != nil {
 			log.Printf("classify: SetClassification(%d): %v", art.ID, err)
 			continue
 		}
@@ -66,12 +66,15 @@ func runClassifyCycle(ctx context.Context, articleRepo *repository.ArticleReposi
 			if cls.Topic != "" {
 				_ = prefRepo.UpsertTopic(u.UserID, cls.Topic, tw)
 			}
+			if cls.Category != "" {
+				_ = prefRepo.UpsertCategory(u.UserID, cls.Category, tw)
+			}
 			for _, t := range cls.Tags {
 				_ = prefRepo.UpsertTag(u.UserID, t, gw)
 			}
 		}
-		log.Printf("classify: article %d → topic=%q tags=%v users=%d",
-			art.ID, cls.Topic, cls.Tags, len(users))
+		log.Printf("classify: article %d → topic=%q category=%q tags=%v users=%d",
+			art.ID, cls.Topic, cls.Category, cls.Tags, len(users))
 	}
 }
 

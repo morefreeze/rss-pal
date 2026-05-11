@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Article, GroupedArticles, TopicGroup } from '../api/client'
 import ArticleCard from './ArticleCard'
+import { labelFor } from './categoryLabels'
 
 const INITIAL_PER_GROUP = 5
 
@@ -76,7 +77,7 @@ export default function GroupedArticleView({ data, isRead, formatDate, stripMark
         <GroupSection
           key={g.topic}
           group={g}
-          label={g.topic}
+          label={labelFor(g.topic)}
           isRead={isRead}
           formatDate={formatDate}
           stripMarkdown={stripMarkdown}
