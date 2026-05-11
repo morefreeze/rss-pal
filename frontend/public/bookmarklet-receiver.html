@@ -47,7 +47,7 @@ p{margin:6px 0;line-height:1.5}
   // keep the URL reasonable).
   var hash = location.hash.slice(1);
   if (!hash) {
-    fail('缺少数据 — 请从书签栏触发，不要直接打开本页');
+    fail('缺少数据 — 如果是从书签栏点的，说明你用的还是旧版书签，请到 RSS Pal 设置页重新把按钮拖到书签栏后再试。');
     return;
   }
   var d;
