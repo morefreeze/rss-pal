@@ -36,16 +36,10 @@ function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Art
         <span
           title="视频"
           aria-label="视频"
-          style={{
-            padding: '2px 8px',
-            borderRadius: 999,
-            border: '1px solid #cc3a3a',
-            background: '#fff5f5',
-            color: '#cc3a3a',
-            fontSize: 12,
-          }}
+          className="tag-chip"
+          style={{ border: '1px solid var(--border)' }}
         >
-          🎬
+          🎬 视频
         </span>
       )}
       {(isAudio || audioFallback) && (
@@ -53,22 +47,15 @@ function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Art
           type="button"
           aria-label="播放"
           title="音频 · 点击播放"
+          className="btn-ghost btn-sm"
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
             onPlay(article)
           }}
-          style={{
-            padding: '2px 8px',
-            borderRadius: 999,
-            border: '1px solid #0066cc',
-            background: '#fff',
-            color: '#0066cc',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
+          style={{ borderRadius: 999 }}
         >
-          ▶
+          ▶ 音频
         </button>
       )}
     </span>
@@ -110,7 +97,7 @@ function SearchArticleRow({
         display: 'block',
         opacity: isRead ? 0.6 : 1,
         cursor: 'pointer',
-        outline: isFocused ? '2px solid #0066cc' : 'none',
+        outline: isFocused ? '2px solid var(--accent)' : 'none',
         outlineOffset: -2,
       }}
       onClick={() => {
@@ -122,7 +109,7 @@ function SearchArticleRow({
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         {!isRead && (
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />
         )}
         <div style={{ flex: 1 }}>
           <div className={isRead ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
@@ -140,7 +127,7 @@ function SearchArticleRow({
               <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
             </div>
             {article.feed_title && (
-              <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
+              <span className="text-sm" style={{ padding: '1px 6px', background: 'var(--accent-soft)', borderRadius: 4, color: 'var(--accent)' }}>
                 {article.feed_title}
               </span>
             )}
@@ -521,7 +508,7 @@ export default function ArticleListPage() {
               style={{
                 fontSize: 13,
                 padding: '4px 10px',
-                ...(grouped ? { background: '#0066cc', color: 'white', borderColor: '#0066cc' } : {}),
+                ...(grouped ? { background: 'var(--accent)', color: 'var(--accent-fg)', borderColor: 'var(--accent)' } : {}),
               }}
               onClick={() => {
                 const next = !grouped
@@ -591,7 +578,7 @@ export default function ArticleListPage() {
                   <div className="flex gap-2 mt-1">
                     <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
                     {article.feed_title && (
-                      <span className="text-sm" style={{ padding: '1px 6px', background: '#f0f4ff', borderRadius: 4, color: '#4b6bcc' }}>
+                      <span className="text-sm" style={{ padding: '1px 6px', background: 'var(--accent-soft)', borderRadius: 4, color: 'var(--accent)' }}>
                         {article.feed_title}
                       </span>
                     )}
@@ -714,7 +701,7 @@ export default function ArticleListPage() {
           {hasMore ? (
             <div style={{ textAlign: 'center', padding: '12px' }}>
               {loadingMore ? (
-                <span style={{ color: '#999', fontSize: 13 }}>加载中...</span>
+                <span style={{ color: 'var(--fg-muted)', fontSize: 13 }}>加载中...</span>
               ) : (
                 <button
                   type="button"
@@ -727,7 +714,7 @@ export default function ArticleListPage() {
               )}
             </div>
           ) : articles.length > 0 ? (
-            <div style={{ textAlign: 'center', padding: '16px', color: '#ccc', fontSize: 13 }}>
+            <div style={{ textAlign: 'center', padding: '16px', color: 'var(--fg-muted)', fontSize: 13 }}>
               — 已加载全部文章 —
             </div>
           ) : null}
