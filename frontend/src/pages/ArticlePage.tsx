@@ -639,7 +639,7 @@ export default function ArticlePage() {
             </button>
           </div>
           {article.feed_title && (
-            <div className="text-sm" style={{ color: '#4b6bcc' }}>{article.feed_title}</div>
+            <div className="text-sm" style={{ color: 'var(--accent)' }}>{article.feed_title}</div>
           )}
         </div>
         <h2>{article.title}</h2>
@@ -740,7 +740,7 @@ export default function ArticlePage() {
             )}
             {streamingDetailed && (
               <>
-                <hr style={{ margin: '12px 0', borderColor: '#eee' }} />
+                <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
                 <div style={{ whiteSpace: 'pre-wrap' }}>
                   {streamingDetailed}
                   {streamPhase === 'detailed' && <span className="typing-caret">▍</span>}
@@ -758,7 +758,7 @@ export default function ArticlePage() {
             )}
             {article.summary_detailed && (
               <>
-                <hr style={{ margin: '12px 0', borderColor: '#eee' }} />
+                <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
                 <ReactMarkdown>{article.summary_detailed}</ReactMarkdown>
               </>
             )}

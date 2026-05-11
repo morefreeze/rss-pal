@@ -266,7 +266,7 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: Sa
               </div>
             )}
             {!hasMore && items.length > 0 && (
-              <div style={{ textAlign: 'center', padding: 16, color: '#ccc', fontSize: 13 }}>
+              <div style={{ textAlign: 'center', padding: 16, color: 'var(--fg-muted)', fontSize: 13 }}>
                 — 已加载全部收藏 —
               </div>
             )}
