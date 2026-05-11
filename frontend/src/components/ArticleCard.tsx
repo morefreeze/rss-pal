@@ -15,8 +15,6 @@ function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Art
   const t = article.media_type ?? ''
   const isVideo = t.startsWith('video/')
   const isAudio = t.startsWith('audio/')
-  // Articles with media_url but no recognised type fall back to the
-  // play-button shape (the original behaviour).
   const audioFallback = !isVideo && !isAudio
 
   return (
@@ -25,16 +23,10 @@ function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Art
         <span
           title="视频"
           aria-label="视频"
-          style={{
-            padding: '2px 8px',
-            borderRadius: 999,
-            border: '1px solid #cc3a3a',
-            background: '#fff5f5',
-            color: '#cc3a3a',
-            fontSize: 12,
-          }}
+          className="tag-chip"
+          style={{ border: '1px solid var(--border)' }}
         >
-          🎬
+          🎬 视频
         </span>
       )}
       {(isAudio || audioFallback) && (
@@ -42,22 +34,15 @@ function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Art
           type="button"
           aria-label="播放"
           title="音频 · 点击播放"
+          className="btn-ghost btn-sm"
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
             onPlay(article)
           }}
-          style={{
-            padding: '2px 8px',
-            borderRadius: 999,
-            border: '1px solid #0066cc',
-            background: '#fff',
-            color: '#0066cc',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
+          style={{ borderRadius: 999 }}
         >
-          ▶
+          ▶ 音频
         </button>
       )}
     </span>
@@ -122,7 +107,7 @@ export default function ArticleCard({
         display: 'block',
         opacity: isRead ? 0.6 : 1,
         cursor: 'pointer',
-        outline: isFocused ? '2px solid #0066cc' : 'none',
+        outline: isFocused ? '2px solid var(--accent)' : 'none',
         outlineOffset: -2,
       }}
       onClick={() => {
@@ -133,7 +118,7 @@ export default function ArticleCard({
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         {!isRead && (
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0066cc', flexShrink: 0, marginTop: 6 }} />
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />
         )}
         <div style={{ flex: 1 }}>
           <div className={isRead ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
