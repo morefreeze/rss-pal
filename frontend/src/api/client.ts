@@ -498,6 +498,32 @@ export const getBookmarkletToken = () =>
 export const regenerateBookmarkletToken = () =>
   api.post<{ token: string }>('/settings/bookmarklet-token/regenerate').then(res => res.data.token)
 
+// Admin: subscription backup + restore (admin-only).
+export interface BackupFile {
+  name: string
+  created_at: string
+  size: number
+}
+export interface BackupListResponse {
+  backups: BackupFile[]
+  dir: string
+}
+export interface BackupRestoreStats {
+  feeds: number
+  user_tags: number
+  interest_categories: number
+  interest_topics: number
+  skipped_article_link: number
+}
+export const listBackups = () =>
+  api.get<BackupListResponse>('/admin/backups').then(res => res.data)
+
+export const createBackupNow = () =>
+  api.post<{ ok: boolean }>('/admin/backups').then(res => res.data)
+
+export const restoreBackup = (name: string) =>
+  api.post<{ ok: boolean; stats: BackupRestoreStats }>('/admin/backups/restore', { name }).then(res => res.data)
+
 export interface RecommendedFeed {
   id: number
   url: string
