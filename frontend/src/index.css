@@ -341,11 +341,11 @@ body.reading-mode-active #root > div > header { display: none; }
 }
 
 /* ===== AI section marker + confetti easter egg ===== */
-/* The 🏁 emoji floats above the 4px progress bar so it stays visible even
-   when the blue fill has covered the marker's x-position. */
+/* The 🏁 emoji hangs just below the 4px progress bar so it stays visible
+   regardless of where the blue fill is. */
 .ai-marker {
   position: absolute;
-  top: -10px;
+  top: 4px;
   font-size: 14px;
   line-height: 1;
   transform: translateX(-50%);
@@ -390,7 +390,7 @@ body.reading-mode-active #root > div > header { display: none; }
 
 .ai-celebration {
   position: fixed;
-  top: 14px;
+  top: 26px;
   transform: translateX(-50%);
   background: rgba(255, 255, 255, 0.97);
   color: #6b21a8;
