@@ -4,8 +4,9 @@ export type ReaderMode = 'normal' | 'reading'
 export type ReaderFontFamily = 'sans' | 'serif'
 export type ReaderBgTheme = 'default' | 'sepia' | 'green' | 'gray' | 'dark'
 
+// Persisted settings. `mode` is intentionally NOT in here — reading mode is
+// a per-session toggle the user opts into manually each time.
 export type ReaderSettings = {
-  mode: ReaderMode
   fontSize: number      // 12..24, step 1
   fontFamily: ReaderFontFamily
   bgTheme: ReaderBgTheme
@@ -15,7 +16,6 @@ export type ReaderSettings = {
 const STORAGE_KEY = 'rsspal:reader-settings'
 
 const DEFAULTS: ReaderSettings = {
-  mode: 'normal',
   fontSize: 16,
   fontFamily: 'sans',
   bgTheme: 'default',
@@ -28,7 +28,6 @@ function load(): ReaderSettings {
     if (!raw) return DEFAULTS
     const parsed = JSON.parse(raw) as Partial<ReaderSettings>
     return {
-      mode: parsed.mode === 'reading' ? 'reading' : 'normal',
       fontSize: clampFont(parsed.fontSize ?? DEFAULTS.fontSize),
       fontFamily: parsed.fontFamily === 'serif' ? 'serif' : 'sans',
       bgTheme: isTheme(parsed.bgTheme) ? parsed.bgTheme : 'default',
@@ -50,13 +49,14 @@ function isTheme(v: unknown): v is ReaderBgTheme {
 
 export function useReaderSettings() {
   const [settings, setSettings] = useState<ReaderSettings>(() => load())
+  const [mode, setModeState] = useState<ReaderMode>('normal')
 
-  // Persist on every change
+  // Persist visual settings on every change. Mode is deliberately excluded.
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)) } catch {}
   }, [settings])
 
-  // Sync across tabs
+  // Sync visual settings across tabs.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY) setSettings(load())
@@ -65,7 +65,9 @@ export function useReaderSettings() {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  const setMode = useCallback((mode: ReaderMode) => setSettings(s => ({ ...s, mode })), [])
+  const setMode = useCallback((m: ReaderMode) => setModeState(m), [])
+  const toggleMode = useCallback(() =>
+    setModeState(m => m === 'reading' ? 'normal' : 'reading'), [])
   const setFontSize = useCallback((fontSize: number) =>
     setSettings(s => ({ ...s, fontSize: clampFont(fontSize) })), [])
   const setFontFamily = useCallback((fontFamily: ReaderFontFamily) =>
@@ -74,11 +76,10 @@ export function useReaderSettings() {
     setSettings(s => ({ ...s, bgTheme })), [])
   const setConfettiEnabled = useCallback((confettiEnabled: boolean) =>
     setSettings(s => ({ ...s, confettiEnabled })), [])
-  const toggleMode = useCallback(() =>
-    setSettings(s => ({ ...s, mode: s.mode === 'reading' ? 'normal' : 'reading' })), [])
 
   return {
     ...settings,
+    mode,
     setMode,
     toggleMode,
     setFontSize,
