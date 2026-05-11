@@ -18,6 +18,9 @@ frontend/dist/
 # Docker volumes
 postgres_data/
 
+# Host-mounted backup snapshots (subscription state)
+backups/
+
 # Claude Code loop state
 .claude/
 

@@ -11,6 +11,11 @@ type Config struct {
 	Auth     AuthConfig
 	JWT      JWTConfig
 	RSSHub   RSSHubConfig
+	Backup   BackupConfig
+}
+
+type BackupConfig struct {
+	Dir string // host-mounted; survives container removal
 }
 
 type ServerConfig struct {
@@ -68,6 +73,9 @@ func Load() *Config {
 		},
 		RSSHub: RSSHubConfig{
 			BaseURL: getEnv("RSSHUB_BASE_URL", "http://rsshub:1200"),
+		},
+		Backup: BackupConfig{
+			Dir: getEnv("BACKUP_DIR", "/backups"),
 		},
 	}
 }
