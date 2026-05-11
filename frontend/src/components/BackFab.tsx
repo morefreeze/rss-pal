@@ -37,8 +37,8 @@ export default function BackFab({ onClick }: BackFabProps) {
         width: 48,
         height: 48,
         borderRadius: '50%',
-        border: '1px solid rgba(0,0,0,0.08)',
-        background: 'rgba(255,255,255,0.92)',
+        border: '1px solid var(--border)',
+        background: 'var(--surface)',
         boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
         cursor: 'pointer',
         display: 'flex',
@@ -48,7 +48,7 @@ export default function BackFab({ onClick }: BackFabProps) {
         pointerEvents: visible ? 'auto' : 'none',
         transition: 'opacity 0.2s ease',
         zIndex: 50,
-        color: '#333',
+        color: 'var(--fg)',
         padding: 0,
       }}
     >
