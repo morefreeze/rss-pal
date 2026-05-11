@@ -23,6 +23,7 @@ type FeedHandler struct {
 	articleRepo    *repository.ArticleRepository
 	fetcher        *rss.Fetcher
 	contentFetcher *rss.ContentFetcher
+	rsshubBase     string         // used to rewrite WeChat URLs on direct add
 	backup         *backup.Runner // nil when backup is disabled
 }
 
@@ -32,6 +33,7 @@ func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.Art
 		articleRepo:    articleRepo,
 		fetcher:        rss.NewFetcher(rsshubBase),
 		contentFetcher: rss.NewContentFetcher(),
+		rsshubBase:     rsshubBase,
 	}
 }
 
@@ -111,6 +113,24 @@ func (h *FeedHandler) Create(c *gin.Context) {
 
 	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
 		req.URL = "https://" + req.URL
+	}
+
+	// WeChat 公众号 URLs are rewritten to their RSSHub /wechat/ce/<biz>
+	// route on add, so the URL stored in feeds (and used by worker/refetch)
+	// is always a normal RSS feed. We only consult the query string here —
+	// no HTTP fetch — to keep POST /api/feeds fast. Short links that haven't
+	// been resolved via /preview will fail with a clear message.
+	if rss.IsWeChatURL(req.URL) {
+		if h.rsshubBase == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "RSSHub 未配置，无法订阅公众号"})
+			return
+		}
+		biz, err := rss.ExtractBiz(c.Request.Context(), nil, req.URL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未能从该链接提取公众号 ID，请先在「预览」中解析"})
+			return
+		}
+		req.URL = rss.BuildFeedURL(h.rsshubBase, biz)
 	}
 
 	feedType := req.FeedType

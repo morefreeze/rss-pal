@@ -328,22 +328,32 @@ export default function FeedListPage() {
         )}
 
         {/* Preview result */}
-        {preview && (
+        {preview && (() => {
+          // Sniff RSSHub's WeChat route on actual_url to recognise that the
+          // backend turned a mp.weixin.qq.com URL into a 公众号 subscription.
+          const isWeChat = (preview.actual_url || '').includes('/wechat/ce/')
+          return (
           <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12 }}>
+
             <div className="flex-between mb-2">
               <div>
                 <div className="text-bold">{preview.feed_title || '未命名订阅源'}</div>
                 <div className="text-muted text-sm">
-                  {preview.feed_type === 'html' ? '🌐 网页抓取模式' : '📡 RSS/Atom 订阅'}
-                  {preview.actual_url !== newUrl.trim() && (
+                  {isWeChat
+                    ? '📑 微信公众号订阅'
+                    : preview.feed_type === 'html' ? '🌐 网页抓取模式' : '📡 RSS/Atom 订阅'}
+                  {!isWeChat && preview.actual_url !== newUrl.trim() && (
                     <span style={{ marginLeft: 6 }}>· 已自动发现 RSS 地址</span>
+                  )}
+                  {isWeChat && (
+                    <span style={{ marginLeft: 6 }}>· 已通过 RSSHub 路由</span>
                   )}
                   · {(preview.items ?? []).length} 篇文章
                 </div>
               </div>
               <div className="flex gap-1">
                 <button onClick={handleConfirmAdd} disabled={adding}>
-                  {adding ? '添加中...' : '确认订阅'}
+                  {adding ? '添加中...' : isWeChat ? '订阅该公众号' : '确认订阅'}
                 </button>
                 <button className="secondary" onClick={handleCancelPreview}>取消</button>
               </div>
@@ -370,7 +380,8 @@ export default function FeedListPage() {
               )}
             </div>
           </div>
-        )}
+          )
+        })()}
       </div>
 
       {/* Existing feeds list */}
@@ -385,6 +396,9 @@ export default function FeedListPage() {
                   {feed.title || feed.url}
                   {feed.feed_type === 'html' && (
                     <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#fef9c3', borderRadius: 4, color: '#854d0e' }}>网页</span>
+                  )}
+                  {feed.url.includes('/wechat/ce/') && (
+                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#dcfce7', borderRadius: 4, color: '#166534' }}>公众号</span>
                   )}
                   {!feed.is_active && (
                     <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>已暂停</span>

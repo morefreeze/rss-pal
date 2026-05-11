@@ -102,6 +102,32 @@ func (f *Fetcher) Fetch(ctx context.Context, feedURL string, etag, lastModified 
 // Preview fetches a URL and returns up to 10 articles without saving anything.
 // Tries RSS/Atom first, then auto-discovers RSS link in HTML, then falls back to scraping.
 func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, error) {
+	// WeChat 公众号 URLs route through RSSHub: we extract __biz from the URL
+	// (or, for short links, from the article HTML) and synthesize the
+	// /wechat/ce/<biz> route. The preview is the same as any RSS preview from
+	// that point on, so callers see actual_url = "<rsshub>/wechat/ce/<biz>"
+	// and frontend can sniff `/wechat/ce/` to switch the badge.
+	if IsWeChatURL(rawURL) {
+		if f.rsshubBase == "" {
+			return nil, fmt.Errorf("RSSHub 未配置，无法订阅公众号")
+		}
+		biz, err := ExtractBiz(ctx, f.client, rawURL)
+		if err != nil {
+			return nil, fmt.Errorf("未能从该链接提取公众号 ID（请使用 PC 端「复制链接」获得的长链）: %w", err)
+		}
+		rsshubURL := BuildFeedURL(f.rsshubBase, biz)
+		res, err := f.Fetch(ctx, rsshubURL, "", "")
+		if err != nil {
+			return nil, fmt.Errorf("RSSHub 公众号数据源暂不可用: %w", err)
+		}
+		if res == nil || res.Feed == nil {
+			return nil, fmt.Errorf("RSSHub 公众号数据源暂不可用")
+		}
+		out := rssToPreview(res.Feed, rsshubURL)
+		out.ActualURL = rsshubURL
+		return out, nil
+	}
+
 	fetchURL := ResolveFeedURL(rawURL, f.rsshubBase)
 	req, err := http.NewRequestWithContext(ctx, "GET", fetchURL, nil)
 	if err != nil {
