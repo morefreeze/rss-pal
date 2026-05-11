@@ -226,6 +226,20 @@ export const exportOPML = () =>
 export const getArticles = (params?: { feed_id?: number; unread?: boolean; saved?: boolean; limit?: number; offset?: number }) =>
   api.get<Article[]>('/articles', { params }).then(res => res.data)
 
+export interface TopicGroup {
+  topic: string
+  total_count: number
+  articles: Article[]
+}
+
+export interface GroupedArticles {
+  groups: TopicGroup[]
+  unclassified: TopicGroup
+}
+
+export const getGroupedArticles = (params?: { feed_id?: number; unread?: boolean; saved?: boolean }) =>
+  api.get<GroupedArticles>('/articles/grouped', { params }).then(res => res.data)
+
 export const searchArticles = (q: string, limit?: number) =>
   api.get<Article[]>('/articles/search', { params: { q, limit } }).then(res => res.data)
 
