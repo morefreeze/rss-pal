@@ -745,7 +745,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
                       <div>
                         <code style={{ fontSize: 14, background: 'var(--code-bg)', padding: '2px 8px', borderRadius: 4 }}>{ic.code}</code>
                         <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
-                          {ic.used_by ? <span style={{ color: '#16a34a' }}>已使用</span> : <span style={{ color: '#2563eb' }}>未使用</span>}
+                          {ic.used_by ? <span style={{ color: '#16a34a' }}>已使用</span> : <span style={{ color: 'var(--accent)' }}>未使用</span>}
                         </span>
                         <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
                           过期：{formatDate(ic.expires_at)}
