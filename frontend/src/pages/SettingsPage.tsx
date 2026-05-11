@@ -195,8 +195,8 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
       </div>
       <p className="text-muted text-sm mb-2">
         快照内容：订阅源、标签、兴趣分类与主题、用户偏好。文章本体不在备份内（worker 会重新抓）。
-        文件存在主机 <code style={{ background: '#f3f4f6', padding: '1px 6px', borderRadius: 3 }}>./backups/</code>
-        （容器内 <code style={{ background: '#f3f4f6', padding: '1px 6px', borderRadius: 3 }}>{dir || '/backups'}</code>），
+        文件存在主机 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>./backups/</code>
+        （容器内 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>{dir || '/backups'}</code>），
         每次 feed 增删后 5 分钟自动备份，每日定时一次；保留策略 7 天 / 周 / 月分级。
       </p>
       {loading ? (
@@ -208,9 +208,9 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
       ) : (
         <div>
           {files.map(f => (
-            <div key={f.name} className="flex-between" style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0' }}>
+            <div key={f.name} className="flex-between" style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
               <div>
-                <code style={{ background: '#f3f4f6', padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
+                <code style={{ background: 'var(--code-bg)', padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
                   {f.name}
                 </code>
                 <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
@@ -298,7 +298,7 @@ function BookmarkletSection() {
 
       <div className="flex gap-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
         <span className="text-sm">Token:</span>
-        <code style={{ background: '#f3f4f6', padding: '3px 8px', borderRadius: 4, fontSize: 12 }}>
+        <code style={{ background: 'var(--code-bg)', padding: '3px 8px', borderRadius: 4, fontSize: 12 }}>
           {revealed && token ? token : masked}
         </code>
         {token && (
@@ -741,9 +741,9 @@ export default function SettingsPage({ user }: SettingsPageProps) {
               ) : (
                 <div>
                   {inviteCodes.map(ic => (
-                    <div key={ic.id} className="flex-between" style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0' }}>
+                    <div key={ic.id} className="flex-between" style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                       <div>
-                        <code style={{ fontSize: 14, background: '#f3f4f6', padding: '2px 8px', borderRadius: 4 }}>{ic.code}</code>
+                        <code style={{ fontSize: 14, background: 'var(--code-bg)', padding: '2px 8px', borderRadius: 4 }}>{ic.code}</code>
                         <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
                           {ic.used_by ? <span style={{ color: '#16a34a' }}>已使用</span> : <span style={{ color: '#2563eb' }}>未使用</span>}
                         </span>
@@ -834,7 +834,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
 
             {/* 新建模板表单 */}
             {showNewTemplate && (
-              <form data-new-template-form onSubmit={handleCreateTemplate} className="card mb-2" style={{ background: '#f8fafc' }}>
+              <form data-new-template-form onSubmit={handleCreateTemplate} className="card mb-2" style={{ background: 'var(--surface)' }}>
                 <h4 className="mb-1">新建模板</h4>
 
                 <div className="mb-1">
@@ -897,7 +897,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
               <div className="mb-2">
                 <div className="text-sm text-muted mb-1" style={{ fontWeight: 600 }}>系统模板</div>
                 {systemTemplates.map(t => (
-                  <div key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <div key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                     <div className="flex-between">
                       <div>
                         <span className="text-bold text-sm">{t.name}</span>
@@ -919,17 +919,17 @@ export default function SettingsPage({ user }: SettingsPageProps) {
                       </div>
                     </div>
                     {expandedTemplates.has(t.id) && (
-                      <div style={{ marginTop: 8, padding: 10, background: '#f8fafc', borderRadius: 6, border: '1px solid #e5e7eb' }}>
+                      <div style={{ marginTop: 8, padding: 10, background: 'var(--surface)', borderRadius: 6, border: '1px solid var(--border)' }}>
                         {t.brief_prompt && (
                           <div className="mb-2">
                             <div className="text-sm text-bold text-muted" style={{ marginBottom: 4 }}>简短摘要 Prompt：</div>
-                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0, color: '#374151', lineHeight: 1.5 }}>{t.brief_prompt}</pre>
+                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0, color: 'var(--fg)', lineHeight: 1.5 }}>{t.brief_prompt}</pre>
                           </div>
                         )}
                         {t.detailed_prompt && (
                           <div>
                             <div className="text-sm text-bold text-muted" style={{ marginBottom: 4 }}>详细摘要 Prompt：</div>
-                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0, color: '#374151', lineHeight: 1.5 }}>{t.detailed_prompt}</pre>
+                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0, color: 'var(--fg)', lineHeight: 1.5 }}>{t.detailed_prompt}</pre>
                           </div>
                         )}
                       </div>
@@ -946,7 +946,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
                 <div className="text-muted text-sm">暂无自定义模板</div>
               ) : (
                 userTemplates.map(t => (
-                  <div key={t.id} className="flex-between" style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <div key={t.id} className="flex-between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                     <div>
                       <span className="text-bold text-sm">{t.name}</span>
                       {t.style && (
