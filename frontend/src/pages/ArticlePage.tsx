@@ -13,6 +13,7 @@ import MarkdownArticle from '../components/MarkdownArticle'
 import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
 import BackFab from '../components/BackFab'
+import ConfettiBurst from '../components/ConfettiBurst'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
 import TagBar from '../components/TagBar'
@@ -44,9 +45,16 @@ export default function ArticlePage() {
   const [disliked, setDisliked] = useState(false)
   const [saved, setSaved] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
+  const summaryRef = useRef<HTMLDivElement>(null)
   const readStartTime = useRef<number>(Date.now())
   // High-water mark so scrolling up (e.g. to nav buttons) can't regress saved progress.
   const maxScrollRef = useRef<number>(0)
+  // Progress (0..1) at which the AI summary card has just exited the viewport.
+  // null while we can't measure (no summary content, layout not ready).
+  const [aiMarkerPos, setAiMarkerPos] = useState<number | null>(null)
+  const [confettiFired, setConfettiFired] = useState(false)
+  const [showCelebration, setShowCelebration] = useState(false)
+  const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Template selector state
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
@@ -248,6 +256,78 @@ export default function ArticlePage() {
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
+
+  // Reset confetti state when navigating between articles.
+  useEffect(() => {
+    setConfettiFired(false)
+    setShowCelebration(false)
+    if (celebrationTimerRef.current) {
+      clearTimeout(celebrationTimerRef.current)
+      celebrationTimerRef.current = null
+    }
+  }, [id])
+
+  // Measure where the AI summary card ends, expressed as a 0..1 fraction of
+  // total scrollable height. Re-measure after the summary or content changes,
+  // and on a short delay to catch late-loading images/markdown.
+  useEffect(() => {
+    const hasSummary = !!(article?.summary_brief || article?.summary_detailed)
+    if (!hasSummary || streamPhase !== 'idle') {
+      setAiMarkerPos(null)
+      return
+    }
+    const recompute = () => {
+      const summary = summaryRef.current
+      const content = contentRef.current
+      if (!summary || !content) { setAiMarkerPos(null); return }
+      const maxScroll = content.scrollHeight - window.innerHeight
+      if (maxScroll <= 0) { setAiMarkerPos(null); return }
+      const summaryBottom = summary.offsetTop + summary.offsetHeight
+      const scrollAtPast = Math.max(0, summaryBottom - window.innerHeight)
+      const pos = scrollAtPast / maxScroll
+      setAiMarkerPos(pos > 0.01 && pos < 0.99 ? pos : null)
+    }
+    recompute()
+    const t1 = setTimeout(recompute, 300)
+    const t2 = setTimeout(recompute, 1200)
+    window.addEventListener('resize', recompute)
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+      window.removeEventListener('resize', recompute)
+    }
+  }, [article?.id, article?.summary_brief, article?.summary_detailed, article?.content, streamPhase])
+
+  // Fire confetti the first time the user scrolls past the AI marker. If the
+  // page is already past the marker on mount (scroll-restored), mark as fired
+  // silently — no retroactive celebration.
+  useEffect(() => {
+    if (aiMarkerPos === null || confettiFired) return
+    const content = contentRef.current
+    if (!content) return
+    const maxScroll = content.scrollHeight - window.innerHeight
+    if (maxScroll <= 0) return
+    if (window.scrollY / maxScroll >= aiMarkerPos) {
+      setConfettiFired(true)
+      return
+    }
+    const onScroll = () => {
+      const m = contentRef.current
+      if (!m) return
+      const ms = m.scrollHeight - window.innerHeight
+      if (ms <= 0) return
+      if (window.scrollY / ms >= aiMarkerPos) {
+        setConfettiFired(true)
+        if (reader.confettiEnabled) {
+          setShowCelebration(true)
+          if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current)
+          celebrationTimerRef.current = setTimeout(() => setShowCelebration(false), 1900)
+        }
+      }
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [aiMarkerPos, confettiFired, reader.confettiEnabled])
 
   useEffect(() => {
     const onVisibility = () => { if (document.hidden) flushProgress() }
@@ -518,6 +598,20 @@ export default function ArticlePage() {
             backgroundColor: '#0066cc',
             transition: 'width 0.3s ease',
           }} />
+          {aiMarkerPos !== null && (
+            <div
+              className={`ai-marker${showCelebration ? ' pulse' : ''}`}
+              style={{ left: `${aiMarkerPos * 100}%` }}
+              title="AI 总结结束"
+            >
+              {showCelebration && reader.confettiEnabled && <ConfettiBurst />}
+            </div>
+          )}
+        </div>
+      )}
+      {showCelebration && aiMarkerPos !== null && reader.confettiEnabled && (
+        <div className="ai-celebration" style={{ left: `${aiMarkerPos * 100}%` }}>
+          🎉 AI 总结读完啦
         </div>
       )}
 
@@ -617,7 +711,7 @@ export default function ArticlePage() {
       </div>
 
       {/* Summary section — shown before content */}
-      <div className="card">
+      <div ref={summaryRef} className="card">
         <div className="flex-between mb-2">
           <h3>AI 总结</h3>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
