@@ -21,7 +21,6 @@ export default function Layout({ user, onLogout }: LayoutProps) {
   useEffect(() => {
     refreshUnread()
     window.addEventListener('refresh-unread', refreshUnread)
-    // Poll every 2 minutes so the badge stays current as worker fetches articles
     const interval = setInterval(refreshUnread, 2 * 60 * 1000)
     return () => {
       window.removeEventListener('refresh-unread', refreshUnread)
@@ -41,17 +40,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
     <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       文章
       {unreadCount > 0 && (
-        <span style={{
-          background: '#0066cc',
-          color: 'white',
-          borderRadius: 10,
-          fontSize: 11,
-          fontWeight: 600,
-          padding: '1px 5px',
-          minWidth: 18,
-          textAlign: 'center',
-          lineHeight: '16px',
-        }}>
+        <span className="unread-badge">
           {unreadCount > 99 ? '99+' : unreadCount}
         </span>
       )}
@@ -61,11 +50,10 @@ export default function Layout({ user, onLogout }: LayoutProps) {
   return (
     <PlayerProvider>
       <div>
-      <header style={{ marginBottom: 16 }}>
+      <header style={{ marginBottom: 20 }}>
         <div className="flex-between">
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: '#0066cc' }}>RSS Pal</h1>
+          <h1 className="nav-brand">RSS Pal</h1>
 
-          {/* Desktop nav */}
           <nav className="flex gap-2 desktop-nav" style={{ alignItems: 'center' }}>
             <NavLink to="/articles" className={navLinkClass}>{articlesLabel}</NavLink>
             <NavLink to="/weekly" className={navLinkClass}>周刊</NavLink>
@@ -74,27 +62,31 @@ export default function Layout({ user, onLogout }: LayoutProps) {
             <NavLink to="/insights" className={navLinkClass}>洞察</NavLink>
             <NavLink to="/stats" className={navLinkClass}>统计</NavLink>
             <NavLink to="/settings" className={navLinkClass}>设置</NavLink>
-            <span className="text-muted text-sm" style={{ borderLeft: '1px solid #ddd', paddingLeft: 8 }}>
+            <span className="text-muted text-sm" style={{ borderLeft: '1px solid var(--border)', paddingLeft: 8 }}>
               {user?.username}
             </span>
-            <button className="secondary" onClick={handleLogout} style={{ padding: '4px 10px', fontSize: 13 }}>
+            <button className="btn-ghost btn-sm" onClick={handleLogout}>
               登出
             </button>
           </nav>
 
-          {/* Mobile menu button */}
           <button
-            className="secondary mobile-menu-btn"
+            className="btn-ghost btn-sm mobile-menu-btn"
             onClick={() => setMenuOpen(o => !o)}
-            style={{ padding: '4px 10px', fontSize: 18 }}
+            aria-label="菜单"
           >
             {menuOpen ? '✕' : '☰'}
           </button>
         </div>
 
-        {/* Mobile dropdown nav */}
         {menuOpen && (
-          <nav className="mobile-nav" style={{ marginTop: 8, padding: '8px 0', background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
+          <nav className="mobile-nav" style={{
+            marginTop: 8,
+            padding: '8px 0',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+          }}>
             {[
               { to: '/articles', label: articlesLabel },
               { to: '/weekly', label: '周刊' },
@@ -109,14 +101,14 @@ export default function Layout({ user, onLogout }: LayoutProps) {
                 to={to}
                 className={navLinkClass}
                 onClick={() => setMenuOpen(false)}
-                style={{ display: 'block', padding: '10px 16px', borderBottom: '1px solid #f0f0f0' }}
+                style={{ display: 'block', padding: '10px 16px', borderBottom: '1px solid var(--border)', borderRadius: 0 }}
               >
                 {label}
               </NavLink>
             ))}
             <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="text-muted text-sm">{user?.username}</span>
-              <button className="secondary" onClick={handleLogout} style={{ padding: '4px 10px', fontSize: 13 }}>
+              <button className="btn-ghost btn-sm" onClick={handleLogout}>
                 登出
               </button>
             </div>
