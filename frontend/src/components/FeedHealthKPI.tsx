@@ -3,8 +3,8 @@ import { FeedHealthKPI as KPI } from '../api/client'
 const cardStyle: React.CSSProperties = {
   flex: 1,
   padding: '12px 16px',
-  background: '#fff',
-  border: '1px solid #e0e0e0',
+  background: 'var(--surface)',
+  border: '1px solid var(--border)',
   borderRadius: 8,
   textAlign: 'center',
 }
@@ -17,7 +17,7 @@ const numStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   fontSize: 12,
-  color: '#666',
+  color: 'var(--fg-muted)',
   marginTop: 4,
 }
 
