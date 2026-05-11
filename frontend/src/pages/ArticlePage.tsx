@@ -610,11 +610,6 @@ export default function ArticlePage() {
           </div>
         )}
       </div>
-      {showCelebration && aiMarkerPos !== null && reader.confettiEnabled && (
-        <div className="ai-celebration" style={{ left: `${aiMarkerPos * 100}%` }}>
-          🎉 AI 总结读完啦
-        </div>
-      )}
 
       <div className="card">
         <div className="flex-between mb-2">

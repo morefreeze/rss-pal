@@ -388,29 +388,6 @@ body.reading-mode-active #root > div > header { display: none; }
   100% { opacity: 0; transform: translate(var(--cx), var(--cy)) rotate(var(--cr)) scale(1); }
 }
 
-.ai-celebration {
-  position: fixed;
-  top: 26px;
-  transform: translateX(-50%);
-  background: rgba(255, 255, 255, 0.97);
-  color: #6b21a8;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid #e9d5ff;
-  box-shadow: 0 4px 12px rgba(168, 85, 247, 0.18);
-  pointer-events: none;
-  z-index: 1001;
-  animation: ai-celebration-pop 1.8s ease-out forwards;
-  white-space: nowrap;
-}
-@keyframes ai-celebration-pop {
-  0%   { opacity: 0; transform: translate(-50%, -6px); }
-  15%  { opacity: 1; transform: translate(-50%, 0); }
-  75%  { opacity: 1; transform: translate(-50%, 0); }
-  100% { opacity: 0; transform: translate(-50%, -4px); }
-}
 
 /* ===== Tag chips ===== */
 .tag-chip {
