@@ -106,7 +106,7 @@ export default function TagBar({ articleId }: Props) {
         )}
       </div>
       {data.suggestions.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '4px 0 12px', fontSize: 12, color: '#64748b' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '4px 0 12px', fontSize: 12, color: 'var(--fg-muted)' }}>
           <span>AI 建议:</span>
           {data.suggestions.map(name => (
             <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
@@ -128,7 +128,8 @@ export default function TagBar({ articleId }: Props) {
                   const fresh = await getArticleTags(articleId)
                   setData(fresh)
                 }}
-                style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 11, padding: 0 }}
+                className="btn-text btn-sm"
+                style={{ padding: 0 }}
               >
                 ✕
               </button>
@@ -141,7 +142,8 @@ export default function TagBar({ articleId }: Props) {
               const fresh = await getArticleTags(articleId)
               setData(fresh)
             }}
-            style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', textDecoration: 'underline', fontSize: 12 }}
+            className="btn-text btn-sm"
+            style={{ textDecoration: 'underline' }}
           >
             全部忽略
           </button>
