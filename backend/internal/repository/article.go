@@ -514,19 +514,260 @@ func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Ti
 	return r.scanArticle(rows)
 }
 
-// FindArticlesNeedingClassification returns up to `limit` articles that have
-// strong signals in the last 7 days but no cached topic.
+// GroupedTopN and GroupedPerGroupCap bound the /api/articles/grouped
+// response server-side; the frontend renders 5 per group with an
+// "展开更多" affordance up to PerGroupCap.
+const (
+	GroupedTopN        = 8
+	GroupedPerGroupCap = 20
+)
+
+// GetGroupedByCategory returns the per-category view of articles visible to
+// userID under the given filters. Top-N category groups are ranked by
+// interest_categories.weight (falling back to article count for cold-start
+// users); within each group articles are ranked by the same preference
+// score formula that GetTopArticlesInRange uses. Unclassified articles
+// (category IS NULL OR '') always come back in their own bucket. Category
+// groups that don't make the top-N are not returned.
+//
+// The response JSON keeps the "topic" key for backward compat with the v1
+// frontend; the value is now a category enum slug (e.g. "ai_eng") rather
+// than a 2-4 字 中文 noun — the frontend label map renders it.
+func (r *ArticleRepository) GetGroupedByCategory(userID int, feedID *int, unreadOnly, savedOnly bool) (*model.GroupedArticles, error) {
+	// The same WHERE-clause shape used by GetAll, expressed as a string
+	// fragment plus positional args we'll re-thread into each of the two
+	// queries below. $1 is always userID.
+	args := []interface{}{userID}
+	conditions := []string{"(f.owner_id IS NULL OR f.owner_id = $1)"}
+	joins := ""
+	argIdx := 2
+	if feedID != nil {
+		conditions = append(conditions, fmt.Sprintf("a.feed_id = $%d", argIdx))
+		args = append(args, *feedID)
+		argIdx++
+	}
+	if unreadOnly {
+		conditions = append(conditions, "COALESCE(rp.is_completed, false) = false")
+	}
+	if savedOnly {
+		joins += " LEFT JOIN user_preferences up_save ON up_save.article_id = a.id AND up_save.user_id = $1 AND up_save.signal_type = 'save'"
+		conditions = append(conditions, fmt.Sprintf("up_save.signal_value = $%d", argIdx))
+		args = append(args, 1.0)
+		argIdx++
+	}
+	where := strings.Join(conditions, " AND ")
+
+	visibleCTE := `
+WITH visible AS (
+    SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+           a.summary_brief, a.summary_detailed, a.fetched_at,
+           a.word_count, a.reading_minutes,
+           a.media_url, a.media_type, a.media_duration_seconds,
+           a.category,
+           f.title AS feed_title,
+           COALESCE(rp.is_completed, false) AS is_read
+    FROM articles a
+    JOIN feeds f ON a.feed_id = f.id
+    LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1` + joins + `
+    WHERE ` + where + `
+),
+score AS (
+    SELECT article_id, SUM(
+        CASE signal_type
+            WHEN 'like' THEN 5.0 * signal_value
+            WHEN 'dislike' THEN -10.0 * signal_value
+            WHEN 'save' THEN 3.0 * signal_value
+            WHEN 'read_duration' THEN signal_value / 60.0
+            WHEN 'completed_listen' THEN 8.0 * signal_value
+            ELSE 1.0 * signal_value
+        END
+    ) AS s
+    FROM user_preferences
+    WHERE user_id = $1
+    GROUP BY article_id
+)`
+
+	// --- Query 1: top-N category groups + up to PerGroupCap articles each ---
+	groupsQuery := visibleCTE + fmt.Sprintf(`,
+classified AS (
+    SELECT * FROM visible WHERE category IS NOT NULL AND category <> ''
+),
+cat_stats AS (
+    SELECT c.category,
+           COUNT(*)::int AS article_count,
+           COALESCE(MAX(ic.weight), 0) AS weight
+    FROM classified c
+    LEFT JOIN interest_categories ic ON ic.user_id = $1 AND ic.category = c.category
+    GROUP BY c.category
+    ORDER BY weight DESC, article_count DESC, c.category ASC
+    LIMIT %d
+),
+ranked AS (
+    SELECT c.*, COALESCE(s.s, 0) AS score,
+           ROW_NUMBER() OVER (PARTITION BY c.category
+                              ORDER BY COALESCE(s.s, 0) DESC, c.published_at DESC NULLS LAST, c.id DESC) AS rn
+    FROM classified c
+    LEFT JOIN score s ON c.id = s.article_id
+    WHERE c.category IN (SELECT category FROM cat_stats)
+)
+SELECT cs.category, cs.article_count, cs.weight,
+       r.id, r.feed_id, r.title, r.url, r.content, r.published_at,
+       r.summary_brief, r.summary_detailed, r.fetched_at,
+       r.word_count, r.reading_minutes,
+       r.media_url, r.media_type, r.media_duration_seconds,
+       r.feed_title, r.is_read,
+       r.rn
+FROM cat_stats cs
+JOIN ranked r ON r.category = cs.category AND r.rn <= %d
+ORDER BY cs.weight DESC, cs.article_count DESC, cs.category ASC, r.rn ASC
+`, GroupedTopN, GroupedPerGroupCap)
+
+	groups, err := r.scanTopicGroups(groupsQuery, args)
+	if err != nil {
+		return nil, err
+	}
+
+	// --- Query 2a: unclassified bucket size ---
+	unclassifiedCountQuery := visibleCTE + `
+SELECT COUNT(*)::int FROM visible WHERE category IS NULL OR category = ''`
+	var unclassifiedTotal int
+	if err := r.db.QueryRow(unclassifiedCountQuery, args...).Scan(&unclassifiedTotal); err != nil {
+		return nil, err
+	}
+
+	// --- Query 2b: top-PerGroupCap unclassified articles ---
+	unclassifiedArticlesQuery := visibleCTE + fmt.Sprintf(`,
+unclassified AS (
+    SELECT * FROM visible WHERE category IS NULL OR category = ''
+)
+SELECT u.id, u.feed_id, u.title, u.url, u.content, u.published_at,
+       u.summary_brief, u.summary_detailed, u.fetched_at,
+       u.word_count, u.reading_minutes,
+       u.media_url, u.media_type, u.media_duration_seconds,
+       u.feed_title, u.is_read
+FROM unclassified u
+LEFT JOIN score s ON u.id = s.article_id
+ORDER BY COALESCE(s.s, 0) DESC, u.published_at DESC NULLS LAST, u.id DESC
+LIMIT %d`, GroupedPerGroupCap)
+
+	unclassified, err := r.scanFlatGroup(unclassifiedArticlesQuery, args, unclassifiedTotal)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.GroupedArticles{
+		Groups:       groups,
+		Unclassified: unclassified,
+	}, nil
+}
+
+// scanTopicGroups consumes rows shaped by the groupsQuery: each row is
+// (topic, article_count, weight, article fields, rn). Rows for the same
+// topic arrive contiguously thanks to the outer ORDER BY, so we group
+// linearly while preserving the SQL-side ordering.
+func (r *ArticleRepository) scanTopicGroups(query string, args []interface{}) ([]model.TopicGroup, error) {
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []model.TopicGroup
+	var currentTopic string
+	var currentIdx = -1
+	for rows.Next() {
+		var topic string
+		var articleCount int
+		var weight float64
+		var rn int
+		var a model.Article
+		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+		var mediaDuration sql.NullInt64
+		var isRead sql.NullBool
+		if err := rows.Scan(
+			&topic, &articleCount, &weight,
+			&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
+			&summaryBrief, &summaryDetailed, &a.FetchedAt,
+			&a.WordCount, &a.ReadingMinutes,
+			&mediaURL, &mediaType, &mediaDuration,
+			&feedTitle, &isRead, &rn,
+		); err != nil {
+			return nil, err
+		}
+		a.Content = content.String
+		a.SummaryBrief = summaryBrief.String
+		a.SummaryDetailed = summaryDetailed.String
+		a.FeedTitle = feedTitle.String
+		a.IsRead = isRead.Bool
+		a.MediaURL = mediaURL.String
+		a.MediaType = mediaType.String
+		a.MediaDurationSeconds = int(mediaDuration.Int64)
+
+		if topic != currentTopic || currentIdx < 0 {
+			groups = append(groups, model.TopicGroup{
+				Topic:      topic,
+				TotalCount: articleCount,
+				Articles:   []model.Article{},
+			})
+			currentTopic = topic
+			currentIdx = len(groups) - 1
+		}
+		groups[currentIdx].Articles = append(groups[currentIdx].Articles, a)
+	}
+	return groups, rows.Err()
+}
+
+// scanFlatGroup consumes rows shaped like (article fields) — no topic
+// column, no rn. Used for the unclassified bucket. totalCount is plumbed
+// in from a separate COUNT(*) query.
+func (r *ArticleRepository) scanFlatGroup(query string, args []interface{}, totalCount int) (model.TopicGroup, error) {
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return model.TopicGroup{}, err
+	}
+	defer rows.Close()
+
+	group := model.TopicGroup{Topic: "", TotalCount: totalCount, Articles: []model.Article{}}
+	for rows.Next() {
+		var a model.Article
+		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+		var mediaDuration sql.NullInt64
+		var isRead sql.NullBool
+		if err := rows.Scan(
+			&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
+			&summaryBrief, &summaryDetailed, &a.FetchedAt,
+			&a.WordCount, &a.ReadingMinutes,
+			&mediaURL, &mediaType, &mediaDuration,
+			&feedTitle, &isRead,
+		); err != nil {
+			return model.TopicGroup{}, err
+		}
+		a.Content = content.String
+		a.SummaryBrief = summaryBrief.String
+		a.SummaryDetailed = summaryDetailed.String
+		a.FeedTitle = feedTitle.String
+		a.IsRead = isRead.Bool
+		a.MediaURL = mediaURL.String
+		a.MediaType = mediaType.String
+		a.MediaDurationSeconds = int(mediaDuration.Int64)
+		group.Articles = append(group.Articles, a)
+	}
+	return group, rows.Err()
+}
+
+// FindArticlesNeedingClassification returns up to `limit` articles without a
+// cached category. Previously gated on "user signals within 7 days" to save
+// tokens, but the 分组 view needs full coverage so that gate was dropped —
+// the per-pass LIMIT and most-recent-first ordering still throttle cost.
+// Articles missing only `topic` (but already classified for category) fall
+// through here and get a second pass from the same prompt, which is fine.
 func (r *ArticleRepository) FindArticlesNeedingClassification(limit int) ([]model.Article, error) {
 	query := `
-		SELECT DISTINCT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds
 		FROM articles a
-		JOIN user_preferences up ON up.article_id = a.id
-		WHERE a.topic IS NULL
-		  AND up.created_at > NOW() - INTERVAL '7 days'
-		  AND (
-		    up.signal_type IN ('like','save','completed_listen')
-		    OR (up.signal_type = 'read_duration' AND up.signal_value >= 60)
-		  )
+		WHERE a.category IS NULL
+		  AND a.content IS NOT NULL AND a.content <> ''
+		ORDER BY a.fetched_at DESC
 		LIMIT $1
 	`
 	rows, err := r.db.Query(query, limit)
@@ -537,12 +778,16 @@ func (r *ArticleRepository) FindArticlesNeedingClassification(limit int) ([]mode
 	return r.scanArticleNoFeedTitle(rows)
 }
 
-// SetClassification writes topic + tags onto an article. Pass empty string and
-// empty slice to mark the article as "AI returned nothing" (still cached, won't retry).
-func (r *ArticleRepository) SetClassification(articleID int, topic string, tags []string) error {
+// SetClassification writes topic + tags + category onto an article. Pass
+// empty strings / empty slice to mark the article as "AI returned nothing"
+// for that field (still cached at the row level via the column being
+// non-NULL... see SetCategory). Use nullableString so an empty category
+// stays NULL — both the worker pass and the grouping query treat NULL as
+// "not yet classified" and re-attempt / hide-in-unclassified accordingly.
+func (r *ArticleRepository) SetClassification(articleID int, topic string, tags []string, category string) error {
 	_, err := r.db.Exec(
-		`UPDATE articles SET topic = $1, tags = $2 WHERE id = $3`,
-		topic, pq.Array(tags), articleID,
+		`UPDATE articles SET topic = $1, tags = $2, category = $3 WHERE id = $4`,
+		topic, pq.Array(tags), nullableString(category), articleID,
 	)
 	return err
 }

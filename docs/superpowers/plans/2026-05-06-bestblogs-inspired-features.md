@@ -21,7 +21,7 @@
 **Files:**
 - Create: `backend/migrations/007_bestblogs_features.sql`
 
-- [ ] **Step 1: Create migration file**
+- [x] **Step 1: Create migration file**
 
 ```sql
 -- 007_bestblogs_features.sql
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS weekly_digests (
 );
 ```
 
-- [ ] **Step 2: Apply the migration**
+- [x] **Step 2: Apply the migration**
 
 Compose mounts `./backend/migrations` to `/docker-entrypoint-initdb.d`, but that only runs on **fresh** db init. For an existing db, apply manually:
 
@@ -68,7 +68,7 @@ docker exec -i $(docker-compose ps -q postgres) psql -U postgres -d rsspal < bac
 
 Expected output: `ALTER TABLE` × 2, `CREATE TABLE` × 2, `CREATE INDEX` × 1.
 
-- [ ] **Step 3: Verify schema**
+- [x] **Step 3: Verify schema**
 
 ```bash
 docker exec -i $(docker-compose ps -q postgres) psql -U postgres -d rsspal -c "\d articles" -c "\d recommended_feeds" -c "\d weekly_digests"
@@ -76,7 +76,7 @@ docker exec -i $(docker-compose ps -q postgres) psql -U postgres -d rsspal -c "\
 
 Expected: `articles` shows `word_count` and `reading_minutes` columns (`integer`, default `0`); both new tables exist with the columns above.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/migrations/007_bestblogs_features.sql
@@ -91,7 +91,7 @@ git commit -m "feat(db): migration 007 — article metrics, recommended_feeds, w
 - Create: `backend/internal/rss/metrics.go`
 - Test:   `backend/internal/rss/metrics_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `backend/internal/rss/metrics_test.go`:
 
@@ -183,7 +183,7 @@ func TestComputeMetrics_StripsHTMLTags(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd backend && go test ./internal/rss/ -run TestComputeMetrics -v
@@ -191,7 +191,7 @@ cd backend && go test ./internal/rss/ -run TestComputeMetrics -v
 
 Expected: FAIL with "undefined: ComputeMetrics".
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `backend/internal/rss/metrics.go`:
 
@@ -268,7 +268,7 @@ func stripHTMLForMetrics(s string) string {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 cd backend && go test ./internal/rss/ -run TestComputeMetrics -v
@@ -276,7 +276,7 @@ cd backend && go test ./internal/rss/ -run TestComputeMetrics -v
 
 Expected: all 6 tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/internal/rss/metrics.go backend/internal/rss/metrics_test.go
@@ -293,7 +293,7 @@ git commit -m "feat(rss): add ComputeMetrics for word count and reading minutes"
 - Modify: `backend/cmd/worker/main.go` (compute on insert + on refetch)
 - Create: `backend/cmd/backfill_metrics/main.go` (one-shot backfill)
 
-- [ ] **Step 1: Add fields to model**
+- [x] **Step 1: Add fields to model**
 
 In `backend/internal/model/model.go`, change the `Article` struct (find the existing block, add two fields after `FetchedAt`):
 
@@ -315,7 +315,7 @@ type Article struct {
 }
 ```
 
-- [ ] **Step 2: Update repository to read/write metrics**
+- [x] **Step 2: Update repository to read/write metrics**
 
 In `backend/internal/repository/article.go`:
 
@@ -448,7 +448,7 @@ wc, rm := rss.ComputeMetrics(newContent)
 articleRepo.UpdateContent(articleID, newContent, wc, rm)
 ```
 
-- [ ] **Step 3: Update worker to compute metrics on new article insert**
+- [x] **Step 3: Update worker to compute metrics on new article insert**
 
 In `backend/cmd/worker/main.go`, in `processFeed` (around line 240) where the article is built before `articleRepo.Create(article)`:
 
@@ -465,11 +465,11 @@ article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 
 Apply the same to `processHTMLFeed` (around line 295+). Search for all `articleRepo.Create` call sites and add the metrics line just before each.
 
-- [ ] **Step 4: Update worker `refetchShortContent` path to recompute metrics**
+- [x] **Step 4: Update worker `refetchShortContent` path to recompute metrics**
 
 Find `refetchShortContent` (search for it in `cmd/worker/main.go`). At each `articleRepo.UpdateContent(...)` call, the new signature requires the metrics — they're already computed by you when you pass them in the new caller-computed pattern from Step 2g.
 
-- [ ] **Step 5: Build to confirm it compiles**
+- [x] **Step 5: Build to confirm it compiles**
 
 ```bash
 cd backend && go build ./...
@@ -477,7 +477,7 @@ cd backend && go build ./...
 
 Expected: no errors.
 
-- [ ] **Step 6: Create one-shot backfill cmd**
+- [x] **Step 6: Create one-shot backfill cmd**
 
 `backend/cmd/backfill_metrics/main.go`:
 
@@ -531,7 +531,7 @@ func main() {
 }
 ```
 
-- [ ] **Step 7: Build the backfill cmd**
+- [x] **Step 7: Build the backfill cmd**
 
 ```bash
 cd backend && go build -o /tmp/backfill_metrics ./cmd/backfill_metrics
@@ -539,7 +539,7 @@ cd backend && go build -o /tmp/backfill_metrics ./cmd/backfill_metrics
 
 Expected: no errors.
 
-- [ ] **Step 8: Rebuild and start api+worker, run backfill**
+- [x] **Step 8: Rebuild and start api+worker, run backfill**
 
 ```bash
 docker-compose up -d --build api worker
@@ -556,7 +556,7 @@ Alternatively run it on the host:
 cd backend && DB_HOST=localhost go run ./cmd/backfill_metrics
 ```
 
-- [ ] **Step 9: Verify a few rows have non-zero metrics**
+- [x] **Step 9: Verify a few rows have non-zero metrics**
 
 ```bash
 docker exec -i $(docker-compose ps -q postgres) psql -U postgres -d rsspal -c "SELECT id, word_count, reading_minutes FROM articles WHERE word_count > 0 LIMIT 5;"
@@ -564,7 +564,7 @@ docker exec -i $(docker-compose ps -q postgres) psql -U postgres -d rsspal -c "S
 
 Expected: 5 rows with non-zero values.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add backend/internal/model/model.go backend/internal/repository/article.go backend/cmd/worker/main.go backend/cmd/backfill_metrics/main.go
@@ -585,7 +585,7 @@ git commit -m "feat: persist word_count and reading_minutes on articles
 - Modify: `frontend/src/pages/ArticleListPage.tsx` (render meta in card)
 - Modify: `frontend/src/pages/ArticlePage.tsx` (render meta in header)
 
-- [ ] **Step 1: Add fields to `Article` type**
+- [x] **Step 1: Add fields to `Article` type**
 
 In `frontend/src/api/client.ts`, find `export interface Article` and add two fields:
 
@@ -607,7 +607,7 @@ export interface Article {
 }
 ```
 
-- [ ] **Step 2: Create the component**
+- [x] **Step 2: Create the component**
 
 `frontend/src/components/ReadingMeta.tsx`:
 
@@ -631,7 +631,7 @@ export default function ReadingMeta({ wordCount, readingMinutes, className }: Pr
 }
 ```
 
-- [ ] **Step 3: Render in article list cards**
+- [x] **Step 3: Render in article list cards**
 
 In `frontend/src/pages/ArticleListPage.tsx`, locate where each article card renders its meta line (search for existing display of `feed_title` or `published_at` near the card). Add an import and a `<ReadingMeta>` next to the existing meta text.
 
@@ -649,7 +649,7 @@ In the article card JSX, find a spot in the meta row (where source / date / unre
 
 (Pick the meta row that already has `gap` styling so it renders inline.)
 
-- [ ] **Step 4: Render in article detail header**
+- [x] **Step 4: Render in article detail header**
 
 In `frontend/src/pages/ArticlePage.tsx`, near the top of the rendered article (where title and date display), add the same component:
 
@@ -659,7 +659,7 @@ import ReadingMeta from '../components/ReadingMeta'
 <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
 ```
 
-- [ ] **Step 5: Type-check the frontend**
+- [x] **Step 5: Type-check the frontend**
 
 ```bash
 cd frontend && npm run build
@@ -667,7 +667,7 @@ cd frontend && npm run build
 
 Expected: build succeeds with no TypeScript errors.
 
-- [ ] **Step 6: Manual browser verification**
+- [x] **Step 6: Manual browser verification**
 
 ```bash
 cd frontend && npm run dev
@@ -675,7 +675,7 @@ cd frontend && npm run dev
 
 Open `http://localhost:5173/articles`, log in, scroll the list. Expected: each article card shows `📖 N 字 · M 分钟`. Articles without computed metrics (none, since backfill ran) show no meta.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/api/client.ts frontend/src/components/ReadingMeta.tsx frontend/src/pages/ArticleListPage.tsx frontend/src/pages/ArticlePage.tsx
@@ -689,7 +689,7 @@ git commit -m "feat(frontend): show word count and reading minutes on article ca
 **Files:**
 - Modify: `docker-compose.yml`
 
-- [ ] **Step 1: Append the rsshub service**
+- [x] **Step 1: Append the rsshub service**
 
 In `docker-compose.yml`, add this service block (between `worker` and `frontend`, or anywhere within `services:`):
 
@@ -705,7 +705,7 @@ In `docker-compose.yml`, add this service block (between `worker` and `frontend`
     # No port exposure — only api/worker reach it via http://rsshub:1200 on the compose network
 ```
 
-- [ ] **Step 2: Bring it up**
+- [x] **Step 2: Bring it up**
 
 ```bash
 docker-compose up -d rsshub
@@ -713,7 +713,7 @@ docker-compose up -d rsshub
 
 Expected: `rsshub` shows healthy in `docker-compose ps`.
 
-- [ ] **Step 3: Verify reachability from worker**
+- [x] **Step 3: Verify reachability from worker**
 
 ```bash
 docker-compose exec worker sh -c "wget -qO- http://rsshub:1200/test/1 | head -c 500"
@@ -727,7 +727,7 @@ docker-compose exec api sh -c "wget -qO- http://rsshub:1200/test/1 | head -c 500
 
 (Both alpine-based images normally have busybox `wget`.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docker-compose.yml
@@ -744,7 +744,7 @@ git commit -m "infra: add self-hosted rsshub container for non-RSS sources"
 - Modify: `backend/cmd/worker/main.go`
 - Modify: `backend/internal/repository/article.go` (skip `youtube`/`podcast` in `GetArticlesWithShortContent`)
 
-- [ ] **Step 1: Skip deep content fetch in `processFeed`**
+- [x] **Step 1: Skip deep content fetch in `processFeed`**
 
 In `cmd/worker/main.go`, inside `processFeed`, where today the code calls `contentFetcher.FetchContent(ctx, item.Link)` (around line 230), wrap it in a feed-type guard:
 
@@ -769,7 +769,7 @@ if !skipDeepFetch && item.Link != "" {
 
 (Keep the existing else-branch behavior; just guard the deep fetch.)
 
-- [ ] **Step 2: Skip refetch loop for these feed types**
+- [x] **Step 2: Skip refetch loop for these feed types**
 
 In `internal/repository/article.go`, update `GetArticlesWithShortContent` so it joins `feeds` and excludes `youtube`/`podcast`:
 
@@ -795,7 +795,7 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 }
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 ```bash
 cd backend && go build ./...
@@ -803,7 +803,7 @@ cd backend && go build ./...
 
 Expected: no errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/cmd/worker/main.go backend/internal/repository/article.go
@@ -820,7 +820,7 @@ git commit -m "feat(worker): skip deep content fetch for youtube/podcast feed ty
 - Create: `backend/internal/api/recommended.go`
 - Modify: `backend/cmd/server/main.go` (wire the handler)
 
-- [ ] **Step 1: Model**
+- [x] **Step 1: Model**
 
 `backend/internal/model/recommended.go`:
 
@@ -844,7 +844,7 @@ type RecommendedFeed struct {
 }
 ```
 
-- [ ] **Step 2: Repository**
+- [x] **Step 2: Repository**
 
 `backend/internal/repository/recommended.go`:
 
@@ -909,7 +909,7 @@ func (r *RecommendedFeedRepository) GetByID(id int) (*model.RecommendedFeed, err
 }
 ```
 
-- [ ] **Step 3: API handler**
+- [x] **Step 3: API handler**
 
 `backend/internal/api/recommended.go`:
 
@@ -988,7 +988,7 @@ func (h *RecommendedHandler) Subscribe(c *gin.Context) {
 }
 ```
 
-- [ ] **Step 4: Wire into the server**
+- [x] **Step 4: Wire into the server**
 
 In `backend/cmd/server/main.go`:
 
@@ -1012,7 +1012,7 @@ apiGroup.GET("/recommended-feeds", recommendedHandler.List)
 apiGroup.POST("/recommended-feeds/:id/subscribe", recommendedHandler.Subscribe)
 ```
 
-- [ ] **Step 5: Build**
+- [x] **Step 5: Build**
 
 ```bash
 cd backend && go build ./...
@@ -1020,7 +1020,7 @@ cd backend && go build ./...
 
 Expected: no errors.
 
-- [ ] **Step 6: Smoke test (empty list returns `[]` or `null`)**
+- [x] **Step 6: Smoke test (empty list returns `[]` or `null`)**
 
 ```bash
 docker-compose up -d --build api
@@ -1031,7 +1031,7 @@ curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/recommended-feeds
 
 Expected: `null` or `[]` (catalog still empty until Task 9 seeds it).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/internal/model/recommended.go backend/internal/repository/recommended.go backend/internal/api/recommended.go backend/cmd/server/main.go
@@ -1047,7 +1047,7 @@ git commit -m "feat(api): recommended feeds catalog and subscribe endpoint"
 - Create: `frontend/src/pages/RecommendedPage.tsx`
 - Modify: `frontend/src/App.tsx` (route)
 
-- [ ] **Step 1: Add types and API calls in `client.ts`**
+- [x] **Step 1: Add types and API calls in `client.ts`**
 
 Append to `frontend/src/api/client.ts`:
 
@@ -1073,7 +1073,7 @@ export const subscribeRecommendedFeed = (id: number) =>
   api.post<{ status: string; feed_id?: number }>(`/recommended-feeds/${id}/subscribe`).then(res => res.data)
 ```
 
-- [ ] **Step 2: Build the page**
+- [x] **Step 2: Build the page**
 
 `frontend/src/pages/RecommendedPage.tsx`:
 
@@ -1178,7 +1178,7 @@ export default function RecommendedPage() {
 }
 ```
 
-- [ ] **Step 3: Add route in `App.tsx`**
+- [x] **Step 3: Add route in `App.tsx`**
 
 In `frontend/src/App.tsx`:
 
@@ -1194,7 +1194,7 @@ b) Inside the `<Route element={<RequireAuth ...>}>` block, add a new route:
 <Route path="recommended" element={<RecommendedPage />} />
 ```
 
-- [ ] **Step 4: Type-check**
+- [x] **Step 4: Type-check**
 
 ```bash
 cd frontend && npm run build
@@ -1202,7 +1202,7 @@ cd frontend && npm run build
 
 Expected: no TypeScript errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/api/client.ts frontend/src/pages/RecommendedPage.tsx frontend/src/App.tsx
@@ -1222,7 +1222,7 @@ git commit -m "feat(frontend): recommended feeds catalog page"
 **Files:**
 - Create: `backend/cmd/seed/main.go`
 
-- [ ] **Step 1: Write the seed cmd**
+- [x] **Step 1: Write the seed cmd**
 
 `backend/cmd/seed/main.go`:
 
@@ -1380,7 +1380,7 @@ func main() {
 }
 ```
 
-- [ ] **Step 2: Build**
+- [x] **Step 2: Build**
 
 ```bash
 cd backend && go build ./...
@@ -1388,7 +1388,7 @@ cd backend && go build ./...
 
 Expected: no errors.
 
-- [ ] **Step 3: Run the seed**
+- [x] **Step 3: Run the seed**
 
 Easiest: from inside the worker container so it's on the rsshub network:
 
@@ -1407,7 +1407,7 @@ cd backend && DB_HOST=localhost RSSHUB_BASE=http://localhost:1200 go run ./cmd/s
 
 Expected output: a JSON array of 12 reports, then a final `seed complete: X healthy, Y broken` line. WeChat (#11) and the podcast (#12) are most likely the broken ones; YouTube (#7-9) and Anthropic (#2) may also fail depending on current routes — that's fine, they get `is_broken=true` and are visible only in the catalog.
 
-- [ ] **Step 4: Verify rows landed**
+- [x] **Step 4: Verify rows landed**
 
 ```bash
 docker exec -i $(docker-compose ps -q postgres) psql -U postgres -d rsspal -c "SELECT category, count(*) FROM recommended_feeds GROUP BY category;"
@@ -1417,7 +1417,7 @@ docker exec -i $(docker-compose ps -q postgres) psql -U postgres -d rsspal -c "S
 
 Expected: 12 rows in `recommended_feeds` across the 5 categories; >=8 healthy rows in `feeds` with `owner_id IS NULL`.
 
-- [ ] **Step 5: Investigate any unexpected breakage**
+- [x] **Step 5: Investigate any unexpected breakage**
 
 For any source you expected to work but came back `is_broken=true`, do a manual probe:
 
@@ -1427,7 +1427,7 @@ docker-compose exec worker sh -c "wget -qO- --timeout=10 '<the-url>' | head -c 5
 
 If RSS source is genuinely down, leave as broken. If it's a transient network issue, re-run the seed (it's idempotent). For RSSHub microsoft/wechat routes that fail, search for alternatives at `https://docs.rsshub.app/` and update the `seeds` slice; re-run.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/cmd/seed/main.go
@@ -1438,7 +1438,7 @@ git commit -m "feat: seed cmd populates recommended_feeds catalog and shared fee
 - ON CONFLICT idempotent; safe to re-run after fixing bad routes"
 ```
 
-- [ ] **Step 7: Verify worker picks up seeded feeds**
+- [x] **Step 7: Verify worker picks up seeded feeds**
 
 ```bash
 docker-compose restart worker
@@ -1458,7 +1458,7 @@ Expected: logs show `Fetching feed: https://openai.com/...` etc., and `Feed ... 
 - Create: `backend/internal/api/weekly.go`
 - Modify: `backend/cmd/server/main.go`
 
-- [ ] **Step 1: AI prompt for the weekly intro**
+- [x] **Step 1: AI prompt for the weekly intro**
 
 `backend/internal/ai/weekly_digest.go`:
 
@@ -1505,7 +1505,7 @@ type WeeklyDigestItem struct {
 }
 ```
 
-- [ ] **Step 2: Repository for digest cache**
+- [x] **Step 2: Repository for digest cache**
 
 `backend/internal/repository/weekly_digest.go`:
 
@@ -1570,7 +1570,7 @@ func (r *WeeklyDigestRepository) Upsert(userID int, weekStart time.Time, intro s
 }
 ```
 
-- [ ] **Step 3: Top-articles-of-the-week query**
+- [x] **Step 3: Top-articles-of-the-week query**
 
 Add this method to `backend/internal/repository/article.go`. **Also add `"github.com/lib/pq"` to the file's import block** if it's not already there (needed for `pq.Int64Array`).
 
@@ -1640,7 +1640,7 @@ func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Ti
 }
 ```
 
-- [ ] **Step 4: Weekly digest API handler**
+- [x] **Step 4: Weekly digest API handler**
 
 `backend/internal/api/weekly.go`:
 
@@ -1751,7 +1751,7 @@ func (h *WeeklyHandler) Get(c *gin.Context) {
 }
 ```
 
-- [ ] **Step 5: Wire into the server**
+- [x] **Step 5: Wire into the server**
 
 In `backend/cmd/server/main.go`:
 
@@ -1773,7 +1773,7 @@ c) Inside the protected route group (alongside the recommended-feeds routes), ad
 apiGroup.GET("/weekly-digest", weeklyHandler.Get)
 ```
 
-- [ ] **Step 6: Build**
+- [x] **Step 6: Build**
 
 ```bash
 cd backend && go build ./...
@@ -1781,7 +1781,7 @@ cd backend && go build ./...
 
 Expected: no errors.
 
-- [ ] **Step 7: Smoke test the endpoint**
+- [x] **Step 7: Smoke test the endpoint**
 
 ```bash
 docker-compose up -d --build api
@@ -1792,7 +1792,7 @@ curl -s -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/weekly-digest' | h
 
 Expected: JSON with `week_start` (a Monday), `intro_text` (possibly empty if no articles this week, or AI-generated otherwise), and an `articles` array.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/internal/ai/weekly_digest.go backend/internal/repository/weekly_digest.go backend/internal/api/weekly.go backend/internal/repository/article.go backend/cmd/server/main.go
@@ -1808,7 +1808,7 @@ git commit -m "feat(api): weekly digest with AI-generated theme intro and cache"
 - Create: `frontend/src/pages/WeeklyPage.tsx`
 - Modify: `frontend/src/App.tsx`
 
-- [ ] **Step 1: Add types and API call**
+- [x] **Step 1: Add types and API call**
 
 Append to `frontend/src/api/client.ts`:
 
@@ -1823,7 +1823,7 @@ export const getWeeklyDigest = (week?: string) =>
   api.get<WeeklyDigest>('/weekly-digest', { params: week ? { week } : {} }).then(res => res.data)
 ```
 
-- [ ] **Step 2: Build the page**
+- [x] **Step 2: Build the page**
 
 `frontend/src/pages/WeeklyPage.tsx`:
 
@@ -1904,7 +1904,7 @@ export default function WeeklyPage() {
 }
 ```
 
-- [ ] **Step 3: Add route**
+- [x] **Step 3: Add route**
 
 In `frontend/src/App.tsx`:
 
@@ -1920,7 +1920,7 @@ b) Inside the protected `<Route>` block, add:
 <Route path="weekly" element={<WeeklyPage />} />
 ```
 
-- [ ] **Step 4: Type-check**
+- [x] **Step 4: Type-check**
 
 ```bash
 cd frontend && npm run build
@@ -1928,7 +1928,7 @@ cd frontend && npm run build
 
 Expected: no TypeScript errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/api/client.ts frontend/src/pages/WeeklyPage.tsx frontend/src/App.tsx
@@ -1942,7 +1942,7 @@ git commit -m "feat(frontend): weekly digest page with prev/next navigation"
 **Files:**
 - Modify: `frontend/src/components/Layout.tsx`
 
-- [ ] **Step 1: Add nav entries**
+- [x] **Step 1: Add nav entries**
 
 In `frontend/src/components/Layout.tsx`, find the desktop nav (the `<nav className="flex gap-2 desktop-nav" ...>` block) and add two `NavLink` entries between `订阅` and `洞察`:
 
@@ -1968,7 +1968,7 @@ Also update the mobile dropdown nav array — add the same two entries:
 ].map(...)}
 ```
 
-- [ ] **Step 2: Type-check + build**
+- [x] **Step 2: Type-check + build**
 
 ```bash
 cd frontend && npm run build
@@ -1976,7 +1976,7 @@ cd frontend && npm run build
 
 Expected: no errors.
 
-- [ ] **Step 3: End-to-end verification**
+- [x] **Step 3: End-to-end verification**
 
 ```bash
 docker-compose up -d --build
@@ -1988,15 +1988,15 @@ Expected: postgres / api / worker / frontend / rsshub all `Up` and healthy.
 
 In a browser at `http://localhost`, log in as admin and verify:
 
-- [ ] `/feeds` shows 12 seeded sources (or fewer if some were broken)
-- [ ] `/articles` lists articles from at least: OpenAI, Cloudflare, baoyu.io, 量子位, Substack, 1+ YouTube channel
-- [ ] Article cards show `📖 N 字 · M 分钟`
-- [ ] `/recommended` shows 12 cards across categories (AI 工程 / 中文科技 / 企业基建 / 视频 / 播客). Healthy ones show `✓ 已订阅`. Broken ones show `⚠ 当前路由不可用`
-- [ ] `/weekly` shows the AI-generated intro paragraph + up to 10 article cards. Click `‹ 上一周` and confirm articles change.
-- [ ] Mobile menu (resize browser narrow, click `☰`) shows the new `周刊` and `推荐` entries
-- [ ] No console errors (`F12` → Console)
+- [x] `/feeds` shows 12 seeded sources (or fewer if some were broken)
+- [x] `/articles` lists articles from at least: OpenAI, Cloudflare, baoyu.io, 量子位, Substack, 1+ YouTube channel
+- [x] Article cards show `📖 N 字 · M 分钟`
+- [x] `/recommended` shows 12 cards across categories (AI 工程 / 中文科技 / 企业基建 / 视频 / 播客). Healthy ones show `✓ 已订阅`. Broken ones show `⚠ 当前路由不可用`
+- [x] `/weekly` shows the AI-generated intro paragraph + up to 10 article cards. Click `‹ 上一周` and confirm articles change.
+- [x] Mobile menu (resize browser narrow, click `☰`) shows the new `周刊` and `推荐` entries
+- [x] No console errors (`F12` → Console)
 
-- [ ] **Step 4: Commit + push**
+- [x] **Step 4: Commit + push**
 
 ```bash
 git add frontend/src/components/Layout.tsx
