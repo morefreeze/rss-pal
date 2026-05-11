@@ -38,88 +38,91 @@ p{margin:6px 0;line-height:1.5}
   function escapeText(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
   function fail(msg) { render('err', '❌ 抓取失败', escapeText(msg), false); }
 
-  if (!window.opener) {
-    fail('缺少 opener 上下文 — 请从书签栏触发，不要直接打开本页');
+  // Payload comes in via the URL fragment (#base64-of-json). We previously
+  // relayed it via window.opener.postMessage, but Cross-Origin-Opener-Policy:
+  // same-origin on the source page (e.g. rockpapershotgun.com) severs
+  // window.opener on the popup, breaking the handshake. Fragments are
+  // client-only, not sent to any server, and avoid the cap that limited the
+  // postMessage path (though the bookmarklet still strips script/style to
+  // keep the URL reasonable).
+  var hash = location.hash.slice(1);
+  if (!hash) {
+    fail('缺少数据 — 请从书签栏触发，不要直接打开本页');
+    return;
+  }
+  var d;
+  try {
+    // bookmarklet does: btoa(unescape(encodeURIComponent(JSON.stringify(p))))
+    var json = decodeURIComponent(escape(atob(hash)));
+    d = JSON.parse(json);
+  } catch (e) {
+    fail('解析数据失败: ' + e.message);
+    return;
+  }
+  // Wipe the fragment so the token + page HTML don't linger in tab history.
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+
+  if (!d || !d.token || !d.url || !d.html) {
+    fail('数据不完整');
     return;
   }
 
-  function onMsg(e) {
-    var d = e.data;
-    if (e.source !== window.opener) return;
-    if (!d || d.type !== 'rsspal:capture') return;
-    window.removeEventListener('message', onMsg);
+  function postCapture(force) {
+    return fetch('/api/bookmarklet/capture', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + d.token,
+      },
+      body: JSON.stringify({
+        url: d.url,
+        title: d.title || '',
+        html: d.html,
+        force: !!force,
+      }),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, j: j, status: r.status }; });
+      });
+  }
 
-    if (!d.token || !d.url || !d.html) {
-      fail('数据不完整');
+  function handleResponse(x) {
+    if (!x.ok) {
+      fail(x.j && x.j.error ? x.j.error : 'HTTP ' + x.status);
       return;
     }
-
-    function postCapture(force) {
-      return fetch('/api/bookmarklet/capture', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + d.token,
-        },
-        body: JSON.stringify({
-          url: d.url,
-          title: d.title || '',
-          html: d.html,
-          force: !!force,
-        }),
-      })
-        .then(function (r) {
-          return r.json().then(function (j) { return { ok: r.ok, j: j, status: r.status }; });
-        });
+    var phase = x.j.status;
+    if (phase === 'duplicate') {
+      renderDuplicatePrompt(x.j);
+      return;
     }
-
-    function handleResponse(x) {
-      if (!x.ok) {
-        fail(x.j && x.j.error ? x.j.error : 'HTTP ' + x.status);
-        return;
-      }
-      var phase = x.j.status;
-      if (phase === 'duplicate') {
-        renderDuplicatePrompt(x.j);
-        return;
-      }
-      var heading = phase === 'created' ? '✅ 已收藏'
-        : phase === 'updated' ? '✅ 已更新'
-        : '✅ 抓取成功';
-      var cls = 'ok';
-      render(cls, heading, escapeText(x.j.message), true);
-    }
-
-    function renderDuplicatePrompt(j) {
-      box.innerHTML =
-        '<h1 class="info">⚠️ 已有同 URL 文章</h1>'
-        + '<p>现有内容 ' + j.existing_length + ' 字 · ' + (j.existing_images || 0) + ' 图</p>'
-        + '<p>新内容 ' + j.new_length + ' 字 · ' + (j.new_images || 0) + ' 图</p>'
-        + '<p>怎么处理？</p>'
-        + '<div style="margin-top:14px;display:flex;gap:8px;justify-content:center;">'
-        +   '<button id="ow" style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">覆盖</button>'
-        +   '<button id="kp" style="padding:8px 18px;background:#f3f4f6;border:1px solid #ddd;border-radius:6px;cursor:pointer;">保留旧内容</button>'
-        + '</div>';
-      document.getElementById('ow').onclick = function () {
-        box.innerHTML = '<h1 class="info"><span class="spinner"></span>正在覆盖…</h1>';
-        postCapture(true).then(handleResponse).catch(function (err) { fail('网络错误: ' + err.message); });
-      };
-      document.getElementById('kp').onclick = function () {
-        render('info', 'ℹ️ 已保留旧内容', '可关闭此页面', false);
-      };
-    }
-
-    box.innerHTML = '<h1 class="info"><span class="spinner"></span>正在保存…</h1>';
-    postCapture(false).then(handleResponse).catch(function (err) { fail('网络错误: ' + err.message); });
+    var heading = phase === 'created' ? '✅ 已收藏'
+      : phase === 'updated' ? '✅ 已更新'
+      : '✅ 抓取成功';
+    render('ok', heading, escapeText(x.j.message), true);
   }
 
-  window.addEventListener('message', onMsg);
-  // Tell the opener we're ready to receive the captured payload.
-  try {
-    window.opener.postMessage({ type: 'rsspal:ready' }, '*');
-  } catch (e) {
-    fail('与发起页面通讯失败: ' + e.message);
+  function renderDuplicatePrompt(j) {
+    box.innerHTML =
+      '<h1 class="info">⚠️ 已有同 URL 文章</h1>'
+      + '<p>现有内容 ' + j.existing_length + ' 字 · ' + (j.existing_images || 0) + ' 图</p>'
+      + '<p>新内容 ' + j.new_length + ' 字 · ' + (j.new_images || 0) + ' 图</p>'
+      + '<p>怎么处理？</p>'
+      + '<div style="margin-top:14px;display:flex;gap:8px;justify-content:center;">'
+      +   '<button id="ow" style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">覆盖</button>'
+      +   '<button id="kp" style="padding:8px 18px;background:#f3f4f6;border:1px solid #ddd;border-radius:6px;cursor:pointer;">保留旧内容</button>'
+      + '</div>';
+    document.getElementById('ow').onclick = function () {
+      box.innerHTML = '<h1 class="info"><span class="spinner"></span>正在覆盖…</h1>';
+      postCapture(true).then(handleResponse).catch(function (err) { fail('网络错误: ' + err.message); });
+    };
+    document.getElementById('kp').onclick = function () {
+      render('info', 'ℹ️ 已保留旧内容', '可关闭此页面', false);
+    };
   }
+
+  box.innerHTML = '<h1 class="info"><span class="spinner"></span>正在保存…</h1>';
+  postCapture(false).then(handleResponse).catch(function (err) { fail('网络错误: ' + err.message); });
 })();
 </script>
 </body>
