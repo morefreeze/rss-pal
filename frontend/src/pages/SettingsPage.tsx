@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 
@@ -117,6 +117,119 @@ var w=window.open('${apiBase}/bookmarklet-receiver.html#'+b64,'_blank');
 if(!w){alert('RSS Pal: 请允许此页面弹窗后再试');return;}
 })();`
   return 'javascript:' + encodeURIComponent(code)
+}
+
+function BackupSection({ isAdmin }: { isAdmin: boolean }) {
+  const [files, setFiles] = useState<BackupFile[]>([])
+  const [dir, setDir] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await listBackups()
+      setFiles(data.backups || [])
+      setDir(data.dir || '')
+    } catch (err: any) {
+      if (err?.response?.status === 403) setError('需要管理员权限')
+      else setError('加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAdmin) load()
+    else setLoading(false)
+  }, [isAdmin])
+
+  const handleBackupNow = async () => {
+    setBusy(true)
+    try {
+      await createBackupNow()
+      toast.success('备份完成')
+      await load()
+    } catch {
+      toast.error('备份失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleRestore = async (name: string) => {
+    const ok = window.confirm(
+      `确定从 ${name} 恢复吗？\n\n` +
+      `- 现有订阅按 URL 合并（已存在则保留当前状态，仅补缺）\n` +
+      `- 标签 / 兴趣分类 / 兴趣主题会按自然键 upsert\n` +
+      `- 文章相关的 tag/preference 不会恢复（文章会重新抓）`
+    )
+    if (!ok) return
+    setBusy(true)
+    try {
+      const result = await restoreBackup(name)
+      const s = result.stats
+      toast.success(`已恢复：${s.feeds} feeds / ${s.user_tags} tags / ${s.interest_categories} cats / ${s.interest_topics} topics`)
+      if (s.skipped_article_link > 0) {
+        toast.info(`${s.skipped_article_link} 条 article-linked 记录已跳过（无法重新关联）`)
+      }
+    } catch {
+      toast.error('恢复失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!isAdmin) return null
+
+  return (
+    <div className="card mb-2">
+      <div className="flex-between mb-1">
+        <h3>备份与恢复</h3>
+        <button onClick={handleBackupNow} disabled={busy} style={{ fontSize: 13 }}>
+          {busy ? '...' : '立即备份'}
+        </button>
+      </div>
+      <p className="text-muted text-sm mb-2">
+        快照内容：订阅源、标签、兴趣分类与主题、用户偏好。文章本体不在备份内（worker 会重新抓）。
+        文件存在主机 <code style={{ background: '#f3f4f6', padding: '1px 6px', borderRadius: 3 }}>./backups/</code>
+        （容器内 <code style={{ background: '#f3f4f6', padding: '1px 6px', borderRadius: 3 }}>{dir || '/backups'}</code>），
+        每次 feed 增删后 5 分钟自动备份，每日定时一次；保留策略 7 天 / 周 / 月分级。
+      </p>
+      {loading ? (
+        <div className="text-muted text-sm">加载中...</div>
+      ) : error ? (
+        <div className="text-sm" style={{ color: '#dc2626' }}>{error}</div>
+      ) : files.length === 0 ? (
+        <div className="text-muted text-sm">还没有备份文件，点击"立即备份"创建第一份</div>
+      ) : (
+        <div>
+          {files.map(f => (
+            <div key={f.name} className="flex-between" style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0' }}>
+              <div>
+                <code style={{ background: '#f3f4f6', padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
+                  {f.name}
+                </code>
+                <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
+                  {new Date(f.created_at).toLocaleString('zh-CN')} · {(f.size / 1024).toFixed(1)} KB
+                </span>
+              </div>
+              <button
+                className="secondary"
+                style={{ fontSize: 12, padding: '2px 10px' }}
+                onClick={() => handleRestore(f.name)}
+                disabled={busy}
+              >
+                恢复
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function BookmarkletSection() {
@@ -517,6 +630,9 @@ export default function SettingsPage({ user }: SettingsPageProps) {
           </button>
         </form>
       </div>
+
+      {/* 备份与恢复（仅管理员可见） */}
+      <BackupSection isAdmin={!!user?.is_admin} />
 
       {/* 浏览器抓取（bookmarklet） */}
       <BookmarkletSection />
