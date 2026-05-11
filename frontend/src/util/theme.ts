@@ -16,15 +16,21 @@ export function getTheme(): Theme {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (isTheme(raw)) return raw
-    // Best-effort migration from the legacy reader-mode bgTheme key so
-    // users who picked sepia/dark there don't lose continuity.
+    // Best-effort one-time migration from the legacy reader-mode bgTheme key
+    // so users who picked sepia/dark/gray there don't lose continuity. Legacy
+    // 'green' and 'default' have no equivalents and fall through to DEFAULT.
     const legacyRaw = localStorage.getItem('rsspal:reader-settings')
     if (legacyRaw) {
       try {
         const parsed = JSON.parse(legacyRaw) as { bgTheme?: string }
-        if (parsed.bgTheme === 'sepia') return 'paper'
-        if (parsed.bgTheme === 'dark') return 'night'
-        if (parsed.bgTheme === 'gray') return 'pearl'
+        let migrated: Theme | undefined
+        if (parsed.bgTheme === 'sepia') migrated = 'paper'
+        else if (parsed.bgTheme === 'dark') migrated = 'night'
+        else if (parsed.bgTheme === 'gray') migrated = 'pearl'
+        if (migrated) {
+          try { localStorage.setItem(STORAGE_KEY, migrated) } catch { /* ignore */ }
+          return migrated
+        }
       } catch { /* ignore */ }
     }
   } catch { /* ignore */ }
