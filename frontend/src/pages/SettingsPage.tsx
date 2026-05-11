@@ -82,17 +82,19 @@ function PromptField({
 }
 
 function buildBookmarkletJS(apiBase: string, token: string): string {
-  // postMessage relay — fetch/XHR is blocked by `connect-src` CSP on
-  // many sites (x.com, etc.), and form POST from HTTPS to http://localhost
-  // is blocked by mixed-content rules. Top-level window.open from HTTPS
-  // to HTTP is *not* blocked, so we open a same-origin receiver page on
-  // the RSS Pal host, hand the captured payload over via postMessage,
-  // and let the receiver POST same-origin (no CSP, no mixed content).
+  // We open a same-origin receiver page on the RSS Pal host and let it POST
+  // to /api/bookmarklet/capture from its own origin (no foreign-CSP / mixed-
+  // content issues). The payload is base64-encoded into the receiver's URL
+  // fragment — fragments are client-only (never sent over the wire) and
+  // survive Cross-Origin-Opener-Policy: same-origin (set by sites like
+  // rockpapershotgun.com), which severs window.opener and broke an earlier
+  // postMessage-handshake design.
   //
   // Pre-trim on a clone of documentElement: drops script/style/link/noscript
-  // (≈60× shrink on mp.weixin.qq.com — 3 MiB → 50 KiB — keeping us under the
-  // server's body cap) and promotes data-src into src so lazy-loaded article
-  // images survive the round trip. The live DOM is not mutated.
+  // (≈60× shrink on mp.weixin.qq.com — 3 MiB → 50 KiB — also keeping the
+  // resulting URL fragment well under browser limits) and promotes data-src
+  // into src so lazy-loaded article images survive the round trip. The live
+  // DOM is not mutated.
   const code = `(function(){
 var c=document.documentElement.cloneNode(true);
 c.querySelectorAll('script,style,link,noscript,template').forEach(function(n){n.remove();});
@@ -107,15 +109,11 @@ c.querySelectorAll('img').forEach(function(i){
     if(ss)i.setAttribute('srcset',ss.trim());
   }
 });
-var data={token:'${token}',url:location.href,title:document.title,html:c.outerHTML};
-var w=window.open('${apiBase}/bookmarklet-receiver.html','_blank');
+var payload=JSON.stringify({token:'${token}',url:location.href,title:document.title,html:c.outerHTML});
+var b64;
+try{b64=btoa(unescape(encodeURIComponent(payload)));}catch(e){alert('RSS Pal: 编码失败 '+e.message);return;}
+var w=window.open('${apiBase}/bookmarklet-receiver.html#'+b64,'_blank');
 if(!w){alert('RSS Pal: 请允许此页面弹窗后再试');return;}
-function onMsg(e){
-  if(e.source!==w||!e.data||e.data.type!=='rsspal:ready')return;
-  window.removeEventListener('message',onMsg);
-  w.postMessage({type:'rsspal:capture',token:data.token,url:data.url,title:data.title,html:data.html},'${apiBase}');
-}
-window.addEventListener('message',onMsg);
 })();`
   return 'javascript:' + encodeURIComponent(code)
 }
