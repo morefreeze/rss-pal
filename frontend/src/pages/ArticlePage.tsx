@@ -12,6 +12,7 @@ import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
 import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
+import BackFab from '../components/BackFab'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
 import TagBar from '../components/TagBar'
@@ -748,6 +749,35 @@ export default function ArticlePage() {
           </div>
         </div>
       </div>
+      {/* Bottom nav so readers don't have to scroll back up to leave the article. */}
+      <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between' }}>
+        <button
+          className="secondary"
+          onClick={handleBack}
+          style={{ fontSize: 13, padding: '6px 14px' }}
+        >
+          ← 返回列表
+        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="secondary"
+            disabled={!prevId}
+            onClick={() => prevId && navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
+            style={{ fontSize: 13, padding: '6px 14px' }}
+          >
+            ‹ 上一篇
+          </button>
+          <button
+            className="secondary"
+            disabled={!nextId}
+            onClick={() => nextId && navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
+            style={{ fontSize: 13, padding: '6px 14px' }}
+          >
+            下一篇 ›
+          </button>
+        </div>
+      </div>
+      <BackFab onClick={handleBack} />
       <BackToTopButton />
     </div>
   )
