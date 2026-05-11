@@ -144,14 +144,6 @@ export default function ArticlePage() {
 
   // Accumulates active (visible) seconds on this page for the stay-time gate.
   const activeReadSecondsRef = useRef(0)
-  useEffect(() => {
-    const tick = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        activeReadSecondsRef.current += 1
-      }
-    }, 1000)
-    return () => clearInterval(tick)
-  }, [])
 
   const pendingProgressRef = useRef<{ scrollPosition: number; isCompleted: boolean } | null>(null)
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -179,6 +171,37 @@ export default function ArticlePage() {
       flushProgress()
     }, 1500)
   }, [flushProgress])
+
+  // Counts active seconds and acts as the completion backstop. handleScroll
+  // only re-evaluates is_completed on scroll events, so if the user reaches
+  // the bottom before the time gate elapses, no later scroll event fires and
+  // the article would stay forever-unread. This tick fills that hole.
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      activeReadSecondsRef.current += 1
+
+      if (!article || progress?.is_completed) return
+      if (maxScrollRef.current <= 0.9) return
+      const readMin = article.reading_minutes || 1
+      const minSeconds = Math.min(30, Math.floor(readMin * 30))
+      if (activeReadSecondsRef.current < minSeconds) return
+
+      const scrollPosition = Math.max(maxScrollRef.current, 0.9)
+      setProgress(prev => prev ? { ...prev, scroll_position: scrollPosition, is_completed: true } : prev)
+      pendingProgressRef.current = { scrollPosition, isCompleted: true }
+      try {
+        const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+        if (!read.includes(article.id)) {
+          read.push(article.id)
+          sessionStorage.setItem('readArticles', JSON.stringify(read))
+        }
+      } catch {}
+      window.dispatchEvent(new Event('refresh-unread'))
+      flushProgress()
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [article, progress?.is_completed, flushProgress])
 
   const handleScroll = useCallback(() => {
     if (!article || !contentRef.current) return
