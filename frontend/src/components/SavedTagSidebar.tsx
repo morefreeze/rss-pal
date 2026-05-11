@@ -41,7 +41,7 @@ export default function SavedTagSidebar({
       style={{
         width: 220,
         flexShrink: 0,
-        borderRight: '1px solid #e2e8f0',
+        borderRight: '1px solid var(--border)',
         padding: 12,
         overflowY: 'auto',
       }}
