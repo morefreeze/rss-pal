@@ -603,7 +603,9 @@ export default function ArticlePage() {
             className={`ai-marker${showCelebration ? ' pulse' : ''}`}
             style={{ left: `${aiMarkerPos * 100}%` }}
             title="AI 总结结束"
+            aria-label="AI summary end"
           >
+            🏁
             {showCelebration && reader.confettiEnabled && <ConfettiBurst />}
           </div>
         )}
