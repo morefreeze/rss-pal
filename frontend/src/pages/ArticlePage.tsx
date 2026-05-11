@@ -570,11 +570,9 @@ export default function ArticlePage() {
         }}
         fontSize={reader.fontSize}
         fontFamily={reader.fontFamily}
-        bgTheme={reader.bgTheme}
         onExit={() => reader.setMode('normal')}
         onFontSize={reader.setFontSize}
         onFontFamily={reader.setFontFamily}
-        onBgTheme={reader.setBgTheme}
       />
     )
   }
