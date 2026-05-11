@@ -9,6 +9,7 @@ export type ReaderSettings = {
   fontSize: number      // 12..24, step 1
   fontFamily: ReaderFontFamily
   bgTheme: ReaderBgTheme
+  confettiEnabled: boolean
 }
 
 const STORAGE_KEY = 'rsspal:reader-settings'
@@ -18,6 +19,7 @@ const DEFAULTS: ReaderSettings = {
   fontSize: 16,
   fontFamily: 'sans',
   bgTheme: 'default',
+  confettiEnabled: true,
 }
 
 function load(): ReaderSettings {
@@ -30,6 +32,7 @@ function load(): ReaderSettings {
       fontSize: clampFont(parsed.fontSize ?? DEFAULTS.fontSize),
       fontFamily: parsed.fontFamily === 'serif' ? 'serif' : 'sans',
       bgTheme: isTheme(parsed.bgTheme) ? parsed.bgTheme : 'default',
+      confettiEnabled: parsed.confettiEnabled !== false,
     }
   } catch {
     return DEFAULTS
@@ -69,6 +72,8 @@ export function useReaderSettings() {
     setSettings(s => ({ ...s, fontFamily })), [])
   const setBgTheme = useCallback((bgTheme: ReaderBgTheme) =>
     setSettings(s => ({ ...s, bgTheme })), [])
+  const setConfettiEnabled = useCallback((confettiEnabled: boolean) =>
+    setSettings(s => ({ ...s, confettiEnabled })), [])
   const toggleMode = useCallback(() =>
     setSettings(s => ({ ...s, mode: s.mode === 'reading' ? 'normal' : 'reading' })), [])
 
@@ -79,5 +84,6 @@ export function useReaderSettings() {
     setFontSize,
     setFontFamily,
     setBgTheme,
+    setConfettiEnabled,
   }
 }
