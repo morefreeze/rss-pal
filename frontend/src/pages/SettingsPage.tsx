@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
@@ -347,14 +347,21 @@ function readTabFromHash(): TabId {
 function useSettingsTab(): [TabId, (t: TabId) => void] {
   const [tab, setTabState] = useState<TabId>(() => readTabFromHash())
   useEffect(() => {
+    // Clean up a stale invalid hash on first mount so /settings#foo silently
+    // becomes /settings#appearance instead of leaving #foo in the address bar.
+    const raw = window.location.hash.slice(1)
+    if (raw && raw !== tab) {
+      history.replaceState(null, '', `${window.location.pathname}#${tab}`)
+    }
     const onHash = () => setTabState(readTabFromHash())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  const setTab = (t: TabId) => {
+  // Single source of truth: write the hash and let `hashchange` drive state.
+  const setTab = useCallback((t: TabId) => {
     window.location.hash = t
-    setTabState(t)
-  }
+  }, [])
   return [tab, setTab]
 }
 
