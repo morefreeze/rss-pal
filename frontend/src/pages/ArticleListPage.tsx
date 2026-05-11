@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { getArticles, searchArticles, getRecommended, markAllRead, Article, Feed, getFeeds, likeArticle, dislikeArticle } from '../api/client'
+import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
+import GroupedArticleView from '../components/GroupedArticleView'
 import SavedPage from './SavedPage'
 import { usePlayer } from '../player/PlayerContext'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
@@ -171,6 +172,11 @@ export default function ArticleListPage() {
   const [showRecommended, setShowRecommended] = useState(() => {
     try { return localStorage.getItem('showRecommended') === 'true' } catch { return false }
   })
+  const [grouped, setGrouped] = useState(() => {
+    try { return sessionStorage.getItem('articlesGrouped') === 'true' } catch { return false }
+  })
+  const [groupedData, setGroupedData] = useState<GroupedArticles | null>(null)
+  const [groupedLoading, setGroupedLoading] = useState(false)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -212,11 +218,23 @@ export default function ArticleListPage() {
     // mode, so skip the regular /api/articles call to avoid a wasted
     // request and to keep the flicker out.
     if (isClippingMode) return
+    if (grouped) {
+      // Grouped mode fetches its own payload — single shot, no pagination.
+      setGroupedLoading(true)
+      getGroupedArticles({
+        feed_id: selectedFeed || undefined,
+        unread: unreadOnly || undefined,
+        saved: savedOnly || undefined,
+      })
+        .then(setGroupedData)
+        .finally(() => setGroupedLoading(false))
+      return
+    }
     setOffset(0)
     setHasMore(true)
     setFocusedIdx(-1)
     loadArticles(0, true)
-  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode])
+  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped])
 
   const loadFeeds = async () => {
     const data = await getFeeds()
@@ -498,6 +516,25 @@ export default function ArticleListPage() {
           )}
           {!isClippingMode && !searchQuery && (
             <button
+              type="button"
+              className="secondary"
+              style={{
+                fontSize: 13,
+                padding: '4px 10px',
+                ...(grouped ? { background: '#0066cc', color: 'white', borderColor: '#0066cc' } : {}),
+              }}
+              onClick={() => {
+                const next = !grouped
+                setGrouped(next)
+                try { sessionStorage.setItem('articlesGrouped', String(next)) } catch {}
+              }}
+              title={grouped ? '回到列表视图' : '按主题分组查看'}
+            >
+              📚 分组
+            </button>
+          )}
+          {!isClippingMode && !searchQuery && !grouped && (
+            <button
               className="secondary"
               style={{ fontSize: 12, padding: '4px 10px' }}
               onClick={() => loadArticles(0, true)}
@@ -524,7 +561,7 @@ export default function ArticleListPage() {
         <SavedPage restrictToFeedId={selectedFeed} entryPath="/articles" />
       )}
 
-      {!isClippingMode && recommended.length > 0 && !searchQuery && (
+      {!isClippingMode && recommended.length > 0 && !searchQuery && !grouped && (
         <div className="rec-panel">
           <button
             type="button"
@@ -618,7 +655,22 @@ export default function ArticleListPage() {
         ) : null
       )}
 
-      {!isClippingMode && !searchQuery && loading ? (
+      {!isClippingMode && !searchQuery && grouped ? (
+        groupedLoading ? (
+          <div className="card">Loading...</div>
+        ) : groupedData ? (
+          <GroupedArticleView
+            data={groupedData}
+            isRead={isRead}
+            formatDate={formatDate}
+            stripMarkdown={stripMarkdown}
+            onOpen={openArticle}
+            onPlay={player.playArticle}
+          />
+        ) : (
+          <div className="card text-muted">加载失败</div>
+        )
+      ) : !isClippingMode && !searchQuery && loading ? (
         <div className="card">Loading...</div>
       ) : !isClippingMode && !searchQuery && articles.length === 0 && feeds.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
