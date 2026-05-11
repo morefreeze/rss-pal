@@ -56,7 +56,7 @@ export default function RecommendedPage() {
               <div key={rf.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                   <strong style={{ fontSize: 14 }}>{rf.title}</strong>
-                  <span style={{ fontSize: 11, padding: '2px 6px', background: '#f0f0f0', borderRadius: 4 }}>
+                  <span style={{ fontSize: 11, padding: '2px 6px', background: 'var(--surface-hover)', borderRadius: 4 }}>
                     {rf.language === 'zh' ? '中文' : 'English'}
                   </span>
                 </div>
