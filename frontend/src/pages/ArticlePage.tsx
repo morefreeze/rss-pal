@@ -581,34 +581,33 @@ export default function ArticlePage() {
 
   return (
     <div ref={contentRef}>
-      {/* Sticky progress bar at top of viewport */}
-      {progressPercent > 0 && (
+      {/* Sticky progress bar at top of viewport — always visible so the
+          AI marker shows up from the moment the article opens. */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 4,
+        backgroundColor: '#e0e0e0',
+        zIndex: 1000,
+      }}>
         <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 4,
-          backgroundColor: '#e0e0e0',
-          zIndex: 1000,
-        }}>
-          <div style={{
-            height: '100%',
-            width: `${progressPercent}%`,
-            backgroundColor: '#0066cc',
-            transition: 'width 0.3s ease',
-          }} />
-          {aiMarkerPos !== null && (
-            <div
-              className={`ai-marker${showCelebration ? ' pulse' : ''}`}
-              style={{ left: `${aiMarkerPos * 100}%` }}
-              title="AI 总结结束"
-            >
-              {showCelebration && reader.confettiEnabled && <ConfettiBurst />}
-            </div>
-          )}
-        </div>
-      )}
+          height: '100%',
+          width: `${progressPercent}%`,
+          backgroundColor: '#0066cc',
+          transition: 'width 0.3s ease',
+        }} />
+        {aiMarkerPos !== null && (
+          <div
+            className={`ai-marker${showCelebration ? ' pulse' : ''}`}
+            style={{ left: `${aiMarkerPos * 100}%` }}
+            title="AI 总结结束"
+          >
+            {showCelebration && reader.confettiEnabled && <ConfettiBurst />}
+          </div>
+        )}
+      </div>
       {showCelebration && aiMarkerPos !== null && reader.confettiEnabled && (
         <div className="ai-celebration" style={{ left: `${aiMarkerPos * 100}%` }}>
           🎉 AI 总结读完啦
