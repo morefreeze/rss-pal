@@ -3,8 +3,9 @@ package main
 import (
 	"log"
 
-	"github.com/bytedance/rss-pal/internal/api"
 	"github.com/bytedance/rss-pal/internal/ai"
+	"github.com/bytedance/rss-pal/internal/api"
+	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
@@ -42,8 +43,11 @@ func main() {
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	summarizerService := service.NewSummarizerService(summarizer)
 
+	backupRunner := backup.NewRunner(db, cfg.Backup.Dir)
+
 	authHandler := api.NewAuthHandler(cfg, userRepo)
-	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL)
+	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
+	adminHandler := api.NewAdminHandler(db, backupRunner, cfg)
 	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
@@ -191,6 +195,11 @@ func main() {
 		apiGroup.POST("/settings/polish-prompt", settingsHandler.PolishPrompt)
 		apiGroup.GET("/settings/bookmarklet-token", settingsHandler.GetBookmarkletToken)
 		apiGroup.POST("/settings/bookmarklet-token/regenerate", settingsHandler.RegenerateBookmarkletToken)
+
+		// Admin: subscription backup + restore (host-mounted /backups dir)
+		apiGroup.GET("/admin/backups", adminHandler.ListBackups)
+		apiGroup.POST("/admin/backups", adminHandler.CreateBackupNow)
+		apiGroup.POST("/admin/backups/restore", adminHandler.RestoreBackup)
 	}
 
 	log.Printf("Server starting on port %s", cfg.Server.Port)

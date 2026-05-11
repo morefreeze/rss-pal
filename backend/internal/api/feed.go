@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
@@ -22,6 +23,7 @@ type FeedHandler struct {
 	articleRepo    *repository.ArticleRepository
 	fetcher        *rss.Fetcher
 	contentFetcher *rss.ContentFetcher
+	backup         *backup.Runner // nil when backup is disabled
 }
 
 func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.ArticleRepository, rsshubBase string) *FeedHandler {
@@ -31,6 +33,13 @@ func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.Art
 		fetcher:        rss.NewFetcher(rsshubBase),
 		contentFetcher: rss.NewContentFetcher(),
 	}
+}
+
+// WithBackupRunner wires a backup runner so add/delete trigger a debounced
+// snapshot. Pass nil to disable.
+func (h *FeedHandler) WithBackupRunner(r *backup.Runner) *FeedHandler {
+	h.backup = r
+	return h
 }
 
 func (h *FeedHandler) GetAll(c *gin.Context) {
@@ -126,6 +135,9 @@ func (h *FeedHandler) Create(c *gin.Context) {
 		return
 	}
 
+	if h.backup != nil {
+		h.backup.TriggerAsync()
+	}
 	c.JSON(http.StatusCreated, feed)
 }
 
@@ -185,6 +197,9 @@ func (h *FeedHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	if h.backup != nil {
+		h.backup.TriggerAsync()
+	}
 	c.Status(http.StatusNoContent)
 }
 

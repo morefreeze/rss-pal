@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/ai"
+	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -80,6 +81,10 @@ func main() {
 		})
 		defer stopCron()
 	}
+
+	backupRunner := backup.NewRunner(db, cfg.Backup.Dir)
+	stopBackup := backupRunner.ScheduleDaily(context.Background())
+	defer stopBackup()
 
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
