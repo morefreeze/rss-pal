@@ -20,7 +20,7 @@ body[data-theme='paper'] {
   --surface: #ede4c6;
   --surface-hover: #e4d9b3;
   --fg: #3a2f1a;
-  --fg-muted: #7a6f55;
+  --fg-muted: #6b6046;
   --accent: #5b3b00;
   --accent-soft: rgba(91, 59, 0, 0.18);
   --accent-fg: #f5edd6;
@@ -59,7 +59,7 @@ body[data-theme='night'] {
   --surface: #242424;
   --surface-hover: #2e2e2e;
   --fg: #d4d4d4;
-  --fg-muted: #888888;
+  --fg-muted: #9a9a9a;
   --accent: #7eb6ff;
   --accent-soft: rgba(126, 182, 255, 0.20);
   --accent-fg: #1a1a1a;
@@ -68,10 +68,11 @@ body[data-theme='night'] {
   --link: #7eb6ff;
 }
 
-/* Fallback when no theme attr yet (pre-boot) — Paper. */
+/* Fallback when no theme attr yet (pre-boot) — Paper.
+   Values must mirror body[data-theme='paper'] exactly. */
 body:not([data-theme]) {
   --bg: #f5edd6; --surface: #ede4c6; --surface-hover: #e4d9b3;
-  --fg: #3a2f1a; --fg-muted: #7a6f55;
+  --fg: #3a2f1a; --fg-muted: #6b6046;
   --accent: #5b3b00; --accent-soft: rgba(91, 59, 0, 0.18); --accent-fg: #f5edd6;
   --border: #d9cdaa; --code-bg: #ebe2c8; --link: #5b3b00;
 }
@@ -447,6 +448,9 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 }
 .markdown-body a { color: var(--link); }
 .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.markdown-body table { border-collapse: collapse; margin: 12px 0; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 6px 10px; }
+.markdown-body th { background: var(--surface-hover); font-weight: 600; }
 
 /* === Toast === */
 @keyframes slideIn {
