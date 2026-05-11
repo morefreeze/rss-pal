@@ -1,155 +1,133 @@
-# Articles Topic Grouping — Design
+# Articles Category Grouping — Design (v2)
 
 **Date:** 2026-05-11
 **Scope:** backend + frontend
+**Supersedes:** the v1 topic-based design previously in this file.
 **Files touched:**
-- backend: `internal/repository/article.go`, `internal/api/article.go`, `cmd/server/main.go`
-- frontend: `src/pages/ArticleListPage.tsx`, `src/api/client.ts`, new `src/components/GroupedArticleView.tsx`
+- backend: `internal/repository/article.go`, `internal/repository/preference.go`, `internal/api/article.go`, `internal/model/model.go`, `internal/ai/classify.go`, `cmd/worker/classify.go`, `cmd/server/main.go`, new migration `migrations/017_article_category.sql`
+- frontend: `src/pages/ArticleListPage.tsx`, `src/api/client.ts`, `src/components/GroupedArticleView.tsx`, new `src/components/categoryLabels.ts`
 
-## Problem
+## Why v2
 
-`/articles` is a flat reverse-chronological list. When the user wants to skim "what's happening in AI today" vs. "what's happening in macro today," they have to scroll the whole feed and mentally group by source/topic. Each article already carries a 2-4 字 中文 `topic` (assigned by `ai.ClassifyArticle`) and the system already maintains per-user `interest_topics` weights — those signals are unused on the list page.
+v1 grouped on `articles.topic` — a **per-user-engagement classification cache** assigned by `ai.ClassifyArticle` only when a user gave a strong signal (like / save / completed_listen / read_duration ≥ 60s). The result on a real database: 5 classified articles out of 135, so the grouped view collapses to 2 small buckets + one giant `未分类`.
 
-## Goal
+Two intertwined problems:
 
-Add a **`📚 分组` toggle** on `/articles`. When on, the article list is replaced by a topic-grouped view ordered by the user's interest weights. The flat view is unchanged.
+1. **Sparsity** — most articles never get a topic, because `topic` was designed to *fuel* `interest_topics` weights, not to *organize* the article list.
+2. **Granularity** — the prompt asks for 2-4 字 中文 names with mild self-stabilization. The steady-state distribution is long-tailed ("大模型 / Agent / RAG / 美联储 / 播客 / ..."), which forces the grouping view into top-N truncation and still ends up looking like a noisy taxonomy rather than a clean shelf.
 
-## Non-goals (YAGNI)
+v2 introduces a **coarse, closed-enum** `articles.category` field that's:
+- assigned to **every** article (not gated on user actions),
+- drawn from a **fixed 10-value enum**,
+- mirrored by `interest_categories` (per-user weights, same shape as `interest_topics`) so the grouping view can order by interest the same way the original spec called for.
 
-- **No** topic-based filter on the flat view (no `?topic=...` query, no chip-to-filter navigation).
-- **No** AI-driven secondary clustering of topic names into super-clusters (e.g. "大模型 / RAG / agent" → "AI 工程"). Use the raw `articles.topic` value as the group key.
-- **No** offline pre-aggregation table or worker task.
-- **No** "+ N more topics" hint for groups that don't make the top 8 — they're simply not visible in this view (the user chose lean).
-- **No** pagination, prefetch, or "load more" inside the grouped view — single response.
+`articles.topic` stays as-is — it still drives insights and the existing classification pipeline.
 
-## Design
+## The enum
 
-### Toggle & state
-
-- Place the `📚 分组` button in the existing filter bar on `ArticleListPage.tsx`, adjacent to `未读` / `网摘`.
-- Persist state in `sessionStorage` under key `articlesGrouped` (string `"true"` / absent), matching the `unreadOnly` pattern.
-- When the search box has a non-empty query, the grouped view is hidden and search results take over (existing behavior). The toggle remains visible but its effect resumes when the search clears.
-- Switching the toggle does not change the URL (consistent with the page's other filters today).
-
-### View behavior when grouped mode is ON
-
-| Aspect | Flat mode (current) | Grouped mode (new) |
-|---|---|---|
-| `为你推荐` panel | shown | hidden |
-| Article list rendering | flat, time-desc | grouped (see below) |
-| Feed selection (sidebar) | filters | same filter applies |
-| `未读` / `网摘` toggles | filter | same filters apply |
-| `加载更多` / prefetch | active | not used (single response) |
-
-### Grouping rules
-
-1. **Group ordering** — `ORDER BY COALESCE(it.weight, 0) DESC, group_article_count DESC`
-   - `it.weight` comes from `interest_topics` joined on `(user_id, topic)`.
-   - For a cold-start user (no `interest_topics` rows), the COALESCE makes every group tie on weight=0, so ordering naturally falls back to article count.
-2. **Top-N cap** — show only the first **8** topic groups. Topic groups that don't make the cut are not rendered in grouped mode.
-3. **Unclassified bucket** — articles with `topic IS NULL OR topic = ''` form one extra group titled `未分类`, rendered last regardless of size. Not counted against the top-8 cap.
-4. **Within a group** — `ORDER BY COALESCE(p.score, 0) DESC, a.published_at DESC NULLS LAST`, where `p.score` is the per-article user preference score aggregated exactly like the existing `GetReadingList` / `GetRecommended` paths use:
-   ```
-   like     →  signal_value * 5
-   dislike  →  signal_value * -10
-   save     →  signal_value * 3
-   read_duration → signal_value / 60
-   ```
-   (other signal types omitted to match current `GetRecommended` SUM expression).
-5. **Per-group cap** — server returns at most **20** articles per group. UI shows the first **5**; an `展开更多 (N)` row reveals the rest of the up-to-20. There is no path to articles beyond 20 in a single group within this view (by design — the user can switch to flat mode).
-
-### API
-
-**`GET /api/articles/grouped`**
-
-Query parameters mirror `GET /api/articles` semantics **exactly** — the implementation should share its `WHERE` clause builder with the existing flat-list query rather than re-deriving filter logic:
-- `feed_id` (int, optional)
-- `unread` (bool, optional) — same `COALESCE(rp.is_completed, false) = false` semantics used today (articles with no `reading_progress` row are considered unread).
-- `saved` (bool, optional) — same as today: includes both `user_preferences` save signals **and** articles from the bookmarklet `网摘` feed (per the post-refactor unified definition in `c54ea25`-era commits).
-
-Server-side constants (not exposed as params): `TOP_GROUPS = 8`, `PER_GROUP_CAP = 20`.
-
-Response:
-```json
-{
-  "groups": [
-    {
-      "topic": "大模型",
-      "total_count": 14,
-      "articles": [ /* up to PER_GROUP_CAP Article objects, same shape as GET /api/articles */ ]
-    }
-  ],
-  "unclassified": {
-    "total_count": 3,
-    "articles": [ /* up to PER_GROUP_CAP */ ]
-  }
-}
+```
+ai_eng | ai | cn_tech | enterprise | youtube | podcast | news | blog | health | business
 ```
 
-`total_count` reflects the count under the same filters, not the global count. If `unclassified.total_count` is 0, the `unclassified` field is still present with an empty `articles` array (frontend will simply skip rendering it).
+The first 6 are the existing values used by `recommended_feeds.category` (and the `CATEGORY_LABELS` map in `RecommendedPage.tsx`). The last 4 are new — chosen to cover the coverage gaps the existing 6 leave on the user's actual subscription set (time-news feeds, personal blogs, health, business/finance).
 
-### Backend query sketch
+Validation is **app-level only** — no DB `CHECK` constraint, so the enum can grow without a migration. Both Go and TypeScript hold the canonical list.
 
-A single endpoint, two SQL passes:
+## Schema (migration 017)
 
-1. **Pick top-8 topics + per-group articles**, using a CTE for the filtered article set and `LATERAL` to take the top-20-by-score per topic:
-   ```sql
-   WITH visible AS (
-     SELECT a.id, a.topic, a.published_at, a.feed_id, ...
-     FROM articles a
-     JOIN feeds f ON a.feed_id = f.id
-     WHERE <feed_id / unread / saved / tenancy filters>
-       AND a.topic IS NOT NULL AND a.topic <> ''
-   ),
-   topic_stats AS (
-     SELECT v.topic,
-            COUNT(*) AS article_count,
-            COALESCE(it.weight, 0) AS weight
-     FROM visible v
-     LEFT JOIN interest_topics it ON it.user_id = $userId AND it.topic = v.topic
-     GROUP BY v.topic, it.weight
-     ORDER BY weight DESC, article_count DESC
-     LIMIT 8
-   )
-   SELECT ts.topic, ts.article_count, art.*
-   FROM topic_stats ts
-   JOIN LATERAL (
-     SELECT v.*, COALESCE(p.score, 0) AS score
-     FROM visible v
-     LEFT JOIN per_article_score p ON p.article_id = v.id   -- subquery, same SUM as GetRecommended
-     WHERE v.topic = ts.topic
-     ORDER BY score DESC, v.published_at DESC NULLS LAST
-     LIMIT 20
-   ) art ON true;
-   ```
-2. **Unclassified**: same shape, filter `topic IS NULL OR topic = ''`, capped at 20.
+```sql
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS category VARCHAR(20);
+CREATE INDEX IF NOT EXISTS idx_articles_category
+  ON articles(category) WHERE category IS NOT NULL;
+-- Partial index helps the unclassified-bucket query that filters
+-- `category IS NULL OR category = ''`.
+CREATE INDEX IF NOT EXISTS idx_articles_no_category
+  ON articles(id) WHERE category IS NULL;
 
-Implementation can be one repository method `GetGroupedByTopic(userID int, filters ArticleFilters) (*model.GroupedArticles, error)` returning a struct that the handler serializes directly.
+CREATE TABLE IF NOT EXISTS interest_categories (
+  id                 SERIAL PRIMARY KEY,
+  user_id            INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  category           VARCHAR(20) NOT NULL,
+  weight             FLOAT NOT NULL DEFAULT 0,
+  last_reinforced_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, category)
+);
+CREATE INDEX IF NOT EXISTS idx_interest_categories_user_weight
+  ON interest_categories(user_id, weight DESC);
+```
 
-### Frontend changes
+## AI prompt change
 
-- `ArticleListPage.tsx`:
-  - New state `const [grouped, setGrouped] = useState(...)` read from `sessionStorage.articlesGrouped`.
-  - When `grouped && !searchQuery`, fetch from `/api/articles/grouped` instead of `/api/articles`. Hide the recommended panel.
-  - The filter-change effect (currently keyed on `selectedFeed, unreadOnly, savedOnly`) must also re-fire when `grouped` flips.
-- New `GroupedArticleView.tsx` component:
-  - Props: `groups: Group[]`, `unclassified: Group | null`, plus the action callbacks that `ArticleCard` already needs (like / dislike / mark-read, etc.).
-  - Renders each group as a section header `主题名 · N 篇` followed by 5 `ArticleCard` rows, then an `展开更多 (N)` button if `articles.length > 5`. Expand state is local component state, per group (`Map<topic, boolean>`).
-- `client.ts`: add `GroupedArticles` type + `getGroupedArticles(filters)` helper.
+`ai.ClassifyArticle` returns one extra field:
 
-### Error handling
+```json
+{"topic": "...", "tags": ["...", "...", "..."], "category": "..."}
+```
 
-- Backend errors → standard `500` JSON (`{ "error": "..." }`). Frontend shows a toast and falls back to flat view for that render cycle (does not auto-disable the toggle — user toggles back manually if desired).
-- Empty result (no articles match filters) → `{ "groups": [], "unclassified": { "total_count": 0, "articles": [] } }`. Frontend renders the same "暂无文章" placeholder the flat view uses.
+Prompt addition:
 
-### Testing
+> - category：从以下闭合列表里**必选一个**，不允许新建：[ai_eng, ai, cn_tech, enterprise, youtube, podcast, news, blog, health, business]
 
-- Repository unit test: seed 3 users + 30 articles across 12 topics with varying `interest_topics` weights and `user_preferences` signals; assert (a) only top-8 topics returned, (b) group order matches weight then count, (c) within-group order matches score then time, (d) unclassified bucket present when applicable, (e) tenancy: user B never sees user A's private feeds.
-- API integration test: hit `/api/articles/grouped` with `unread=true` and `saved=true` and assert filter pass-through.
-- Frontend: no test infra in the project today (no vitest/jest configured); manual verification via the existing docker-compose dev flow.
+`model.Classification` gains `Category string`. Parser validates against the enum; out-of-enum values are coerced to `""` so we never write garbage. The existing `topic` and `tags` outputs are unchanged.
 
-### Migration / rollout
+## Worker change
 
-- No DB migration. All required tables and columns (`articles.topic`, `interest_topics`, `user_preferences`, `reading_progress`) already exist.
-- No backfill. Existing rows without a `topic` simply land in `未分类` until the classifier eventually backfills (it's already running for new articles).
-- Feature is purely additive — flat view is untouched, so risk to existing users is limited to the new endpoint and the new toggle.
+`ArticleRepository.FindArticlesNeedingClassification` was previously gated on "7 days + strong signal" — that gate is what produced sparse coverage. Replace with:
+
+```sql
+SELECT ...
+FROM articles a
+WHERE a.category IS NULL
+ORDER BY a.fetched_at DESC
+LIMIT $1
+```
+
+Rationale: classification is now needed for *every* article, not just engaged ones. The `ORDER BY fetched_at DESC` + per-batch `LIMIT 50` keeps the worker bounded; the existing once-per-loop scheduler naturally drains the backlog within a few cycles (130 backlog ÷ 50/loop = ~3 loops). When the backlog is empty, the candidate list is empty and the pass is a no-op.
+
+On classify success the worker:
+1. Writes both `articles.topic` (existing) and `articles.category` (new).
+2. For each user with a strong signal on the article: `UpsertTopic` (existing) **and** `UpsertCategory` (new — same signal-weight formula via `api.SignalToTopicWeight`).
+
+Topic and category writes are independent: a row with a valid category but invalid topic (and vice versa) is fine.
+
+## Backfill
+
+No dedicated `cmd/backfill_categories` binary. The widened worker pass naturally backfills the existing ~130 NULL-category articles within a few minutes of the next worker restart. If a one-shot backfill is needed later (e.g., after a prompt revision), the existing `cmd/backfill_metrics` template is a 60-line copy job.
+
+## Grouping endpoint switch
+
+Rename and rewrite `ArticleRepository.GetGroupedByTopic` → `GetGroupedByCategory`. Same shape; SQL changes:
+
+1. `visible` CTE filter on `a.category IS NOT NULL AND a.category <> ''` instead of `a.topic ...`.
+2. `topic_stats` CTE joins `interest_categories ic` on `(user_id, category)` instead of `interest_topics it on (user_id, topic)`.
+3. `GROUP BY c.category`, `ORDER BY weight DESC, article_count DESC, c.category ASC`.
+4. Unclassified CTE filters on `category IS NULL OR category = ''`.
+
+Constants stay the same (`GroupedTopN = 8`, `GroupedPerGroupCap = 20`). The handler `GetGrouped` keeps the same response shape; only the JSON key remains `topic` for backward compatibility with already-deployed frontend code (the value carried is the category enum slug, e.g. `"ai_eng"`).
+
+## Frontend change
+
+- Lift the `CATEGORY_LABELS` map currently in `RecommendedPage.tsx` into a shared `src/components/categoryLabels.ts` module so both pages import from one place.
+- Extend the label map with the 4 new categories:
+  ```ts
+  news: '时事'
+  blog: '博客随笔'
+  health: '健康'
+  business: '商业'
+  ```
+- `GroupedArticleView` passes the group's `topic` (which is now actually a category slug) through the label map before rendering — falling back to the raw slug if the map misses (defensive; covers prompt-output drift).
+- No change to the toggle button, the persistence key, or the API client signature.
+
+## Out of scope
+
+- No reclassification of articles whose category was assigned under an older prompt.
+- No user-editable category enum.
+- No per-feed category default / override.
+- No topic ↔ category mapping table.
+- No `interest_categories` UI yet (preference page can be added later if desired). The table is populated automatically by the worker via strong-signal reinforcement.
+
+## Migration / rollout
+
+- New migration runs on next `docker-compose up`.
+- Old `/api/articles/grouped` endpoint (from PR #17) is replaced in the same merge — the response JSON shape is unchanged so the deployed frontend continues to work; only the values inside `"topic"` change (now category slugs instead of free-form Chinese nouns). The frontend update lands in the same PR so users never see raw slugs.
+- The existing v1 implementation on the feature branch is fully superseded by v2's commits; the topic-grouped state shipped in PR #17 will not survive merge.

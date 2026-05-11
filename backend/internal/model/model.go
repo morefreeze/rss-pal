@@ -140,9 +140,39 @@ type InsightCandidate struct {
 }
 
 // Classification is what the AI returns for one article.
+// Category is a coarse closed-enum (see ValidCategories); empty means the
+// AI returned something invalid and we declined to store it.
 type Classification struct {
-	Topic string   `json:"topic"`
-	Tags  []string `json:"tags"`
+	Topic    string   `json:"topic"`
+	Tags     []string `json:"tags"`
+	Category string   `json:"category"`
+}
+
+// ValidCategories is the canonical app-level enum for articles.category and
+// interest_categories.category. Order matches the historical sequence in
+// recommended_feeds.category (first 6) plus the 4 added in migration 019.
+var ValidCategories = []string{
+	"ai_eng", "ai", "cn_tech", "enterprise", "youtube", "podcast",
+	"news", "blog", "health", "business",
+}
+
+// IsValidCategory returns true iff c is one of the canonical enum values.
+func IsValidCategory(c string) bool {
+	for _, v := range ValidCategories {
+		if v == c {
+			return true
+		}
+	}
+	return false
+}
+
+// InterestCategory mirrors InterestTopic at the coarse-grained category level.
+type InterestCategory struct {
+	ID               int       `json:"id" db:"id"`
+	UserID           int       `json:"user_id" db:"user_id"`
+	Category         string    `json:"category" db:"category"`
+	Weight           float64   `json:"weight" db:"weight"`
+	LastReinforcedAt time.Time `json:"last_reinforced_at" db:"last_reinforced_at"`
 }
 
 // PlaybackProgress is the per-user resume position for an audio article.
