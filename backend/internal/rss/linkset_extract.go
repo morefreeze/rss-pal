@@ -163,8 +163,10 @@ func extractEditorNote(s *goquery.Selection, linkText string) string {
 	if container.Length() == 0 {
 		sib := s.Parent()
 		if sib.Length() > 0 {
-			text := strings.TrimSpace(sib.Text())
+			text := sib.Text()
 			text = strings.Replace(text, linkText, "", 1)
+			text = linkSetWhitespaceRe.ReplaceAllString(text, " ")
+			text = strings.Trim(text, " —–-:　")
 			return capEditorNote(text)
 		}
 		return ""

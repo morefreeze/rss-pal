@@ -97,3 +97,60 @@ func TestExtractCandidates_LongBlurbCapped(t *testing.T) {
 		t.Errorf("editor note not capped: %d runes", len([]rune(cands[0].EditorNote)))
 	}
 }
+
+func TestExtractCandidates_ButtondownIssueSmoke(t *testing.T) {
+	data, err := os.ReadFile("testdata/linkset/buttondown_issue.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cands := ExtractCandidates(string(data), "https://buttondown.com/hacker-newsletter/archive/793/")
+
+	if len(cands) < 5 {
+		t.Fatalf("expected ≥5 candidates from a real Buttondown issue, got %d", len(cands))
+	}
+
+	// None should be social-share / unsubscribe noise.
+	for _, c := range cands {
+		if strings.Contains(c.URL, "t.co/") {
+			t.Errorf("t.co link should be filtered: %s", c.URL)
+		}
+		if strings.Contains(c.URL, "/unsubscribe") {
+			t.Errorf("unsubscribe link should be filtered: %s", c.URL)
+		}
+		if strings.Contains(c.URL, "twitter.com/intent") ||
+			strings.Contains(c.URL, "twitter.com/share") {
+			t.Errorf("twitter share/intent should be filtered: %s", c.URL)
+		}
+	}
+
+	// No buttondown.com self-links (newsletter root / emails/).
+	for _, c := range cands {
+		if strings.HasPrefix(c.URL, "https://buttondown.com/hacker-newsletter") ||
+			strings.HasPrefix(c.URL, "https://buttondown.com/emails/") {
+			t.Errorf("buttondown self-link should be filtered: %s", c.URL)
+		}
+	}
+
+	// URLs are deduped (no duplicates after normalisation).
+	seen := map[string]struct{}{}
+	for _, c := range cands {
+		if _, dup := seen[c.URL]; dup {
+			t.Errorf("duplicate URL: %s", c.URL)
+		}
+		seen[c.URL] = struct{}{}
+	}
+}
+
+func TestExtractCandidates_SameHostSameDepthAllowed(t *testing.T) {
+	// Multi-tenant platforms (github.com, dev.to) host many independent
+	// resources at sibling paths. A link from /a/b/awesome to /a/b/library
+	// (same depth) must NOT be filtered as "own-site".
+	html := `<a href="https://github.com/foo/lib-a">lib-a</a>`
+	cands := ExtractCandidates(html, "https://github.com/foo/awesome-list")
+	if len(cands) != 1 {
+		t.Fatalf("same-host same-depth link should pass; got %d candidates", len(cands))
+	}
+	if cands[0].URL != "https://github.com/foo/lib-a" {
+		t.Errorf("URL = %q", cands[0].URL)
+	}
+}
