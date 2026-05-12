@@ -103,6 +103,63 @@ func TestExtractBiz_SingleQuotedHTML(t *testing.T) {
 	}
 }
 
+func TestExtractBiz_ModernHTMLParamForm(t *testing.T) {
+	// Modern mp.weixin.qq.com article HTML no longer emits a `var biz="..."`
+	// declaration; it leaks __biz only via canonical URLs / share strings
+	// like `__biz=Mzk0NDczMjYwOA==`. Real fixture confirmed against a live
+	// signed article URL on 2026-05-12.
+	html := `<html><head><link rel="canonical" href="https://mp.weixin.qq.com/s?__biz=Mzk0NDczMjYwOA==&amp;mid=2247500001&amp;idx=1&amp;sn=abc"/></head><body>article</body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(html))
+	}))
+	defer srv.Close()
+
+	got, err := ExtractBiz(context.Background(), srv.Client(), srv.URL+"/s/abc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "Mzk0NDczMjYwOA==" {
+		t.Errorf("got biz=%q, want Mzk0NDczMjYwOA==", got)
+	}
+}
+
+func TestExtractBiz_URLEncodedParamForm(t *testing.T) {
+	// Some pages double-encode the biz value inside JS strings; matchBiz
+	// must url-unescape so callers always see the raw base64 form.
+	html := `<script>var u = "https://mp.weixin.qq.com/s?__biz=Mzk0NDczMjYwOA%3D%3D&mid=1";</script>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(html))
+	}))
+	defer srv.Close()
+
+	got, err := ExtractBiz(context.Background(), srv.Client(), srv.URL+"/s/abc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "Mzk0NDczMjYwOA==" {
+		t.Errorf("got biz=%q, want Mzk0NDczMjYwOA==", got)
+	}
+}
+
+func TestExtractBiz_VarBeatsParam(t *testing.T) {
+	// When both forms appear, the legacy `var biz` wins — it's set by the
+	// article's own bootstrap JS and is the canonical source.
+	html := `<link rel="canonical" href="https://mp.weixin.qq.com/s?__biz=WRONGWRONG==">
+<script>var biz = "RIGHTRIGHT==";</script>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(html))
+	}))
+	defer srv.Close()
+
+	got, err := ExtractBiz(context.Background(), srv.Client(), srv.URL+"/s/abc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "RIGHTRIGHT==" {
+		t.Errorf("got biz=%q, want RIGHTRIGHT==", got)
+	}
+}
+
 func TestExtractBiz_HTMLMiss(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<html><body>no biz here</body></html>`))

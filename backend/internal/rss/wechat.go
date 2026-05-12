@@ -15,10 +15,19 @@ import (
 // RSS feed. The only WeChat-specific work is extracting `__biz` (the base64
 // public-account ID) from whatever URL the user pasted.
 
-// wechatBizPattern matches the `var biz = "..."` (or single-quoted) assignment
-// rendered inside mp.weixin.qq.com article HTML. WeChat keeps this stable
-// across article-page variants, so it survives small template changes.
-var wechatBizPattern = regexp.MustCompile(`var\s+biz\s*=\s*['"]([^'"]+)['"]`)
+// Two patterns to pull __biz out of mp.weixin.qq.com article HTML. We try
+// them in order and use whichever fires first:
+//
+//   bizVarPattern   — legacy `var biz = "MzI5..."` JS assignment. Still
+//                     present on older article templates.
+//   bizParamPattern — modern templates skip the JS variable but include
+//                     `__biz=Mz...` inside a canonical URL or share link
+//                     (e.g. `__biz=Mzk0NDczMjYwOA==&mid=...`). Stops at any
+//                     character that isn't a valid base64/url-safe biz char.
+var (
+	bizVarPattern   = regexp.MustCompile(`var\s+biz\s*=\s*['"]([^'"]+)['"]`)
+	bizParamPattern = regexp.MustCompile(`__biz=([A-Za-z0-9+/=%]{8,})`)
+)
 
 // IsWeChatURL reports whether the URL points to an mp.weixin.qq.com page.
 // True for any host with that suffix; permits sub-prefixes like
@@ -77,15 +86,32 @@ func ExtractBiz(ctx context.Context, client *http.Client, rawURL string) (string
 	if err != nil {
 		return "", fmt.Errorf("wechat: read article body: %w", err)
 	}
-	m := wechatBizPattern.FindSubmatch(body)
-	if len(m) < 2 {
+	biz := matchBiz(body)
+	if biz == "" {
 		return "", fmt.Errorf("wechat: __biz not found in article HTML")
 	}
-	biz := strings.TrimSpace(string(m[1]))
-	if biz == "" {
-		return "", fmt.Errorf("wechat: empty __biz in article HTML")
-	}
 	return biz, nil
+}
+
+// matchBiz tries each known biz-extraction pattern against the HTML and
+// returns the first non-empty hit. URL-encoded values (`Mz...%3D%3D`) are
+// decoded so callers always get the raw base64 form.
+func matchBiz(body []byte) string {
+	for _, pat := range []*regexp.Regexp{bizVarPattern, bizParamPattern} {
+		m := pat.FindSubmatch(body)
+		if len(m) < 2 {
+			continue
+		}
+		biz := strings.TrimSpace(string(m[1]))
+		if biz == "" {
+			continue
+		}
+		if decoded, err := url.QueryUnescape(biz); err == nil {
+			biz = decoded
+		}
+		return biz
+	}
+	return ""
 }
 
 // BuildFeedURL composes the RSSHub `/wechat/ce/<biz>` URL that fronts a
