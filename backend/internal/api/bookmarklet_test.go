@@ -236,18 +236,69 @@ func TestBuildTweetContent_NoTimestamp(t *testing.T) {
 	}
 }
 
-func TestBuildTweetTitle_ShortText(t *testing.T) {
+func TestBuildTweetTitle_ClauseBreakOnPeriod(t *testing.T) {
 	cap := &rss.TweetCapture{
 		Author:       "karpathy",
+		DisplayName:  "Andrej Karpathy",
 		TextMarkdown: "+1 to this excellent thread.",
 	}
-	if got := buildTweetTitle(cap); got != "+1 to this excellent thread." {
+	want := "Andrej Karpathy · +1 to this excellent thread"
+	if got := buildTweetTitle(cap); got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestBuildTweetTitle_ClauseBreakOnComma(t *testing.T) {
+	cap := &rss.TweetCapture{
+		DisplayName:  "Andrej Karpathy",
+		TextMarkdown: "This works really well btw, at the end of your query ask your LLM to structure as HTML",
+	}
+	want := "Andrej Karpathy · This works really well btw"
+	if got := buildTweetTitle(cap); got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestBuildTweetTitle_HandlePrefixWhenNoDisplayName(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:       "karpathy",
+		TextMarkdown: "hello world.",
+	}
+	if got := buildTweetTitle(cap); got != "@karpathy · hello world" {
 		t.Errorf("got %q", got)
 	}
 }
 
-func TestBuildTweetTitle_LongText(t *testing.T) {
-	long := strings.Repeat("a", 80)
+func TestBuildTweetTitle_ChineseClause(t *testing.T) {
+	cap := &rss.TweetCapture{
+		DisplayName:  "艾略特",
+		TextMarkdown: "今天凌晨北京时间下午，Andrej Karpathy 转发了一条推文。",
+	}
+	want := "艾略特 · 今天凌晨北京时间下午"
+	if got := buildTweetTitle(cap); got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestBuildTweetTitle_NoBreakWordBoundary(t *testing.T) {
+	cap := &rss.TweetCapture{
+		DisplayName:  "tester",
+		TextMarkdown: strings.Repeat("word ", 30), // 150 chars, no clause break
+	}
+	got := buildTweetTitle(cap)
+	if !strings.HasPrefix(got, "tester · word") {
+		t.Errorf("missing prefix: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("missing ellipsis: %q", got)
+	}
+	if strings.Contains(got, " · word ") && strings.HasSuffix(strings.TrimSuffix(got, "…"), " ") {
+		t.Errorf("trailing space before ellipsis: %q", got)
+	}
+}
+
+func TestBuildTweetTitle_NoBreakNoSpace(t *testing.T) {
+	long := strings.Repeat("a", 80) // 80 a's, no breaks, no spaces
 	cap := &rss.TweetCapture{TextMarkdown: long}
 	got := buildTweetTitle(cap)
 	if len([]rune(got)) != 61 { // 60 a's + ellipsis
@@ -271,6 +322,17 @@ func TestBuildTweetTitle_ImageOnlyFallback(t *testing.T) {
 		ImageURLs: []string{"x"},
 	}
 	if got := buildTweetTitle(cap); got != "@karpathy 的推文" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestBuildTweetTitle_ImageOnlyDisplayNameFallback(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:      "karpathy",
+		DisplayName: "Andrej Karpathy",
+		ImageURLs:   []string{"x"},
+	}
+	if got := buildTweetTitle(cap); got != "Andrej Karpathy 的推文" {
 		t.Errorf("got %q", got)
 	}
 }

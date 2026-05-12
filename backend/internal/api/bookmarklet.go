@@ -399,21 +399,69 @@ func buildTweetByline(cap *rss.TweetCapture) string {
 	return b.String()
 }
 
-// buildTweetTitle takes the first 60 runes of the tweet text (newlines
-// flattened to spaces), or falls back to "@handle 的推文" for image-only
-// tweets. Final fallback if even the handle is missing is "Twitter 推文".
+// buildTweetTitle renders a feed-list-friendly tweet title in the form
+// "<DisplayName> · <first clause>". The first clause is the text up to the
+// first sentence/clause break (.!?。！？,，) that falls within a useful
+// rune-count range; absent a break we walk back to the last word boundary
+// within 60 runes. Empty text falls back to "@handle 的推文" for
+// image-only tweets. Final fallback is "Twitter 推文".
 func buildTweetTitle(cap *rss.TweetCapture) string {
 	text := strings.TrimSpace(cap.TextMarkdown)
-	if text != "" {
-		text = strings.ReplaceAll(text, "\n", " ")
-		runes := []rune(text)
-		if len(runes) <= 60 {
-			return text
+	if text == "" {
+		if cap.DisplayName != "" {
+			return cap.DisplayName + " 的推文"
 		}
-		return string(runes[:60]) + "…"
+		if cap.Author != "" {
+			return "@" + cap.Author + " 的推文"
+		}
+		return "Twitter 推文"
 	}
-	if cap.Author != "" {
-		return "@" + cap.Author + " 的推文"
+
+	body := firstClauseOrTruncate(strings.ReplaceAll(text, "\n", " "))
+
+	switch {
+	case cap.DisplayName != "":
+		return cap.DisplayName + " · " + body
+	case cap.Author != "":
+		return "@" + cap.Author + " · " + body
+	default:
+		return body
 	}
-	return "Twitter 推文"
+}
+
+// firstClauseOrTruncate returns text up to the first clause break
+// (.!?。！？,，) whose rune index is in [8, 80] — short enough to read at a
+// glance, long enough to not collapse on "+1!" or "lol". When no useful
+// break exists, falls back to a 60-rune cap snapped to the last space in
+// the upper half of the window (so we don't slice mid-word for English).
+func firstClauseOrTruncate(text string) string {
+	const minClause, maxClause = 8, 80
+	runes := []rune(text)
+	breakIdx := -1
+	for i, r := range runes {
+		if i < minClause {
+			continue
+		}
+		if i > maxClause {
+			break
+		}
+		switch r {
+		case '.', '!', '?', '。', '！', '？', ',', '，':
+			breakIdx = i
+		}
+		if breakIdx != -1 {
+			break
+		}
+	}
+	if breakIdx != -1 {
+		return strings.TrimRight(string(runes[:breakIdx]), " ")
+	}
+	if len(runes) <= 60 {
+		return text
+	}
+	chunk := string(runes[:60])
+	if lastSpace := strings.LastIndex(chunk, " "); lastSpace > 30 {
+		return strings.TrimRight(chunk[:lastSpace], " ") + "…"
+	}
+	return chunk + "…"
 }
