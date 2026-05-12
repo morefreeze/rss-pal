@@ -375,3 +375,23 @@ func (h *ArticleHandler) ExpandChild(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"article_id": id, "state": "processing"})
 }
+
+func (h *ArticleHandler) GetLinkSetRecommended(c *gin.Context) {
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
+	if days <= 0 || days > 30 {
+		days = 7
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	articles, err := h.articleRepo.GetLinkSetRecommendations(getUserID(c), days, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if articles == nil {
+		articles = []model.Article{}
+	}
+	c.JSON(http.StatusOK, articles)
+}
