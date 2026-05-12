@@ -127,6 +127,20 @@ func TestExtractTweet_QuoteURL(t *testing.T) {
 	}
 }
 
+func TestExtractTweet_ImageOnly(t *testing.T) {
+	data := mustReadFixture(t, "tweet_image_only.html")
+	cap, err := ExtractTweet(data, "4444444444444444444")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.TextMarkdown != "" {
+		t.Errorf("TextMarkdown should be empty, got %q", cap.TextMarkdown)
+	}
+	if len(cap.ImageURLs) != 1 {
+		t.Errorf("want 1 image, got %d", len(cap.ImageURLs))
+	}
+}
+
 func mustReadFixture(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile("testdata/twitter/" + name)
