@@ -14,8 +14,8 @@ type NavItem = { to: string; icon: string; label: string }
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/articles',    icon: '📰', label: '文章' },
-  { to: '/weekly',      icon: '📅', label: '周刊' },
   { to: '/feeds',       icon: '📡', label: '订阅' },
+  { to: '/weekly',      icon: '📅', label: '周刊' },
   { to: '/recommended', icon: '✨', label: '推荐' },
   { to: '/insights',    icon: '💡', label: '洞察' },
   { to: '/stats',       icon: '📊', label: '统计' },
