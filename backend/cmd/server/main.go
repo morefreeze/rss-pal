@@ -132,6 +132,7 @@ func main() {
 		apiGroup.GET("/articles", articleHandler.GetAll)
 		apiGroup.GET("/articles/grouped", articleHandler.GetGrouped)
 		apiGroup.GET("/articles/search", articleHandler.Search)
+		apiGroup.GET("/articles/recommended/link_set", articleHandler.GetLinkSetRecommended)
 		apiGroup.GET("/articles/recommended", articleHandler.GetRecommended)
 		apiGroup.GET("/articles/unread-count", articleHandler.GetUnreadCount)
 		apiGroup.POST("/articles/mark-all-read", articleHandler.MarkAllRead)
