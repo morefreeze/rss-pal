@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bytedance/rss-pal/internal/model"
@@ -112,13 +113,38 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	normalized := util.NormalizeURL(req.URL)
-	content, err := extractContentFromHTML(req.HTML, req.URL)
-	if err != nil || strings.TrimSpace(content) == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "无法从页面提取正文"})
-		return
+
+	var (
+		content     string
+		title       = strings.TrimSpace(req.Title)
+		publishedAt *time.Time
+		wasTwitter  bool
+	)
+
+	if statusID, ok := rss.IsTwitterStatusURL(normalized); ok {
+		cap, err := rss.ExtractTweet(req.HTML, statusID)
+		if err == nil {
+			content = buildTweetContent(cap)
+			title = buildTweetTitle(cap)
+			if !cap.PublishedAt.IsZero() {
+				t := cap.PublishedAt
+				publishedAt = &t
+			}
+			wasTwitter = true
+		} else {
+			log.Printf("bookmarklet: twitter extract for %s failed (%v); falling back to generic extractor", normalized, err)
+		}
 	}
 
-	title := strings.TrimSpace(req.Title)
+	if !wasTwitter {
+		body, err := extractContentFromHTML(req.HTML, req.URL)
+		if err != nil || strings.TrimSpace(body) == "" {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "无法从页面提取正文"})
+			return
+		}
+		content = body
+	}
+
 	if title == "" {
 		title = normalized
 	}
@@ -174,10 +200,11 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	article := &model.Article{
-		FeedID:  feed.ID,
-		Title:   title,
-		URL:     normalized,
-		Content: content,
+		FeedID:      feed.ID,
+		Title:       title,
+		URL:         normalized,
+		Content:     content,
+		PublishedAt: publishedAt, // nil for non-twitter (preserves existing behavior)
 	}
 	article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 	if err := h.articleRepo.Create(article); err != nil {
@@ -316,4 +343,77 @@ func GenerateBookmarkletToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// buildTweetContent renders a TweetCapture as the article body. The first
+// line is a markdown blockquote that carries the author byline and date,
+// which the reader renders just like Twitter's own attribution row. Empty
+// fields are silently dropped — image-only and quote-only tweets still
+// produce a useful article body.
+func buildTweetContent(cap *rss.TweetCapture) string {
+	var sections []string
+
+	if byline := buildTweetByline(cap); byline != "" {
+		sections = append(sections, byline)
+	}
+	if cap.TextMarkdown != "" {
+		sections = append(sections, cap.TextMarkdown)
+	}
+	for _, img := range cap.ImageURLs {
+		sections = append(sections, "![]("+img+")")
+	}
+	if cap.QuoteURL != "" {
+		sections = append(sections, "引用: "+cap.QuoteURL)
+	}
+
+	return strings.Join(sections, "\n\n")
+}
+
+// buildTweetByline produces "> @handle (DisplayName) · YYYY-MM-DD" when
+// possible, degrading gracefully when any component is missing. Returns ""
+// only when even the handle is missing (extremely rare — we got the
+// statusID from a URL that also contained the handle, so this would mean
+// the parser couldn't find any profile anchor inside the focal article).
+func buildTweetByline(cap *rss.TweetCapture) string {
+	if cap.Author == "" && cap.DisplayName == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("> ")
+	if cap.Author != "" {
+		b.WriteString("@")
+		b.WriteString(cap.Author)
+	}
+	if cap.DisplayName != "" {
+		if cap.Author != "" {
+			b.WriteString(" ")
+		}
+		b.WriteString("(")
+		b.WriteString(cap.DisplayName)
+		b.WriteString(")")
+	}
+	if !cap.PublishedAt.IsZero() {
+		b.WriteString(" · ")
+		b.WriteString(cap.PublishedAt.UTC().Format("2006-01-02"))
+	}
+	return b.String()
+}
+
+// buildTweetTitle takes the first 60 runes of the tweet text (newlines
+// flattened to spaces), or falls back to "@handle 的推文" for image-only
+// tweets. Final fallback if even the handle is missing is "Twitter 推文".
+func buildTweetTitle(cap *rss.TweetCapture) string {
+	text := strings.TrimSpace(cap.TextMarkdown)
+	if text != "" {
+		text = strings.ReplaceAll(text, "\n", " ")
+		runes := []rune(text)
+		if len(runes) <= 60 {
+			return text
+		}
+		return string(runes[:60]) + "…"
+	}
+	if cap.Author != "" {
+		return "@" + cap.Author + " 的推文"
+	}
+	return "Twitter 推文"
 }
