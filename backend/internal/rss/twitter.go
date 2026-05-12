@@ -81,6 +81,9 @@ func ExtractTweet(html string, statusID string) (*TweetCapture, error) {
 	}
 
 	out := &TweetCapture{
+		Author:       extractAuthorHandle(focal),
+		DisplayName:  extractDisplayName(focal),
+		PublishedAt:  extractPublishedAt(focal),
 		TextMarkdown: extractTweetText(focal),
 	}
 	return out, nil
@@ -170,4 +173,56 @@ func walkTextMarkdown(sel *goquery.Selection, b *strings.Builder) {
 			}
 		}
 	})
+}
+
+// extractAuthorHandle reads the first profile anchor inside the focal
+// article. The href is always /<handle> (no nested path) for the byline
+// link. Falls back to empty string — the caller may still know the handle
+// from the URL.
+var profileHrefRe = regexp.MustCompile(`^/([A-Za-z0-9_]{1,15})$`)
+
+func extractAuthorHandle(focal *goquery.Selection) string {
+	var handle string
+	focal.Find(`[data-testid="User-Name"] a[href][role="link"]`).EachWithBreak(func(_ int, a *goquery.Selection) bool {
+		href, _ := a.Attr("href")
+		if m := profileHrefRe.FindStringSubmatch(href); m != nil {
+			handle = m[1]
+			return false
+		}
+		return true
+	})
+	return handle
+}
+
+// extractDisplayName takes the first non-empty <span> text inside the
+// User-Name container. Twitter renders the display name first, then the
+// `@handle` in a second span; trimming and stopping at the first useful
+// value picks the display name.
+func extractDisplayName(focal *goquery.Selection) string {
+	var name string
+	focal.Find(`[data-testid="User-Name"] span`).EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		txt := strings.TrimSpace(s.Text())
+		if txt == "" || strings.HasPrefix(txt, "@") {
+			return true
+		}
+		name = txt
+		return false
+	})
+	return name
+}
+
+// extractPublishedAt parses the first <time datetime="..."> inside the
+// focal article. Twitter renders it as RFC3339 / ISO 8601 UTC. Failure
+// returns the zero time; callers leave Article.PublishedAt nil in that case.
+func extractPublishedAt(focal *goquery.Selection) time.Time {
+	var ts time.Time
+	focal.Find(`time[datetime]`).EachWithBreak(func(_ int, tm *goquery.Selection) bool {
+		dt, _ := tm.Attr("datetime")
+		if t, err := time.Parse(time.RFC3339, dt); err == nil {
+			ts = t.UTC()
+			return false
+		}
+		return true
+	})
+	return ts
 }
