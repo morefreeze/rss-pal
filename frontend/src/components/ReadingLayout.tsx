@@ -1,11 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import MarkdownArticle from './MarkdownArticle'
 import ReaderSettingsPanel from './ReaderSettingsPanel'
-import type {
-  ReaderBgTheme,
-  ReaderFontFamily,
-} from '../hooks/useReaderSettings'
+import type { ReaderFontFamily } from '../hooks/useReaderSettings'
 
 type ArticleLite = {
   title: string
@@ -22,34 +19,20 @@ type Props = {
   article: ArticleLite
   fontSize: number
   fontFamily: ReaderFontFamily
-  bgTheme: ReaderBgTheme
   onExit: () => void
   onFontSize: (n: number) => void
   onFontFamily: (f: ReaderFontFamily) => void
-  onBgTheme: (b: ReaderBgTheme) => void
 }
 
 export default function ReadingLayout(props: Props) {
-  const { article, fontSize, fontFamily, bgTheme, onExit } = props
-
-  // Apply theme on <body> so the entire viewport adopts the bg color.
-  useEffect(() => {
-    const prev = document.body.getAttribute('data-reader-bg')
-    document.body.setAttribute('data-reader-bg', bgTheme)
-    document.body.classList.add('reading-mode-active')
-    return () => {
-      if (prev !== null) document.body.setAttribute('data-reader-bg', prev)
-      else document.body.removeAttribute('data-reader-bg')
-      document.body.classList.remove('reading-mode-active')
-    }
-  }, [bgTheme])
+  const { article, fontSize, fontFamily, onExit } = props
 
   const [summaryOpen, setSummaryOpen] = useState(false)
 
   const fmtDate = (s: string | null) => s ? new Date(s).toLocaleString('zh-CN') : ''
   const ff = fontFamily === 'serif'
-    ? '"Source Han Serif SC", "Songti SC", serif'
-    : 'system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif'
+    ? 'var(--font-serif)'
+    : 'var(--font-sans)'
 
   return (
     <div className="reading-layout" style={{ fontFamily: ff }}>
@@ -95,10 +78,8 @@ export default function ReadingLayout(props: Props) {
       <ReaderSettingsPanel
         fontSize={fontSize}
         fontFamily={fontFamily}
-        bgTheme={bgTheme}
         onFontSize={props.onFontSize}
         onFontFamily={props.onFontFamily}
-        onBgTheme={props.onBgTheme}
       />
     </div>
   )

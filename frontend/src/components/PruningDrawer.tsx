@@ -43,16 +43,16 @@ export default function PruningDrawer({ rows, onChange }: Props) {
                   {r.pruning_rule!.label}
                 </span>
               </div>
-              <div style={{ fontSize: 13, color: '#666', margin: '4px 0' }}>
+              <div style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0' }}>
                 原因：{r.pruning_rule!.reason}
               </div>
               <div>
                 {r.pruning_rule!.suggested_actions.map(a => (
-                  <button key={a} onClick={() => action(r.feed_id, a as any)} style={{ marginRight: 6 }}>
+                  <button key={a} onClick={() => action(r.feed_id, a as any)} className="btn-ghost btn-sm" style={{ marginRight: 6 }}>
                     {a}
                   </button>
                 ))}
-                <button onClick={() => dismiss(r.feed_id)} style={{ marginRight: 6, color: '#888' }}>
+                <button onClick={() => dismiss(r.feed_id)} className="btn-text btn-sm" style={{ marginRight: 6 }}>
                   暂不处理
                 </button>
               </div>

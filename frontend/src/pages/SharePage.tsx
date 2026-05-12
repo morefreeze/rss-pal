@@ -44,7 +44,7 @@ export default function SharePage() {
       <div style={{ maxWidth: 720, margin: '40px auto', padding: '0 16px' }}>
         <div className="card" style={{ textAlign: 'center' }}>
           <p style={{ color: '#ef4444', marginBottom: 16 }}>{error || '文章不存在'}</p>
-          <a href="/" style={{ color: '#0066cc' }}>返回 RSS Pal 首页</a>
+          <a href="/" style={{ color: 'var(--link)' }}>返回 RSS Pal 首页</a>
         </div>
       </div>
     )
@@ -54,8 +54,8 @@ export default function SharePage() {
     <div style={{ maxWidth: 720, margin: '40px auto', padding: '0 16px' }}>
       {/* Header branding */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-        <span style={{ fontWeight: 700, fontSize: 18, color: '#0066cc' }}>RSS Pal</span>
-        <span style={{ color: '#999', fontSize: 14 }}>· 分享文章</span>
+        <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--accent)' }}>RSS Pal</span>
+        <span style={{ color: 'var(--fg-muted)', fontSize: 14 }}>· 分享文章</span>
       </div>
 
       {/* Article title card */}
@@ -68,7 +68,7 @@ export default function SharePage() {
           href={article.url}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ fontSize: 14, color: '#0066cc', wordBreak: 'break-all' }}
+          style={{ fontSize: 14, color: 'var(--link)', wordBreak: 'break-all' }}
         >
           {article.url}
         </a>
@@ -81,7 +81,7 @@ export default function SharePage() {
           <div className="markdown-body">
             {article.summary_brief && <ReactMarkdown>{article.summary_brief}</ReactMarkdown>}
             {article.summary_brief && article.summary_detailed && (
-              <hr style={{ margin: '12px 0', borderColor: '#eee' }} />
+              <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
             )}
             {article.summary_detailed && <ReactMarkdown>{article.summary_detailed}</ReactMarkdown>}
           </div>
@@ -102,11 +102,11 @@ export default function SharePage() {
       </div>
 
       {/* Footer watermark */}
-      <div style={{ textAlign: 'center', marginTop: 32, marginBottom: 24, color: '#aaa', fontSize: 13 }}>
+      <div style={{ textAlign: 'center', marginTop: 32, marginBottom: 24, color: 'var(--fg-muted)', fontSize: 13 }}>
         <span>由 </span>
-        <a href="/" style={{ color: '#0066cc', fontWeight: 600 }}>RSS Pal</a>
+        <a href="/" style={{ color: 'var(--accent)', fontWeight: 600 }}>RSS Pal</a>
         <span> 提供 · </span>
-        <a href="/" style={{ color: '#aaa' }}>在 RSS Pal 中阅读更多</a>
+        <a href="/" style={{ color: 'var(--fg-muted)' }}>在 RSS Pal 中阅读更多</a>
       </div>
     </div>
   )

@@ -11,7 +11,7 @@ const KIND_LABEL: Record<string, string> = {
   emerging: '可能的新兴趣点',
 }
 const KIND_COLOR: Record<string, string> = {
-  core: '#1a56db',
+  core: 'var(--accent)',
   emerging: '#7c3aed',
 }
 
@@ -32,7 +32,7 @@ export default function RecommendationsCard({ recommendations, articles }: Props
           <div
             style={{
               fontWeight: 600,
-              color: KIND_COLOR[d.direction_kind] || '#1a56db',
+              color: KIND_COLOR[d.direction_kind] || 'var(--accent)',
               marginBottom: 8,
               fontSize: 14,
             }}
@@ -54,14 +54,14 @@ export default function RecommendationsCard({ recommendations, articles }: Props
                   }}
                   style={{
                     padding: 12,
-                    border: '1px solid #e5e7eb',
+                    border: '1px solid var(--border)',
                     borderRadius: 8,
                     cursor: 'pointer',
-                    background: '#fafafa',
+                    background: 'var(--surface)',
                     transition: 'background 0.1s',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#f3f4f6')}
-                  onMouseLeave={e => (e.currentTarget.style.background = '#fafafa')}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-hover)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'var(--surface)')}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <span style={{ fontWeight: 500 }}>{meta.title}</span>
@@ -69,8 +69,8 @@ export default function RecommendationsCard({ recommendations, articles }: Props
                       <span
                         style={{
                           fontSize: 11,
-                          color: '#9ca3af',
-                          background: '#e5e7eb',
+                          color: 'var(--fg-muted)',
+                          background: 'var(--surface-hover)',
                           padding: '2px 8px',
                           borderRadius: 10,
                           marginLeft: 8,
@@ -85,7 +85,7 @@ export default function RecommendationsCard({ recommendations, articles }: Props
                     {meta.feed_title}
                     {meta.brief ? ` · ${meta.brief}` : ''}
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 13, color: '#374151' }}>💡 {a.reason}</div>
+                  <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg)' }}>💡 {a.reason}</div>
                 </div>
               )
             })}

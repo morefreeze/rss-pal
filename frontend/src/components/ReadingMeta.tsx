@@ -10,7 +10,7 @@ export default function ReadingMeta({ wordCount, readingMinutes, className }: Pr
   const formatted = wordCount.toLocaleString('zh-CN')
   const mins = readingMinutes && readingMinutes > 0 ? readingMinutes : 1
   return (
-    <span className={className} style={{ color: '#888', fontSize: 12 }}>
+    <span className={className} style={{ color: 'var(--fg-muted)', fontSize: 12 }}>
       📖 {formatted} 字 · {mins} 分钟
     </span>
   )

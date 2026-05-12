@@ -34,9 +34,9 @@ function AudioCard({ article }: { article: Article }) {
       style={{
         margin: '12px 0 20px',
         padding: 16,
-        border: '1px solid #ddd',
+        border: '1px solid var(--border)',
         borderRadius: 8,
-        background: '#fafafa',
+        background: 'var(--surface)',
         display: 'flex',
         alignItems: 'center',
         gap: 16,
@@ -50,22 +50,18 @@ function AudioCard({ article }: { article: Article }) {
           width: 56,
           height: 56,
           borderRadius: 999,
-          background: '#0066cc',
-          color: '#fff',
-          border: 'none',
-          fontSize: 24,
-          cursor: 'pointer',
           flexShrink: 0,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
+          fontSize: 24,
         }}
       >
-        {isCurrent && p.loading ? <Spinner size={24} color="#fff" /> : playing ? '⏸' : '▶'}
+        {isCurrent && p.loading ? <Spinner size={24} color="var(--accent-fg)" /> : playing ? '⏸' : '▶'}
       </button>
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: 600, fontSize: 15 }}>音频节目</div>
-        <div style={{ fontSize: 13, color: '#666' }}>
+        <div style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
           {fmtMinSec(article.media_duration_seconds || 0) || '时长未知'}
         </div>
       </div>

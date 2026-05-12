@@ -29,8 +29,8 @@ export default function MiniPlayer() {
         left: 0,
         right: 0,
         height: 64,
-        background: '#fff',
-        borderTop: '1px solid #ddd',
+        background: 'var(--surface)',
+        borderTop: '1px solid var(--border)',
         display: 'flex',
         alignItems: 'center',
         gap: 12,
@@ -53,7 +53,7 @@ export default function MiniPlayer() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {p.title}
-          {p.feedTitle && <span style={{ color: '#888', fontWeight: 400 }}> · {p.feedTitle}</span>}
+          {p.feedTitle && <span style={{ color: 'var(--fg-muted)', fontWeight: 400 }}> · {p.feedTitle}</span>}
         </div>
         <input
           type="range"
@@ -84,7 +84,7 @@ export default function MiniPlayer() {
         />
       </div>
 
-      <span style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
         {fmt(sliderValue)} / {fmt(p.duration)}
       </span>
 

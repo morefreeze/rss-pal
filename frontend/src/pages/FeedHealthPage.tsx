@@ -59,7 +59,7 @@ export default function FeedHealthPage() {
           }} />
           {data.archived.length > 0 && (
             <details style={{ marginTop: 24 }}>
-              <summary style={{ cursor: 'pointer', fontSize: 14, color: '#666' }}>
+              <summary style={{ cursor: 'pointer', fontSize: 14, color: 'var(--fg-muted)' }}>
                 已归档 ({data.archived.length})
               </summary>
               <ul>
