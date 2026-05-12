@@ -701,20 +701,7 @@ export default function ArticlePage() {
             <div className="text-sm" style={{ color: 'var(--accent)' }}>{article.feed_title}</div>
           )}
         </div>
-        <div className="flex-between" style={{ alignItems: 'flex-start', gap: 12 }}>
-          <h2 style={{ flex: 1 }}>{article.title}</h2>
-          {article.links_extendable === true && (
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded text-sm whitespace-nowrap"
-              style={{ background: 'var(--accent)', color: 'var(--accent-fg, white)', flexShrink: 0 }}
-              onClick={() => setBatchModalOpen(true)}
-            >
-              批量抓取
-              <span className="ml-1 text-xs opacity-80">（检测到多个可抓取链接）</span>
-            </button>
-          )}
-        </div>
+        <h2>{article.title}</h2>
         <div className="text-muted text-sm mb-2" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           <span>{formatDate(article.published_at)}</span>
           <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
@@ -952,6 +939,31 @@ export default function ArticlePage() {
           </div>
         </div>
       </div>
+      {article.links_extendable === true && (
+        <button
+          type="button"
+          onClick={() => setBatchModalOpen(true)}
+          title="检测到多个可抓取链接"
+          style={{
+            position: 'fixed',
+            right: 24,
+            bottom: 152,
+            padding: '10px 16px',
+            borderRadius: 24,
+            border: 'none',
+            background: 'var(--accent)',
+            color: 'var(--accent-fg)',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+            fontSize: 13,
+            fontWeight: 500,
+            zIndex: 1100,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          📥 批量抓取
+        </button>
+      )}
       <BatchFetchModal
         open={batchModalOpen}
         articleId={article.id}
