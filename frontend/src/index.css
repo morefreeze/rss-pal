@@ -67,6 +67,19 @@ body[data-theme='night'] {
   --code-bg: #262626;
   --link: #7eb6ff;
 }
+body[data-theme='neon'] {
+  --bg: #0a1929;
+  --surface: #122a47;
+  --surface-hover: #1a3a5e;
+  --fg: #d6e7ff;
+  --fg-muted: #8aacd2;
+  --accent: #00d9ff;
+  --accent-soft: rgba(0, 217, 255, 0.22);
+  --accent-fg: #0a1929;
+  --border: #1f3a5c;
+  --code-bg: #102438;
+  --link: #00d9ff;
+}
 
 /* Fallback when no theme attr yet (pre-boot) — Paper.
    Values must mirror body[data-theme='paper'] exactly. */

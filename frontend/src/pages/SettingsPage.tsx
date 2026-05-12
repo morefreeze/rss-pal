@@ -388,6 +388,7 @@ const THEME_META: { id: Theme; label: string; bg: string; fg: string; accent: st
   { id: 'quiet', label: 'Quiet · 静白',  bg: '#fafaf7', fg: '#1f2933', accent: '#3a5a40', border: '#e3e3de' },
   { id: 'pearl', label: 'Pearl · 珍珠',  bg: '#ebebeb', fg: '#262626', accent: '#0066cc', border: '#d4d4d4' },
   { id: 'night', label: 'Night · 夜读',  bg: '#1a1a1a', fg: '#d4d4d4', accent: '#7eb6ff', border: '#333333' },
+  { id: 'neon',  label: 'Neon · 霓虹',   bg: '#0a1929', fg: '#d6e7ff', accent: '#00d9ff', border: '#1f3a5c' },
 ]
 
 function ThemePicker() {
