@@ -61,7 +61,18 @@ function UserMenu({ username, onLogout }: { username: string; onLogout: () => vo
         }}
       >
         <span>👤 {username}</span>
-        <span style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
+        <span
+          aria-hidden="true"
+          style={{
+            fontSize: 14,
+            lineHeight: 1,
+            opacity: 0.85,
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.15s ease',
+          }}
+        >
+          ▾
+        </span>
       </button>
       {open && (
         <div
