@@ -283,8 +283,8 @@ export interface OneoffLinkSetResponse {
   parent_article_id: number
 }
 
-export const createOneoffLinkSet = (url: string): Promise<OneoffLinkSetResponse> =>
-  api.post<OneoffLinkSetResponse>('/feeds/oneoff_link_set', { url }).then(res => res.data)
+export const createOneoffLinkSet = (url: string, expand: boolean): Promise<OneoffLinkSetResponse> =>
+  api.post<OneoffLinkSetResponse>('/feeds/oneoff_link_set', { url, expand }).then(res => res.data)
 
 export const expandLinkSetChild = (articleId: number): Promise<{ article_id: number; state: string }> =>
   api.post(`/articles/${articleId}/expand`).then(res => res.data)
