@@ -52,10 +52,11 @@ type PreviewItem struct {
 
 // PreviewResult is returned by Preview() before the feed is saved
 type PreviewResult struct {
-	FeedTitle string        `json:"feed_title"`
-	FeedType  string        `json:"feed_type"`  // "rss" or "html"
-	ActualURL string        `json:"actual_url"` // may differ from input (RSS found in HTML)
-	Items     []PreviewItem `json:"items"`
+	FeedTitle        string        `json:"feed_title"`
+	FeedType         string        `json:"feed_type"`             // "rss" or "html"
+	ActualURL        string        `json:"actual_url"`            // may differ from input (RSS found in HTML)
+	Items            []PreviewItem `json:"items"`
+	DiscoveredRSSURL string        `json:"discovered_rss_url,omitempty"` // sibling/parent RSS feed found via path-walking
 }
 
 func (f *Fetcher) Fetch(ctx context.Context, feedURL string, etag, lastModified string) (*FetchResult, error) {
@@ -163,39 +164,47 @@ func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, e
 
 	// Try HTML scraping first (no extra requests)
 	htmlResult := f.scrapeHTMLArticles(doc, rawURL)
-	if len(htmlResult.Items) >= 3 {
-		return htmlResult, nil
-	}
 
-	// HTML scraping found too few articles; probe common RSS paths concurrently
-	type rssHit struct {
-		result *PreviewResult
-	}
-	hitCh := make(chan rssHit, 1)
-	probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-
+	// Build probe bases: input URL + every parent path (deepest first) + root domain.
+	// This handles Buttondown-style archive URLs like /hacker-newsletter/archive/793/
+	// where the RSS feed lives at /hacker-newsletter/rss.
 	candidates := []string{"/feed", "/rss", "/rss.xml", "/atom.xml", "/feed.xml", "/index.xml"}
 	baseURL2 := strings.TrimRight(rawURL, "/")
 	probeBases := []string{baseURL2}
 
-	// Also probe from root domain when URL has a sub-path
-	if parsed, err := url.Parse(rawURL); err == nil {
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Host != "" {
+		// Walk up the path, appending each parent (deepest first).
+		pathParts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		for i := len(pathParts) - 1; i >= 0; i-- {
+			prefix := strings.Join(pathParts[:i], "/")
+			if prefix == "" {
+				continue
+			}
+			base := parsed.Scheme + "://" + parsed.Host + "/" + prefix
+			if base != baseURL2 {
+				probeBases = append(probeBases, base)
+			}
+		}
 		rootBase := parsed.Scheme + "://" + parsed.Host
 		if rootBase != baseURL2 {
 			probeBases = append(probeBases, rootBase)
 		}
 	}
 
+	// Always run the probe in the background — even when HTML scrape was
+	// sufficient — so we can surface `discovered_rss_url` for the frontend
+	// to offer "subscribe to whole newsletter" as an alternative to "process one-off".
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	discoveredCh := make(chan string, 1)
 	for _, base := range probeBases {
 		for _, suffix := range candidates {
 			go func(candidate string) {
 				res, err := f.Fetch(probeCtx, candidate, "", "")
 				if err == nil && res != nil && len(res.Feed.Items) > 0 {
-					r := rssToPreview(res.Feed, candidate)
-					r.ActualURL = candidate
 					select {
-					case hitCh <- rssHit{r}:
+					case discoveredCh <- candidate:
 					default:
 					}
 				}
@@ -203,10 +212,26 @@ func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, e
 		}
 	}
 
+	var discovered string
 	select {
-	case hit := <-hitCh:
-		return hit.result, nil
+	case discovered = <-discoveredCh:
 	case <-probeCtx.Done():
+	}
+
+	if len(htmlResult.Items) >= 3 {
+		htmlResult.DiscoveredRSSURL = discovered
+		return htmlResult, nil
+	}
+
+	// HTML scrape was insufficient — prefer the discovered RSS for the actual preview.
+	if discovered != "" {
+		rssRes, err := f.Fetch(ctx, discovered, "", "")
+		if err == nil && rssRes != nil && len(rssRes.Feed.Items) > 0 {
+			out := rssToPreview(rssRes.Feed, discovered)
+			out.ActualURL = discovered
+			out.DiscoveredRSSURL = discovered
+			return out, nil
+		}
 	}
 
 	return htmlResult, nil
