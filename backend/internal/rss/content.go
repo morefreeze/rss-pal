@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"regexp"
@@ -142,6 +143,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
 	StripAvatars(doc)
 	PromoteLazyImages(doc)
+	AbsolutizeURLs(doc.Selection, url)
 
 	// Try to find main content
 	var content string
@@ -516,6 +518,41 @@ func srcNeedsPromotion(src string) bool {
 	return false
 }
 
+// AbsolutizeURLs rewrites relative href/src attributes within selection to
+// absolute URLs against baseURL. Skips empty, data:, javascript:, mailto: and
+// fragment-only values. Called before markdown extraction so the resulting
+// markdown carries fully-qualified URLs (otherwise our image proxy receives a
+// host-less URL and fails to fetch).
+func AbsolutizeURLs(selection *goquery.Selection, baseURL string) {
+	base, err := url.Parse(baseURL)
+	if err != nil || base.Scheme == "" {
+		return
+	}
+	rewrite := func(s *goquery.Selection, attr string) {
+		v := strings.TrimSpace(s.AttrOr(attr, ""))
+		if v == "" || strings.HasPrefix(v, "#") ||
+			strings.HasPrefix(v, "data:") ||
+			strings.HasPrefix(v, "javascript:") ||
+			strings.HasPrefix(v, "mailto:") {
+			return
+		}
+		ref, err := url.Parse(v)
+		if err != nil {
+			return
+		}
+		if ref.IsAbs() {
+			return
+		}
+		s.SetAttr(attr, base.ResolveReference(ref).String())
+	}
+	selection.Find("img").Each(func(_ int, s *goquery.Selection) {
+		rewrite(s, "src")
+	})
+	selection.Find("a").Each(func(_ int, s *goquery.Selection) {
+		rewrite(s, "href")
+	})
+}
+
 type mathPlaceholder struct {
 	key     string
 	latex   string
@@ -581,7 +618,40 @@ func extractTexAnnotations(selection *goquery.Selection) []mathPlaceholder {
 		add(s, latex, display)
 	})
 
+	// Raw-text math containers (e.g. elonlit.com's <div class="math">$$...$$</div>
+	// and <span class="math">\(...\)</span>). Such pages defer MathJax rendering
+	// to runtime JS, so the LaTeX sits as plain text and would otherwise be
+	// mangled by html-to-markdown's backslash-doubling pass.
+	selection.Find(`[class*="math"], [class*="tex2jax_process"]`).Each(func(_ int, s *goquery.Selection) {
+		latex, display, ok := parseRawMathText(s.Text())
+		if !ok {
+			return
+		}
+		add(s, latex, display)
+	})
+
 	return phs
+}
+
+// parseRawMathText returns the LaTeX inside MathJax-style delimiters
+// (`\(...\)`, `\[...\]`, or `$$...$$`) when the trimmed body of an element
+// is exactly such an expression. Conservative on purpose: a container whose
+// body is prose-plus-math falls through untouched so we don't grab whole
+// paragraphs as math.
+func parseRawMathText(body string) (latex string, display bool, ok bool) {
+	body = strings.TrimSpace(body)
+	if len(body) < 4 {
+		return "", false, false
+	}
+	switch {
+	case strings.HasPrefix(body, `\[`) && strings.HasSuffix(body, `\]`):
+		return strings.TrimSpace(body[2 : len(body)-2]), true, true
+	case strings.HasPrefix(body, "$$") && strings.HasSuffix(body, "$$"):
+		return strings.TrimSpace(body[2 : len(body)-2]), true, true
+	case strings.HasPrefix(body, `\(`) && strings.HasSuffix(body, `\)`):
+		return strings.TrimSpace(body[2 : len(body)-2]), false, true
+	}
+	return "", false, false
 }
 
 func reinsertMathPlaceholders(md string, phs []mathPlaceholder) string {

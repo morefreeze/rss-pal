@@ -499,7 +499,7 @@ export default function ArticleListPage() {
                 }}
                 disabled={!!searchQuery}
               />
-              收藏
+              已保存
             </label>
           )}
           {!isClippingMode && !searchQuery && (
@@ -514,16 +514,6 @@ export default function ArticleListPage() {
               title={grouped ? '回到列表视图' : '按主题分组查看'}
             >
               📚 分组
-            </button>
-          )}
-          {!isClippingMode && !searchQuery && !grouped && (
-            <button
-              className="btn-ghost"
-              onClick={() => loadArticles(0, true)}
-              disabled={loading}
-              title="刷新文章列表"
-            >
-              ↻
             </button>
           )}
           {!isClippingMode && !searchQuery && articles.length > 0 && (
