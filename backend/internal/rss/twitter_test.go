@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestIsTwitterStatusURL(t *testing.T) {
@@ -68,6 +69,24 @@ func TestExtractTweet_TextOnly(t *testing.T) {
 	want := "The biggest unlock from LLMs for me has been the [blog post](https://example.com/blog) on building intuition."
 	if cap.TextMarkdown != want {
 		t.Errorf("TextMarkdown mismatch\n got: %q\nwant: %q", cap.TextMarkdown, want)
+	}
+}
+
+func TestExtractTweet_AuthorAndTimestamp(t *testing.T) {
+	data := mustReadFixture(t, "tweet_text_only.html")
+	cap, err := ExtractTweet(data, "9999999999999999999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.Author != "karpathy" {
+		t.Errorf("Author = %q, want %q", cap.Author, "karpathy")
+	}
+	if cap.DisplayName != "Andrej Karpathy" {
+		t.Errorf("DisplayName = %q, want %q", cap.DisplayName, "Andrej Karpathy")
+	}
+	wantTime := time.Date(2026, 4, 21, 9, 0, 0, 0, time.UTC)
+	if !cap.PublishedAt.Equal(wantTime) {
+		t.Errorf("PublishedAt = %v, want %v", cap.PublishedAt, wantTime)
 	}
 }
 
