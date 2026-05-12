@@ -124,6 +124,7 @@ func (h *FeedHandler) Create(c *gin.Context) {
 		IsActive:         true,
 		OwnerID:          getOwnerID(c),
 		FeedType:         feedType,
+		ExpandLinks:      req.ExpandLinks,
 	}
 
 	if err := h.repo.Create(feed); err != nil {
@@ -483,6 +484,88 @@ func extractStatusFromErr(s string) string {
 		return "HTTP " + rest[:3]
 	}
 	return "HTTP 5xx"
+}
+
+// CreateOneoffLinkSet handles POST /api/feeds/oneoff_link_set.
+// Creates a pseudo-feed (feed_type='link_set', is_active=false, expand_links=true)
+// owned by the caller; fetches the URL's content synchronously and inserts a
+// parent article marked is_link_set=true. The worker pass picks up child
+// expansion within seconds.
+func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url required"})
+		return
+	}
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+		req.URL = "https://" + req.URL
+	}
+	if err := validatePublicURL(req.URL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	// 1. Fetch the page's content (Jina fallback included).
+	content, err := h.contentFetcher.FetchContent(ctx, req.URL)
+	if err != nil || content == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "无法抓取该页面内容"})
+		return
+	}
+
+	// 2. Derive a feed title from the page's <title>.
+	title := req.URL
+	if doc, derr := h.contentFetcher.FetchHTMLDocument(ctx, req.URL); derr == nil && doc != nil {
+		if pageTitle := strings.TrimSpace(doc.Find("title").First().Text()); pageTitle != "" {
+			title = pageTitle
+		}
+	}
+
+	// 3. Create the pseudo-feed.
+	ownerID := getOwnerID(c)
+	feed := &model.Feed{
+		URL:              req.URL,
+		Title:            title,
+		FetchIntervalMin: 60,
+		IsActive:         false,
+		OwnerID:          ownerID,
+		FeedType:         "link_set",
+		ExpandLinks:      true,
+	}
+	if err := h.repo.Create(feed); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 4. Set feed to paused status (matches is_active=false).
+	if err := h.repo.UpdateStatus(feed.ID, "paused"); err != nil {
+		log.Printf("oneoff_link_set: set paused status: %v", err)
+	}
+
+	// 5. Insert the parent article.
+	wc, rm := rss.ComputeMetrics(content)
+	parent := &model.Article{
+		FeedID:         feed.ID,
+		Title:          title,
+		URL:            req.URL,
+		Content:        content,
+		WordCount:      wc,
+		ReadingMinutes: rm,
+		IsLinkSet:      true,
+	}
+	if err := h.articleRepo.Create(parent); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存父文章失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"feed_id":           feed.ID,
+		"parent_article_id": parent.ID,
+	})
 }
 
 // validatePublicURL blocks SSRF by rejecting non-HTTP(S) schemes and private/loopback IPs.
