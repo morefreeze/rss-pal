@@ -195,7 +195,7 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 12px', minWidth: 0 }}>
           {loading && (
             <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>加载候选中…</div>
           )}
@@ -206,7 +206,7 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
             <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>未找到可抓取的链接</div>
           )}
           {!loading && !error && candidates && candidates.length > 0 && (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {candidates.map((c, i) => {
                 const disabled = c.already_fetched
                 const checked = selected.has(i)
@@ -215,16 +215,20 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
                     key={i}
                     onClick={(e) => !disabled && handleRowClick(e, i)}
                     style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 10,
+                      display: 'grid',
+                      gridTemplateColumns: '20px minmax(0, 1fr) auto',
+                      alignItems: 'start',
+                      columnGap: 10,
                       padding: '8px 10px',
+                      marginBottom: 2,
                       borderRadius: 4,
                       fontSize: 13,
+                      color: 'var(--fg)',
                       cursor: disabled ? 'not-allowed' : 'pointer',
                       opacity: disabled ? 0.5 : 1,
                       background: checked ? 'var(--surface-hover)' : 'transparent',
                       userSelect: 'none',
+                      boxSizing: 'border-box',
                     }}
                   >
                     <input
@@ -234,31 +238,53 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
                       readOnly
                       onChange={() => {}}
                       onClick={(e) => e.stopPropagation()}
-                      style={{ marginTop: 3, flexShrink: 0 }}
+                      style={{ marginTop: 3 }}
                     />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {c.title}
+                    <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <div style={{
+                        fontWeight: 500,
+                        color: 'var(--fg)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {c.title || '(无标题)'}
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{
+                        fontSize: 11,
+                        color: 'var(--fg-muted)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
                         {hostOf(c.url)}
                       </div>
                       {c.editor_note && (
-                        <div style={{ fontSize: 11, marginTop: 4, fontStyle: 'italic', color: 'var(--fg-muted)' }}>
+                        <div style={{
+                          fontSize: 11,
+                          marginTop: 4,
+                          fontStyle: 'italic',
+                          color: 'var(--fg-muted)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
                           {c.editor_note}
                         </div>
                       )}
                     </div>
-                    {disabled && (
-                      <span style={{
-                        fontSize: 11,
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        background: 'var(--surface-hover)',
-                        color: 'var(--fg-muted)',
-                        flexShrink: 0,
-                      }}>已抓取</span>
-                    )}
+                    <div>
+                      {disabled && (
+                        <span style={{
+                          fontSize: 11,
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          background: 'var(--surface-hover)',
+                          color: 'var(--fg-muted)',
+                          whiteSpace: 'nowrap',
+                        }}>已抓取</span>
+                      )}
+                    </div>
                   </li>
                 )
               })}
