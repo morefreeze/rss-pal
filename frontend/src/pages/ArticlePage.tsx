@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
-  getTemplates, generateSummaryStream, shareArticle, exportMarkdown,
+  getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
@@ -126,6 +126,56 @@ export default function ArticlePage() {
       streamAbortRef.current?.abort()
     }
   }, [id])
+
+  // Auto-expand stub link_set children and poll until ready/failed
+  useEffect(() => {
+    if (!article) return
+    const state = article.processing_state
+    if (state !== 'stub' && state !== 'processing') return
+
+    let cancelled = false
+    let intervalId: ReturnType<typeof setInterval> | null = null
+
+    const startPolling = () => {
+      intervalId = setInterval(async () => {
+        if (cancelled) return
+        try {
+          const data = await getArticle(article.id)
+          if (cancelled) return
+          if (data.article.processing_state === 'ready' || data.article.processing_state === 'failed') {
+            setArticle(data.article)
+            setLinkSetChildren(data.children ?? null)
+            if (intervalId) clearInterval(intervalId)
+          } else {
+            setArticle(data.article)
+          }
+        } catch (e) {
+          console.warn('article poll failed', e)
+        }
+      }, 4000)
+    }
+
+    if (state === 'stub') {
+      expandLinkSetChild(article.id)
+        .then(() => { if (!cancelled) startPolling() })
+        .catch((err) => console.warn('expand failed', err))
+    } else {
+      // state === 'processing' — already queued, just poll
+      startPolling()
+    }
+
+    // 5-minute safety cap
+    const safetyTimer = setTimeout(() => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+    }, 5 * 60 * 1000)
+
+    return () => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+      clearTimeout(safetyTimer)
+    }
+  }, [article?.id, article?.processing_state])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -708,6 +758,35 @@ export default function ArticlePage() {
           </button>
         </div>
       </div>
+
+      {/* Link-set stub/processing status banner */}
+      {(article.processing_state === 'stub' || article.processing_state === 'processing') && (
+        <div className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>
+          正在抓取并生成摘要…
+        </div>
+      )}
+      {article.processing_state === 'failed' && (
+        <div className="p-3 rounded-md mb-4 text-sm flex items-center gap-3" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+          <span style={{ color: 'var(--fg-muted)' }}>抓取失败</span>
+          <button
+            type="button"
+            className="px-2 py-1 text-xs rounded"
+            style={{ border: '1px solid var(--border)', color: 'var(--fg)' }}
+            onClick={async () => {
+              try {
+                await expandLinkSetChild(article.id)
+                const data = await getArticle(article.id)
+                setArticle(data.article)
+                setLinkSetChildren(data.children ?? null)
+              } catch (e) {
+                console.warn('retry failed', e)
+              }
+            }}
+          >
+            重试
+          </button>
+        </div>
+      )}
 
       {/* Summary section — shown before content */}
       <div ref={summaryRef} className="card">
