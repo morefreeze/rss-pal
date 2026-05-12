@@ -209,12 +209,12 @@ tweet + 回复 + 上下文)。挑选规则:
 if statusID, ok := IsTwitterStatusURL(normalizedURL); ok {
     cap, err := twitter.ExtractTweet(req.HTML, statusID)
     if err == nil {
-        title := buildTweetTitle(cap)        // first 60 chars + … or fallback
-        content := buildTweetContent(cap)    // text + images + quote link
-        author := buildTweetAuthor(cap)      // "DisplayName (@handle)"
-        publishedAt := cap.PublishedAt
-        if publishedAt.IsZero() {
-            publishedAt = time.Now()
+        title := buildTweetTitle(cap)
+        content := buildTweetContent(cap)
+        var publishedAt *time.Time
+        if !cap.PublishedAt.IsZero() {
+            t := cap.PublishedAt
+            publishedAt = &t
         }
         // → existing get-or-create saved feed + dedup/overwrite path,
         //   using these fields instead of FetchContentFromReader output
@@ -230,6 +230,8 @@ if statusID, ok := IsTwitterStatusURL(normalizedURL); ok {
 `buildTweetContent` 模板:
 
 ```
+> @{handle} ({displayName}) · {YYYY-MM-DD}
+
 {textMarkdown}
 
 ![]({image1})
@@ -242,6 +244,10 @@ if statusID, ok := IsTwitterStatusURL(normalizedURL); ok {
 ```
 
 空白处理:
+- byline 行字段缺失时退化:
+  - 仅 handle:`> @{handle}`
+  - 没 displayName:`> @{handle} · {date}`
+  - 没 date(`PublishedAt` 零值):`> @{handle} ({displayName})`
 - 任一区块为空就整段跳过(包括前后空行)
 - 仅当至少一张图片时才出现图片区块
 - 仅当 `quoteURL != ""` 时才出现引用行
@@ -249,13 +255,7 @@ if statusID, ok := IsTwitterStatusURL(normalizedURL); ok {
 `buildTweetTitle`:
 - `textMarkdown != ""` → 取前 60 个 rune,如果实际长度更长追加 `…`,把
   换行替换成空格
-- 否则 → `"@" + author + " 的推文"`
-
-`buildTweetAuthor`:
-- `displayName != "" && author != ""` → `"DisplayName (@handle)"`
-- 只有 author → `"@handle"`
-- 都没有 → `"Twitter"`(理论上不会发生,因为 statusID 是从 URL 拿的,
-  handle 也在同一个 URL path)
+- 否则 → `"@" + handle + " 的推文"`
 
 ## Article 字段映射
 
