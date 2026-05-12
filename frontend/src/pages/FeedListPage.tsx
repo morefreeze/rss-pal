@@ -229,6 +229,18 @@ export default function FeedListPage() {
     }
   }
 
+  const handleCardClick = (feedId: number) => {
+    try { sessionStorage.setItem('selectedFeed', JSON.stringify(feedId)) } catch {}
+    navigate('/articles')
+  }
+
+  const handleCardKeyDown = (e: React.KeyboardEvent, feedId: number) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleCardClick(feedId)
+    }
+  }
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return '从未'
     return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -378,7 +390,17 @@ export default function FeedListPage() {
         <div className="card text-muted">暂无订阅，从上方添加你的第一个订阅源</div>
       ) : (
         feeds.map(feed => (
-          <div key={feed.id} className="card">
+          <div
+            key={feed.id}
+            className="card"
+            role="button"
+            tabIndex={0}
+            onClick={() => handleCardClick(feed.id)}
+            onKeyDown={(e) => handleCardKeyDown(e, feed.id)}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--surface-hover)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '' }}
+            style={{ cursor: 'pointer' }}
+          >
             <div className="flex-between">
               <div>
                 <div className="text-bold" style={!feed.is_active ? { color: 'var(--fg-muted)' } : {}}>
@@ -402,19 +424,22 @@ export default function FeedListPage() {
                   <button
                     className="secondary"
                     disabled={fetchingId === feed.id}
-                    onClick={() => handleFetch(feed.id)}
+                    onClick={(e) => { e.stopPropagation(); handleFetch(feed.id) }}
                   >
                     {fetchingId === feed.id ? '抓取中...' : '刷新'}
                   </button>
                 ) : null}
                 <button
                   className="secondary"
-                  onClick={() => handleToggleActive(feed)}
+                  onClick={(e) => { e.stopPropagation(); handleToggleActive(feed) }}
                   style={!feed.is_active ? { color: '#92400e', background: '#fef9c3' } : {}}
                 >
                   {feed.is_active ? '暂停' : '继续'}
                 </button>
-                <button className="secondary" onClick={() => handleDelete(feed.id)}>删除</button>
+                <button
+                  className="secondary"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(feed.id) }}
+                >删除</button>
               </div>
             </div>
           </div>
