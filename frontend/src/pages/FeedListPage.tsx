@@ -289,49 +289,6 @@ export default function FeedListPage() {
           </button>
         </form>
 
-        {/* Popular feeds — grouped + collapsible */}
-        <div className="mb-2">
-          <div className="text-sm text-muted mb-1">热门推荐：</div>
-          {POPULAR_FEEDS.map(group => {
-            const folded = foldedGroups[group.category] === true
-            return (
-              <div key={group.category} style={{ marginBottom: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => setFoldedGroups(s => ({ ...s, [group.category]: !folded }))}
-                  className="btn-text btn-sm"
-                  style={{
-                    padding: '2px 0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
-                >
-                  <span>{group.emoji}</span>
-                  <span>{group.category}</span>
-                  <span style={{ fontSize: 10 }}>{folded ? '▸' : '▾'}</span>
-                </button>
-                {!folded && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
-                    {group.items.map(f => (
-                      <button
-                        key={f.url}
-                        type="button"
-                        className="secondary"
-                        style={{ fontSize: 12, padding: '3px 10px' }}
-                        title={f.desc}
-                        onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
-                      >
-                        {f.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-
         {/* Preview error */}
         {previewError && (
           <div style={{ color: '#dc2626', fontSize: 14, marginBottom: 8 }}>{previewError}</div>
@@ -445,6 +402,49 @@ export default function FeedListPage() {
             </div>
           </div>
         )}
+
+        {/* Popular feeds — grouped + collapsible */}
+        <div className="mb-2">
+          <div className="text-sm text-muted mb-1">热门推荐：</div>
+          {POPULAR_FEEDS.map(group => {
+            const folded = foldedGroups[group.category] === true
+            return (
+              <div key={group.category} style={{ marginBottom: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setFoldedGroups(s => ({ ...s, [group.category]: !folded }))}
+                  className="btn-text btn-sm"
+                  style={{
+                    padding: '2px 0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <span>{group.emoji}</span>
+                  <span>{group.category}</span>
+                  <span style={{ fontSize: 10 }}>{folded ? '▸' : '▾'}</span>
+                </button>
+                {!folded && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                    {group.items.map(f => (
+                      <button
+                        key={f.url}
+                        type="button"
+                        className="secondary"
+                        style={{ fontSize: 12, padding: '3px 10px' }}
+                        title={f.desc}
+                        onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
+                      >
+                        {f.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {/* Existing feeds list */}

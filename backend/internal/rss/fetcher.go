@@ -158,6 +158,7 @@ func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, e
 		if err == nil && rssResult != nil && len(rssResult.Feed.Items) > 0 {
 			result := rssToPreview(rssResult.Feed, discoveredFeedURL)
 			result.ActualURL = discoveredFeedURL
+			result.DiscoveredRSSURL = discoveredFeedURL
 			return result, nil
 		}
 	}
