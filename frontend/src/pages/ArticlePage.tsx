@@ -197,7 +197,9 @@ export default function ArticlePage() {
       if (activeReadSecondsRef.current < minSeconds) return
 
       const scrollPosition = Math.max(maxScrollRef.current, 0.9)
-      setProgress(prev => prev ? { ...prev, scroll_position: scrollPosition, is_completed: true } : prev)
+      setProgress(prev => prev
+        ? { ...prev, scroll_position: scrollPosition, is_completed: true }
+        : { id: 0, article_id: article.id, scroll_position: scrollPosition, last_read_at: new Date().toISOString(), is_completed: true })
       pendingProgressRef.current = { scrollPosition, isCompleted: true }
       try {
         const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
@@ -228,11 +230,9 @@ export default function ArticlePage() {
     const isCompleted = scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds
     const wasCompleted = progress?.is_completed
 
-    setProgress(prev => prev ? {
-      ...prev,
-      scroll_position: scrollPosition,
-      is_completed: isCompleted,
-    } : prev)
+    setProgress(prev => prev
+      ? { ...prev, scroll_position: scrollPosition, is_completed: isCompleted }
+      : { id: 0, article_id: article.id, scroll_position: scrollPosition, last_read_at: new Date().toISOString(), is_completed: isCompleted })
 
     pendingProgressRef.current = { scrollPosition, isCompleted }
 
