@@ -2,6 +2,10 @@
 *, *::before, *::after { box-sizing: border-box; }
 * { margin: 0; padding: 0; }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 /* === Tokens === */
 :root {
   --font-sans: Inter, "Source Han Sans SC", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -9,6 +13,7 @@
   --font-mono: Menlo, Monaco, "Courier New", monospace;
   --radius: 6px;
   --content-max: 760px;
+  --bottom-chrome: 16px;
 
   font-family: var(--font-sans);
   font-weight: 400;
@@ -93,15 +98,21 @@ body:not([data-theme]) {
 /* === Element defaults === */
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--fg);
   transition: background-color 0.15s ease, color 0.15s ease;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
 }
 
 #root {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
+}
+
+main {
+  padding-bottom: var(--bottom-chrome);
 }
 
 .content {
@@ -137,6 +148,8 @@ input:focus, textarea:focus {
 
 /* === Buttons === */
 button {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   cursor: pointer;
   padding: 0 14px;
   height: 32px;
