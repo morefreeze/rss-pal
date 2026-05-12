@@ -104,6 +104,8 @@ func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, art
 	defer cycleMu.Unlock()
 
 	fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
+	processLinkSetParents(ctx, feedRepo, articleRepo, prefRepo)
+	processQueuedChildren(ctx, articleRepo, contentFetcher)
 	refetchShortContent(ctx, articleRepo, contentFetcher, summarizer)
 	if transcriptFetcher != nil {
 		backfillTranscripts(ctx, articleRepo, transcriptFetcher)
@@ -362,6 +364,7 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				URL:         item.Link,
 				Content:     content,
 				PublishedAt: parsePublishedTime(item.PublishedParsed, item.UpdatedParsed),
+				IsLinkSet:   feed.ExpandLinks,
 			}
 			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 			if mediaInfo != nil {
@@ -435,6 +438,7 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 				URL:         link,
 				Content:     content,
 				PublishedAt: pubAt,
+				IsLinkSet:   feed.ExpandLinks,
 			}
 			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 			if err := articleRepo.Create(article); err != nil {
