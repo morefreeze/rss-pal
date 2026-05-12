@@ -3,6 +3,7 @@ package rss
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -107,6 +108,22 @@ func TestExtractTweet_Images(t *testing.T) {
 		if cap.ImageURLs[i] != want[i] {
 			t.Errorf("ImageURLs[%d] = %q, want %q", i, cap.ImageURLs[i], want[i])
 		}
+	}
+}
+
+func TestExtractTweet_QuoteURL(t *testing.T) {
+	data := mustReadFixture(t, "tweet_with_quote.html")
+	cap, err := ExtractTweet(data, "2053872850101285137")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://x.com/someone_else/status/3333333333333333333"
+	if cap.QuoteURL != want {
+		t.Errorf("QuoteURL = %q, want %q", cap.QuoteURL, want)
+	}
+	// The quoted tweet's text must NOT leak into our TextMarkdown.
+	if strings.Contains(cap.TextMarkdown, "quoted tweet body") {
+		t.Errorf("quoted tweet body leaked into TextMarkdown: %q", cap.TextMarkdown)
 	}
 }
 
