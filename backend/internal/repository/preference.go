@@ -399,11 +399,15 @@ func (r *PreferenceRepository) GetUserSignalHosts(userID int) (*model.HostSignal
 	defer crows.Close()
 	for crows.Next() {
 		var rawURL string
-		if err := crows.Scan(&rawURL); err == nil {
-			if h := hostOfURL(rawURL); h != "" {
-				out.Completed[h] = struct{}{}
-			}
+		if err := crows.Scan(&rawURL); err != nil {
+			return nil, err
 		}
+		if h := hostOfURL(rawURL); h != "" {
+			out.Completed[h] = struct{}{}
+		}
+	}
+	if err := crows.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
