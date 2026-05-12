@@ -559,8 +559,20 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 
 .reading-article .markdown-body img { max-width: 100%; height: auto; border-radius: 4px; }
 
-/* Hide app chrome (header) when reading mode is active. */
-body.reading-mode-active #root > div > header { display: none; }
+/* === Reading mode chrome === */
+/* Header + bottom tab slide off when chrome hidden. */
+#root > div > header,
+.mobile-tab-bar {
+  transition: transform 0.22s ease;
+}
+body.reading-mode-active:not(.reading-chrome-visible) #root > div > header {
+  transform: translateY(-110%);
+  pointer-events: none;
+}
+body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
+  transform: translateY(calc(100% + env(safe-area-inset-bottom)));
+  pointer-events: none;
+}
 
 /* === Typing caret === */
 .typing-caret {
