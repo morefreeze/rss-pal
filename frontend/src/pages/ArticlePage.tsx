@@ -8,6 +8,7 @@ import {
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
+import { LinkSetChildren } from '../components/LinkSetChildren'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
 import ReadingLayout from '../components/ReadingLayout'
@@ -73,6 +74,9 @@ export default function ArticlePage() {
   // Bookmarklet state
   const [fromBookmarklet, setFromBookmarklet] = useState(false)
 
+  // LinkSet children
+  const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(null)
+
   const loadArticle = async () => {
     if (!id) return
     setLoading(true)
@@ -83,6 +87,7 @@ export default function ArticlePage() {
       setProgress(data.progress)
       maxScrollRef.current = data.progress?.scroll_position ?? 0
       setFromBookmarklet(Boolean(data.from_bookmarklet))
+      setLinkSetChildren(data.children ?? null)
       if (data.signals) {
         setLiked((data.signals['like'] ?? 0) > 0)
         setDisliked((data.signals['dislike'] ?? 0) > 0)
@@ -837,6 +842,13 @@ export default function ArticlePage() {
           </div>
         </div>
       </div>
+      {article?.is_link_set && (
+        <LinkSetChildren
+          parentId={article.id}
+          children={linkSetChildren ?? []}
+          onChildrenUpdated={(updated) => setLinkSetChildren(updated)}
+        />
+      )}
       {/* Bottom nav so readers don't have to scroll back up to leave the article. */}
       <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between' }}>
         <button
