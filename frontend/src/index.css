@@ -790,12 +790,31 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
 
 @media (max-width: 1024px) {
   .desktop-nav { display: none !important; }
-  /* mobile-menu-btn intentionally remains hidden: we use MobileTabBar */
   #root > div > header { margin-bottom: 12px; }
+
+  /* Inputs: 16px font prevents iOS Safari auto-zoom on focus. */
+  input, textarea, select { font-size: 16px; }
+
+  /* Generic toolbar reflow: anything with .flex-between or inline-style
+     flex toolbars wraps instead of overflowing. */
+  .flex-between { flex-wrap: wrap; gap: 8px; }
+
+  /* Settings-style tabs were already overflow-x:auto; reinforce that here
+     so unrelated horizontal tab strips inherit the same behavior. */
+  .settings-tabs { overflow-x: auto; }
 }
 
 @media (max-width: 640px) {
   #root { padding: 12px; }
   .card { padding: 12px; }
+
+  /* Touch targets: bump non-chip buttons to 44px. */
   button:not(.btn-sm):not(.settings-tab):not(.theme-swatch):not(.tag-chip-remove):not(.tag-add-btn):not(.reading-summary-toggle):not(.rec-feedback-btn):not(.rec-panel-header):not(.saved-row):not(.tag-suggest-dropdown button):not(.saved-mode-toggle button):not(.mobile-tab-link) { min-height: 44px; }
+
+  /* Single-column reflow for auto-fit grids that have explicit minmax > 1fr. */
+  .theme-grid { grid-template-columns: 1fr 1fr; }
+
+  /* Reading article: tighter horizontal padding. */
+  .reading-article { padding: 8px 16px 96px; }
+  .reading-toolbar { padding: 12px 16px; }
 }
