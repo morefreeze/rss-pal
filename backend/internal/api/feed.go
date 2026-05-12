@@ -490,8 +490,7 @@ func extractStatusFromErr(s string) string {
 //
 // When expand=true: creates a pseudo-feed (feed_type='link_set', is_active=false,
 // expand_links=true) owned by the caller; fetches the URL's content synchronously
-// and inserts a parent article marked is_link_set=true. The worker pass picks up
-// child expansion within seconds.
+// and inserts a parent article. The worker pass detects links_extendable within seconds.
 //
 // When expand=false: saves the URL as a single article into the user's "⭐ 网摘"
 // feed (GetOrCreateSavedFeed), with no link expansion.
@@ -565,7 +564,6 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 			Content:        content,
 			WordCount:      wc,
 			ReadingMinutes: rm,
-			IsLinkSet:      true,
 		}
 		feedID = feed.ID
 	} else {
@@ -586,7 +584,6 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 			Content:        content,
 			WordCount:      wc,
 			ReadingMinutes: rm,
-			IsLinkSet:      false,
 		}
 		feedID = saved.ID
 	}

@@ -760,11 +760,25 @@ export default function ArticlePage() {
       </div>
 
       {/* Link-set stub/processing status banner */}
-      {(article.processing_state === 'stub' || article.processing_state === 'processing') && (
-        <div className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>
-          正在抓取并生成摘要…
-        </div>
-      )}
+      {(() => {
+        const state = article.processing_state
+        const hasContent = !!article.content && article.content.length > 0
+        if (state === 'stub' || (state === 'processing' && !hasContent)) {
+          return (
+            <div className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>
+              正在抓取内容…
+            </div>
+          )
+        }
+        if (state === 'processing' && hasContent) {
+          return (
+            <div className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>
+              正在生成摘要…
+            </div>
+          )
+        }
+        return null
+      })()}
       {article.processing_state === 'failed' && (
         <div className="p-3 rounded-md mb-4 text-sm flex items-center gap-3" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
           <span style={{ color: 'var(--fg-muted)' }}>抓取失败</span>

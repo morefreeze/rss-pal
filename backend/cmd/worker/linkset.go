@@ -7,121 +7,56 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
-	"github.com/bytedance/rss-pal/internal/service"
 )
 
 const (
 	maxLinkSetParentsPerCycle  = 10
 	maxLinkSetChildrenPerCycle = 30
-	linkSetTopK                = 5
-	linkSetSmallIssueThreshold = 8
+	linkSetMinCandidates       = 3
 )
 
-// processLinkSetParents finds parent articles (is_link_set=true) that haven't
-// been expanded yet, extracts their candidate links, pre-ranks against the
-// owning user's signals, and inserts child rows. Top-K go in with
-// processing_state='processing' (eager); the rest as 'stub' (on-demand).
-func processLinkSetParents(
+// detectLinkSetCandidates inspects articles whose links_extendable is NULL
+// (not yet checked), fetches their raw HTML, runs ExtractCandidates, and
+// flips the flag: true if count >= linkSetMinCandidates, false otherwise.
+// It does NOT create any child articles — that's deferred to the user's
+// explicit batch_fetch action.
+func detectLinkSetCandidates(
 	ctx context.Context,
-	feedRepo *repository.FeedRepository,
 	articleRepo *repository.ArticleRepository,
-	prefRepo *repository.PreferenceRepository,
 	contentFetcher *rss.ContentFetcher,
 ) {
-	parents, err := articleRepo.FindParentsNeedingExpansion(maxLinkSetParentsPerCycle)
+	arts, err := articleRepo.FindArticlesNeedingLinkCheck(maxLinkSetParentsPerCycle)
 	if err != nil {
-		log.Printf("link_set: find parents: %v", err)
+		log.Printf("link_set: find articles needing check: %v", err)
 		return
 	}
-	if len(parents) == 0 {
+	if len(arts) == 0 {
 		return
 	}
-	log.Printf("link_set: expanding %d parents", len(parents))
+	log.Printf("link_set: checking %d articles for extractable links", len(arts))
 
-	for _, parent := range parents {
-		fetchCtx, fetchCancel := context.WithTimeout(ctx, 30*time.Second)
-		doc, err := contentFetcher.FetchHTMLDocument(fetchCtx, parent.URL)
-		fetchCancel()
+	for _, a := range arts {
+		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		doc, err := contentFetcher.FetchHTMLDocument(fetchCtx, a.URL)
+		cancel()
 		if err != nil || doc == nil {
-			log.Printf("link_set: parent %d fetch raw html: %v", parent.ID, err)
+			log.Printf("link_set: %d fetch html: %v", a.ID, err)
+			// Mark as checked-no so we don't keep retrying.
+			if e := articleRepo.SetLinksExtendable(a.ID, false); e != nil {
+				log.Printf("link_set: mark false on fetch fail %d: %v", a.ID, e)
+			}
 			continue
 		}
-		rawHTML, err := doc.Html()
-		if err != nil || rawHTML == "" {
-			log.Printf("link_set: parent %d empty raw html", parent.ID)
+		rawHTML, _ := doc.Html()
+		cands := rss.ExtractCandidates(rawHTML, a.URL)
+		extendable := len(cands) >= linkSetMinCandidates
+		if err := articleRepo.SetLinksExtendable(a.ID, extendable); err != nil {
+			log.Printf("link_set: set extendable %d: %v", a.ID, err)
 			continue
 		}
-		cands := rss.ExtractCandidates(rawHTML, parent.URL)
-		if len(cands) == 0 {
-			log.Printf("link_set: parent %d yielded no candidates", parent.ID)
-			continue
-		}
-
-		// Look up owning user for ranking signals.
-		feed, ferr := feedRepo.GetByID(parent.FeedID)
-		var topics []model.InterestTopic
-		var hosts *model.HostSignalSet
-		if ferr != nil {
-			log.Printf("link_set: feed %d for parent %d: %v", parent.FeedID, parent.ID, ferr)
-		} else if feed.OwnerID != nil {
-			if t, terr := prefRepo.GetTopByUser(*feed.OwnerID, 10); terr == nil {
-				topics = t
-			}
-			if h, herr := prefRepo.GetUserSignalHosts(*feed.OwnerID); herr == nil {
-				hosts = h
-			}
-		}
-		if hosts == nil {
-			hosts = &model.HostSignalSet{}
-		}
-		scores := service.PrerankCandidates(cands, topics, hosts)
-
-		// Sort indices by score descending, document order tie-break.
-		order := make([]int, len(cands))
-		for i := range order {
-			order[i] = i
-		}
-		for i := 1; i < len(order); i++ {
-			for j := i; j > 0 && scores[order[j]] > scores[order[j-1]]; j-- {
-				order[j], order[j-1] = order[j-1], order[j]
-			}
-		}
-
-		topKLimit := linkSetTopK
-		if len(cands) <= linkSetSmallIssueThreshold {
-			topKLimit = len(cands)
-		}
-		topKSet := make(map[int]struct{})
-		for i := 0; i < topKLimit && i < len(order); i++ {
-			topKSet[order[i]] = struct{}{}
-		}
-
-		children := make([]repository.LinkSetChildInput, 0, len(cands))
-		for i, c := range cands {
-			state := "stub"
-			if _, ok := topKSet[i]; ok {
-				state = "processing"
-			}
-			children = append(children, repository.LinkSetChildInput{
-				FeedID:          parent.FeedID,
-				ParentArticleID: parent.ID,
-				Title:           c.Title,
-				URL:             c.URL,
-				EditorNote:      c.EditorNote,
-				PrerankScore:    scores[i],
-				ProcessingState: state,
-				PublishedAt:     parent.PublishedAt,
-			})
-		}
-		n, err := articleRepo.InsertLinkSetChildren(children)
-		if err != nil {
-			log.Printf("link_set: insert children for parent %d: %v", parent.ID, err)
-			continue
-		}
-		log.Printf("link_set: parent %d → %d children inserted (Top-K = %d, total candidates = %d)", parent.ID, n, topKLimit, len(cands))
+		log.Printf("link_set: %d → %d candidates → extendable=%v", a.ID, len(cands), extendable)
 	}
 }
 
