@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
-import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, Feed, FeedPreview } from '../api/client'
+import { Link, useNavigate } from 'react-router-dom'
+import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
 
 const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; url: string; desc: string }[] }[] = [
@@ -63,6 +63,7 @@ const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; u
 ]
 
 export default function FeedListPage() {
+  const navigate = useNavigate()
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [newUrl, setNewUrl] = useState('')
   const [loading, setLoading] = useState(true)
@@ -75,6 +76,7 @@ export default function FeedListPage() {
   const [addSuccess, setAddSuccess] = useState('')
   const [importing, setImporting] = useState(false)
   const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
+  const [expandLinks, setExpandLinks] = useState(false)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { loadFeeds() }, [])
@@ -104,6 +106,7 @@ export default function FeedListPage() {
     setPreviewStatus('获取中...')
     setPreview(null)
     setPreviewError('')
+    setExpandLinks(false)
     // After 4s show "probing RSS" hint so user knows it's still working
     if (previewTimer.current) clearTimeout(previewTimer.current)
     previewTimer.current = setTimeout(() => setPreviewStatus('正在探测 RSS 地址...'), 4000)
@@ -130,9 +133,10 @@ export default function FeedListPage() {
     setAddSuccess('')
     try {
       const actualUrl = preview.actual_url || newUrl.trim()
-      const feed = await addFeed(actualUrl, preview.feed_type)
+      const feed = await addFeed(actualUrl, preview.feed_type, expandLinks)
       setNewUrl('')
       setPreview(null)
+      setExpandLinks(false)
       await loadFeeds()
       // Auto-fetch after adding
       try {
@@ -153,6 +157,7 @@ export default function FeedListPage() {
   const handleCancelPreview = () => {
     setPreview(null)
     setPreviewError('')
+    setExpandLinks(false)
   }
 
   const handleToggleActive = async (feed: Feed) => {
@@ -345,6 +350,14 @@ export default function FeedListPage() {
                   )}
                   · {(preview.items ?? []).length} 篇文章
                 </div>
+                <label className="flex items-center gap-2 text-sm mt-3" style={{ color: 'var(--fg-muted)' }}>
+                  <input
+                    type="checkbox"
+                    checked={expandLinks}
+                    onChange={(e) => setExpandLinks(e.target.checked)}
+                  />
+                  <span>这是 link_set（爆开其中的链接）</span>
+                </label>
               </div>
               <div className="flex gap-1">
                 <button onClick={handleConfirmAdd} disabled={adding}>
@@ -353,6 +366,62 @@ export default function FeedListPage() {
                 <button className="secondary" onClick={handleCancelPreview}>取消</button>
               </div>
             </div>
+
+            {/* Discovery panel: shown when discovered_rss_url differs from pasted URL */}
+            {preview.discovered_rss_url && preview.discovered_rss_url !== newUrl.trim() && (
+              <div
+                className="rounded-md p-3 mb-3 text-sm"
+                style={{
+                  border: '1px solid var(--accent)',
+                  background: 'var(--accent-subtle, rgba(0,128,255,0.05))',
+                }}
+              >
+                <div className="mb-2">
+                  发现这个站点的 RSS：
+                  <code
+                    className="px-1 py-0.5 rounded ml-1 text-xs"
+                    style={{ background: 'var(--bg-elevated)' }}
+                  >
+                    {preview.discovered_rss_url}
+                  </code>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded text-xs"
+                    style={{ background: 'var(--accent)', color: 'var(--accent-fg, white)' }}
+                    onClick={async () => {
+                      const discoveredUrl = preview.discovered_rss_url!
+                      setNewUrl(discoveredUrl)
+                      await doPreview(discoveredUrl)
+                    }}
+                  >
+                    订阅整个 newsletter
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded text-xs"
+                    style={{
+                      background: 'var(--bg-elevated)',
+                      color: 'var(--fg)',
+                      border: '1px solid var(--border)',
+                    }}
+                    onClick={async () => {
+                      try {
+                        const result = await createOneoffLinkSet(newUrl.trim())
+                        navigate(`/articles/${result.parent_article_id}`)
+                      } catch (err) {
+                        console.warn('oneoff link_set failed', err)
+                        toast.error('创建 link_set 失败，请重试')
+                      }
+                    }}
+                  >
+                    只处理这一期
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div>
               {(preview.items ?? []).length === 0 ? (
                 <div className="text-muted text-sm">
