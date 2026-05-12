@@ -29,6 +29,7 @@ func processLinkSetParents(
 	feedRepo *repository.FeedRepository,
 	articleRepo *repository.ArticleRepository,
 	prefRepo *repository.PreferenceRepository,
+	contentFetcher *rss.ContentFetcher,
 ) {
 	parents, err := articleRepo.FindParentsNeedingExpansion(maxLinkSetParentsPerCycle)
 	if err != nil {
@@ -41,11 +42,19 @@ func processLinkSetParents(
 	log.Printf("link_set: expanding %d parents", len(parents))
 
 	for _, parent := range parents {
-		if parent.Content == "" {
-			log.Printf("link_set: parent %d (%s) has empty content, skipping", parent.ID, parent.URL)
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 30*time.Second)
+		doc, err := contentFetcher.FetchHTMLDocument(fetchCtx, parent.URL)
+		fetchCancel()
+		if err != nil || doc == nil {
+			log.Printf("link_set: parent %d fetch raw html: %v", parent.ID, err)
 			continue
 		}
-		cands := rss.ExtractCandidates(parent.Content, parent.URL)
+		rawHTML, err := doc.Html()
+		if err != nil || rawHTML == "" {
+			log.Printf("link_set: parent %d empty raw html", parent.ID)
+			continue
+		}
+		cands := rss.ExtractCandidates(rawHTML, parent.URL)
 		if len(cands) == 0 {
 			log.Printf("link_set: parent %d yielded no candidates", parent.ID)
 			continue
