@@ -1,6 +1,10 @@
 package rss
 
-import "testing"
+import (
+	"errors"
+	"os"
+	"testing"
+)
 
 func TestIsTwitterStatusURL(t *testing.T) {
 	tests := []struct {
@@ -34,4 +38,32 @@ func TestIsTwitterStatusURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractTweet_FocalSelection(t *testing.T) {
+	data := mustReadFixture(t, "tweet_text_only.html")
+	cap, err := ExtractTweet(data, "9999999999999999999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap == nil {
+		t.Fatal("got nil capture")
+	}
+}
+
+func TestExtractTweet_FocalNotInHTML(t *testing.T) {
+	data := mustReadFixture(t, "tweet_text_only.html")
+	_, err := ExtractTweet(data, "1111111111111111111")
+	if !errors.Is(err, ErrTweetNotFound) {
+		t.Fatalf("want ErrTweetNotFound, got %v", err)
+	}
+}
+
+func mustReadFixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/twitter/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
