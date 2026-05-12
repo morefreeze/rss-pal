@@ -92,6 +92,7 @@ export interface Feed {
   created_at: string
   article_count: number
   unread_count: number
+  expand_links: boolean
 }
 
 export interface Article {
@@ -111,6 +112,33 @@ export interface Article {
   media_url?: string
   media_type?: string
   media_duration_seconds?: number
+  // link_set fields
+  is_link_set?: boolean
+  links_extendable?: boolean | null  // tri-state: null = unchecked, true/false = checked
+  parent_article_id?: number | null
+  processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
+  prerank_score?: number | null
+  editor_note?: string
+}
+
+export interface CandidateView {
+  title: string
+  url: string
+  editor_note?: string
+  already_fetched: boolean
+}
+
+export async function getArticleCandidates(articleId: number): Promise<CandidateView[]> {
+  const { data } = await api.get<{ candidates: CandidateView[] }>(`/articles/${articleId}/candidates`)
+  return data.candidates ?? []
+}
+
+export async function batchFetchCandidates(
+  articleId: number,
+  candidates: Array<{ title: string; url: string; editor_note?: string }>
+): Promise<{ inserted: number }> {
+  const { data } = await api.post(`/articles/${articleId}/batch_fetch`, { candidates })
+  return data
 }
 
 export interface ReadingProgress {
@@ -198,6 +226,15 @@ export interface FeedPreview {
   feed_type: 'rss' | 'html'
   actual_url: string
   items: FeedPreviewItem[]
+  discovered_rss_url?: string
+}
+
+export interface ArticleDetailResponse {
+  article: Article
+  progress?: any
+  signals?: any
+  from_bookmarklet?: boolean
+  children?: Article[]
 }
 
 // Feeds
@@ -207,8 +244,8 @@ export const getFeeds = () =>
 export const previewFeed = (url: string) =>
   api.post<FeedPreview>('/feeds/preview', { url }).then(res => res.data)
 
-export const addFeed = (url: string, feedType?: string) =>
-  api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss' }).then(res => res.data)
+export const addFeed = (url: string, feedType?: string, expandLinks: boolean = false) =>
+  api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss', expand_links: expandLinks }).then(res => res.data)
 
 export const deleteFeed = (id: number) =>
   api.delete(`/feeds/${id}`)
@@ -256,10 +293,25 @@ export const markAllRead = (filters?: { feedId?: number | null; unread?: boolean
   }).then(res => res.data)
 
 export const getArticle = (id: number) =>
-  api.get<{ article: Article; progress: ReadingProgress | null; signals: Record<string, number> | null; from_bookmarklet?: boolean }>(`/articles/${id}`).then(res => res.data)
+  api.get<ArticleDetailResponse>(`/articles/${id}`).then(res => res.data)
 
 export const getRecommended = (limit?: number) =>
   api.get<Article[]>('/articles/recommended', { params: { limit } }).then(res => res.data)
+
+// link_set API methods
+export interface OneoffLinkSetResponse {
+  feed_id: number
+  parent_article_id: number
+}
+
+export const createOneoffLinkSet = (url: string, expand: boolean): Promise<OneoffLinkSetResponse> =>
+  api.post<OneoffLinkSetResponse>('/feeds/oneoff_link_set', { url, expand }).then(res => res.data)
+
+export const expandLinkSetChild = (articleId: number): Promise<{ article_id: number; state: string }> =>
+  api.post(`/articles/${articleId}/expand`).then(res => res.data)
+
+export const getLinkSetRecommendations = (days: number = 7, limit: number = 20): Promise<Article[]> =>
+  api.get<Article[]>('/articles/recommended/link_set', { params: { days, limit } }).then(res => res.data)
 
 export const generateSummary = (id: number) =>
   api.post<{ summary_brief: string; summary_detailed: string }>(`/articles/${id}/summary`).then(res => res.data)

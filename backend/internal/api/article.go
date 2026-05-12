@@ -1,26 +1,30 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 type ArticleHandler struct {
-	articleRepo  *repository.ArticleRepository
-	progressRepo *repository.ProgressRepository
-	prefRepo     *repository.PreferenceRepository
-	summarizer   *service.SummarizerService
-	templateRepo *repository.TemplateRepository
-	cfg          *config.Config
+	articleRepo    *repository.ArticleRepository
+	progressRepo   *repository.ProgressRepository
+	prefRepo       *repository.PreferenceRepository
+	summarizer     *service.SummarizerService
+	templateRepo   *repository.TemplateRepository
+	cfg            *config.Config
+	contentFetcher *rss.ContentFetcher
 }
 
 func (h *ArticleHandler) GetUnreadCount(c *gin.Context) {
@@ -49,12 +53,13 @@ func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "已全部标记为已读"})
 }
 
-func NewArticleHandler(articleRepo *repository.ArticleRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, summarizer *service.SummarizerService) *ArticleHandler {
+func NewArticleHandler(articleRepo *repository.ArticleRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, summarizer *service.SummarizerService, contentFetcher *rss.ContentFetcher) *ArticleHandler {
 	return &ArticleHandler{
-		articleRepo:  articleRepo,
-		progressRepo: progressRepo,
-		prefRepo:     prefRepo,
-		summarizer:   summarizer,
+		articleRepo:    articleRepo,
+		progressRepo:   progressRepo,
+		prefRepo:       prefRepo,
+		summarizer:     summarizer,
+		contentFetcher: contentFetcher,
 	}
 }
 
@@ -156,6 +161,14 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		"progress":         progress,
 		"signals":          signals,
 		"from_bookmarklet": feedType == "saved",
+	}
+	if article.LinksExtendable != nil && *article.LinksExtendable {
+		children, err := h.articleRepo.GetChildren(article.ID)
+		if err == nil {
+			response["children"] = children
+		} else {
+			response["children"] = []model.Article{}
+		}
 	}
 	c.JSON(http.StatusOK, response)
 }
@@ -341,4 +354,198 @@ func (h *ArticleHandler) RecordClick(c *gin.Context) {
 
 	// Click will be handled by preference handler
 	c.Status(http.StatusOK)
+}
+
+// ExpandChild transitions a stub link_set child to 'processing' so the worker
+// picks it up on its next cycle. 4xx if the article is not a stub.
+func (h *ArticleHandler) ExpandChild(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	// Authorise: the article must be visible to this user.
+	if _, err := h.articleRepo.GetByID(id, getUserID(c)); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+	n, err := h.articleRepo.UpdateProcessingState(id, "stub", "processing")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "文章不是 stub 状态"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"article_id": id, "state": "processing"})
+}
+
+func (h *ArticleHandler) GetLinkSetRecommended(c *gin.Context) {
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
+	if days <= 0 || days > 30 {
+		days = 7
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	articles, err := h.articleRepo.GetLinkSetRecommendations(getUserID(c), days, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if articles == nil {
+		articles = []model.Article{}
+	}
+	c.JSON(http.StatusOK, articles)
+}
+
+// CandidateView is one extractable link as shown in the batch_fetch modal.
+type CandidateView struct {
+	Title          string `json:"title"`
+	URL            string `json:"url"`
+	EditorNote     string `json:"editor_note,omitempty"`
+	AlreadyFetched bool   `json:"already_fetched"`
+}
+
+// GetCandidates returns the batch-fetch modal candidates. Reads from the
+// link_set_candidates cache written by the worker (~10ms). Falls back to
+// live HTML extraction for articles detected before the cache was added.
+func (h *ArticleHandler) GetCandidates(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if _, err := h.articleRepo.GetByID(id, getUserID(c)); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+
+	cached, fetched, err := h.articleRepo.GetLinkSetCandidates(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(cached) > 0 {
+		out := make([]CandidateView, 0, len(cached))
+		for _, cd := range cached {
+			out = append(out, CandidateView{
+				Title:          cd.Title,
+				URL:            cd.URL,
+				EditorNote:     cd.EditorNote,
+				AlreadyFetched: fetched[cd.URL],
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"candidates": out, "from_cache": true})
+		return
+	}
+
+	// Fallback: cache empty — extract live (slow path). This happens for
+	// articles detected before this cache was added.
+	article, err := h.articleRepo.GetByID(id, getUserID(c))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	doc, err := h.contentFetcher.FetchHTMLDocument(ctx, article.URL)
+	if err != nil || doc == nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "无法获取原页面"})
+		return
+	}
+	rawHTML, _ := doc.Html()
+	cands := rss.ExtractCandidates(rawHTML, article.URL)
+
+	// Opportunistically persist for next time.
+	repoCands := make([]repository.LinkSetCandidate, 0, len(cands))
+	for i, cd := range cands {
+		repoCands = append(repoCands, repository.LinkSetCandidate{
+			ParentArticleID: id,
+			Title:           cd.Title,
+			URL:             cd.URL,
+			EditorNote:      cd.EditorNote,
+			Position:        i,
+		})
+	}
+	_ = h.articleRepo.ReplaceLinkSetCandidates(id, repoCands)
+
+	children, _ := h.articleRepo.GetChildren(id)
+	existing := make(map[string]struct{}, len(children))
+	for _, ch := range children {
+		existing[ch.URL] = struct{}{}
+	}
+	out := make([]CandidateView, 0, len(cands))
+	for _, cd := range cands {
+		_, dup := existing[cd.URL]
+		out = append(out, CandidateView{
+			Title:          cd.Title,
+			URL:            cd.URL,
+			EditorNote:     cd.EditorNote,
+			AlreadyFetched: dup,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"candidates": out, "from_cache": false})
+}
+
+// BatchFetchRequest is what the modal posts on confirm.
+type BatchFetchRequest struct {
+	Candidates []struct {
+		Title      string `json:"title"`
+		URL        string `json:"url"`
+		EditorNote string `json:"editor_note"`
+	} `json:"candidates"`
+}
+
+// BatchFetch creates child article rows for the user-selected candidates
+// and queues them for content fetching (processing_state='processing').
+func (h *ArticleHandler) BatchFetch(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	parent, err := h.articleRepo.GetByID(id, getUserID(c))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+	var req BatchFetchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.Candidates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no candidates selected"})
+		return
+	}
+	inputs := make([]repository.LinkSetChildInput, 0, len(req.Candidates))
+	for _, cand := range req.Candidates {
+		if cand.URL == "" {
+			continue
+		}
+		title := cand.Title
+		if title == "" {
+			title = cand.URL
+		}
+		inputs = append(inputs, repository.LinkSetChildInput{
+			FeedID:          parent.FeedID,
+			ParentArticleID: parent.ID,
+			Title:           title,
+			URL:             cand.URL,
+			EditorNote:      cand.EditorNote,
+			PrerankScore:    0,
+			ProcessingState: "processing",
+			PublishedAt:     parent.PublishedAt,
+		})
+	}
+	n, err := h.articleRepo.InsertLinkSetChildren(inputs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"inserted": n})
 }

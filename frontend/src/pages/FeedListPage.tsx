@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
-import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, Feed, FeedPreview } from '../api/client'
+import { Link, useNavigate } from 'react-router-dom'
+import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
 
 const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; url: string; desc: string }[] }[] = [
@@ -63,6 +63,7 @@ const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; u
 ]
 
 export default function FeedListPage() {
+  const navigate = useNavigate()
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [newUrl, setNewUrl] = useState('')
   const [loading, setLoading] = useState(true)
@@ -229,6 +230,11 @@ export default function FeedListPage() {
     }
   }
 
+  const handleCardClick = (feedId: number) => {
+    try { sessionStorage.setItem('selectedFeed', JSON.stringify(feedId)) } catch {}
+    navigate('/articles')
+  }
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return '从未'
     return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -279,6 +285,108 @@ export default function FeedListPage() {
           </button>
         </form>
 
+        {/* Preview error */}
+        {previewError && (
+          <div style={{ color: '#dc2626', fontSize: 14, marginBottom: 8 }}>{previewError}</div>
+        )}
+
+        {/* Preview result */}
+        {preview && (
+          <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12 }}>
+            <div className="flex-between mb-2">
+              <div>
+                <div className="text-bold">{preview.feed_title || '未命名订阅源'}</div>
+                <div className="text-muted text-sm">
+                  {preview.feed_type === 'html' ? '🌐 网页抓取模式' : '📡 RSS/Atom 订阅'}
+                  {preview.actual_url !== newUrl.trim() && (
+                    <span style={{ marginLeft: 6 }}>· 已自动发现 RSS 地址</span>
+                  )}
+                  · {(preview.items ?? []).length} 篇文章
+                </div>
+              </div>
+              <div className="flex gap-1">
+                <button onClick={handleConfirmAdd} disabled={adding}>
+                  {adding ? '添加中...' : '确认订阅'}
+                </button>
+                <button className="secondary" onClick={handleCancelPreview}>取消</button>
+              </div>
+            </div>
+
+            {/* Discovery panel: shown when discovered_rss_url differs from pasted URL */}
+            {preview.discovered_rss_url && preview.discovered_rss_url !== newUrl.trim() && (
+              <div
+                className="rounded-md p-3 mb-3 text-sm"
+                style={{
+                  border: '1px solid var(--accent)',
+                  background: 'var(--accent-subtle, rgba(0,128,255,0.05))',
+                }}
+              >
+                <div className="mb-2">
+                  发现这个站点的 RSS：
+                  <code
+                    className="px-1 py-0.5 rounded ml-1 text-xs"
+                    style={{ background: 'var(--bg-elevated)' }}
+                  >
+                    {preview.discovered_rss_url}
+                  </code>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded text-xs"
+                    style={{ background: 'var(--accent)', color: 'var(--accent-fg, white)' }}
+                    onClick={async () => {
+                      const discoveredUrl = preview.discovered_rss_url!
+                      setNewUrl(discoveredUrl)
+                      await doPreview(discoveredUrl)
+                    }}
+                  >
+                    订阅整个 newsletter
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded text-xs"
+                    style={{ background: 'var(--bg-elevated)', color: 'var(--fg)', border: '1px solid var(--border)' }}
+                    onClick={async () => {
+                      try {
+                        const result = await createOneoffLinkSet(newUrl.trim(), false)
+                        navigate(`/articles/${result.parent_article_id}`)
+                      } catch (err) {
+                        console.warn('save one-off failed', err)
+                        toast.error('保存失败，请重试')
+                      }
+                    }}
+                  >
+                    只抓取这一期 newsletter
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div>
+              {(preview.items ?? []).length === 0 ? (
+                <div className="text-muted text-sm">
+                  未找到文章。可能原因：该页面使用 JavaScript 动态加载内容，或此地址不是文章列表页。
+                  <br />建议尝试该网站的 RSS 直接地址（通常在页脚或设置中可找到）。
+                </div>
+              ) : (
+                (preview.items ?? []).map((item, i) => (
+                  <div key={i} style={{ padding: '5px 0', borderBottom: i < (preview.items ?? []).length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm" style={{ color: 'var(--link)' }}>
+                      {item.title}
+                    </a>
+                    {item.published_at && (
+                      <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
+                        {new Date(item.published_at).toLocaleDateString('zh-CN')}
+                      </span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Popular feeds — grouped + collapsible */}
         <div className="mb-2">
           <div className="text-sm text-muted mb-1">热门推荐：</div>
@@ -321,56 +429,6 @@ export default function FeedListPage() {
             )
           })}
         </div>
-
-        {/* Preview error */}
-        {previewError && (
-          <div style={{ color: '#dc2626', fontSize: 14, marginBottom: 8 }}>{previewError}</div>
-        )}
-
-        {/* Preview result */}
-        {preview && (
-          <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12 }}>
-            <div className="flex-between mb-2">
-              <div>
-                <div className="text-bold">{preview.feed_title || '未命名订阅源'}</div>
-                <div className="text-muted text-sm">
-                  {preview.feed_type === 'html' ? '🌐 网页抓取模式' : '📡 RSS/Atom 订阅'}
-                  {preview.actual_url !== newUrl.trim() && (
-                    <span style={{ marginLeft: 6 }}>· 已自动发现 RSS 地址</span>
-                  )}
-                  · {(preview.items ?? []).length} 篇文章
-                </div>
-              </div>
-              <div className="flex gap-1">
-                <button onClick={handleConfirmAdd} disabled={adding}>
-                  {adding ? '添加中...' : '确认订阅'}
-                </button>
-                <button className="secondary" onClick={handleCancelPreview}>取消</button>
-              </div>
-            </div>
-            <div>
-              {(preview.items ?? []).length === 0 ? (
-                <div className="text-muted text-sm">
-                  未找到文章。可能原因：该页面使用 JavaScript 动态加载内容，或此地址不是文章列表页。
-                  <br />建议尝试该网站的 RSS 直接地址（通常在页脚或设置中可找到）。
-                </div>
-              ) : (
-                (preview.items ?? []).map((item, i) => (
-                  <div key={i} style={{ padding: '5px 0', borderBottom: i < (preview.items ?? []).length - 1 ? '1px solid var(--border)' : 'none' }}>
-                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm" style={{ color: 'var(--link)' }}>
-                      {item.title}
-                    </a>
-                    {item.published_at && (
-                      <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
-                        {new Date(item.published_at).toLocaleDateString('zh-CN')}
-                      </span>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Existing feeds list */}
@@ -378,9 +436,20 @@ export default function FeedListPage() {
         <div className="card text-muted">暂无订阅，从上方添加你的第一个订阅源</div>
       ) : (
         feeds.map(feed => (
-          <div key={feed.id} className="card">
+          <div
+            key={feed.id}
+            className="card card-clickable"
+            onClick={() => handleCardClick(feed.id)}
+          >
             <div className="flex-between">
-              <div>
+              <Link
+                to="/articles"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  try { sessionStorage.setItem('selectedFeed', JSON.stringify(feed.id)) } catch {}
+                }}
+                style={{ display: 'block', color: 'inherit', textDecoration: 'none', flex: 1, minWidth: 0 }}
+              >
                 <div className="text-bold" style={!feed.is_active ? { color: 'var(--fg-muted)' } : {}}>
                   {feed.title || feed.url}
                   {feed.feed_type === 'html' && (
@@ -396,25 +465,28 @@ export default function FeedListPage() {
                   {feed.unread_count > 0 && <span style={{ color: 'var(--accent)', fontWeight: 500 }}> · {feed.unread_count} 未读</span>}
                   {' '}· 上次抓取：{formatDate(feed.last_fetched_at)}
                 </div>
-              </div>
+              </Link>
               <div className="flex gap-1">
                 {feed.is_active ? (
                   <button
                     className="secondary"
                     disabled={fetchingId === feed.id}
-                    onClick={() => handleFetch(feed.id)}
+                    onClick={(e) => { e.stopPropagation(); handleFetch(feed.id) }}
                   >
                     {fetchingId === feed.id ? '抓取中...' : '刷新'}
                   </button>
                 ) : null}
                 <button
                   className="secondary"
-                  onClick={() => handleToggleActive(feed)}
+                  onClick={(e) => { e.stopPropagation(); handleToggleActive(feed) }}
                   style={!feed.is_active ? { color: '#92400e', background: '#fef9c3' } : {}}
                 >
                   {feed.is_active ? '暂停' : '继续'}
                 </button>
-                <button className="secondary" onClick={() => handleDelete(feed.id)}>删除</button>
+                <button
+                  className="secondary"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(feed.id) }}
+                >删除</button>
               </div>
             </div>
           </div>

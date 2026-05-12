@@ -4,10 +4,12 @@ import ReactMarkdown from 'react-markdown'
 import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
-  getTemplates, generateSummaryStream, shareArticle, exportMarkdown,
+  getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
+import { LinkSetChildren } from '../components/LinkSetChildren'
+import { BatchFetchModal } from '../components/BatchFetchModal'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
 import ReadingLayout from '../components/ReadingLayout'
@@ -73,6 +75,12 @@ export default function ArticlePage() {
   // Bookmarklet state
   const [fromBookmarklet, setFromBookmarklet] = useState(false)
 
+  // LinkSet children
+  const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(null)
+
+  // Batch fetch modal
+  const [batchModalOpen, setBatchModalOpen] = useState(false)
+
   const loadArticle = async () => {
     if (!id) return
     setLoading(true)
@@ -83,6 +91,7 @@ export default function ArticlePage() {
       setProgress(data.progress)
       maxScrollRef.current = data.progress?.scroll_position ?? 0
       setFromBookmarklet(Boolean(data.from_bookmarklet))
+      setLinkSetChildren(data.children ?? null)
       if (data.signals) {
         setLiked((data.signals['like'] ?? 0) > 0)
         setDisliked((data.signals['dislike'] ?? 0) > 0)
@@ -121,6 +130,56 @@ export default function ArticlePage() {
       streamAbortRef.current?.abort()
     }
   }, [id])
+
+  // Auto-expand stub link_set children and poll until ready/failed
+  useEffect(() => {
+    if (!article) return
+    const state = article.processing_state
+    if (state !== 'stub' && state !== 'processing') return
+
+    let cancelled = false
+    let intervalId: ReturnType<typeof setInterval> | null = null
+
+    const startPolling = () => {
+      intervalId = setInterval(async () => {
+        if (cancelled) return
+        try {
+          const data = await getArticle(article.id)
+          if (cancelled) return
+          if (data.article.processing_state === 'ready' || data.article.processing_state === 'failed') {
+            setArticle(data.article)
+            setLinkSetChildren(data.children ?? null)
+            if (intervalId) clearInterval(intervalId)
+          } else {
+            setArticle(data.article)
+          }
+        } catch (e) {
+          console.warn('article poll failed', e)
+        }
+      }, 4000)
+    }
+
+    if (state === 'stub') {
+      expandLinkSetChild(article.id)
+        .then(() => { if (!cancelled) startPolling() })
+        .catch((err) => console.warn('expand failed', err))
+    } else {
+      // state === 'processing' — already queued, just poll
+      startPolling()
+    }
+
+    // 5-minute safety cap
+    const safetyTimer = setTimeout(() => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+    }, 5 * 60 * 1000)
+
+    return () => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+      clearTimeout(safetyTimer)
+    }
+  }, [article?.id, article?.processing_state])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -704,6 +763,49 @@ export default function ArticlePage() {
         </div>
       </div>
 
+      {/* Link-set stub/processing status banner */}
+      {(() => {
+        const state = article.processing_state
+        const hasContent = !!article.content && article.content.length > 0
+        if (state === 'stub' || (state === 'processing' && !hasContent)) {
+          return (
+            <div className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>
+              正在抓取内容…
+            </div>
+          )
+        }
+        if (state === 'processing' && hasContent) {
+          return (
+            <div className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>
+              正在生成摘要…
+            </div>
+          )
+        }
+        return null
+      })()}
+      {article.processing_state === 'failed' && (
+        <div className="p-3 rounded-md mb-4 text-sm flex items-center gap-3" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+          <span style={{ color: 'var(--fg-muted)' }}>抓取失败</span>
+          <button
+            type="button"
+            className="px-2 py-1 text-xs rounded"
+            style={{ border: '1px solid var(--border)', color: 'var(--fg)' }}
+            onClick={async () => {
+              try {
+                await expandLinkSetChild(article.id)
+                const data = await getArticle(article.id)
+                setArticle(data.article)
+                setLinkSetChildren(data.children ?? null)
+              } catch (e) {
+                console.warn('retry failed', e)
+              }
+            }}
+          >
+            重试
+          </button>
+        </div>
+      )}
+
       {/* Summary section — shown before content */}
       <div ref={summaryRef} className="card">
         <div className="flex-between mb-2">
@@ -837,6 +939,53 @@ export default function ArticlePage() {
           </div>
         </div>
       </div>
+      {article.links_extendable === true && (
+        <button
+          type="button"
+          onClick={() => setBatchModalOpen(true)}
+          title="检测到多个可抓取链接"
+          style={{
+            position: 'fixed',
+            right: 24,
+            bottom: 152,
+            padding: '10px 16px',
+            borderRadius: 24,
+            border: 'none',
+            background: 'var(--accent)',
+            color: 'var(--accent-fg)',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+            fontSize: 13,
+            fontWeight: 500,
+            zIndex: 1100,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          📥 批量抓取
+        </button>
+      )}
+      <BatchFetchModal
+        open={batchModalOpen}
+        articleId={article.id}
+        onClose={() => setBatchModalOpen(false)}
+        onFetched={async (_n) => {
+          // Refresh the article to pick up new children
+          try {
+            const data = await getArticle(article.id)
+            setArticle(data.article)
+            setLinkSetChildren(data.children ?? null)
+          } catch (e) {
+            console.warn('refresh after batch_fetch failed', e)
+          }
+        }}
+      />
+      {article?.is_link_set && (
+        <LinkSetChildren
+          parentId={article.id}
+          children={linkSetChildren ?? []}
+          onChildrenUpdated={(updated) => setLinkSetChildren(updated)}
+        />
+      )}
       {/* Bottom nav so readers don't have to scroll back up to leave the article. */}
       <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between' }}>
         <button

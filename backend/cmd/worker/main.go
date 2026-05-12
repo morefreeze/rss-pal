@@ -104,6 +104,8 @@ func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, art
 	defer cycleMu.Unlock()
 
 	fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
+	detectLinkSetCandidates(ctx, articleRepo, contentFetcher)
+	processQueuedChildren(ctx, articleRepo, contentFetcher)
 	refetchShortContent(ctx, articleRepo, contentFetcher, summarizer)
 	if transcriptFetcher != nil {
 		backfillTranscripts(ctx, articleRepo, transcriptFetcher)

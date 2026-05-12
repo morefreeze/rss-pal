@@ -241,6 +241,8 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
   border-color: var(--accent-soft);
   text-decoration: none;
 }
+.card-clickable { cursor: pointer; }
+.card-clickable:hover { background: var(--surface-hover); }
 
 /* === Layout utilities === */
 .flex { display: flex; }

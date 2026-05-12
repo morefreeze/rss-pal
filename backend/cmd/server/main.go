@@ -45,10 +45,12 @@ func main() {
 
 	backupRunner := backup.NewRunner(db, cfg.Backup.Dir)
 
+	contentFetcher := rss.NewContentFetcher()
+
 	authHandler := api.NewAuthHandler(cfg, userRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(db, backupRunner, cfg)
-	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService)
+	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService, contentFetcher)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo, eventRepo)
@@ -114,6 +116,7 @@ func main() {
 		apiGroup.GET("/feeds/:id", feedHandler.GetByID)
 		apiGroup.POST("/feeds", feedHandler.Create)
 		apiGroup.POST("/feeds/preview", feedHandler.Preview)
+		apiGroup.POST("/feeds/oneoff_link_set", feedHandler.CreateOneoffLinkSet)
 		apiGroup.PUT("/feeds/:id", feedHandler.Update)
 		apiGroup.DELETE("/feeds/:id", feedHandler.Delete)
 		apiGroup.POST("/feeds/:id/fetch", feedHandler.FetchNow)
@@ -131,6 +134,7 @@ func main() {
 		apiGroup.GET("/articles", articleHandler.GetAll)
 		apiGroup.GET("/articles/grouped", articleHandler.GetGrouped)
 		apiGroup.GET("/articles/search", articleHandler.Search)
+		apiGroup.GET("/articles/recommended/link_set", articleHandler.GetLinkSetRecommended)
 		apiGroup.GET("/articles/recommended", articleHandler.GetRecommended)
 		apiGroup.GET("/articles/unread-count", articleHandler.GetUnreadCount)
 		apiGroup.POST("/articles/mark-all-read", articleHandler.MarkAllRead)
@@ -145,6 +149,9 @@ func main() {
 		apiGroup.POST("/articles/:id/tags", userTagHandler.AddArticleTag)
 		apiGroup.DELETE("/articles/:id/tags/:tagId", userTagHandler.RemoveArticleTag)
 		apiGroup.POST("/articles/:id/suggestions/dismiss", userTagHandler.DismissSuggestion)
+		apiGroup.POST("/articles/:id/expand", articleHandler.ExpandChild)
+		apiGroup.GET("/articles/:id/candidates", articleHandler.GetCandidates)
+		apiGroup.POST("/articles/:id/batch_fetch", articleHandler.BatchFetch)
 
 		// Saved articles (filtered by tags / source / untagged)
 		apiGroup.GET("/saved", savedHandler.List)
