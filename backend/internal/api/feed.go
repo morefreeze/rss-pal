@@ -487,13 +487,18 @@ func extractStatusFromErr(s string) string {
 }
 
 // CreateOneoffLinkSet handles POST /api/feeds/oneoff_link_set.
-// Creates a pseudo-feed (feed_type='link_set', is_active=false, expand_links=true)
-// owned by the caller; fetches the URL's content synchronously and inserts a
-// parent article marked is_link_set=true. The worker pass picks up child
-// expansion within seconds.
+//
+// When expand=true: creates a pseudo-feed (feed_type='link_set', is_active=false,
+// expand_links=true) owned by the caller; fetches the URL's content synchronously
+// and inserts a parent article marked is_link_set=true. The worker pass picks up
+// child expansion within seconds.
+//
+// When expand=false: saves the URL as a single article into the user's "⭐ 网摘"
+// feed (GetOrCreateSavedFeed), with no link expansion.
 func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 	var req struct {
-		URL string `json:"url"`
+		URL    string `json:"url"`
+		Expand bool   `json:"expand"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.URL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url required"})
@@ -517,7 +522,7 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 		return
 	}
 
-	// 2. Derive a feed title from the page's <title>.
+	// 2. Derive a title from the page's <title>.
 	title := req.URL
 	if doc, derr := h.contentFetcher.FetchHTMLDocument(ctx, req.URL); derr == nil && doc != nil {
 		if pageTitle := strings.TrimSpace(doc.Find("title").First().Text()); pageTitle != "" {
@@ -525,46 +530,76 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 		}
 	}
 
-	// 3. Create the pseudo-feed.
 	ownerID := getOwnerID(c)
-	feed := &model.Feed{
-		URL:              req.URL,
-		Title:            title,
-		FetchIntervalMin: 60,
-		IsActive:         false,
-		OwnerID:          ownerID,
-		FeedType:         "link_set",
-		ExpandLinks:      true,
-	}
-	if err := h.repo.Create(feed); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// 4. Set feed to paused status (matches is_active=false).
-	if err := h.repo.UpdateStatus(feed.ID, "paused"); err != nil {
-		log.Printf("oneoff_link_set: set paused status: %v", err)
-	}
-
-	// 5. Insert the parent article.
 	wc, rm := rss.ComputeMetrics(content)
-	parent := &model.Article{
-		FeedID:         feed.ID,
-		Title:          title,
-		URL:            req.URL,
-		Content:        content,
-		WordCount:      wc,
-		ReadingMinutes: rm,
-		IsLinkSet:      true,
+
+	var feedID int
+	var article *model.Article
+
+	if req.Expand {
+		// ==== expand=true: existing link_set behaviour ====
+		// 3. Create the pseudo-feed.
+		feed := &model.Feed{
+			URL:              req.URL,
+			Title:            title,
+			FetchIntervalMin: 60,
+			IsActive:         false,
+			OwnerID:          ownerID,
+			FeedType:         "link_set",
+			ExpandLinks:      true,
+		}
+		if err := h.repo.Create(feed); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// 4. Set feed to paused status (matches is_active=false).
+		if err := h.repo.UpdateStatus(feed.ID, "paused"); err != nil {
+			log.Printf("oneoff_link_set: set paused status: %v", err)
+		}
+
+		article = &model.Article{
+			FeedID:         feed.ID,
+			Title:          title,
+			URL:            req.URL,
+			Content:        content,
+			WordCount:      wc,
+			ReadingMinutes: rm,
+			IsLinkSet:      true,
+		}
+		feedID = feed.ID
+	} else {
+		// ==== expand=false: save into the user's ⭐ 网摘 feed ====
+		if ownerID == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "需要登录"})
+			return
+		}
+		saved, err := h.repo.GetOrCreateSavedFeed(*ownerID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		article = &model.Article{
+			FeedID:         saved.ID,
+			Title:          title,
+			URL:            req.URL,
+			Content:        content,
+			WordCount:      wc,
+			ReadingMinutes: rm,
+			IsLinkSet:      false,
+		}
+		feedID = saved.ID
 	}
-	if err := h.articleRepo.Create(parent); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存父文章失败: " + err.Error()})
+
+	// 5. Insert the article.
+	if err := h.articleRepo.Create(article); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存文章失败: " + err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"feed_id":           feed.ID,
-		"parent_article_id": parent.ID,
+		"feed_id":           feedID,
+		"parent_article_id": article.ID,
 	})
 }
 

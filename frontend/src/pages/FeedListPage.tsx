@@ -76,7 +76,6 @@ export default function FeedListPage() {
   const [addSuccess, setAddSuccess] = useState('')
   const [importing, setImporting] = useState(false)
   const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
-  const [expandLinks, setExpandLinks] = useState(false)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { loadFeeds() }, [])
@@ -106,7 +105,6 @@ export default function FeedListPage() {
     setPreviewStatus('获取中...')
     setPreview(null)
     setPreviewError('')
-    setExpandLinks(false)
     // After 4s show "probing RSS" hint so user knows it's still working
     if (previewTimer.current) clearTimeout(previewTimer.current)
     previewTimer.current = setTimeout(() => setPreviewStatus('正在探测 RSS 地址...'), 4000)
@@ -133,10 +131,9 @@ export default function FeedListPage() {
     setAddSuccess('')
     try {
       const actualUrl = preview.actual_url || newUrl.trim()
-      const feed = await addFeed(actualUrl, preview.feed_type, expandLinks)
+      const feed = await addFeed(actualUrl, preview.feed_type)
       setNewUrl('')
       setPreview(null)
-      setExpandLinks(false)
       await loadFeeds()
       // Auto-fetch after adding
       try {
@@ -157,7 +154,6 @@ export default function FeedListPage() {
   const handleCancelPreview = () => {
     setPreview(null)
     setPreviewError('')
-    setExpandLinks(false)
   }
 
   const handleToggleActive = async (feed: Feed) => {
@@ -307,14 +303,6 @@ export default function FeedListPage() {
                   )}
                   · {(preview.items ?? []).length} 篇文章
                 </div>
-                <label className="flex items-center gap-2 text-sm mt-3" style={{ color: 'var(--fg-muted)' }}>
-                  <input
-                    type="checkbox"
-                    checked={expandLinks}
-                    onChange={(e) => setExpandLinks(e.target.checked)}
-                  />
-                  <span>这是 link_set（爆开其中的链接）</span>
-                </label>
               </div>
               <div className="flex gap-1">
                 <button onClick={handleConfirmAdd} disabled={adding}>
@@ -342,7 +330,7 @@ export default function FeedListPage() {
                     {preview.discovered_rss_url}
                   </code>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button
                     type="button"
                     className="px-3 py-1 rounded text-xs"
@@ -358,22 +346,34 @@ export default function FeedListPage() {
                   <button
                     type="button"
                     className="px-3 py-1 rounded text-xs"
-                    style={{
-                      background: 'var(--bg-elevated)',
-                      color: 'var(--fg)',
-                      border: '1px solid var(--border)',
-                    }}
+                    style={{ background: 'var(--bg-elevated)', color: 'var(--fg)', border: '1px solid var(--border)' }}
                     onClick={async () => {
                       try {
-                        const result = await createOneoffLinkSet(newUrl.trim())
+                        const result = await createOneoffLinkSet(newUrl.trim(), false)
                         navigate(`/articles/${result.parent_article_id}`)
                       } catch (err) {
-                        console.warn('oneoff link_set failed', err)
+                        console.warn('save one-off failed', err)
+                        toast.error('保存失败，请重试')
+                      }
+                    }}
+                  >
+                    只抓取这一期 newsletter
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded text-xs"
+                    style={{ background: 'var(--bg-elevated)', color: 'var(--fg)', border: '1px solid var(--border)' }}
+                    onClick={async () => {
+                      try {
+                        const result = await createOneoffLinkSet(newUrl.trim(), true)
+                        navigate(`/articles/${result.parent_article_id}`)
+                      } catch (err) {
+                        console.warn('one-off expand failed', err)
                         toast.error('创建 link_set 失败，请重试')
                       }
                     }}
                   >
-                    只处理这一期
+                    抓取这一期并扩展其中的链接
                   </button>
                 </div>
               </div>
