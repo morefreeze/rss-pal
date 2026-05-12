@@ -17,15 +17,61 @@ function hostOf(url: string): string {
   }
 }
 
-const TOP_K_DISPLAY = 5
-
 export function LinkSetChildren({ parentId, children, onChildrenUpdated }: Props) {
   const [items, setItems] = useState<Article[]>(children)
-  const [pendingIds, setPendingIds] = useState<Set<number>>(new Set())
 
   useEffect(() => {
-    setItems(children)
+    // Sort by id ASC (creation order = user's selection order)
+    const sorted = [...children].sort((a, b) => a.id - b.id)
+    setItems(sorted)
   }, [children])
+
+  // Poll for any processing children until they finish
+  useEffect(() => {
+    const processingIds = items.filter((c) => c.processing_state === 'processing').map((c) => c.id)
+    if (processingIds.length === 0) return
+
+    let cancelled = false
+    const interval = setInterval(async () => {
+      if (cancelled) return
+      try {
+        const data = await getArticle(parentId)
+        if (cancelled) return
+        if (data.children) {
+          const sorted = [...data.children].sort((a, b) => a.id - b.id)
+          setItems(sorted)
+          onChildrenUpdated?.(data.children)
+          // Stop polling once none are processing
+          const stillProcessing = sorted.some((c) => c.processing_state === 'processing')
+          if (!stillProcessing) {
+            clearInterval(interval)
+          }
+        }
+      } catch (e) {
+        console.warn('poll failed', e)
+      }
+    }, 4000)
+
+    // Safety cap at 5 minutes
+    const safety = setTimeout(() => {
+      cancelled = true
+      clearInterval(interval)
+    }, 5 * 60 * 1000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      clearTimeout(safety)
+    }
+  }, [items.map((c) => c.id + ':' + c.processing_state).join(',')])
+
+  async function handleRetry(childId: number) {
+    try {
+      await expandLinkSetChild(childId)
+    } catch (e) {
+      console.warn('retry failed', e)
+    }
+  }
 
   if (items.length === 0) {
     return (
@@ -38,56 +84,12 @@ export function LinkSetChildren({ parentId, children, onChildrenUpdated }: Props
     )
   }
 
-  const topK = items.slice(0, TOP_K_DISPLAY)
-  const rest = items.slice(TOP_K_DISPLAY)
-
-  async function handleExpand(childId: number) {
-    setPendingIds((p) => new Set(p).add(childId))
-    try {
-      await expandLinkSetChild(childId)
-    } catch (e) {
-      console.warn('expand failed', e)
-      setPendingIds((p) => {
-        const n = new Set(p)
-        n.delete(childId)
-        return n
-      })
-      return
-    }
-    const interval = setInterval(async () => {
-      try {
-        const data = await getArticle(parentId)
-        const updatedChild = data.children?.find((c) => c.id === childId)
-        if (
-          updatedChild &&
-          (updatedChild.processing_state === 'ready' || updatedChild.processing_state === 'failed')
-        ) {
-          clearInterval(interval)
-          if (data.children) {
-            setItems(data.children)
-            onChildrenUpdated?.(data.children)
-          }
-          setPendingIds((p) => {
-            const n = new Set(p)
-            n.delete(childId)
-            return n
-          })
-        }
-      } catch (e) {
-        console.warn('poll failed', e)
-      }
-    }, 4000)
-    // Safety cap at 5 minutes
-    setTimeout(() => clearInterval(interval), 5 * 60 * 1000)
-  }
-
   return (
     <section className="mt-8 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
-      <h2 className="text-lg font-semibold mb-4">本期链接（{items.length} 条）</h2>
+      <h2 className="text-lg font-semibold mb-4">已抓取的链接（{items.length} 条）</h2>
 
-      {/* Top-K: full cards */}
       <div className="space-y-3">
-        {topK.map((c) => (
+        {items.map((c) => (
           <article
             key={c.id}
             className="p-4 rounded-md"
@@ -108,11 +110,6 @@ export function LinkSetChildren({ parentId, children, onChildrenUpdated }: Props
                 {c.editor_note}
               </p>
             )}
-            {c.processing_state === 'ready' && c.summary_brief && (
-              <p className="text-sm mt-2" style={{ color: 'var(--fg)' }}>
-                {c.summary_brief}
-              </p>
-            )}
             {c.processing_state === 'processing' && (
               <p className="text-xs mt-2" style={{ color: 'var(--fg-muted)' }}>
                 正在抓取并生成摘要…
@@ -122,62 +119,19 @@ export function LinkSetChildren({ parentId, children, onChildrenUpdated }: Props
               <button
                 className="mt-2 text-xs px-2 py-1 rounded"
                 style={{ border: '1px solid var(--border)', color: 'var(--fg)' }}
-                onClick={() => handleExpand(c.id)}
+                onClick={() => handleRetry(c.id)}
               >
                 重试
               </button>
             )}
+            {c.processing_state === 'ready' && c.summary_brief && (
+              <p className="text-sm mt-2" style={{ color: 'var(--fg)' }}>
+                {c.summary_brief}
+              </p>
+            )}
           </article>
         ))}
       </div>
-
-      {/* Rest: compact rows */}
-      {rest.length > 0 && (
-        <div className="mt-6">
-          <h3 className="text-sm font-medium mb-2" style={{ color: 'var(--fg-muted)' }}>
-            其余 {rest.length} 条
-          </h3>
-          <ul className="space-y-1">
-            {rest.map((c) => (
-              <li key={c.id} className="flex items-center gap-2 text-sm py-1">
-                <Link
-                  to={`/articles/${c.id}`}
-                  className="flex-1 truncate hover:underline"
-                  style={{ color: 'var(--fg)' }}
-                >
-                  {c.title}
-                </Link>
-                <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>
-                  {hostOf(c.url)}
-                </span>
-                {c.processing_state === 'stub' && !pendingIds.has(c.id) && (
-                  <button
-                    className="text-xs px-2 py-0.5 rounded"
-                    style={{ border: '1px solid var(--border)', color: 'var(--fg)' }}
-                    onClick={() => handleExpand(c.id)}
-                  >
-                    展开摘要
-                  </button>
-                )}
-                {(pendingIds.has(c.id) || c.processing_state === 'processing') && (
-                  <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>
-                    处理中…
-                  </span>
-                )}
-                {c.processing_state === 'failed' && (
-                  <button
-                    className="text-xs px-2 py-0.5 rounded"
-                    style={{ border: '1px solid var(--border)', color: 'var(--fg)' }}
-                    onClick={() => handleExpand(c.id)}
-                  >
-                    重试
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </section>
   )
 }

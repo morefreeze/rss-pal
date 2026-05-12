@@ -114,10 +114,31 @@ export interface Article {
   media_duration_seconds?: number
   // link_set fields
   is_link_set?: boolean
+  links_extendable?: boolean | null  // tri-state: null = unchecked, true/false = checked
   parent_article_id?: number | null
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
   prerank_score?: number | null
   editor_note?: string
+}
+
+export interface CandidateView {
+  title: string
+  url: string
+  editor_note?: string
+  already_fetched: boolean
+}
+
+export async function getArticleCandidates(articleId: number): Promise<CandidateView[]> {
+  const { data } = await api.get<{ candidates: CandidateView[] }>(`/articles/${articleId}/candidates`)
+  return data.candidates ?? []
+}
+
+export async function batchFetchCandidates(
+  articleId: number,
+  candidates: Array<{ title: string; url: string; editor_note?: string }>
+): Promise<{ inserted: number }> {
+  const { data } = await api.post(`/articles/${articleId}/batch_fetch`, { candidates })
+  return data
 }
 
 export interface ReadingProgress {

@@ -9,6 +9,7 @@ import {
 } from '../api/client'
 import { toast } from '../utils/toast'
 import { LinkSetChildren } from '../components/LinkSetChildren'
+import { BatchFetchModal } from '../components/BatchFetchModal'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
 import ReadingLayout from '../components/ReadingLayout'
@@ -76,6 +77,9 @@ export default function ArticlePage() {
 
   // LinkSet children
   const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(null)
+
+  // Batch fetch modal
+  const [batchModalOpen, setBatchModalOpen] = useState(false)
 
   const loadArticle = async () => {
     if (!id) return
@@ -697,7 +701,20 @@ export default function ArticlePage() {
             <div className="text-sm" style={{ color: 'var(--accent)' }}>{article.feed_title}</div>
           )}
         </div>
-        <h2>{article.title}</h2>
+        <div className="flex-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+          <h2 style={{ flex: 1 }}>{article.title}</h2>
+          {article.links_extendable === true && (
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded text-sm whitespace-nowrap"
+              style={{ background: 'var(--accent)', color: 'var(--accent-fg, white)', flexShrink: 0 }}
+              onClick={() => setBatchModalOpen(true)}
+            >
+              批量抓取
+              <span className="ml-1 text-xs opacity-80">（检测到多个可抓取链接）</span>
+            </button>
+          )}
+        </div>
         <div className="text-muted text-sm mb-2" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           <span>{formatDate(article.published_at)}</span>
           <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
@@ -935,6 +952,21 @@ export default function ArticlePage() {
           </div>
         </div>
       </div>
+      <BatchFetchModal
+        open={batchModalOpen}
+        articleId={article.id}
+        onClose={() => setBatchModalOpen(false)}
+        onFetched={async (_n) => {
+          // Refresh the article to pick up new children
+          try {
+            const data = await getArticle(article.id)
+            setArticle(data.article)
+            setLinkSetChildren(data.children ?? null)
+          } catch (e) {
+            console.warn('refresh after batch_fetch failed', e)
+          }
+        }}
+      />
       {article?.is_link_set && (
         <LinkSetChildren
           parentId={article.id}
