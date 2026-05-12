@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
-import { getRecommendedFeeds, subscribeRecommendedFeed, RecommendedFeed } from '../api/client'
+import { useNavigate } from 'react-router-dom'
+import { getRecommendedFeeds, subscribeRecommendedFeed, getLinkSetRecommendations, RecommendedFeed, Article } from '../api/client'
 import { toast } from '../utils/toast'
 import { CATEGORY_LABELS, CATEGORY_ORDER } from '../components/categoryLabels'
 
 export default function RecommendedPage() {
+  const navigate = useNavigate()
   const [items, setItems] = useState<RecommendedFeed[]>([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [linkSetRecs, setLinkSetRecs] = useState<Article[]>([])
+
+  useEffect(() => {
+    getLinkSetRecommendations(7, 20)
+      .then(setLinkSetRecs)
+      .catch(() => setLinkSetRecs([]))
+  }, [])
 
   useEffect(() => { load() }, [])
 
@@ -42,6 +51,29 @@ export default function RecommendedPage() {
 
   return (
     <div>
+      {linkSetRecs.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-lg font-semibold mb-3">本周精选 link_set 链接</h2>
+          <div className="space-y-3">
+            {linkSetRecs.map((a) => (
+              <div
+                key={a.id}
+                className="card"
+                style={{ cursor: 'pointer' }}
+                onClick={() => navigate(`/articles/${a.id}`)}
+              >
+                <div className="text-bold">{a.title}</div>
+                {a.summary_brief && (
+                  <div className="text-muted text-sm mt-1">{a.summary_brief.slice(0, 120)}…</div>
+                )}
+                {a.feed_title && (
+                  <div className="text-muted text-sm mt-1" style={{ color: 'var(--accent)' }}>{a.feed_title}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <h2 style={{ marginBottom: 16 }}>推荐订阅</h2>
       <p className="text-muted text-sm" style={{ marginBottom: 16 }}>
         以下是从 bestblogs.dev 精选的高质量来源。点击「订阅」即可添加到你的订阅列表。
