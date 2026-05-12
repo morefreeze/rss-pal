@@ -788,11 +788,14 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
 .mobile-menu-btn { display: none; }
 .mobile-nav { display: none; }
 
-@media (max-width: 640px) {
+@media (max-width: 1024px) {
   .desktop-nav { display: none !important; }
-  .mobile-menu-btn { display: block; }
-  .mobile-nav { display: block; }
+  /* mobile-menu-btn intentionally remains hidden: we use MobileTabBar */
+  #root > div > header { margin-bottom: 12px; }
+}
+
+@media (max-width: 640px) {
   #root { padding: 12px; }
   .card { padding: 12px; }
-  button:not(.btn-sm):not(.settings-tab):not(.theme-swatch):not(.tag-chip-remove):not(.tag-add-btn):not(.reading-summary-toggle):not(.rec-feedback-btn):not(.rec-panel-header):not(.saved-row):not(.tag-suggest-dropdown button):not(.saved-mode-toggle button) { height: 36px; }
+  button:not(.btn-sm):not(.settings-tab):not(.theme-swatch):not(.tag-chip-remove):not(.tag-add-btn):not(.reading-summary-toggle):not(.rec-feedback-btn):not(.rec-panel-header):not(.saved-row):not(.tag-suggest-dropdown button):not(.saved-mode-toggle button):not(.mobile-tab-link) { min-height: 44px; }
 }
