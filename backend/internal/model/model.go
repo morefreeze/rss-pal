@@ -76,6 +76,14 @@ type InterestTopic struct {
 	LastReinforcedAt time.Time `json:"last_reinforced_at" db:"last_reinforced_at"`
 }
 
+// HostSignalSet groups hosts of articles that received specific user signals.
+// Used by pre-rank scoring to boost/penalise candidates from known-good/bad sources.
+type HostSignalSet struct {
+	Liked     map[string]struct{}
+	Disliked  map[string]struct{}
+	Completed map[string]struct{}
+}
+
 type ReadingProgress struct {
 	ID             int       `json:"id" db:"id"`
 	UserID         int       `json:"user_id" db:"user_id"`
