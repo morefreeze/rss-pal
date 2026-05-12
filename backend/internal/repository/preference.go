@@ -2,6 +2,8 @@ package repository
 
 import (
 	"database/sql"
+	"net/url"
+	"strings"
 
 	"github.com/bytedance/rss-pal/internal/model"
 )
@@ -37,6 +39,30 @@ func (r *PreferenceRepository) GetTopics(userID int) ([]model.InterestTopic, err
 		topics = append(topics, t)
 	}
 	return topics, nil
+}
+
+// GetTopByUser returns the top-N interest topics for a user, ordered by weight DESC.
+func (r *PreferenceRepository) GetTopByUser(userID, limit int) ([]model.InterestTopic, error) {
+	rows, err := r.db.Query(`
+		SELECT id, topic, weight, last_reinforced_at
+		FROM interest_topics
+		WHERE user_id = $1
+		ORDER BY weight DESC
+		LIMIT $2
+	`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.InterestTopic
+	for rows.Next() {
+		var t model.InterestTopic
+		if err := rows.Scan(&t.ID, &t.Topic, &t.Weight, &t.LastReinforcedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 func (r *PreferenceRepository) UpsertTopic(userID int, topic string, weightDelta float64) error {
@@ -314,4 +340,78 @@ func (r *PreferenceRepository) GetUsersWithStrongSignal(articleID int) ([]UserSi
 		out = append(out, u)
 	}
 	return out, nil
+}
+
+// GetUserSignalHosts returns hosts of articles the user liked/saved, disliked,
+// or completed-read in the last 30 days.
+func (r *PreferenceRepository) GetUserSignalHosts(userID int) (*model.HostSignalSet, error) {
+	out := &model.HostSignalSet{
+		Liked:     map[string]struct{}{},
+		Disliked:  map[string]struct{}{},
+		Completed: map[string]struct{}{},
+	}
+	rows, err := r.db.Query(`
+		SELECT a.url, p.signal_type, COALESCE(p.signal_value, 1.0)
+		FROM user_preferences p
+		JOIN articles a ON a.id = p.article_id
+		WHERE p.user_id = $1
+		  AND p.created_at > NOW() - INTERVAL '30 days'
+		  AND p.signal_type IN ('like', 'save', 'dislike')
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rawURL, sigType string
+		var sigVal float64
+		if err := rows.Scan(&rawURL, &sigType, &sigVal); err != nil {
+			return nil, err
+		}
+		h := hostOfURL(rawURL)
+		if h == "" {
+			continue
+		}
+		switch sigType {
+		case "like", "save":
+			if sigVal > 0 {
+				out.Liked[h] = struct{}{}
+			}
+		case "dislike":
+			if sigVal > 0 {
+				out.Disliked[h] = struct{}{}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	crows, err := r.db.Query(`
+		SELECT a.url FROM reading_progress rp
+		JOIN articles a ON a.id = rp.article_id
+		WHERE rp.user_id = $1 AND rp.is_completed = true
+		  AND rp.last_read_at > NOW() - INTERVAL '30 days'
+	`, userID)
+	if err != nil {
+		return out, nil // not fatal
+	}
+	defer crows.Close()
+	for crows.Next() {
+		var rawURL string
+		if err := crows.Scan(&rawURL); err == nil {
+			if h := hostOfURL(rawURL); h != "" {
+				out.Completed[h] = struct{}{}
+			}
+		}
+	}
+	return out, nil
+}
+
+func hostOfURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }
