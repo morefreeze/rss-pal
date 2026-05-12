@@ -337,9 +337,22 @@ func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*mo
 	return &a, nil
 }
 
+// UpdateSummary writes brief+detailed summaries. If the article was in
+// processing_state='processing' (a link_set child whose content fetch
+// completed and is now being summarised), transition it to 'ready'.
+// Non-link_set articles default to 'ready' from creation, so the CASE
+// is a no-op for them.
 func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed string) error {
-	query := `UPDATE articles SET summary_brief = $1, summary_detailed = $2 WHERE id = $3`
-	_, err := r.db.Exec(query, summaryBrief, summaryDetailed, id)
+	_, err := r.db.Exec(`
+		UPDATE articles
+		SET summary_brief = $1,
+		    summary_detailed = $2,
+		    processing_state = CASE
+		        WHEN processing_state = 'processing' THEN 'ready'
+		        ELSE processing_state
+		    END
+		WHERE id = $3
+	`, summaryBrief, summaryDetailed, id)
 	return err
 }
 
