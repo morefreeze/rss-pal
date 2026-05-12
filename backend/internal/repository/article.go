@@ -501,6 +501,7 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 		WHERE a.url != '' AND a.refetch_attempts < 5
 		  AND f.feed_type NOT IN ('youtube', 'podcast')
 		  AND (a.media_type IS NULL OR (a.media_type NOT LIKE 'video/%' AND a.media_type NOT LIKE 'audio/%'))
+		  AND COALESCE(a.processing_state, 'ready') NOT IN ('stub', 'failed')
 		  AND ((LENGTH(a.content) < $1 OR a.content IS NULL AND a.fetched_at > NOW() - INTERVAL '7 days')
 		       OR (a.content LIKE '%<%>%' AND a.fetched_at > NOW() - INTERVAL '30 days'))
 		ORDER BY a.fetched_at DESC
