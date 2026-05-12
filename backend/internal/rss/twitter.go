@@ -85,6 +85,7 @@ func ExtractTweet(html string, statusID string) (*TweetCapture, error) {
 		DisplayName:  extractDisplayName(focal),
 		PublishedAt:  extractPublishedAt(focal),
 		TextMarkdown: extractTweetText(focal),
+		ImageURLs:    extractTweetImages(focal),
 	}
 	return out, nil
 }
@@ -225,4 +226,61 @@ func extractPublishedAt(focal *goquery.Selection) time.Time {
 		return true
 	})
 	return ts
+}
+
+// extractTweetImages collects photo URLs from the focal tweet, excluding:
+//   - profile avatars (path contains /profile_images/)
+//   - images inside any role="link" container (these are quote-tweet
+//     thumbnails; the quote tweet itself is captured separately as a link).
+//
+// Each URL has its `name=...` query parameter rewritten to `name=large` to
+// pull the highest-quality variant Twitter serves anonymously.
+func extractTweetImages(focal *goquery.Selection) []string {
+	var urls []string
+	focal.Find(`[data-testid="tweetPhoto"] img[src]`).Each(func(_ int, img *goquery.Selection) {
+		// Skip if any ancestor up to focal has role="link" (quote card).
+		if hasAncestor(img, focal, `[role="link"]`) {
+			return
+		}
+		src, _ := img.Attr("src")
+		if !strings.Contains(src, "pbs.twimg.com") || strings.Contains(src, "/profile_images/") {
+			return
+		}
+		urls = append(urls, upgradeTwitterImageURL(src))
+	})
+	return urls
+}
+
+// hasAncestor reports whether sel has an ancestor matching selector within
+// the subtree rooted at stop (exclusive).
+func hasAncestor(sel, stop *goquery.Selection, selector string) bool {
+	stopNode := stop.Get(0)
+	cur := sel.Parent()
+	for cur.Length() > 0 {
+		if cur.Get(0) == stopNode {
+			return false
+		}
+		if cur.Is(selector) {
+			return true
+		}
+		cur = cur.Parent()
+	}
+	return false
+}
+
+// upgradeTwitterImageURL rewrites the `name=` query param to `large`, which
+// is the highest-resolution variant Twitter serves to anonymous callers. If
+// there's no `name=` param, the URL is returned as-is.
+func upgradeTwitterImageURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	if _, has := q["name"]; !has {
+		return raw
+	}
+	q.Set("name", "large")
+	u.RawQuery = q.Encode()
+	return u.String()
 }

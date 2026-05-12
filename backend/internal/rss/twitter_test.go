@@ -90,6 +90,26 @@ func TestExtractTweet_AuthorAndTimestamp(t *testing.T) {
 	}
 }
 
+func TestExtractTweet_Images(t *testing.T) {
+	data := mustReadFixture(t, "tweet_with_images.html")
+	cap, err := ExtractTweet(data, "2222222222222222222")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{
+		"https://pbs.twimg.com/media/AAA111.jpg?format=jpg&name=large",
+		"https://pbs.twimg.com/media/BBB222.jpg?format=jpg&name=large",
+	}
+	if len(cap.ImageURLs) != len(want) {
+		t.Fatalf("ImageURLs len = %d, want %d: %v", len(cap.ImageURLs), len(want), cap.ImageURLs)
+	}
+	for i := range want {
+		if cap.ImageURLs[i] != want[i] {
+			t.Errorf("ImageURLs[%d] = %q, want %q", i, cap.ImageURLs[i], want[i])
+		}
+	}
+}
+
 func mustReadFixture(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile("testdata/twitter/" + name)
