@@ -141,6 +141,14 @@ func TestExtractTweet_ImageOnly(t *testing.T) {
 	}
 }
 
+func TestExtractTweet_ErrTweetNotFound(t *testing.T) {
+	data := mustReadFixture(t, "tweet_not_found.html")
+	_, err := ExtractTweet(data, "1234567890123456789")
+	if !errors.Is(err, ErrTweetNotFound) {
+		t.Fatalf("want ErrTweetNotFound, got %v", err)
+	}
+}
+
 func mustReadFixture(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile("testdata/twitter/" + name)
