@@ -259,9 +259,9 @@ func (r *FeedRepository) GetOrCreateSavedFeed(ownerID int) (*model.Feed, error) 
 		FeedType:         "saved",
 	}
 	insertErr := r.db.QueryRow(
-		`INSERT INTO feeds (url, title, fetch_interval_minutes, is_active, owner_id, feed_type)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
-		newFeed.URL, newFeed.Title, newFeed.FetchIntervalMin, newFeed.IsActive, newFeed.OwnerID, newFeed.FeedType,
+		`INSERT INTO feeds (url, title, fetch_interval_minutes, is_active, owner_id, feed_type, expand_links)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
+		newFeed.URL, newFeed.Title, newFeed.FetchIntervalMin, newFeed.IsActive, newFeed.OwnerID, newFeed.FeedType, false,
 	).Scan(&newFeed.ID, &newFeed.CreatedAt)
 	if insertErr != nil {
 		return nil, insertErr
