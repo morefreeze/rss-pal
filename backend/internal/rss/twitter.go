@@ -28,6 +28,11 @@ var twitterHosts = map[string]struct{}{
 // internal `/i/...` system routes.
 var twitterStatusPathRe = regexp.MustCompile(`^/[A-Za-z0-9_]{1,15}/status/([0-9]+)/?$`)
 
+// twitterPermalinkPathRe matches either a tweet (`/status/`) or X Article
+// (`/article/`) permalink — both forms appear as the clickable destination
+// of a quote card.
+var twitterPermalinkPathRe = regexp.MustCompile(`^/([A-Za-z0-9_]{1,15})/(status|article)/([0-9]+)/?$`)
+
 // IsTwitterStatusURL reports whether raw is a Twitter / X single-tweet
 // permalink. On match it returns the numeric tweet id from the path so the
 // caller can pin DOM extraction to the focal tweet (a tweet page renders
@@ -57,7 +62,19 @@ type TweetCapture struct {
 	PublishedAt  time.Time // RFC3339 from <time datetime="...">, zero if absent
 	TextMarkdown string    // tweet text rendered as markdown
 	ImageURLs    []string  // pbs.twimg.com URLs, upgraded to ?name=large
-	QuoteURL     string    // x.com permalink of quoted tweet, normalized
+	Quote        *Quote    // nested quoted tweet/article, nil if focal has no quote
+}
+
+// Quote is the structured contents of a quote card embedded in the focal
+// tweet. URL is always set when Quote != nil; the other fields are
+// best-effort and degrade rendering when empty (e.g. an X Article quote
+// where we can't extract the title spans).
+type Quote struct {
+	URL         string    // permalink of quoted tweet or X Article
+	Author      string    // handle of quoted user (without @)
+	DisplayName string    // display name of quoted user
+	PublishedAt time.Time // <time datetime="..."> inside the quote card
+	Excerpt     string    // visible body text of the card, capped at ~280 runes
 }
 
 // ErrTweetNotFound means the focal tweet identified by statusID was not
@@ -86,7 +103,7 @@ func ExtractTweet(html string, statusID string) (*TweetCapture, error) {
 		PublishedAt:  extractPublishedAt(focal),
 		TextMarkdown: extractTweetText(focal),
 		ImageURLs:    extractTweetImages(focal),
-		QuoteURL:     extractQuoteURL(focal, statusID),
+		Quote:        extractQuote(focal, statusID),
 	}
 	return out, nil
 }
@@ -137,12 +154,7 @@ func extractTweetText(focal *goquery.Selection) string {
 	}
 	var b strings.Builder
 	walkTextMarkdown(textNode, &b)
-	// Collapse runs of >2 newlines and trim trailing whitespace.
-	out := strings.TrimSpace(b.String())
-	for strings.Contains(out, "\n\n\n") {
-		out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
-	}
-	return out
+	return collapseBlankLines(strings.TrimSpace(b.String()))
 }
 
 func walkTextMarkdown(sel *goquery.Selection, b *strings.Builder) {
@@ -186,6 +198,9 @@ var profileHrefRe = regexp.MustCompile(`^/([A-Za-z0-9_]{1,15})$`)
 func extractAuthorHandle(focal *goquery.Selection) string {
 	var handle string
 	focal.Find(`[data-testid="User-Name"] a[href][role="link"]`).EachWithBreak(func(_ int, a *goquery.Selection) bool {
+		if hasAncestor(a, focal, `div[role="link"]`) {
+			return true // inside the quote card — belongs to the quoted user, not focal
+		}
 		href, _ := a.Attr("href")
 		if m := profileHrefRe.FindStringSubmatch(href); m != nil {
 			handle = m[1]
@@ -203,6 +218,9 @@ func extractAuthorHandle(focal *goquery.Selection) string {
 func extractDisplayName(focal *goquery.Selection) string {
 	var name string
 	focal.Find(`[data-testid="User-Name"] span`).EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		if hasAncestor(s, focal, `div[role="link"]`) {
+			return true // quoted user's name, not focal's
+		}
 		txt := strings.TrimSpace(s.Text())
 		if txt == "" || strings.HasPrefix(txt, "@") {
 			return true
@@ -219,6 +237,9 @@ func extractDisplayName(focal *goquery.Selection) string {
 func extractPublishedAt(focal *goquery.Selection) time.Time {
 	var ts time.Time
 	focal.Find(`time[datetime]`).EachWithBreak(func(_ int, tm *goquery.Selection) bool {
+		if hasAncestor(tm, focal, `div[role="link"]`) {
+			return true // quote card's timestamp, not focal's
+		}
 		dt, _ := tm.Attr("datetime")
 		if t, err := time.Parse(time.RFC3339, dt); err == nil {
 			ts = t.UTC()
@@ -240,7 +261,7 @@ func extractTweetImages(focal *goquery.Selection) []string {
 	var urls []string
 	focal.Find(`[data-testid="tweetPhoto"] img[src]`).Each(func(_ int, img *goquery.Selection) {
 		// Skip if any ancestor up to focal has role="link" (quote card).
-		if hasAncestor(img, focal, `[role="link"]`) {
+		if hasAncestor(img, focal, `div[role="link"]`) {
 			return
 		}
 		src, _ := img.Attr("src")
@@ -269,31 +290,155 @@ func hasAncestor(sel, stop *goquery.Selection, selector string) bool {
 	return false
 }
 
-// extractQuoteURL returns the x.com permalink of a tweet quoted by the
-// focal tweet. Twitter renders the quote card inside a [role="link"] div
-// whose first anchor's href is the quoted permalink. The focal tweet's own
-// permalink anchor lives outside any role="link" container, so we don't
-// accidentally pick ourselves up.
-func extractQuoteURL(focal *goquery.Selection, focalStatusID string) string {
-	var quote string
-	focal.Find(`[role="link"]`).EachWithBreak(func(_ int, link *goquery.Selection) bool {
-		link.Find(`a[href]`).EachWithBreak(func(_ int, a *goquery.Selection) bool {
-			href, _ := a.Attr("href")
-			if !twitterStatusPathRe.MatchString(href) {
-				return true
-			}
-			if strings.HasSuffix(href, "/status/"+focalStatusID) ||
-				strings.HasSuffix(href, "/status/"+focalStatusID+"/") {
-				return true
-			}
-			// Build absolute URL and run through the package's own
-			// canonicalizer-equivalent (host already x.com, query is none).
-			quote = "https://x.com" + strings.TrimSuffix(href, "/")
-			return false
-		})
-		return quote == ""
+// extractQuote returns the structured contents of a quote card embedded in
+// the focal tweet, or nil when no quote card is present. Twitter renders
+// the card inside a [role="link"] div whose first anchor points at the
+// quoted tweet's `/status/` or X Article's `/article/` permalink. The
+// focal tweet's own permalink anchor lives outside any role="link"
+// container, so it can't be mistaken for a quote.
+func extractQuote(focal *goquery.Selection, focalStatusID string) *Quote {
+	var out *Quote
+	focal.Find(`div[role="link"]`).EachWithBreak(func(_ int, card *goquery.Selection) bool {
+		url, author := pickQuotePermalink(card, focalStatusID)
+		if url == "" {
+			return true
+		}
+		out = &Quote{
+			URL:         url,
+			Author:      author,
+			DisplayName: extractCardDisplayName(card),
+			PublishedAt: extractCardPublishedAt(card),
+			Excerpt:     extractCardExcerpt(card),
+		}
+		return false
 	})
-	return quote
+	return out
+}
+
+// pickQuotePermalink walks the card's anchors and returns the first
+// permalink-shaped href that isn't the focal tweet's own. Returns the
+// absolute URL and the handle parsed from the path.
+func pickQuotePermalink(card *goquery.Selection, focalStatusID string) (url, author string) {
+	card.Find(`a[href]`).EachWithBreak(func(_ int, a *goquery.Selection) bool {
+		href, _ := a.Attr("href")
+		m := twitterPermalinkPathRe.FindStringSubmatch(href)
+		if m == nil {
+			return true
+		}
+		// Skip if this is the focal's own /status/<id> link (a tweet can
+		// link to itself from inside a card-shaped container in some
+		// embedded contexts).
+		if m[2] == "status" && m[3] == focalStatusID {
+			return true
+		}
+		url = "https://x.com" + strings.TrimSuffix(href, "/")
+		author = m[1]
+		return false
+	})
+	return url, author
+}
+
+// extractCardDisplayName grabs the quoted user's display name from the
+// card's inner User-Name container, mirroring the focal extractor's logic
+// but scoped to the card subtree.
+func extractCardDisplayName(card *goquery.Selection) string {
+	var name string
+	card.Find(`[data-testid="User-Name"] span`).EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		txt := strings.TrimSpace(s.Text())
+		if txt == "" || strings.HasPrefix(txt, "@") {
+			return true
+		}
+		name = txt
+		return false
+	})
+	return name
+}
+
+// extractCardPublishedAt parses the first <time datetime="..."> inside the
+// card subtree.
+func extractCardPublishedAt(card *goquery.Selection) time.Time {
+	var ts time.Time
+	card.Find(`time[datetime]`).EachWithBreak(func(_ int, tm *goquery.Selection) bool {
+		dt, _ := tm.Attr("datetime")
+		if t, err := time.Parse(time.RFC3339, dt); err == nil {
+			ts = t.UTC()
+			return false
+		}
+		return true
+	})
+	return ts
+}
+
+// extractCardExcerpt returns up to ~280 runes of visible body text from
+// the quote card. Prefers the card's own [data-testid="tweetText"]; for X
+// Article quotes (no tweetText element) it falls back to scraping the
+// card's text content with the User-Name container and timestamps removed.
+func extractCardExcerpt(card *goquery.Selection) string {
+	if txt := card.Find(`[data-testid="tweetText"]`).First(); txt.Length() > 0 {
+		var b strings.Builder
+		walkTextMarkdown(txt, &b)
+		return truncateRunes(collapseBlankLines(strings.TrimSpace(b.String())), 280)
+	}
+	return truncateRunes(collapseBlankLines(strings.TrimSpace(scrapeCardText(card))), 280)
+}
+
+// scrapeCardText walks the card subtree and concatenates text nodes,
+// skipping descendants of the User-Name and time elements (those are meta
+// already captured in DisplayName/PublishedAt).
+func scrapeCardText(card *goquery.Selection) string {
+	var b strings.Builder
+	var walk func(sel *goquery.Selection)
+	walk = func(sel *goquery.Selection) {
+		sel.Contents().Each(func(_ int, n *goquery.Selection) {
+			node := n.Get(0)
+			if node == nil {
+				return
+			}
+			if node.Type == html.TextNode {
+				b.WriteString(node.Data)
+				return
+			}
+			if node.Type != html.ElementNode {
+				return
+			}
+			if n.Is(`[data-testid="User-Name"]`) || n.Is(`time`) {
+				return
+			}
+			if node.Data == "br" {
+				b.WriteString("\n")
+				return
+			}
+			walk(n)
+			// Block-ish elements get a soft break so adjacent paragraphs
+			// don't run together as one wall of text.
+			switch node.Data {
+			case "div", "p", "h1", "h2", "h3", "h4", "section", "article":
+				b.WriteString("\n")
+			}
+		})
+	}
+	walk(card)
+	return b.String()
+}
+
+// truncateRunes returns s capped at max runes, appending an ellipsis when
+// truncation actually happens. Pure, panic-free on multi-byte input.
+func truncateRunes(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
+}
+
+// collapseBlankLines reduces 3+ consecutive newlines to exactly two, which
+// is how markdown renders a paragraph break. Keeps the excerpt readable
+// when the source DOM contains stacked empty divs.
+func collapseBlankLines(s string) string {
+	for strings.Contains(s, "\n\n\n") {
+		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+	}
+	return s
 }
 
 // upgradeTwitterImageURL rewrites the `name=` query param to `large`, which

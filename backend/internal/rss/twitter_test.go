@@ -111,17 +111,45 @@ func TestExtractTweet_Images(t *testing.T) {
 	}
 }
 
-func TestExtractTweet_QuoteURL(t *testing.T) {
+func TestExtractTweet_Quote(t *testing.T) {
 	data := mustReadFixture(t, "tweet_with_quote.html")
 	cap, err := ExtractTweet(data, "2053872850101285137")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "https://x.com/someone_else/status/3333333333333333333"
-	if cap.QuoteURL != want {
-		t.Errorf("QuoteURL = %q, want %q", cap.QuoteURL, want)
+	if cap.Quote == nil {
+		t.Fatal("expected Quote to be set")
 	}
-	// The quoted tweet's text must NOT leak into our TextMarkdown.
+	wantURL := "https://x.com/someone_else/status/3333333333333333333"
+	if cap.Quote.URL != wantURL {
+		t.Errorf("Quote.URL = %q, want %q", cap.Quote.URL, wantURL)
+	}
+	if cap.Quote.Author != "someone_else" {
+		t.Errorf("Quote.Author = %q, want %q", cap.Quote.Author, "someone_else")
+	}
+	if cap.Quote.DisplayName != "Other Person" {
+		t.Errorf("Quote.DisplayName = %q, want %q", cap.Quote.DisplayName, "Other Person")
+	}
+	wantQuotedAt := time.Date(2026, 4, 22, 15, 0, 0, 0, time.UTC)
+	if !cap.Quote.PublishedAt.Equal(wantQuotedAt) {
+		t.Errorf("Quote.PublishedAt = %v, want %v", cap.Quote.PublishedAt, wantQuotedAt)
+	}
+	if cap.Quote.Excerpt != "quoted tweet body — extracted as excerpt." {
+		t.Errorf("Quote.Excerpt = %q", cap.Quote.Excerpt)
+	}
+
+	// Focal-side fields must not leak from the quote card.
+	if cap.Author != "karpathy" {
+		t.Errorf("focal Author = %q, want karpathy (quote-card author leaked?)", cap.Author)
+	}
+	if cap.DisplayName != "Andrej Karpathy" {
+		t.Errorf("focal DisplayName = %q, want Andrej Karpathy", cap.DisplayName)
+	}
+	wantFocalAt := time.Date(2026, 4, 23, 8, 0, 0, 0, time.UTC)
+	if !cap.PublishedAt.Equal(wantFocalAt) {
+		t.Errorf("focal PublishedAt = %v, want %v (quote-card time leaked?)", cap.PublishedAt, wantFocalAt)
+	}
+	// The quoted tweet's text must NOT leak into the focal's TextMarkdown.
 	if strings.Contains(cap.TextMarkdown, "quoted tweet body") {
 		t.Errorf("quoted tweet body leaked into TextMarkdown: %q", cap.TextMarkdown)
 	}

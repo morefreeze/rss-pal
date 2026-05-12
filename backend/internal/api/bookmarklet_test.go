@@ -199,15 +199,63 @@ func TestBuildTweetContent_FullCase(t *testing.T) {
 		PublishedAt:  time.Date(2026, 4, 23, 8, 0, 0, 0, time.UTC),
 		TextMarkdown: "+1 to this excellent thread.",
 		ImageURLs:    []string{"https://pbs.twimg.com/media/AAA111.jpg?name=large"},
-		QuoteURL:     "https://x.com/someone_else/status/3333333333333333333",
+		Quote: &rss.Quote{
+			URL:         "https://x.com/someone_else/status/3333333333333333333",
+			Author:      "someone_else",
+			DisplayName: "Other Person",
+			PublishedAt: time.Date(2026, 4, 22, 15, 0, 0, 0, time.UTC),
+			Excerpt:     "quoted tweet body — extracted as excerpt.",
+		},
 	}
 	got := buildTweetContent(cap)
 	want := "> @karpathy (Andrej Karpathy) · 2026-04-23\n\n" +
 		"+1 to this excellent thread.\n\n" +
 		"![](https://pbs.twimg.com/media/AAA111.jpg?name=large)\n\n" +
-		"引用: https://x.com/someone_else/status/3333333333333333333"
+		"**引用** [@someone_else (Other Person)](https://x.com/someone_else/status/3333333333333333333) · 2026-04-22\n\n" +
+		"> quoted tweet body — extracted as excerpt."
 	if got != want {
 		t.Errorf("buildTweetContent mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestBuildQuoteSection_FallbackURLOnly(t *testing.T) {
+	got := buildQuoteSection(&rss.Quote{URL: "https://x.com/x/status/1"})
+	if got != "引用: https://x.com/x/status/1" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestBuildQuoteSection_NoExcerpt(t *testing.T) {
+	got := buildQuoteSection(&rss.Quote{
+		URL:         "https://x.com/x/status/1",
+		Author:      "x",
+		DisplayName: "X User",
+		PublishedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+	})
+	want := "**引用** [@x (X User)](https://x.com/x/status/1) · 2026-05-01"
+	if got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestBuildQuoteSection_MultilineExcerpt(t *testing.T) {
+	got := buildQuoteSection(&rss.Quote{
+		URL:     "https://x.com/x/status/1",
+		Author:  "x",
+		Excerpt: "first paragraph.\n\nsecond paragraph.",
+	})
+	want := "**引用** [@x](https://x.com/x/status/1)\n\n> first paragraph.\n> \n> second paragraph."
+	if got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestBuildQuoteSection_NilOrEmpty(t *testing.T) {
+	if got := buildQuoteSection(nil); got != "" {
+		t.Errorf("nil quote should produce empty, got %q", got)
+	}
+	if got := buildQuoteSection(&rss.Quote{}); got != "" {
+		t.Errorf("empty URL should produce empty, got %q", got)
 	}
 }
 
