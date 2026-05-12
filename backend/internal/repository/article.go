@@ -958,6 +958,145 @@ func (r *ArticleRepository) GetTopTopicVocabulary(limit int) ([]string, error) {
 }
 
 
+// FindParentsNeedingExpansion returns parent articles (is_link_set=true) that
+// have zero rows in articles with parent_article_id = parent.id. Limit caps
+// per-cycle work.
+func (r *ArticleRepository) FindParentsNeedingExpansion(limit int) ([]model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
+		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
+		       a.is_link_set, a.parent_article_id, a.processing_state, a.prerank_score, a.editor_note
+		FROM articles a
+		WHERE a.is_link_set = true
+		  AND NOT EXISTS (SELECT 1 FROM articles c WHERE c.parent_article_id = a.id)
+		ORDER BY a.fetched_at DESC
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+// GetChildren returns children of a parent ordered by prerank_score DESC, id ASC.
+// scanArticleNoFeedTitle already populates all link_set fields, so no supplemental
+// query is needed.
+func (r *ArticleRepository) GetChildren(parentID int) ([]model.Article, error) {
+	query := `
+		SELECT id, feed_id, title, url, content, published_at,
+		       summary_brief, summary_detailed, fetched_at, word_count,
+		       reading_minutes, media_url, media_type, media_duration_seconds,
+		       is_link_set, parent_article_id, processing_state, prerank_score, editor_note
+		FROM articles
+		WHERE parent_article_id = $1
+		ORDER BY prerank_score DESC NULLS LAST, id ASC
+	`
+	rows, err := r.db.Query(query, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+// UpdateProcessingState transitions an article's processing_state.
+// Returns rowsAffected so callers can detect "already in target state".
+func (r *ArticleRepository) UpdateProcessingState(id int, from, to string) (int64, error) {
+	res, err := r.db.Exec(`UPDATE articles SET processing_state = $1 WHERE id = $2 AND processing_state = $3`, to, id, from)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// GetProcessingChildren returns children with processing_state='processing'
+// and refetch_attempts < 3, capped at limit.
+func (r *ArticleRepository) GetProcessingChildren(limit int) ([]model.Article, error) {
+	query := `
+		SELECT id, feed_id, title, url, content, published_at,
+		       summary_brief, summary_detailed, fetched_at, word_count, reading_minutes,
+		       media_url, media_type, media_duration_seconds,
+		       is_link_set, parent_article_id, processing_state, prerank_score, editor_note
+		FROM articles
+		WHERE processing_state = 'processing'
+		  AND parent_article_id IS NOT NULL
+		  AND COALESCE(refetch_attempts, 0) < 3
+		ORDER BY prerank_score DESC NULLS LAST, id ASC
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+// MarkFailed transitions an article unconditionally to 'failed'.
+func (r *ArticleRepository) MarkFailed(id int) error {
+	_, err := r.db.Exec(`UPDATE articles SET processing_state = 'failed' WHERE id = $1`, id)
+	return err
+}
+
+// MarkFailedAfterRetries transitions processing_state to 'failed' if and only
+// if refetch_attempts has reached threshold. Safe to call after every failure.
+func (r *ArticleRepository) MarkFailedAfterRetries(id, threshold int) error {
+	_, err := r.db.Exec(`
+		UPDATE articles
+		SET processing_state = 'failed'
+		WHERE id = $1 AND COALESCE(refetch_attempts, 0) >= $2
+	`, id, threshold)
+	return err
+}
+
+// GetLinkSetRecommendations returns processed children from link_set parents
+// fetched in the last `days` days, scored by the same formula as GetRecommended.
+// Filters to processing_state='ready' and visible-to-user feeds.
+func (r *ArticleRepository) GetLinkSetRecommendations(userID, days, limit int) ([]model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
+		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
+		       a.is_link_set, a.parent_article_id, a.processing_state, a.prerank_score, a.editor_note
+		FROM articles a
+		JOIN articles parent ON a.parent_article_id = parent.id
+		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN (
+			SELECT article_id, SUM(
+				CASE signal_type
+					WHEN 'like' THEN 5.0 * signal_value
+					WHEN 'dislike' THEN -10.0 * signal_value
+					WHEN 'save' THEN 3.0 * signal_value
+					WHEN 'read_duration' THEN signal_value / 60.0
+					WHEN 'completed_listen' THEN 8.0 * signal_value
+					ELSE 1.0 * signal_value
+				END
+			) AS pref_score
+			FROM user_preferences
+			WHERE created_at > NOW() - INTERVAL '30 days' AND user_id = $1
+			GROUP BY article_id
+		) p ON a.id = p.article_id
+		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+		WHERE a.processing_state = 'ready'
+		  AND a.parent_article_id IS NOT NULL
+		  AND parent.fetched_at > NOW() - ($2 || ' days')::INTERVAL
+		  AND (f.owner_id IS NULL OR f.owner_id = $1)
+		  AND COALESCE(rp.is_completed, false) = false
+		ORDER BY COALESCE(p.pref_score, 0) + COALESCE(a.prerank_score, 0) DESC,
+		         a.published_at DESC NULLS LAST
+		LIMIT $3
+	`
+	rows, err := r.db.Query(query, userID, days, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
 // GetInsightCandidates returns up to (unreadLimit + readLimit) candidate
 // articles for the AI prompt:
 //
