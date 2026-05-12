@@ -289,13 +289,9 @@ export default function FeedListPage() {
                 <button
                   type="button"
                   onClick={() => setFoldedGroups(s => ({ ...s, [group.category]: !folded }))}
+                  className="btn-text btn-sm"
                   style={{
-                    background: 'transparent',
-                    border: 'none',
                     padding: '2px 0',
-                    fontSize: 12,
-                    color: '#666',
-                    cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 4,
@@ -333,7 +329,7 @@ export default function FeedListPage() {
 
         {/* Preview result */}
         {preview && (
-          <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, padding: 12 }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12 }}>
             <div className="flex-between mb-2">
               <div>
                 <div className="text-bold">{preview.feed_title || '未命名订阅源'}</div>
@@ -360,8 +356,8 @@ export default function FeedListPage() {
                 </div>
               ) : (
                 (preview.items ?? []).map((item, i) => (
-                  <div key={i} style={{ padding: '5px 0', borderBottom: i < (preview.items ?? []).length - 1 ? '1px solid #f5f5f5' : 'none' }}>
-                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm" style={{ color: '#213547' }}>
+                  <div key={i} style={{ padding: '5px 0', borderBottom: i < (preview.items ?? []).length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm" style={{ color: 'var(--link)' }}>
                       {item.title}
                     </a>
                     {item.published_at && (
@@ -385,19 +381,19 @@ export default function FeedListPage() {
           <div key={feed.id} className="card">
             <div className="flex-between">
               <div>
-                <div className="text-bold" style={!feed.is_active ? { color: '#aaa' } : {}}>
+                <div className="text-bold" style={!feed.is_active ? { color: 'var(--fg-muted)' } : {}}>
                   {feed.title || feed.url}
                   {feed.feed_type === 'html' && (
                     <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#fef9c3', borderRadius: 4, color: '#854d0e' }}>网页</span>
                   )}
                   {!feed.is_active && (
-                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#f3f4f6', borderRadius: 4, color: '#6b7280' }}>已暂停</span>
+                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>已暂停</span>
                   )}
                 </div>
                 <div className="text-muted text-sm">{feed.url}</div>
                 <div className="text-muted text-sm mt-1">
                   {feed.owner_id ? '私有' : '共享'} · {feed.article_count} 篇
-                  {feed.unread_count > 0 && <span style={{ color: '#2563eb', fontWeight: 500 }}> · {feed.unread_count} 未读</span>}
+                  {feed.unread_count > 0 && <span style={{ color: 'var(--accent)', fontWeight: 500 }}> · {feed.unread_count} 未读</span>}
                   {' '}· 上次抓取：{formatDate(feed.last_fetched_at)}
                 </div>
               </div>

@@ -10,7 +10,7 @@ interface Props {
 
 const numCell: React.CSSProperties = { textAlign: 'right', padding: '6px 8px', whiteSpace: 'nowrap' }
 const labelCell: React.CSSProperties = { padding: '6px 8px' }
-const headerStyle: React.CSSProperties = { padding: '8px', borderBottom: '2px solid #ccc', textAlign: 'left', cursor: 'pointer', userSelect: 'none' }
+const headerStyle: React.CSSProperties = { padding: '8px', borderBottom: '2px solid var(--border)', textAlign: 'left', cursor: 'pointer', userSelect: 'none' }
 
 function pct(v: number | null): string {
   if (v == null) return '—'
@@ -92,11 +92,11 @@ export default function FeedHealthTable({ rows, onChange }: Props) {
       </thead>
       <tbody>
         {sorted.map(r => (
-          <tr key={r.feed_id} style={{ borderBottom: '1px solid #eee' }}>
+          <tr key={r.feed_id} style={{ borderBottom: '1px solid var(--border)' }}>
             <td style={labelCell}>
               {r.feed_title}
               {r.status !== 'active' && (
-                <span style={{ marginLeft: 6, fontSize: 11, color: '#888' }}>[{r.status}]</span>
+                <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--fg-muted)' }}>[{r.status}]</span>
               )}
             </td>
             <td style={numCell}>{r.produced}</td>
@@ -107,9 +107,9 @@ export default function FeedHealthTable({ rows, onChange }: Props) {
             <td style={numCell}>{score(r.value_score)}</td>
             <td style={numCell}>{r.priority_weight.toFixed(2)}</td>
             <td style={labelCell}>
-              <button onClick={() => handleStatus(r.feed_id, 'paused')} disabled={r.status !== 'active'}>暂停</button>
-              <button onClick={() => handleStatus(r.feed_id, 'archived')} style={{ marginLeft: 4 }}>归档</button>
-              <button onClick={() => handleWeight(r.feed_id)} style={{ marginLeft: 4 }}>降权</button>
+              <button className="btn-ghost btn-sm" onClick={() => handleStatus(r.feed_id, 'paused')} disabled={r.status !== 'active'}>暂停</button>
+              <button className="btn-ghost btn-sm" onClick={() => handleStatus(r.feed_id, 'archived')} style={{ marginLeft: 4 }}>归档</button>
+              <button className="btn-ghost btn-sm" onClick={() => handleWeight(r.feed_id)} style={{ marginLeft: 4 }}>降权</button>
             </td>
             <td style={labelCell}>
               {r.pruning_rule && (

@@ -197,7 +197,9 @@ export default function ArticlePage() {
       if (activeReadSecondsRef.current < minSeconds) return
 
       const scrollPosition = Math.max(maxScrollRef.current, 0.9)
-      setProgress(prev => prev ? { ...prev, scroll_position: scrollPosition, is_completed: true } : prev)
+      setProgress(prev => prev
+        ? { ...prev, scroll_position: scrollPosition, is_completed: true }
+        : { id: 0, article_id: article.id, scroll_position: scrollPosition, last_read_at: new Date().toISOString(), is_completed: true })
       pendingProgressRef.current = { scrollPosition, isCompleted: true }
       try {
         const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
@@ -228,11 +230,9 @@ export default function ArticlePage() {
     const isCompleted = scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds
     const wasCompleted = progress?.is_completed
 
-    setProgress(prev => prev ? {
-      ...prev,
-      scroll_position: scrollPosition,
-      is_completed: isCompleted,
-    } : prev)
+    setProgress(prev => prev
+      ? { ...prev, scroll_position: scrollPosition, is_completed: isCompleted }
+      : { id: 0, article_id: article.id, scroll_position: scrollPosition, last_read_at: new Date().toISOString(), is_completed: isCompleted })
 
     pendingProgressRef.current = { scrollPosition, isCompleted }
 
@@ -570,11 +570,9 @@ export default function ArticlePage() {
         }}
         fontSize={reader.fontSize}
         fontFamily={reader.fontFamily}
-        bgTheme={reader.bgTheme}
         onExit={() => reader.setMode('normal')}
         onFontSize={reader.setFontSize}
         onFontFamily={reader.setFontFamily}
-        onBgTheme={reader.setBgTheme}
       />
     )
   }
@@ -641,7 +639,7 @@ export default function ArticlePage() {
             </button>
           </div>
           {article.feed_title && (
-            <div className="text-sm" style={{ color: '#4b6bcc' }}>{article.feed_title}</div>
+            <div className="text-sm" style={{ color: 'var(--accent)' }}>{article.feed_title}</div>
           )}
         </div>
         <h2>{article.title}</h2>
@@ -742,7 +740,7 @@ export default function ArticlePage() {
             )}
             {streamingDetailed && (
               <>
-                <hr style={{ margin: '12px 0', borderColor: '#eee' }} />
+                <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
                 <div style={{ whiteSpace: 'pre-wrap' }}>
                   {streamingDetailed}
                   {streamPhase === 'detailed' && <span className="typing-caret">▍</span>}
@@ -760,7 +758,7 @@ export default function ArticlePage() {
             )}
             {article.summary_detailed && (
               <>
-                <hr style={{ margin: '12px 0', borderColor: '#eee' }} />
+                <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
                 <ReactMarkdown>{article.summary_detailed}</ReactMarkdown>
               </>
             )}
