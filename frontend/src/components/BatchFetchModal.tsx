@@ -8,6 +8,41 @@ interface Props {
   onFetched?: (insertedCount: number) => void
 }
 
+const SELECTION_TTL_MS = 24 * 60 * 60 * 1000 // 1 day
+const selectionKey = (id: number) => `rsspal_batch_sel_${id}`
+
+function loadSavedURLs(articleId: number): string[] {
+  try {
+    const raw = localStorage.getItem(selectionKey(articleId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as { urls?: unknown; savedAt?: unknown }
+    if (typeof parsed?.savedAt !== 'number') return []
+    if (Date.now() - parsed.savedAt > SELECTION_TTL_MS) {
+      localStorage.removeItem(selectionKey(articleId))
+      return []
+    }
+    if (!Array.isArray(parsed.urls)) return []
+    return parsed.urls.filter((u): u is string => typeof u === 'string')
+  } catch {
+    return []
+  }
+}
+
+function saveSelectedURLs(articleId: number, urls: string[]) {
+  try {
+    if (urls.length === 0) {
+      localStorage.removeItem(selectionKey(articleId))
+      return
+    }
+    localStorage.setItem(
+      selectionKey(articleId),
+      JSON.stringify({ urls, savedAt: Date.now() }),
+    )
+  } catch {
+    /* quota or disabled — ignore */
+  }
+}
+
 export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) {
   const [candidates, setCandidates] = useState<CandidateView[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -23,10 +58,33 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
     setSelected(new Set())
     setLastClickedIdx(null)
     getArticleCandidates(articleId)
-      .then((cands) => setCandidates(cands))
+      .then((cands) => {
+        setCandidates(cands)
+        // Restore prior selection (if within 1-day TTL); map URLs back to indices
+        // and drop URLs that no longer appear or are already-fetched.
+        const savedURLs = loadSavedURLs(articleId)
+        if (savedURLs.length === 0) return
+        const savedSet = new Set(savedURLs)
+        const restored = new Set<number>()
+        cands.forEach((c, i) => {
+          if (!c.already_fetched && savedSet.has(c.url)) restored.add(i)
+        })
+        if (restored.size > 0) setSelected(restored)
+      })
       .catch((e) => setError(e?.response?.data?.error || '获取候选链接失败'))
       .finally(() => setLoading(false))
   }, [open, articleId])
+
+  // Persist selection on every change (debounce isn't worth it — localStorage is fast).
+  useEffect(() => {
+    if (!candidates || !open) return
+    const urls: string[] = []
+    selected.forEach((i) => {
+      const c = candidates[i]
+      if (c && !c.already_fetched) urls.push(c.url)
+    })
+    saveSelectedURLs(articleId, urls)
+  }, [selected, candidates, open, articleId])
 
   // Lock body scroll while modal is open
   useEffect(() => {
@@ -107,6 +165,8 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
         editor_note: candidates[i].editor_note,
       }))
       const result = await batchFetchCandidates(articleId, chosen)
+      // Successfully queued — clear saved selection so next open starts fresh.
+      saveSelectedURLs(articleId, [])
       onFetched?.(result.inserted)
       onClose()
     } catch (e: any) {
