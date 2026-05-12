@@ -52,6 +52,25 @@ func detectLinkSetCandidates(
 		rawHTML, _ := doc.Html()
 		cands := rss.ExtractCandidates(rawHTML, a.URL)
 		extendable := len(cands) >= linkSetMinCandidates
+
+		if extendable {
+			repoCands := make([]repository.LinkSetCandidate, 0, len(cands))
+			for i, c := range cands {
+				repoCands = append(repoCands, repository.LinkSetCandidate{
+					ParentArticleID: a.ID,
+					Title:           c.Title,
+					URL:             c.URL,
+					EditorNote:      c.EditorNote,
+					Position:        i,
+				})
+			}
+			if err := articleRepo.ReplaceLinkSetCandidates(a.ID, repoCands); err != nil {
+				log.Printf("link_set: cache candidates for %d: %v", a.ID, err)
+				// continue anyway — the flag still flips so the user gets the button,
+				// and the endpoint will fall back to live extraction if needed.
+			}
+		}
+
 		if err := articleRepo.SetLinksExtendable(a.ID, extendable); err != nil {
 			log.Printf("link_set: set extendable %d: %v", a.ID, err)
 			continue

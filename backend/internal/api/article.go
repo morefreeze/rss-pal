@@ -409,15 +409,42 @@ type CandidateView struct {
 	AlreadyFetched bool   `json:"already_fetched"`
 }
 
-// GetCandidates re-extracts the article's outbound link candidates by fetching
-// raw HTML on demand. Marks any candidate whose URL already exists as a child
-// of this article so the frontend can disable it in the modal.
+// GetCandidates returns the batch-fetch modal candidates. Reads from the
+// link_set_candidates cache written by the worker (~10ms). Falls back to
+// live HTML extraction for articles detected before the cache was added.
 func (h *ArticleHandler) GetCandidates(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
+	if _, err := h.articleRepo.GetByID(id, getUserID(c)); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+
+	cached, fetched, err := h.articleRepo.GetLinkSetCandidates(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(cached) > 0 {
+		out := make([]CandidateView, 0, len(cached))
+		for _, cd := range cached {
+			out = append(out, CandidateView{
+				Title:          cd.Title,
+				URL:            cd.URL,
+				EditorNote:     cd.EditorNote,
+				AlreadyFetched: fetched[cd.URL],
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"candidates": out, "from_cache": true})
+		return
+	}
+
+	// Fallback: cache empty — extract live (slow path). This happens for
+	// articles detected before this cache was added.
 	article, err := h.articleRepo.GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
@@ -433,13 +460,24 @@ func (h *ArticleHandler) GetCandidates(c *gin.Context) {
 	rawHTML, _ := doc.Html()
 	cands := rss.ExtractCandidates(rawHTML, article.URL)
 
-	// Pre-load existing children URLs to mark already_fetched.
+	// Opportunistically persist for next time.
+	repoCands := make([]repository.LinkSetCandidate, 0, len(cands))
+	for i, cd := range cands {
+		repoCands = append(repoCands, repository.LinkSetCandidate{
+			ParentArticleID: id,
+			Title:           cd.Title,
+			URL:             cd.URL,
+			EditorNote:      cd.EditorNote,
+			Position:        i,
+		})
+	}
+	_ = h.articleRepo.ReplaceLinkSetCandidates(id, repoCands)
+
 	children, _ := h.articleRepo.GetChildren(id)
 	existing := make(map[string]struct{}, len(children))
 	for _, ch := range children {
 		existing[ch.URL] = struct{}{}
 	}
-
 	out := make([]CandidateView, 0, len(cands))
 	for _, cd := range cands {
 		_, dup := existing[cd.URL]
@@ -450,7 +488,7 @@ func (h *ArticleHandler) GetCandidates(c *gin.Context) {
 			AlreadyFetched: dup,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"candidates": out})
+	c.JSON(http.StatusOK, gin.H{"candidates": out, "from_cache": false})
 }
 
 // BatchFetchRequest is what the modal posts on confirm.
