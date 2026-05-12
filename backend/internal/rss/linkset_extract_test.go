@@ -141,6 +141,29 @@ func TestExtractCandidates_ButtondownIssueSmoke(t *testing.T) {
 	}
 }
 
+func TestExtractCandidates_RejectsCommentsLinks(t *testing.T) {
+	// Newsletter pattern: each article is paired with a "comments→" link to
+	// the discussion page. The comments link should be filtered as stopword
+	// navigation; the article link kept.
+	html := `<ul>
+        <li><a href="https://example.com/article">Real Article Title</a>
+            <a href="https://news.ycombinator.com/item?id=123">comments→</a></li>
+        <li><a href="https://example.com/article2">Second Article</a>
+            <a href="https://news.ycombinator.com/item?id=124">comments &rarr;</a></li>
+        <li><a href="https://example.com/article3">Third</a>
+            <a href="https://news.ycombinator.com/item?id=125">discuss</a></li>
+    </ul>`
+	cands := ExtractCandidates(html, "https://buttondown.com/foo/archive/1")
+	if len(cands) != 3 {
+		t.Fatalf("want 3 real-article candidates (comments/discuss filtered), got %d: %+v", len(cands), cands)
+	}
+	for _, c := range cands {
+		if c.URL != "" && !strings.HasPrefix(c.URL, "https://example.com/") {
+			t.Errorf("unexpected candidate URL %q (should only be example.com articles)", c.URL)
+		}
+	}
+}
+
 func TestExtractCandidates_SameHostSameDepthAllowed(t *testing.T) {
 	// Multi-tenant platforms (github.com, dev.to) host many independent
 	// resources at sibling paths. A link from /a/b/awesome to /a/b/library
