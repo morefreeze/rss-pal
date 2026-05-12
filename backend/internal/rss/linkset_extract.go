@@ -21,6 +21,9 @@ var (
 	linkSetStopwords    = map[string]struct{}{
 		"here": {}, "click": {}, "read more": {}, "more": {}, "link": {},
 		"→": {}, "↗": {}, "↗️": {},
+		"comments": {}, "comments→": {}, "comments →": {},
+		"discuss": {}, "discussion": {},
+		"via": {}, "source": {},
 	}
 )
 
