@@ -362,11 +362,62 @@ func buildTweetContent(cap *rss.TweetCapture) string {
 	for _, img := range cap.ImageURLs {
 		sections = append(sections, "![]("+img+")")
 	}
-	if cap.QuoteURL != "" {
-		sections = append(sections, "引用: "+cap.QuoteURL)
+	if quote := buildQuoteSection(cap.Quote); quote != "" {
+		sections = append(sections, quote)
 	}
 
 	return strings.Join(sections, "\n\n")
+}
+
+// buildQuoteSection renders a Quote as a markdown block: an "引用" header
+// line linking to the source (with @handle (DisplayName) · YYYY-MM-DD when
+// available), followed by a blockquote of the excerpt. Degrades gracefully:
+// a quote with only a URL falls back to the bare "引用: <url>" line so we
+// don't lose the link.
+func buildQuoteSection(q *rss.Quote) string {
+	if q == nil || q.URL == "" {
+		return ""
+	}
+	if q.Author == "" && q.Excerpt == "" {
+		return "引用: " + q.URL
+	}
+
+	var b strings.Builder
+	b.WriteString("**引用** ")
+	if q.Author != "" {
+		b.WriteString("[@")
+		b.WriteString(q.Author)
+		if q.DisplayName != "" {
+			b.WriteString(" (")
+			b.WriteString(q.DisplayName)
+			b.WriteString(")")
+		}
+		b.WriteString("](")
+		b.WriteString(q.URL)
+		b.WriteString(")")
+	} else {
+		b.WriteString("[")
+		b.WriteString(q.URL)
+		b.WriteString("](")
+		b.WriteString(q.URL)
+		b.WriteString(")")
+	}
+	if !q.PublishedAt.IsZero() {
+		b.WriteString(" · ")
+		b.WriteString(q.PublishedAt.UTC().Format("2006-01-02"))
+	}
+
+	if q.Excerpt != "" {
+		b.WriteString("\n\n")
+		for i, line := range strings.Split(q.Excerpt, "\n") {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString("> ")
+			b.WriteString(line)
+		}
+	}
+	return b.String()
 }
 
 // buildTweetByline produces "> @handle (DisplayName) · YYYY-MM-DD" when
