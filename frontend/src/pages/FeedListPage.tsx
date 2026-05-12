@@ -359,22 +359,6 @@ export default function FeedListPage() {
                   >
                     只抓取这一期 newsletter
                   </button>
-                  <button
-                    type="button"
-                    className="px-3 py-1 rounded text-xs"
-                    style={{ background: 'var(--bg-elevated)', color: 'var(--fg)', border: '1px solid var(--border)' }}
-                    onClick={async () => {
-                      try {
-                        const result = await createOneoffLinkSet(newUrl.trim(), true)
-                        navigate(`/articles/${result.parent_article_id}`)
-                      } catch (err) {
-                        console.warn('one-off expand failed', err)
-                        toast.error('创建 link_set 失败，请重试')
-                      }
-                    }}
-                  >
-                    抓取这一期并扩展其中的链接
-                  </button>
                 </div>
               </div>
             )}
