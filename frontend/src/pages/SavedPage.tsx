@@ -13,8 +13,10 @@ import SavedTagSidebar, {
   SavedSelection,
   SavedSourceRow,
 } from '../components/SavedTagSidebar'
+import SavedTagChipBar from '../components/SavedTagChipBar'
 import { usePlayer } from '../player/PlayerContext'
 import { reportClick } from '../hooks/useExposureTracking'
+import { useBreakpoint } from '../hooks/useBreakpoint'
 
 const PAGE_SIZE = 20
 
@@ -67,6 +69,7 @@ interface SavedPageProps {
 
 export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: SavedPageProps = {}) {
   const navigate = useNavigate()
+  const bp = useBreakpoint()
   const player = usePlayer()
   const [tags, setTags] = useState<UserTag[]>([])
   // Sources are aggregated client-side from saved items' effective_source.
@@ -211,6 +214,66 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: Sa
     }
   })()
 
+  const renderList = () => {
+    if (loading) return <div className="card">Loading...</div>
+    if (items.length === 0) return <div className="card text-muted">暂无收藏文章</div>
+    return (
+      <>
+        {items.map((it, idx) => (
+          <ArticleCard
+            key={it.id}
+            article={it}
+            manualTags={it.manual_tags}
+            isRead={!!it.is_read}
+            isFocused={focusedIdx === idx}
+            idx={idx}
+            onPlay={player.playArticle}
+            formatDate={formatDate}
+            stripMarkdown={stripMarkdown}
+            onOpen={openArticle}
+            onFocus={setFocusedIdx}
+            sourceLabel={it.effective_source?.title}
+          />
+        ))}
+        {hasMore && (
+          <div style={{ textAlign: 'center', padding: 12 }}>
+            <button
+              className="secondary"
+              onClick={loadMore}
+              disabled={loadingMore}
+              style={{ fontSize: 13, padding: '6px 16px' }}
+            >
+              {loadingMore ? '加载中...' : '加载更多'}
+            </button>
+          </div>
+        )}
+        {!hasMore && items.length > 0 && (
+          <div style={{ textAlign: 'center', padding: 16, color: 'var(--fg-muted)', fontSize: 13 }}>
+            — 已加载全部收藏 —
+          </div>
+        )}
+      </>
+    )
+  }
+
+  if (bp === 'phone') {
+    return (
+      <div>
+        <SavedTagChipBar
+          tags={tags}
+          sources={sources}
+          selection={selection}
+          onSelect={handleSelect}
+        />
+        <div className="flex-between mb-2">
+          <h2 style={{ margin: 0, fontSize: 18 }}>{headerLabel}</h2>
+          <span className="text-muted text-sm">共 {total} 篇</span>
+        </div>
+        {renderList()}
+      </div>
+    )
+  }
+
   return (
     <div
       style={{
@@ -231,47 +294,7 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: Sa
           <h2 style={{ margin: 0 }}>{headerLabel}</h2>
           <span className="text-muted text-sm">共 {total} 篇</span>
         </div>
-        {loading ? (
-          <div className="card">Loading...</div>
-        ) : items.length === 0 ? (
-          <div className="card text-muted">暂无收藏文章</div>
-        ) : (
-          <>
-            {items.map((it, idx) => (
-              <ArticleCard
-                key={it.id}
-                article={it}
-                manualTags={it.manual_tags}
-                isRead={!!it.is_read}
-                isFocused={focusedIdx === idx}
-                idx={idx}
-                onPlay={player.playArticle}
-                formatDate={formatDate}
-                stripMarkdown={stripMarkdown}
-                onOpen={openArticle}
-                onFocus={setFocusedIdx}
-                sourceLabel={it.effective_source?.title}
-              />
-            ))}
-            {hasMore && (
-              <div style={{ textAlign: 'center', padding: 12 }}>
-                <button
-                  className="secondary"
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                  style={{ fontSize: 13, padding: '6px 16px' }}
-                >
-                  {loadingMore ? '加载中...' : '加载更多'}
-                </button>
-              </div>
-            )}
-            {!hasMore && items.length > 0 && (
-              <div style={{ textAlign: 'center', padding: 16, color: 'var(--fg-muted)', fontSize: 13 }}>
-                — 已加载全部收藏 —
-              </div>
-            )}
-          </>
-        )}
+        {renderList()}
       </section>
     </div>
   )
