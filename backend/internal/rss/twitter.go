@@ -86,6 +86,7 @@ func ExtractTweet(html string, statusID string) (*TweetCapture, error) {
 		PublishedAt:  extractPublishedAt(focal),
 		TextMarkdown: extractTweetText(focal),
 		ImageURLs:    extractTweetImages(focal),
+		QuoteURL:     extractQuoteURL(focal, statusID),
 	}
 	return out, nil
 }
@@ -266,6 +267,33 @@ func hasAncestor(sel, stop *goquery.Selection, selector string) bool {
 		cur = cur.Parent()
 	}
 	return false
+}
+
+// extractQuoteURL returns the x.com permalink of a tweet quoted by the
+// focal tweet. Twitter renders the quote card inside a [role="link"] div
+// whose first anchor's href is the quoted permalink. The focal tweet's own
+// permalink anchor lives outside any role="link" container, so we don't
+// accidentally pick ourselves up.
+func extractQuoteURL(focal *goquery.Selection, focalStatusID string) string {
+	var quote string
+	focal.Find(`[role="link"]`).EachWithBreak(func(_ int, link *goquery.Selection) bool {
+		link.Find(`a[href]`).EachWithBreak(func(_ int, a *goquery.Selection) bool {
+			href, _ := a.Attr("href")
+			if !twitterStatusPathRe.MatchString(href) {
+				return true
+			}
+			if strings.HasSuffix(href, "/status/"+focalStatusID) ||
+				strings.HasSuffix(href, "/status/"+focalStatusID+"/") {
+				return true
+			}
+			// Build absolute URL and run through the package's own
+			// canonicalizer-equivalent (host already x.com, query is none).
+			quote = "https://x.com" + strings.TrimSuffix(href, "/")
+			return false
+		})
+		return quote == ""
+	})
+	return quote
 }
 
 // upgradeTwitterImageURL rewrites the `name=` query param to `large`, which
