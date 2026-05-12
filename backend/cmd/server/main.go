@@ -45,10 +45,12 @@ func main() {
 
 	backupRunner := backup.NewRunner(db, cfg.Backup.Dir)
 
+	contentFetcher := rss.NewContentFetcher()
+
 	authHandler := api.NewAuthHandler(cfg, userRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(db, backupRunner, cfg)
-	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService)
+	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService, contentFetcher)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo, eventRepo)
@@ -148,6 +150,8 @@ func main() {
 		apiGroup.DELETE("/articles/:id/tags/:tagId", userTagHandler.RemoveArticleTag)
 		apiGroup.POST("/articles/:id/suggestions/dismiss", userTagHandler.DismissSuggestion)
 		apiGroup.POST("/articles/:id/expand", articleHandler.ExpandChild)
+		apiGroup.GET("/articles/:id/candidates", articleHandler.GetCandidates)
+		apiGroup.POST("/articles/:id/batch_fetch", articleHandler.BatchFetch)
 
 		// Saved articles (filtered by tags / source / untagged)
 		apiGroup.GET("/saved", savedHandler.List)
