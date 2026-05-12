@@ -16,7 +16,6 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
   const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Load candidates on open
   useEffect(() => {
     if (!open) return
     setLoading(true)
@@ -28,6 +27,19 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
       .catch((e) => setError(e?.response?.data?.error || '获取候选链接失败'))
       .finally(() => setLoading(false))
   }, [open, articleId])
+
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
 
   const selectableIndices = useMemo(() => {
     if (!candidates) return [] as number[]
@@ -69,25 +81,17 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
     if (e.shiftKey) {
       e.preventDefault()
       rangeSelect(idx)
-    } else if (e.ctrlKey || e.metaKey) {
-      toggleIdx(idx)
     } else {
       toggleIdx(idx)
     }
   }
 
-  function selectAll() {
-    setSelected(new Set(selectableIndices))
-  }
-  function deselectAll() {
-    setSelected(new Set())
-  }
+  function selectAll() { setSelected(new Set(selectableIndices)) }
+  function deselectAll() { setSelected(new Set()) }
   function invertSelection() {
     setSelected((prev) => {
       const next = new Set<number>()
-      for (const i of selectableIndices) {
-        if (!prev.has(i)) next.add(i)
-      }
+      for (const i of selectableIndices) if (!prev.has(i)) next.add(i)
       return next
     })
   }
@@ -97,13 +101,11 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
     setSubmitting(true)
     setError(null)
     try {
-      const chosen = Array.from(selected)
-        .sort((a, b) => a - b)
-        .map((i) => ({
-          title: candidates[i].title,
-          url: candidates[i].url,
-          editor_note: candidates[i].editor_note,
-        }))
+      const chosen = Array.from(selected).sort((a, b) => a - b).map((i) => ({
+        title: candidates[i].title,
+        url: candidates[i].url,
+        editor_note: candidates[i].editor_note,
+      }))
       const result = await batchFetchCandidates(articleId, chosen)
       onFetched?.(result.inserted)
       onClose()
@@ -118,39 +120,93 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
     try { return new URL(url).host } catch { return url }
   }
 
+  const totalSelectable = candidates?.filter((c) => !c.already_fetched).length ?? 0
+  const confirmDisabled = submitting || selected.size === 0
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.4)' }}
       onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0, 0, 0, 0.45)',
+        zIndex: 2000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
     >
       <div
-        className="rounded-lg w-full max-w-3xl mx-4 max-h-[80vh] flex flex-col"
-        style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
         onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--bg)',
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          width: '100%',
+          maxWidth: 720,
+          maxHeight: '85vh',
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.25)',
+        }}
       >
-        <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
-          <h3 className="text-base font-semibold">选择要抓取的链接</h3>
-          <button type="button" className="text-xl leading-none" onClick={onClose} style={{ color: 'var(--fg-muted)' }}>×</button>
+        {/* Header */}
+        <div style={{
+          padding: '14px 20px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>选择要抓取的链接</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭"
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--fg-muted)',
+              fontSize: 22,
+              lineHeight: 1,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >×</button>
         </div>
 
-        <div className="px-5 py-2 flex items-center gap-2 text-xs flex-wrap" style={{ borderBottom: '1px solid var(--border)' }}>
-          <button type="button" onClick={selectAll} className="px-2 py-1 rounded" style={{ border: '1px solid var(--border)' }}>全选</button>
-          <button type="button" onClick={invertSelection} className="px-2 py-1 rounded" style={{ border: '1px solid var(--border)' }}>反选</button>
-          <button type="button" onClick={deselectAll} className="px-2 py-1 rounded" style={{ border: '1px solid var(--border)' }}>取消全选</button>
-          <span className="ml-auto" style={{ color: 'var(--fg-muted)' }}>
-            已选 {selected.size} / 共 {candidates?.filter((c) => !c.already_fetched).length ?? 0} 可选
+        {/* Toolbar */}
+        <div style={{
+          padding: '10px 20px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+          fontSize: 12,
+        }}>
+          <button type="button" className="btn-ghost btn-sm" onClick={selectAll}>全选</button>
+          <button type="button" className="btn-ghost btn-sm" onClick={invertSelection}>反选</button>
+          <button type="button" className="btn-ghost btn-sm" onClick={deselectAll}>取消全选</button>
+          <span style={{ marginLeft: 'auto', color: 'var(--fg-muted)' }}>
+            已选 {selected.size} / 共 {totalSelectable} 可选
           </span>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-2">
-          {loading && <div className="py-8 text-center text-sm" style={{ color: 'var(--fg-muted)' }}>加载候选中…</div>}
-          {error && !loading && <div className="py-4 text-sm" style={{ color: 'crimson' }}>{error}</div>}
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
+          {loading && (
+            <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>加载候选中…</div>
+          )}
+          {error && !loading && (
+            <div style={{ padding: 16, fontSize: 13, color: 'crimson' }}>{error}</div>
+          )}
           {!loading && !error && candidates && candidates.length === 0 && (
-            <div className="py-8 text-center text-sm" style={{ color: 'var(--fg-muted)' }}>未找到可抓取的链接</div>
+            <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>未找到可抓取的链接</div>
           )}
           {!loading && !error && candidates && candidates.length > 0 && (
-            <ul className="space-y-1">
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
               {candidates.map((c, i) => {
                 const disabled = c.already_fetched
                 const checked = selected.has(i)
@@ -158,9 +214,16 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
                   <li
                     key={i}
                     onClick={(e) => !disabled && handleRowClick(e, i)}
-                    className={'flex items-start gap-3 p-2 rounded text-sm cursor-pointer ' + (disabled ? 'opacity-50 cursor-not-allowed' : '')}
                     style={{
-                      background: checked ? 'var(--bg-elevated)' : 'transparent',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      padding: '8px 10px',
+                      borderRadius: 4,
+                      fontSize: 13,
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      opacity: disabled ? 0.5 : 1,
+                      background: checked ? 'var(--surface-hover)' : 'transparent',
                       userSelect: 'none',
                     }}
                   >
@@ -168,20 +231,33 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
                       type="checkbox"
                       checked={checked}
                       disabled={disabled}
+                      readOnly
                       onChange={() => {}}
                       onClick={(e) => e.stopPropagation()}
-                      readOnly
-                      style={{ marginTop: 3 }}
+                      style={{ marginTop: 3, flexShrink: 0 }}
                     />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">{c.title}</div>
-                      <div className="text-xs truncate" style={{ color: 'var(--fg-muted)' }}>{hostOf(c.url)}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {c.title}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {hostOf(c.url)}
+                      </div>
                       {c.editor_note && (
-                        <div className="text-xs mt-1 italic" style={{ color: 'var(--fg-muted)' }}>{c.editor_note}</div>
+                        <div style={{ fontSize: 11, marginTop: 4, fontStyle: 'italic', color: 'var(--fg-muted)' }}>
+                          {c.editor_note}
+                        </div>
                       )}
                     </div>
                     {disabled && (
-                      <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>已抓取</span>
+                      <span style={{
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        background: 'var(--surface-hover)',
+                        color: 'var(--fg-muted)',
+                        flexShrink: 0,
+                      }}>已抓取</span>
                     )}
                   </li>
                 )
@@ -190,19 +266,40 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
           )}
         </div>
 
-        <div className="px-5 py-3 flex items-center justify-end gap-2" style={{ borderTop: '1px solid var(--border)' }}>
-          <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm rounded" style={{ border: '1px solid var(--border)' }}>
-            取消
-          </button>
+        {/* Footer */}
+        <div style={{
+          padding: '12px 20px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 8,
+        }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '6px 14px',
+              fontSize: 13,
+              borderRadius: 4,
+              border: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'var(--fg)',
+              cursor: 'pointer',
+            }}
+          >取消</button>
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={submitting || selected.size === 0}
-            className="px-3 py-1.5 text-sm rounded"
+            disabled={confirmDisabled}
             style={{
-              background: selected.size === 0 || submitting ? 'var(--bg-elevated)' : 'var(--accent)',
-              color: selected.size === 0 || submitting ? 'var(--fg-muted)' : 'var(--accent-fg, white)',
-              cursor: selected.size === 0 || submitting ? 'not-allowed' : 'pointer',
+              padding: '6px 14px',
+              fontSize: 13,
+              borderRadius: 4,
+              border: 'none',
+              background: confirmDisabled ? 'var(--surface-hover)' : 'var(--accent)',
+              color: confirmDisabled ? 'var(--fg-muted)' : 'var(--accent-fg)',
+              cursor: confirmDisabled ? 'not-allowed' : 'pointer',
             }}
           >
             {submitting ? '抓取中…' : `抓取选中（${selected.size}）`}
