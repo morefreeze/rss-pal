@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 
-export type Theme = 'paper' | 'quiet' | 'pearl' | 'night'
+export type Theme = 'paper' | 'quiet' | 'pearl' | 'night' | 'neon'
 
 const STORAGE_KEY = 'rsspal:theme'
 const DEFAULT: Theme = 'paper'
 const EVENT = 'rsspal-theme-change'
 
-const VALID: Record<Theme, true> = { paper: true, quiet: true, pearl: true, night: true }
+const VALID: Record<Theme, true> = { paper: true, quiet: true, pearl: true, night: true, neon: true }
 
 function isTheme(v: unknown): v is Theme {
   return typeof v === 'string' && Object.prototype.hasOwnProperty.call(VALID, v)
