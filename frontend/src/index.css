@@ -186,6 +186,42 @@ button.secondary:disabled,
   font-size: 12px;
 }
 
+/* === Toolbar controls (input / select / checkbox-label sized to match buttons) === */
+.toolbar-control {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: inherit;
+}
+.toolbar-control:focus {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+select.toolbar-control { padding-right: 28px; }
+
+.toolbar-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 4px;
+  font-size: 14px;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+}
+.toolbar-checkbox input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
 /* === Rows & cards === */
 .row {
   padding: 12px 0;
