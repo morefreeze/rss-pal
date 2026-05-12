@@ -157,6 +157,14 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		"signals":          signals,
 		"from_bookmarklet": feedType == "saved",
 	}
+	if article.IsLinkSet {
+		children, err := h.articleRepo.GetChildren(article.ID)
+		if err == nil {
+			response["children"] = children
+		} else {
+			response["children"] = []model.Article{}
+		}
+	}
 	c.JSON(http.StatusOK, response)
 }
 
@@ -341,4 +349,29 @@ func (h *ArticleHandler) RecordClick(c *gin.Context) {
 
 	// Click will be handled by preference handler
 	c.Status(http.StatusOK)
+}
+
+// ExpandChild transitions a stub link_set child to 'processing' so the worker
+// picks it up on its next cycle. 4xx if the article is not a stub.
+func (h *ArticleHandler) ExpandChild(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	// Authorise: the article must be visible to this user.
+	if _, err := h.articleRepo.GetByID(id, getUserID(c)); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+	n, err := h.articleRepo.UpdateProcessingState(id, "stub", "processing")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "文章不是 stub 状态"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"article_id": id, "state": "processing"})
 }

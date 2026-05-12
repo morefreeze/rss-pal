@@ -146,6 +146,7 @@ func main() {
 		apiGroup.POST("/articles/:id/tags", userTagHandler.AddArticleTag)
 		apiGroup.DELETE("/articles/:id/tags/:tagId", userTagHandler.RemoveArticleTag)
 		apiGroup.POST("/articles/:id/suggestions/dismiss", userTagHandler.DismissSuggestion)
+		apiGroup.POST("/articles/:id/expand", articleHandler.ExpandChild)
 
 		// Saved articles (filtered by tags / source / untagged)
 		apiGroup.GET("/saved", savedHandler.List)
