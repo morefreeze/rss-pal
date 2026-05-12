@@ -57,6 +57,10 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
     setError(null)
     setSelected(new Set())
     setLastClickedIdx(null)
+    // Reset candidates so the persist effect bails during the restore window
+    // (otherwise the brief empty-selection state would wipe the saved URLs
+    //  before the async restore finishes).
+    setCandidates(null)
     getArticleCandidates(articleId)
       .then((cands) => {
         setCandidates(cands)
