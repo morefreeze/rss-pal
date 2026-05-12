@@ -40,7 +40,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   }
 
   return (
-    <div className="card" style={{ maxWidth: 400, margin: '100px auto' }}>
+    <div className="card" style={{ maxWidth: 400, margin: '100px auto', padding: '0 16px', width: '100%' }}>
       <h2 style={{ marginBottom: 16 }}>RSS Pal</h2>
 
       <form onSubmit={handleSubmit}>
