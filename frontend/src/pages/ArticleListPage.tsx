@@ -453,7 +453,8 @@ export default function ArticleListPage() {
               placeholder="搜索文章... ( / 聚焦)"
               value={searchQuery}
               onChange={handleSearchChange}
-              style={{ padding: '6px 12px', width: 200 }}
+              className="toolbar-control"
+              style={{ width: 200 }}
             />
           )}
           <select
@@ -463,7 +464,7 @@ export default function ArticleListPage() {
               setSelectedFeed(val)
               try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
             }}
-            style={{ padding: '6px 12px' }}
+            className="toolbar-control"
             disabled={!!searchQuery}
           >
             <option value="">全部订阅</option>
@@ -472,7 +473,7 @@ export default function ArticleListPage() {
             ))}
           </select>
           {!isClippingMode && (
-            <label className="flex gap-1" style={{ alignItems: 'center' }}>
+            <label className="toolbar-checkbox">
               <input
                 type="checkbox"
                 checked={unreadOnly}
@@ -487,7 +488,7 @@ export default function ArticleListPage() {
             </label>
           )}
           {!isClippingMode && (
-            <label className="flex gap-1" style={{ alignItems: 'center' }}>
+            <label className="toolbar-checkbox">
               <input
                 type="checkbox"
                 checked={savedOnly}
@@ -504,12 +505,7 @@ export default function ArticleListPage() {
           {!isClippingMode && !searchQuery && (
             <button
               type="button"
-              className="secondary"
-              style={{
-                fontSize: 13,
-                padding: '4px 10px',
-                ...(grouped ? { background: 'var(--accent)', color: 'var(--accent-fg)', borderColor: 'var(--accent)' } : {}),
-              }}
+              className={grouped ? '' : 'btn-ghost'}
               onClick={() => {
                 const next = !grouped
                 setGrouped(next)
@@ -522,8 +518,7 @@ export default function ArticleListPage() {
           )}
           {!isClippingMode && !searchQuery && !grouped && (
             <button
-              className="secondary"
-              style={{ fontSize: 12, padding: '4px 10px' }}
+              className="btn-ghost"
               onClick={() => loadArticles(0, true)}
               disabled={loading}
               title="刷新文章列表"
@@ -533,8 +528,7 @@ export default function ArticleListPage() {
           )}
           {!isClippingMode && !searchQuery && articles.length > 0 && (
             <button
-              className="secondary"
-              style={{ fontSize: 12, padding: '4px 10px' }}
+              className="btn-ghost"
               onClick={handleMarkAllRead}
               disabled={markingAllRead}
             >
