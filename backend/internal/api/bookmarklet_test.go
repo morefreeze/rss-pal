@@ -3,6 +3,9 @@ package api
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/bytedance/rss-pal/internal/rss"
 )
 
 func TestExtractContentFromHTMLPreservesImages(t *testing.T) {
@@ -186,5 +189,88 @@ func TestCountMarkdownImages(t *testing.T) {
 				t.Errorf("countMarkdownImages(%q) = %d, want %d", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBuildTweetContent_FullCase(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:       "karpathy",
+		DisplayName:  "Andrej Karpathy",
+		PublishedAt:  time.Date(2026, 4, 23, 8, 0, 0, 0, time.UTC),
+		TextMarkdown: "+1 to this excellent thread.",
+		ImageURLs:    []string{"https://pbs.twimg.com/media/AAA111.jpg?name=large"},
+		QuoteURL:     "https://x.com/someone_else/status/3333333333333333333",
+	}
+	got := buildTweetContent(cap)
+	want := "> @karpathy (Andrej Karpathy) · 2026-04-23\n\n" +
+		"+1 to this excellent thread.\n\n" +
+		"![](https://pbs.twimg.com/media/AAA111.jpg?name=large)\n\n" +
+		"引用: https://x.com/someone_else/status/3333333333333333333"
+	if got != want {
+		t.Errorf("buildTweetContent mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestBuildTweetContent_ImageOnly(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:    "karpathy",
+		ImageURLs: []string{"https://pbs.twimg.com/media/IMG.jpg?name=large"},
+	}
+	got := buildTweetContent(cap)
+	want := "> @karpathy\n\n![](https://pbs.twimg.com/media/IMG.jpg?name=large)"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestBuildTweetContent_NoTimestamp(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:       "karpathy",
+		DisplayName:  "Andrej Karpathy",
+		TextMarkdown: "hi",
+	}
+	got := buildTweetContent(cap)
+	want := "> @karpathy (Andrej Karpathy)\n\nhi"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestBuildTweetTitle_ShortText(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:       "karpathy",
+		TextMarkdown: "+1 to this excellent thread.",
+	}
+	if got := buildTweetTitle(cap); got != "+1 to this excellent thread." {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestBuildTweetTitle_LongText(t *testing.T) {
+	long := strings.Repeat("a", 80)
+	cap := &rss.TweetCapture{TextMarkdown: long}
+	got := buildTweetTitle(cap)
+	if len([]rune(got)) != 61 { // 60 a's + ellipsis
+		t.Errorf("title rune len = %d, want 61; got %q", len([]rune(got)), got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("title should end with ellipsis: %q", got)
+	}
+}
+
+func TestBuildTweetTitle_NewlinesFlatten(t *testing.T) {
+	cap := &rss.TweetCapture{TextMarkdown: "first line\nsecond line"}
+	if got := buildTweetTitle(cap); got != "first line second line" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestBuildTweetTitle_ImageOnlyFallback(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:    "karpathy",
+		ImageURLs: []string{"x"},
+	}
+	if got := buildTweetTitle(cap); got != "@karpathy 的推文" {
+		t.Errorf("got %q", got)
 	}
 }
