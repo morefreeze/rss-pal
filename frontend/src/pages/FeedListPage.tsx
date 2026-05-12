@@ -234,13 +234,6 @@ export default function FeedListPage() {
     navigate('/articles')
   }
 
-  const handleCardKeyDown = (e: React.KeyboardEvent, feedId: number) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      handleCardClick(feedId)
-    }
-  }
-
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return '从未'
     return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -392,17 +385,18 @@ export default function FeedListPage() {
         feeds.map(feed => (
           <div
             key={feed.id}
-            className="card"
-            role="button"
-            tabIndex={0}
+            className="card card-clickable"
             onClick={() => handleCardClick(feed.id)}
-            onKeyDown={(e) => handleCardKeyDown(e, feed.id)}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--surface-hover)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '' }}
-            style={{ cursor: 'pointer' }}
           >
             <div className="flex-between">
-              <div>
+              <Link
+                to="/articles"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  try { sessionStorage.setItem('selectedFeed', JSON.stringify(feed.id)) } catch {}
+                }}
+                style={{ display: 'block', color: 'inherit', textDecoration: 'none', flex: 1, minWidth: 0 }}
+              >
                 <div className="text-bold" style={!feed.is_active ? { color: 'var(--fg-muted)' } : {}}>
                   {feed.title || feed.url}
                   {feed.feed_type === 'html' && (
@@ -418,7 +412,7 @@ export default function FeedListPage() {
                   {feed.unread_count > 0 && <span style={{ color: 'var(--accent)', fontWeight: 500 }}> · {feed.unread_count} 未读</span>}
                   {' '}· 上次抓取：{formatDate(feed.last_fetched_at)}
                 </div>
-              </div>
+              </Link>
               <div className="flex gap-1">
                 {feed.is_active ? (
                   <button
