@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/net/html"
 )
 
 // twitterHosts is the set of canonical and legacy hosts that serve Twitter /
@@ -79,7 +80,10 @@ func ExtractTweet(html string, statusID string) (*TweetCapture, error) {
 		return nil, ErrTweetNotFound
 	}
 
-	return &TweetCapture{}, nil // fields filled in later tasks
+	out := &TweetCapture{
+		TextMarkdown: extractTweetText(focal),
+	}
+	return out, nil
 }
 
 // findFocalTweet picks the <article> element that represents the tweet whose
@@ -116,4 +120,54 @@ func findFocalTweet(doc *goquery.Document, statusID string) *goquery.Selection {
 		return true
 	})
 	return match
+}
+
+// extractTweetText walks the [data-testid="tweetText"] subtree and renders
+// it as markdown. Twitter's tweetText is a sequence of spans and anchors;
+// emoji are rendered as <img alt="..."> whose `alt` is the emoji char.
+func extractTweetText(focal *goquery.Selection) string {
+	textNode := focal.Find(`[data-testid="tweetText"]`).First()
+	if textNode.Length() == 0 {
+		return ""
+	}
+	var b strings.Builder
+	walkTextMarkdown(textNode, &b)
+	// Collapse runs of >2 newlines and trim trailing whitespace.
+	out := strings.TrimSpace(b.String())
+	for strings.Contains(out, "\n\n\n") {
+		out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
+	}
+	return out
+}
+
+func walkTextMarkdown(sel *goquery.Selection, b *strings.Builder) {
+	sel.Contents().Each(func(_ int, n *goquery.Selection) {
+		node := n.Get(0)
+		if node == nil {
+			return
+		}
+		switch node.Type {
+		case html.TextNode:
+			b.WriteString(node.Data)
+		case html.ElementNode:
+			switch node.Data {
+			case "br":
+				b.WriteString("\n")
+			case "a":
+				href, _ := n.Attr("href")
+				inner := strings.TrimSpace(n.Text())
+				if href != "" && inner != "" {
+					fmt.Fprintf(b, "[%s](%s)", inner, href)
+				} else {
+					b.WriteString(inner)
+				}
+			case "img":
+				if alt, ok := n.Attr("alt"); ok {
+					b.WriteString(alt)
+				}
+			default:
+				walkTextMarkdown(n, b)
+			}
+		}
+	})
 }

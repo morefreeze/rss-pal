@@ -59,6 +59,18 @@ func TestExtractTweet_FocalNotInHTML(t *testing.T) {
 	}
 }
 
+func TestExtractTweet_TextOnly(t *testing.T) {
+	data := mustReadFixture(t, "tweet_text_only.html")
+	cap, err := ExtractTweet(data, "9999999999999999999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "The biggest unlock from LLMs for me has been the [blog post](https://example.com/blog) on building intuition."
+	if cap.TextMarkdown != want {
+		t.Errorf("TextMarkdown mismatch\n got: %q\nwant: %q", cap.TextMarkdown, want)
+	}
+}
+
 func mustReadFixture(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile("testdata/twitter/" + name)
