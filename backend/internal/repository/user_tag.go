@@ -474,9 +474,11 @@ func (r *SavedRepository) ListSaved(q SavedQuery) ([]SavedRow, int, error) {
 		       a.title, a.url,
 		       a.published_at, a.summary_brief, a.fetched_at,
 		       COALESCE(a.word_count, 0), COALESCE(a.reading_minutes, 0),
-		       COALESCE(a.media_type, '')
+		       COALESCE(a.media_type, ''),
+		       COALESCE(rp.is_completed, false) AS is_read
 		FROM articles a
 		JOIN feeds f ON f.id = a.feed_id
+		LEFT JOIN reading_progress rp ON rp.article_id = a.id AND rp.user_id = $1
 		WHERE `+whereSQL+`
 		ORDER BY a.published_at DESC NULLS LAST, a.id DESC
 		LIMIT `+limitParam+` OFFSET `+offsetParam, args...)
@@ -495,6 +497,7 @@ func (r *SavedRepository) ListSaved(q SavedQuery) ([]SavedRow, int, error) {
 			&a.ID, &a.FeedID, &feedTitle, &feedType, &a.Title, &a.URL,
 			&a.PublishedAt, &summary, &a.FetchedAt,
 			&a.WordCount, &a.ReadingMinutes, &mediaType,
+			&a.IsRead,
 		); err != nil {
 			return nil, 0, err
 		}
