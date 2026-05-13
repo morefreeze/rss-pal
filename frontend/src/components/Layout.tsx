@@ -2,8 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { logout, getUnreadCount } from '../api/client'
 import Toaster from './Toaster'
-import { PlayerProvider } from '../player/PlayerContext'
+import { PlayerProvider, usePlayer } from '../player/PlayerContext'
 import MiniPlayer from './MiniPlayer'
+import MobileTabBar from './MobileTabBar'
+import { useBreakpoint } from '../hooks/useBreakpoint'
 
 interface LayoutProps {
   user: { id: number; username: string; is_admin: boolean } | null
@@ -157,7 +159,50 @@ export default function Layout({ user, onLogout }: LayoutProps) {
 
   return (
     <PlayerProvider>
-      <div>
+      <LayoutInner
+        user={user}
+        unreadCount={unreadCount}
+        onLogout={handleLogout}
+        renderNavLabel={renderNavLabel}
+        navLinkClass={navLinkClass}
+        menuOpen={menuOpen}
+        setMenuOpen={setMenuOpen}
+      />
+    </PlayerProvider>
+  )
+}
+
+interface LayoutInnerProps {
+  user: { id: number; username: string; is_admin: boolean } | null
+  unreadCount: number
+  onLogout: () => void
+  renderNavLabel: (item: NavItem) => React.ReactNode
+  navLinkClass: (s: { isActive: boolean }) => string
+  menuOpen: boolean
+  setMenuOpen: (v: boolean) => void
+}
+
+function LayoutInner({
+  user, unreadCount, onLogout, renderNavLabel, navLinkClass, menuOpen, setMenuOpen,
+}: LayoutInnerProps) {
+  const bp = useBreakpoint()
+  const player = usePlayer()
+
+  // --bottom-chrome = tab-bar height (if shown) + mini-player height (if active)
+  // + safe-area-inset-bottom + 16px gutter. Reads on <body> so any deep main
+  // can pad correctly.
+  useEffect(() => {
+    const tabH = bp === 'desktop' ? 0 : 56
+    const playerH = player.articleId !== null ? 64 : 0
+    const chrome = `calc(${tabH + playerH + 16}px + env(safe-area-inset-bottom))`
+    document.body.style.setProperty('--bottom-chrome', chrome)
+    return () => {
+      document.body.style.removeProperty('--bottom-chrome')
+    }
+  }, [bp, player.articleId])
+
+  return (
+    <div>
       <header style={{ marginBottom: 20 }}>
         <div className="flex-between">
           <h1 className="nav-brand">RSS Pal</h1>
@@ -168,12 +213,12 @@ export default function Layout({ user, onLogout }: LayoutProps) {
                 {renderNavLabel(item)}
               </NavLink>
             ))}
-            {user && <UserMenu username={user.username} onLogout={handleLogout} />}
+            {user && <UserMenu username={user.username} onLogout={onLogout} />}
           </nav>
 
           <button
             className="btn-ghost btn-sm mobile-menu-btn"
-            onClick={() => setMenuOpen(o => !o)}
+            onClick={() => setMenuOpen(!menuOpen)}
             aria-label="菜单"
           >
             {menuOpen ? '✕' : '☰'}
@@ -201,19 +246,21 @@ export default function Layout({ user, onLogout }: LayoutProps) {
             ))}
             <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="text-muted text-sm">👤 {user?.username}</span>
-              <button className="btn-ghost btn-sm" onClick={handleLogout}>
+              <button className="btn-ghost btn-sm" onClick={onLogout}>
                 🚪 登出
               </button>
             </div>
           </nav>
         )}
       </header>
-      <main style={{ paddingBottom: 80 }}>
+      <main>
         <Outlet />
       </main>
       <Toaster />
       <MiniPlayer />
+      {bp !== 'desktop' && (
+        <MobileTabBar unreadCount={unreadCount} onLogout={onLogout} />
+      )}
     </div>
-    </PlayerProvider>
   )
 }

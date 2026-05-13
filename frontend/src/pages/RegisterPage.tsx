@@ -37,7 +37,7 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
   }
 
   return (
-    <div className="card" style={{ maxWidth: 400, margin: '100px auto' }}>
+    <div className="card" style={{ maxWidth: 400, margin: '100px auto', padding: '0 16px', width: '100%' }}>
       <h2 style={{ marginBottom: 16 }}>RSS Pal - 注册</h2>
 
       <form onSubmit={handleSubmit}>
