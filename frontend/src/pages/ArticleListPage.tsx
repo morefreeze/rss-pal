@@ -200,13 +200,13 @@ export default function ArticleListPage() {
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
   const isClippingMode = selectedFeedObj?.feed_type === 'saved'
 
-  const toggleSidebar = () => {
+  const toggleSidebar = useCallback(() => {
     setSidebarOpen(o => {
       const next = !o
       try { localStorage.setItem('tagSidebarOpen', String(next)) } catch {}
       return next
     })
-  }
+  }, [])
 
   const selectTag = (sel: TagFilter) => {
     if (sel.kind !== 'all' && grouped) setGrouped(false)
@@ -417,6 +417,11 @@ export default function ArticleListPage() {
         searchRef.current?.focus()
         return
       }
+      if (e.key === 't' || e.key === 'T') {
+        e.preventDefault()
+        toggleSidebar()
+        return
+      }
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault()
         setFocusedIdx(i => {
@@ -445,7 +450,7 @@ export default function ArticleListPage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [articles, searchResults, searchQuery, unreadOnly, sessionReadIds, focusedIdx])
+  }, [articles, searchResults, searchQuery, unreadOnly, sessionReadIds, focusedIdx, toggleSidebar])
 
   const isRead = (article: Article) => article.is_read || sessionReadIds.has(article.id)
 
