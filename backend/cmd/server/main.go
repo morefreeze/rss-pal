@@ -50,7 +50,7 @@ func main() {
 	authHandler := api.NewAuthHandler(cfg, userRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(db, backupRunner, cfg)
-	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService, contentFetcher)
+	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, summarizerService, contentFetcher)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo, eventRepo)
@@ -127,6 +127,8 @@ func main() {
 		// Manual tags
 		apiGroup.GET("/tags", userTagHandler.ListTags)
 		apiGroup.POST("/tags", userTagHandler.CreateTag)
+		// /tags/sidebar must be before /tags/:id so Gin doesn't match :id=sidebar
+		apiGroup.GET("/tags/sidebar", userTagHandler.GetTagSidebar)
 		apiGroup.PATCH("/tags/:id", userTagHandler.RenameTag)
 		apiGroup.DELETE("/tags/:id", userTagHandler.DeleteTag)
 
