@@ -130,8 +130,13 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 		return
 	}
 
+	sort := repository.SortPublished
+	if c.Query("sort") == "captured" {
+		sort = repository.SortCaptured
+	}
+
 	userID := getUserID(c)
-	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, savedOnly, userID, tagID, untagged)
+	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, savedOnly, userID, tagID, untagged, sort)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
