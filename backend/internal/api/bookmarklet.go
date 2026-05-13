@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bytedance/rss-pal/internal/model"
@@ -115,10 +114,9 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	normalized := util.NormalizeURL(req.URL)
 
 	var (
-		content     string
-		title       = strings.TrimSpace(req.Title)
-		publishedAt *time.Time
-		wasTwitter  bool
+		content    string
+		title      = strings.TrimSpace(req.Title)
+		wasTwitter bool
 	)
 
 	if statusID, ok := rss.IsTwitterStatusURL(normalized); ok {
@@ -126,10 +124,13 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		if err == nil {
 			content = buildTweetContent(cap)
 			title = buildTweetTitle(cap)
-			if !cap.PublishedAt.IsZero() {
-				t := cap.PublishedAt
-				publishedAt = &t
-			}
+			// Intentionally leave article.published_at = nil so the article
+			// list sort (which falls back to fetched_at via COALESCE) ranks
+			// the just-captured tweet at the top of "all subscriptions",
+			// matching the user's intuition that a capture is "new" to
+			// them. The original tweet timestamp is preserved verbatim in
+			// the byline rendered inside `content`, so the information is
+			// not lost — only the sort key changes.
 			wasTwitter = true
 		} else {
 			log.Printf("bookmarklet: twitter extract for %s failed (%v); falling back to generic extractor", normalized, err)
@@ -208,11 +209,13 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	article := &model.Article{
-		FeedID:      feed.ID,
-		Title:       title,
-		URL:         normalized,
-		Content:     content,
-		PublishedAt: publishedAt, // nil for non-twitter (preserves existing behavior)
+		FeedID:  feed.ID,
+		Title:   title,
+		URL:     normalized,
+		Content: content,
+		// PublishedAt intentionally left nil so the article list sort
+		// (COALESCE(published_at, fetched_at)) ranks every bookmarklet
+		// capture by capture time — newly saved items surface at the top.
 	}
 	article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 	if err := h.articleRepo.Create(article); err != nil {
