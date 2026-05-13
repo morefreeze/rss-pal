@@ -22,10 +22,11 @@ type Props = {
   onExit: () => void
   onFontSize: (n: number) => void
   onFontFamily: (f: ReaderFontFamily) => void
+  onTapBody?: () => void
 }
 
 export default function ReadingLayout(props: Props) {
-  const { article, fontSize, fontFamily, onExit } = props
+  const { article, fontSize, fontFamily, onExit, onTapBody } = props
 
   const [summaryOpen, setSummaryOpen] = useState(false)
 
@@ -34,13 +35,26 @@ export default function ReadingLayout(props: Props) {
     ? 'var(--font-serif)'
     : 'var(--font-sans)'
 
+  // Tap on the article body (excluding links / buttons / inputs / details)
+  // toggles chrome via the parent-supplied callback.
+  const handleArticleClick: React.MouseEventHandler<HTMLElement> = (e) => {
+    if (!onTapBody) return
+    const target = e.target as HTMLElement
+    if (target.closest('a, button, input, textarea, select, summary, [role="button"]')) return
+    onTapBody()
+  }
+
   return (
     <div className="reading-layout" style={{ fontFamily: ff }}>
       <div className="reading-toolbar">
         <button className="reading-exit" onClick={onExit} title="退出阅读模式 (Esc / r)">← 退出阅读模式</button>
       </div>
 
-      <article className="reading-article" style={{ fontSize }}>
+      <article
+        className="reading-article"
+        style={{ fontSize }}
+        onClick={handleArticleClick}
+      >
         <h1 className="reading-title">{article.title}</h1>
         <div className="reading-meta">
           <span>{fmtDate(article.published_at)}</span>

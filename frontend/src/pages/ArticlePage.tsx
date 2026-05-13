@@ -17,6 +17,7 @@ import BackToTopButton from '../components/BackToTopButton'
 import BackFab from '../components/BackFab'
 import ConfettiBurst from '../components/ConfettiBurst'
 import { useReaderSettings } from '../hooks/useReaderSettings'
+import { useReadingChrome } from '../hooks/useReadingChrome'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
 import TagBar from '../components/TagBar'
 
@@ -25,6 +26,7 @@ export default function ArticlePage() {
   const navigate = useNavigate()
   const location = useLocation()
   const reader = useReaderSettings()
+  const { toggle: toggleReadingChrome } = useReadingChrome(reader.mode === 'reading')
   const entryPath =
     (location.state as { from?: string } | null)?.from
     ?? (() => { try { return sessionStorage.getItem('articleEntryPath') } catch { return null } })()
@@ -252,7 +254,7 @@ export default function ArticlePage() {
       if (!article || progress?.is_completed) return
       if (maxScrollRef.current <= 0.9) return
       const readMin = article.reading_minutes || 1
-      const minSeconds = Math.min(30, Math.floor(readMin * 30))
+      const minSeconds = Math.min(15, Math.floor(readMin * 30))
       if (activeReadSecondsRef.current < minSeconds) return
 
       const scrollPosition = Math.max(maxScrollRef.current, 0.9)
@@ -285,7 +287,7 @@ export default function ArticlePage() {
     maxScrollRef.current = scrollPosition
 
     const readMin = article?.reading_minutes || 1
-    const minSeconds = Math.min(30, Math.floor(readMin * 30))
+    const minSeconds = Math.min(15, Math.floor(readMin * 30))
     const isCompleted = scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds
     const wasCompleted = progress?.is_completed
 
@@ -632,6 +634,7 @@ export default function ArticlePage() {
         onExit={() => reader.setMode('normal')}
         onFontSize={reader.setFontSize}
         onFontFamily={reader.setFontFamily}
+        onTapBody={toggleReadingChrome}
       />
     )
   }
