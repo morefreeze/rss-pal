@@ -127,6 +127,8 @@ func main() {
 		// Manual tags
 		apiGroup.GET("/tags", userTagHandler.ListTags)
 		apiGroup.POST("/tags", userTagHandler.CreateTag)
+		// /tags/sidebar must be before /tags/:id so Gin doesn't match :id=sidebar
+		apiGroup.GET("/tags/sidebar", userTagHandler.GetTagSidebar)
 		apiGroup.PATCH("/tags/:id", userTagHandler.RenameTag)
 		apiGroup.DELETE("/tags/:id", userTagHandler.DeleteTag)
 
