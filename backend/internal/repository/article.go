@@ -18,6 +18,8 @@ type ArticleFilter struct {
 	FeedID     *int
 	UnreadOnly bool
 	SavedOnly  bool
+	TagID      *int // when non-nil, only articles bound to this tag by UserID
+	Untagged   bool // when true, only articles with zero manual tags by UserID
 }
 
 // buildArticleFilterSQL returns SQL fragments that callers splice into a
@@ -55,6 +57,23 @@ LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.use
 		// for the rp join. But we DO need a literal 1.0 arg.
 		whereFragments = append(whereFragments, fmt.Sprintf("up_save.signal_value = $%d", nextArg))
 		args = append(args, 1.0)
+		nextArg++
+	}
+	if f.TagID != nil {
+		whereFragments = append(whereFragments, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM article_user_tags aut
+                 WHERE aut.article_id = %s.id
+                   AND aut.user_id = $%d
+                   AND aut.tag_id = $%d)`, alias, nextArg, nextArg+1))
+		args = append(args, f.UserID, *f.TagID)
+		nextArg += 2
+	}
+	if f.Untagged {
+		whereFragments = append(whereFragments, fmt.Sprintf(
+			`NOT EXISTS (SELECT 1 FROM article_user_tags aut
+                     WHERE aut.article_id = %s.id
+                       AND aut.user_id = $%d)`, alias, nextArg))
+		args = append(args, f.UserID)
 		nextArg++
 	}
 	finalArg = nextArg
@@ -150,12 +169,14 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 	return articles, nil
 }
 
-func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int) ([]model.Article, error) {
+func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool) ([]model.Article, error) {
 	filter := ArticleFilter{
 		UserID:     userID,
 		FeedID:     feedID,
 		UnreadOnly: unreadOnly,
 		SavedOnly:  savedOnly,
+		TagID:      tagID,
+		Untagged:   untagged,
 	}
 	joins, whereFrags, args, nextArg := buildArticleFilterSQL(filter, "articles", 1)
 

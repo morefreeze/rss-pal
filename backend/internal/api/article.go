@@ -115,8 +115,23 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 	unreadOnly := c.Query("unread") == "true"
 	savedOnly := c.Query("saved") == "true"
 
+	var tagID *int
+	if s := c.Query("tag_id"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tag_id must be an integer"})
+			return
+		}
+		tagID = &n
+	}
+	untagged := c.Query("untagged") == "true"
+	if tagID != nil && untagged {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tag_id and untagged cannot be combined"})
+		return
+	}
+
 	userID := getUserID(c)
-	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, savedOnly, userID)
+	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, savedOnly, userID, tagID, untagged)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
