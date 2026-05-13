@@ -137,27 +137,24 @@ func (r *UserTagRepository) GetTagsForSidebar(filter ArticleFilter) (*TagSidebar
 		return nil, err
 	}
 
-	// total + untagged counts — use the same buildArticleFilterSQL output
-	// but applied directly to a COUNT(*) on articles.
+	// total + untagged counts — same filter, plus the feeds visibility
+	// guard that GetAll applies (so counts agree with what the list returns).
 	joins2, where2, args2, _ := buildArticleFilterSQL(filter, "articles", 1)
-	totalQuery := `SELECT COUNT(*) FROM articles` + joins2
+	visibilityFrag := "(feeds.owner_id IS NULL OR feeds.owner_id = $1)"
+	totalQuery := `SELECT COUNT(*) FROM articles JOIN feeds ON articles.feed_id = feeds.id` + joins2
 	untaggedFrag := fmt.Sprintf(
 		`NOT EXISTS (SELECT 1 FROM article_user_tags aut WHERE aut.article_id = articles.id AND aut.user_id = $%d)`,
 		len(args2)+1)
 	untaggedArgs := append([]any{}, args2...)
 	untaggedArgs = append(untaggedArgs, filter.UserID)
-	untaggedQuery := `SELECT COUNT(*) FROM articles` + joins2
+	untaggedQuery := `SELECT COUNT(*) FROM articles JOIN feeds ON articles.feed_id = feeds.id` + joins2
 
-	if len(where2) > 0 {
-		clause := " WHERE " + where2[0]
-		for i := 1; i < len(where2); i++ {
-			clause += " AND " + where2[i]
-		}
-		totalQuery += clause
-		untaggedQuery += clause + " AND " + untaggedFrag
-	} else {
-		untaggedQuery += " WHERE " + untaggedFrag
+	clause := " WHERE " + visibilityFrag
+	for _, w := range where2 {
+		clause += " AND " + w
 	}
+	totalQuery += clause
+	untaggedQuery += clause + " AND " + untaggedFrag
 
 	var total, untagged int
 	if err := r.db.QueryRow(totalQuery, args2...).Scan(&total); err != nil {
