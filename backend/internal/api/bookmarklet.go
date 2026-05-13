@@ -178,6 +178,14 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章失败"})
 			return
 		}
+		// A bookmarklet re-capture is the user explicitly asking for a fresh
+		// parse — refresh the title too, otherwise stale titles from a
+		// previous (worse) extraction stick around forever.
+		if title != "" && title != existing.Title {
+			if err := h.articleRepo.UpdateTitle(existing.ID, title); err != nil {
+				log.Printf("bookmarklet: UpdateTitle failed for article=%d: %v", existing.ID, err)
+			}
+		}
 		// Clearing summaries forces the worker's backfillSummaries loop to
 		// regenerate them from the new content on its next pass.
 		if err := h.articleRepo.UpdateSummary(existing.ID, "", ""); err != nil {
@@ -187,7 +195,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":     "updated",
 			"article_id": existing.ID,
-			"message":    "已更新文章: " + existing.Title,
+			"message":    "已更新文章: " + title,
 		})
 		return
 	}
