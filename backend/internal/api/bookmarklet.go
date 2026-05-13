@@ -364,6 +364,9 @@ func buildTweetContent(cap *rss.TweetCapture) string {
 	if byline := buildTweetByline(cap); byline != "" {
 		sections = append(sections, byline)
 	}
+	if cap.ArticleTitle != "" {
+		sections = append(sections, "# "+cap.ArticleTitle)
+	}
 	if cap.TextMarkdown != "" {
 		sections = append(sections, cap.TextMarkdown)
 	}
@@ -465,6 +468,20 @@ func buildTweetByline(cap *rss.TweetCapture) string {
 // within 60 runes. Empty text falls back to "@handle 的推文" for
 // image-only tweets. Final fallback is "Twitter 推文".
 func buildTweetTitle(cap *rss.TweetCapture) string {
+	// X Articles have their own title — use it verbatim (with a name prefix
+	// when available) so the feed shows the article's real heading rather
+	// than the first clause of its lead paragraph.
+	if cap.ArticleTitle != "" {
+		switch {
+		case cap.DisplayName != "":
+			return cap.DisplayName + " · " + cap.ArticleTitle
+		case cap.Author != "":
+			return "@" + cap.Author + " · " + cap.ArticleTitle
+		default:
+			return cap.ArticleTitle
+		}
+	}
+
 	text := strings.TrimSpace(cap.TextMarkdown)
 	if text == "" {
 		if cap.DisplayName != "" {

@@ -271,6 +271,36 @@ func TestBuildTweetContent_ImageOnly(t *testing.T) {
 	}
 }
 
+func TestBuildTweetContent_XArticle(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:       "ashpreetbedi",
+		DisplayName:  "Ashpreet Bedi",
+		PublishedAt:  time.Date(2026, 5, 8, 15, 0, 0, 0, time.UTC),
+		ArticleTitle: "Auto-Improving Software",
+		TextMarkdown: "Coding agents have changed how we build software.",
+	}
+	got := buildTweetContent(cap)
+	want := "> @ashpreetbedi (Ashpreet Bedi) · 2026-05-08\n\n" +
+		"# Auto-Improving Software\n\n" +
+		"Coding agents have changed how we build software."
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestBuildTweetTitle_XArticle(t *testing.T) {
+	cap := &rss.TweetCapture{
+		Author:       "ashpreetbedi",
+		DisplayName:  "Ashpreet Bedi",
+		ArticleTitle: "Auto-Improving Software",
+		TextMarkdown: "Coding agents have changed how we build software.",
+	}
+	want := "Ashpreet Bedi · Auto-Improving Software"
+	if got := buildTweetTitle(cap); got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
 func TestBuildTweetContent_NoTimestamp(t *testing.T) {
 	cap := &rss.TweetCapture{
 		Author:       "karpathy",
