@@ -63,9 +63,12 @@ interface SavedPageProps {
   // article — defaults to '/saved' (standalone page) but the embed passes
   // '/articles' so back-navigation lands on the article list.
   entryPath?: string
+  // When undefined (standalone /saved route), sidebar is always shown.
+  // When provided by ArticleListPage in clipping mode, follows the parent toggle.
+  sidebarOpen?: boolean
 }
 
-export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: SavedPageProps = {}) {
+export default function SavedPage({ restrictToFeedId, entryPath = '/saved', sidebarOpen }: SavedPageProps = {}) {
   const navigate = useNavigate()
   const player = usePlayer()
   const [tags, setTags] = useState<UserTag[]>([])
@@ -220,12 +223,14 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved' }: Sa
         minHeight: 'calc(100vh - 120px)',
       }}
     >
-      <SavedTagSidebar
-        tags={tags}
-        sources={sources}
-        selection={selection}
-        onSelect={handleSelect}
-      />
+      {(sidebarOpen ?? true) && (
+        <SavedTagSidebar
+          tags={tags}
+          sources={sources}
+          selection={selection}
+          onSelect={handleSelect}
+        />
+      )}
       <section style={{ flex: 1, minWidth: 0, paddingLeft: 16 }}>
         <div className="flex-between mb-2">
           <h2 style={{ margin: 0 }}>{headerLabel}</h2>

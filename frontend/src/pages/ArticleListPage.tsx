@@ -573,7 +573,11 @@ export default function ArticleListPage() {
       </div>
 
       {isClippingMode && selectedFeed != null && (
-        <SavedPage restrictToFeedId={selectedFeed} entryPath="/articles" />
+        <SavedPage
+          restrictToFeedId={selectedFeed}
+          entryPath="/articles"
+          sidebarOpen={sidebarOpen}
+        />
       )}
 
       {!isClippingMode && recommended.length > 0 && !searchQuery && !grouped && (
