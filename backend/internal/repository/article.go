@@ -10,6 +10,57 @@ import (
 	"github.com/lib/pq"
 )
 
+// ArticleFilter captures the dimensions used by both the article list
+// query and the sidebar counts. Keeping these together guarantees the
+// sidebar tag counts equal what the list returns under the same filter.
+type ArticleFilter struct {
+	UserID     int
+	FeedID     *int
+	UnreadOnly bool
+	SavedOnly  bool
+}
+
+// buildArticleFilterSQL returns SQL fragments that callers splice into a
+// query operating on the `articles` table (must be aliased as `articles`
+// or `a` — the helper emits both forms via the alias arg).
+// nextArg is the next positional placeholder index to start at, given
+// that callers may have placed other args before the filter args.
+func buildArticleFilterSQL(f ArticleFilter, alias string, nextArg int) (
+	joinSQL string,
+	whereFragments []string,
+	args []any,
+	finalArg int,
+) {
+	args = []any{}
+	// Reading-progress join is always emitted because unread filter and
+	// is_read field both need it. Caller already aliases reading-progress
+	// result as `rp`.
+	joinSQL = fmt.Sprintf(`
+LEFT JOIN reading_progress rp ON %s.id = rp.article_id AND rp.user_id = $%d`, alias, nextArg)
+	args = append(args, f.UserID)
+	nextArg++
+
+	if f.FeedID != nil {
+		whereFragments = append(whereFragments, fmt.Sprintf("%s.feed_id = $%d", alias, nextArg))
+		args = append(args, *f.FeedID)
+		nextArg++
+	}
+	if f.UnreadOnly {
+		whereFragments = append(whereFragments, "COALESCE(rp.is_completed, false) = false")
+	}
+	if f.SavedOnly {
+		joinSQL += fmt.Sprintf(`
+LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.user_id = $%d AND up_save.signal_type = 'save'`, alias, nextArg-1) // reuse user_id arg
+		// Note: we don't append user_id again because we already pushed it
+		// for the rp join. But we DO need a literal 1.0 arg.
+		whereFragments = append(whereFragments, fmt.Sprintf("up_save.signal_value = $%d", nextArg))
+		args = append(args, 1.0)
+		nextArg++
+	}
+	finalArg = nextArg
+	return
+}
+
 type ArticleRepository struct {
 	db *sql.DB
 }
@@ -100,39 +151,25 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 }
 
 func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int) ([]model.Article, error) {
+	filter := ArticleFilter{
+		UserID:     userID,
+		FeedID:     feedID,
+		UnreadOnly: unreadOnly,
+		SavedOnly:  savedOnly,
+	}
+	joins, whereFrags, args, nextArg := buildArticleFilterSQL(filter, "articles", 1)
+
 	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, articles.word_count, articles.reading_minutes, articles.media_url, articles.media_type, articles.media_duration_seconds, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read, articles.links_extendable, articles.parent_article_id, articles.processing_state, articles.prerank_score, articles.editor_note
 FROM articles
-JOIN feeds ON articles.feed_id = feeds.id
-LEFT JOIN reading_progress rp ON articles.id = rp.article_id AND rp.user_id = $1`
-	args := []interface{}{userID}
-	conditions := []string{}
-	argIdx := 2
+JOIN feeds ON articles.feed_id = feeds.id` + joins
 
 	// Only return articles from feeds visible to this user (shared feeds or user's own feeds)
-	conditions = append(conditions, "(feeds.owner_id IS NULL OR feeds.owner_id = $1)")
+	allFrags := append([]string{"(feeds.owner_id IS NULL OR feeds.owner_id = $1)"}, whereFrags...)
 
-	if feedID != nil {
-		conditions = append(conditions, fmt.Sprintf("articles.feed_id = $%d", argIdx))
-		args = append(args, *feedID)
-		argIdx++
-	}
-
-	if unreadOnly {
-		conditions = append(conditions, "COALESCE(rp.is_completed, false) = false")
-	}
-
-	if savedOnly {
-		query += fmt.Sprintf(`
-LEFT JOIN user_preferences up_save ON articles.id = up_save.article_id AND up_save.user_id = $1 AND up_save.signal_type = 'save'`)
-		conditions = append(conditions, fmt.Sprintf("up_save.signal_value = $%d", argIdx))
-		args = append(args, 1.0)
-		argIdx++
-	}
-
-	if len(conditions) > 0 {
-		query += " WHERE " + conditions[0]
-		for i := 1; i < len(conditions); i++ {
-			query += " AND " + conditions[i]
+	if len(allFrags) > 0 {
+		query += " WHERE " + allFrags[0]
+		for i := 1; i < len(allFrags); i++ {
+			query += " AND " + allFrags[i]
 		}
 	}
 
@@ -140,7 +177,7 @@ LEFT JOIN user_preferences up_save ON articles.id = up_save.article_id AND up_sa
 	// (published ≤ fetched) keep chronological feel, but backfilled articles
 	// from newly-added feeds (old published_at, recent fetched_at) bubble up
 	// briefly so the new subscription is visible on /articles page 1.
-	query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) DESC, COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) DESC, COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", nextArg, nextArg+1)
 	args = append(args, limit, offset)
 
 	rows, err := r.db.Query(query, args...)
