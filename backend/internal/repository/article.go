@@ -169,7 +169,23 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 	return articles, nil
 }
 
-func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool) ([]model.Article, error) {
+// SortMode selects which timestamp orders the /articles list:
+//   - SortPublished: the smart published_at sort with a 7-day fetched-at
+//     floor that bubbles freshly-subscribed backlog briefly to the top.
+//     Reflects when content was *authored* — the default for chronological
+//     RSS reading.
+//   - SortCaptured: strict fetched_at DESC. Reflects when *we* saw an
+//     article. The bookmarklet capture path uses this so freshly saved
+//     items always surface at the top, regardless of the underlying
+//     tweet's posting time.
+type SortMode int
+
+const (
+	SortPublished SortMode = iota
+	SortCaptured
+)
+
+func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool, sort SortMode) ([]model.Article, error) {
 	filter := ArticleFilter{
 		UserID:     userID,
 		FeedID:     feedID,
@@ -179,6 +195,7 @@ func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bo
 		Untagged:   untagged,
 	}
 	joins, whereFrags, args, nextArg := buildArticleFilterSQL(filter, "articles", 1)
+
 
 	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, articles.word_count, articles.reading_minutes, articles.media_url, articles.media_type, articles.media_duration_seconds, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read, articles.links_extendable, articles.parent_article_id, articles.processing_state, articles.prerank_score, articles.editor_note
 FROM articles
@@ -194,11 +211,18 @@ JOIN feeds ON articles.feed_id = feeds.id` + joins
 		}
 	}
 
-	// Sort by GREATEST(published_at, fetched_at): typical articles
-	// (published ≤ fetched) keep chronological feel, but backfilled articles
-	// from newly-added feeds (old published_at, recent fetched_at) bubble up
-	// briefly so the new subscription is visible on /articles page 1.
-	query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) DESC, COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", nextArg, nextArg+1)
+	switch sort {
+	case SortCaptured:
+		// Strict capture-time order: a freshly bookmarked tweet always
+		// appears at the top, even if its published_at is months old.
+		query += fmt.Sprintf(" ORDER BY articles.fetched_at DESC LIMIT $%d OFFSET $%d", nextArg, nextArg+1)
+	default:
+		// Sort by GREATEST(published_at, fetched_at): typical articles
+		// (published ≤ fetched) keep chronological feel, but backfilled articles
+		// from newly-added feeds (old published_at, recent fetched_at) bubble up
+		// briefly so the new subscription is visible on /articles page 1.
+		query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) DESC, COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", nextArg, nextArg+1)
+	}
 	args = append(args, limit, offset)
 
 	rows, err := r.db.Query(query, args...)
@@ -431,6 +455,15 @@ func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed 
 
 func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, readingMinutes int) error {
 	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0 WHERE id = $4`, content, wordCount, readingMinutes, id)
+	return err
+}
+
+// UpdateTitle overwrites the article's title. Used when a bookmarklet
+// re-capture refreshes a Twitter article's content — the new title from
+// the tweet's first-clause heuristic should replace whatever stale title
+// the previous capture left behind.
+func (r *ArticleRepository) UpdateTitle(id int, title string) error {
+	_, err := r.db.Exec(`UPDATE articles SET title = $1 WHERE id = $2`, title, id)
 	return err
 }
 

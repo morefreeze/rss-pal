@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
+import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleSort, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
 import GroupedArticleView from '../components/GroupedArticleView'
@@ -158,6 +158,9 @@ export default function ArticleListPage() {
   const [savedOnly, setSavedOnly] = useState(() => {
     try { return sessionStorage.getItem('savedOnly') === 'true' } catch { return false }
   })
+  const [sortMode, setSortMode] = useState<ArticleSort>(() => {
+    try { return (sessionStorage.getItem('articlesSort') as ArticleSort) === 'captured' ? 'captured' : 'published' } catch { return 'published' }
+  })
   const [showRecommended, setShowRecommended] = useState(() => {
     try { return localStorage.getItem('showRecommended') === 'true' } catch { return false }
   })
@@ -247,7 +250,7 @@ export default function ArticleListPage() {
     setHasMore(true)
     setFocusedIdx(-1)
     loadArticles(0, true)
-  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, tagFilter])
+  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, sortMode, tagFilter])
 
   useEffect(() => {
     if (!sidebarOpen || isClippingMode) return
@@ -276,6 +279,7 @@ export default function ArticleListPage() {
         untagged: tagFilter.kind === 'untagged' || undefined,
         limit: PAGE_SIZE,
         offset: off,
+        sort: sortMode,
       })
       const data = raw || []
       if (reset) {
@@ -297,7 +301,7 @@ export default function ArticleListPage() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedFeed, unreadOnly, savedOnly, tagFilter])
+  }, [selectedFeed, unreadOnly, savedOnly, sortMode, tagFilter])
 
   const loadMore = useCallback(() => {
     if (!loadingMore && hasMore) {
@@ -550,6 +554,20 @@ export default function ArticleListPage() {
               />
               已保存
             </label>
+          )}
+          {!isClippingMode && !searchQuery && !grouped && (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                const next: ArticleSort = sortMode === 'captured' ? 'published' : 'captured'
+                setSortMode(next)
+                try { sessionStorage.setItem('articlesSort', next) } catch {}
+              }}
+              title={sortMode === 'captured' ? '当前按抓取时间排序,点击切换为发布时间' : '当前按发布时间排序,点击切换为抓取时间'}
+            >
+              ⏱ {sortMode === 'captured' ? '抓取时间' : '发布时间'}
+            </button>
           )}
           {!isClippingMode && !searchQuery && tagFilter.kind === 'all' && (
             <button
