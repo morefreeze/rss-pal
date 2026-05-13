@@ -238,6 +238,18 @@ func walkLongform(sel *goquery.Selection, b *strings.Builder, inBold, inListItem
 				walkLongform(n, b, nowBold, inListItem)
 			}
 		case "div":
+			// X Article inline images: `tweetPhoto` containers that appear
+			// inside the longform body. Emit the image URL on its own line
+			// in DOM order; the photo also has a sibling text caption that
+			// the normal block walker will handle.
+			if testid, _ := n.Attr("data-testid"); testid == "tweetPhoto" {
+				if src := pickInlineImageURL(n); src != "" {
+					b.WriteString("\n\n![](")
+					b.WriteString(src)
+					b.WriteString(")\n\n")
+					return
+				}
+			}
 			class, _ := n.Attr("class")
 			isBlock := strings.Contains(class, "DraftStyleDefault-block")
 			walkLongform(n, b, nowBold, inListItem)
@@ -348,25 +360,53 @@ func extractPublishedAt(focal *goquery.Selection) time.Time {
 
 // extractTweetImages collects photo URLs from the focal tweet, excluding:
 //   - profile avatars (path contains /profile_images/)
-//   - images inside any role="link" container (these are quote-tweet
-//     thumbnails; the quote tweet itself is captured separately as a link).
+//   - images inside any role="link" container (quote-tweet thumbnails;
+//     the quote tweet itself is captured separately as a link)
+//   - images inside an X Article's longform body (walkLongform emits
+//     those inline so they sit where they belong in the prose)
 //
 // Each URL has its `name=...` query parameter rewritten to `name=large` to
 // pull the highest-quality variant Twitter serves anonymously.
 func extractTweetImages(focal *goquery.Selection) []string {
 	var urls []string
 	focal.Find(`[data-testid="tweetPhoto"] img[src]`).Each(func(_ int, img *goquery.Selection) {
-		// Skip if any ancestor up to focal has role="link" (quote card).
 		if hasAncestor(img, focal, `div[role="link"]`) {
 			return
 		}
-		src, _ := img.Attr("src")
-		if !strings.Contains(src, "pbs.twimg.com") || strings.Contains(src, "/profile_images/") {
+		if hasAncestor(img, focal, `[data-testid="longformRichTextComponent"]`) {
 			return
 		}
-		urls = append(urls, upgradeTwitterImageURL(src))
+		if src := normalizeFocalImageSrc(img); src != "" {
+			urls = append(urls, src)
+		}
 	})
 	return urls
+}
+
+// pickInlineImageURL returns the upgraded pbs.twimg.com URL for the first
+// usable <img> descendant of an inline tweetPhoto element, or "" if none
+// (e.g. video thumbnails the focal walker should skip). Shared with the
+// longform walker so X Article inline images render in place.
+func pickInlineImageURL(photo *goquery.Selection) string {
+	var url string
+	photo.Find(`img[src]`).EachWithBreak(func(_ int, img *goquery.Selection) bool {
+		if src := normalizeFocalImageSrc(img); src != "" {
+			url = src
+			return false
+		}
+		return true
+	})
+	return url
+}
+
+// normalizeFocalImageSrc returns the upgraded src of an <img> if it's a
+// pbs.twimg.com media URL (not a profile avatar), or "" otherwise.
+func normalizeFocalImageSrc(img *goquery.Selection) string {
+	src, _ := img.Attr("src")
+	if !strings.Contains(src, "pbs.twimg.com") || strings.Contains(src, "/profile_images/") {
+		return ""
+	}
+	return upgradeTwitterImageURL(src)
 }
 
 // hasAncestor reports whether sel has an ancestor matching selector within

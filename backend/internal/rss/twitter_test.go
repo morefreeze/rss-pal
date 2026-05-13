@@ -206,12 +206,23 @@ func TestExtractTweet_XArticle(t *testing.T) {
 		}
 	}
 
-	// Image should still be extracted via tweetPhoto.
-	if len(cap.ImageURLs) != 1 {
-		t.Fatalf("want 1 image, got %d", len(cap.ImageURLs))
+	// Inline image inside longform must appear in the body in DOM order
+	// (between the first paragraph and the list intro), upgraded to large.
+	const wantInlineImage = "![](https://pbs.twimg.com/media/INLINE1?format=jpg&name=large)"
+	if !strings.Contains(body, wantInlineImage) {
+		t.Errorf("body missing inline image %q\n--- got ---\n%s", wantInlineImage, body)
 	}
-	if !strings.HasSuffix(cap.ImageURLs[0], "name=large") {
-		t.Errorf("expected name=large upgrade, got %q", cap.ImageURLs[0])
+	imgIdx := strings.Index(body, "INLINE1")
+	firstParaEnd := strings.Index(body, "build software.")
+	listIntroIdx := strings.Index(body, "five prompts:")
+	if !(firstParaEnd < imgIdx && imgIdx < listIntroIdx) {
+		t.Errorf("inline image not between first paragraph and list intro\n--- got ---\n%s", body)
+	}
+
+	// Cover image lives outside longform — should still be in ImageURLs and
+	// rendered after the body in buildTweetContent.
+	if len(cap.ImageURLs) != 1 || !strings.Contains(cap.ImageURLs[0], "COVER") {
+		t.Errorf("expected single cover image in ImageURLs, got %v", cap.ImageURLs)
 	}
 }
 
