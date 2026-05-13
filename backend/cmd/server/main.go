@@ -50,7 +50,7 @@ func main() {
 	authHandler := api.NewAuthHandler(cfg, userRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(db, backupRunner, cfg)
-	articleHandler := api.NewArticleHandler(articleRepo, progressRepo, prefRepo, summarizerService, contentFetcher)
+	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, summarizerService, contentFetcher)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo, eventRepo)
