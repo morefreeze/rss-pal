@@ -479,9 +479,16 @@ export default function ArticleListPage() {
       .trim()
 
   return (
-    <div>
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      {sidebarOpen && !isClippingMode && tagSidebarData && (
+        <TagSidebar data={tagSidebarData} selection={tagFilter} onSelect={selectTag} />
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
       <div className="flex-between mb-2">
-        <h2>{isClippingMode ? '网摘' : '文章列表'}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />
+          <h2 style={{ margin: 0 }}>{isClippingMode ? '网摘' : '文章列表'}</h2>
+        </div>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
           {!isClippingMode && (
             <input
@@ -742,6 +749,7 @@ export default function ArticleListPage() {
         </>
         )
       })() : null}
+      </div>
     </div>
   )
 }
