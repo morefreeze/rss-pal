@@ -254,7 +254,7 @@ export default function ArticlePage() {
       if (!article || progress?.is_completed) return
       if (maxScrollRef.current <= 0.9) return
       const readMin = article.reading_minutes || 1
-      const minSeconds = Math.min(30, Math.floor(readMin * 30))
+      const minSeconds = Math.min(15, Math.floor(readMin * 30))
       if (activeReadSecondsRef.current < minSeconds) return
 
       const scrollPosition = Math.max(maxScrollRef.current, 0.9)
@@ -287,7 +287,7 @@ export default function ArticlePage() {
     maxScrollRef.current = scrollPosition
 
     const readMin = article?.reading_minutes || 1
-    const minSeconds = Math.min(30, Math.floor(readMin * 30))
+    const minSeconds = Math.min(15, Math.floor(readMin * 30))
     const isCompleted = scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds
     const wasCompleted = progress?.is_completed
 
