@@ -434,6 +434,15 @@ func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, rea
 	return err
 }
 
+// UpdateTitle overwrites the article's title. Used when a bookmarklet
+// re-capture refreshes a Twitter article's content — the new title from
+// the tweet's first-clause heuristic should replace whatever stale title
+// the previous capture left behind.
+func (r *ArticleRepository) UpdateTitle(id int, title string) error {
+	_, err := r.db.Exec(`UPDATE articles SET title = $1 WHERE id = $2`, title, id)
+	return err
+}
+
 func (r *ArticleRepository) IncrementRefetchAttempts(id int) error {
 	query := `UPDATE articles SET refetch_attempts = refetch_attempts + 1 WHERE id = $1`
 	_, err := r.db.Exec(query, id)
