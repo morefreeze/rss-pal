@@ -177,6 +177,44 @@ func TestExtractTweet_ErrTweetNotFound(t *testing.T) {
 	}
 }
 
+func TestExtractTweet_XArticle(t *testing.T) {
+	data := mustReadFixture(t, "tweet_x_article.html")
+	cap, err := ExtractTweet(data, "2053885390717890757")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.ArticleTitle != "Auto-Improving Software" {
+		t.Errorf("ArticleTitle = %q, want %q", cap.ArticleTitle, "Auto-Improving Software")
+	}
+	if cap.Author != "ashpreetbedi" {
+		t.Errorf("Author = %q", cap.Author)
+	}
+	if cap.DisplayName != "Ashpreet Bedi" {
+		t.Errorf("DisplayName = %q", cap.DisplayName)
+	}
+
+	// The longform body should be present with paragraphs, list items, and bold runs.
+	body := cap.TextMarkdown
+	for _, want := range []string{
+		"Coding agents have changed how we build software.",
+		"The lifecycle is covered by five prompts:",
+		"- **Create.** Scaffolds a new agent.",
+		"- **Improve.** Hardens an existing agent.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- got ---\n%s", want, body)
+		}
+	}
+
+	// Image should still be extracted via tweetPhoto.
+	if len(cap.ImageURLs) != 1 {
+		t.Fatalf("want 1 image, got %d", len(cap.ImageURLs))
+	}
+	if !strings.HasSuffix(cap.ImageURLs[0], "name=large") {
+		t.Errorf("expected name=large upgrade, got %q", cap.ImageURLs[0])
+	}
+}
+
 func mustReadFixture(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile("testdata/twitter/" + name)

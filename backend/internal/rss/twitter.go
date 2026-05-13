@@ -60,7 +60,8 @@ type TweetCapture struct {
 	Author       string    // handle without leading @, e.g. "karpathy"
 	DisplayName  string    // display name, e.g. "Andrej Karpathy"
 	PublishedAt  time.Time // RFC3339 from <time datetime="...">, zero if absent
-	TextMarkdown string    // tweet text rendered as markdown
+	ArticleTitle string    // X Article title (data-testid="twitter-article-title"); empty for regular tweets
+	TextMarkdown string    // tweet text rendered as markdown — for X Articles this is the longform body
 	ImageURLs    []string  // pbs.twimg.com URLs, upgraded to ?name=large
 	Quote        *Quote    // nested quoted tweet/article, nil if focal has no quote
 }
@@ -101,7 +102,8 @@ func ExtractTweet(html string, statusID string) (*TweetCapture, error) {
 		Author:       extractAuthorHandle(focal),
 		DisplayName:  extractDisplayName(focal),
 		PublishedAt:  extractPublishedAt(focal),
-		TextMarkdown: extractTweetText(focal),
+		ArticleTitle: extractArticleTitle(focal),
+		TextMarkdown: extractFocalBody(focal),
 		ImageURLs:    extractTweetImages(focal),
 		Quote:        extractQuote(focal, statusID),
 	}
@@ -144,10 +146,17 @@ func findFocalTweet(doc *goquery.Document, statusID string) *goquery.Selection {
 	return match
 }
 
-// extractTweetText walks the [data-testid="tweetText"] subtree and renders
-// it as markdown. Twitter's tweetText is a sequence of spans and anchors;
-// emoji are rendered as <img alt="..."> whose `alt` is the emoji char.
-func extractTweetText(focal *goquery.Selection) string {
+// extractFocalBody returns the focal post's main body as markdown. For X
+// Articles (long-form posts) we walk the DraftJS-style
+// [data-testid="longformRichTextComponent"] subtree, preserving paragraph
+// breaks, list items, and bold runs. For regular tweets we walk
+// [data-testid="tweetText"] as before.
+func extractFocalBody(focal *goquery.Selection) string {
+	if longform := focal.Find(`[data-testid="longformRichTextComponent"]`).First(); longform.Length() > 0 {
+		var b strings.Builder
+		walkLongform(longform, &b, false, false)
+		return collapseBlankLines(normalizeLongformLines(b.String()))
+	}
 	textNode := focal.Find(`[data-testid="tweetText"]`).First()
 	if textNode.Length() == 0 {
 		return ""
@@ -155,6 +164,93 @@ func extractTweetText(focal *goquery.Selection) string {
 	var b strings.Builder
 	walkTextMarkdown(textNode, &b)
 	return collapseBlankLines(strings.TrimSpace(b.String()))
+}
+
+// extractArticleTitle returns the heading of an X Article post, taken from
+// the [data-testid="twitter-article-title"] element inside the focal
+// article. Regular tweets have no such element and return "".
+func extractArticleTitle(focal *goquery.Selection) string {
+	title := focal.Find(`[data-testid="twitter-article-title"]`).First()
+	if title.Length() == 0 {
+		return ""
+	}
+	return strings.TrimSpace(title.Text())
+}
+
+// walkLongform renders an X Article body (DraftJS-style DOM) as markdown.
+// Paragraph blocks (`public-DraftStyleDefault-block` divs) close with a
+// blank line, list items (`<li>`) emit `- ` prefix, and any element whose
+// inline style sets `font-weight: bold` wraps its text in `**…**`. The
+// caller-supplied builder accumulates output; inBold threads through
+// recursion so a bold ancestor styles all enclosed text runs.
+func walkLongform(sel *goquery.Selection, b *strings.Builder, inBold, inListItem bool) {
+	sel.Contents().Each(func(_ int, n *goquery.Selection) {
+		node := n.Get(0)
+		if node == nil {
+			return
+		}
+		if node.Type == html.TextNode {
+			if inBold && strings.TrimSpace(node.Data) != "" {
+				b.WriteString("**")
+				b.WriteString(node.Data)
+				b.WriteString("**")
+			} else {
+				b.WriteString(node.Data)
+			}
+			return
+		}
+		if node.Type != html.ElementNode {
+			return
+		}
+		style, _ := n.Attr("style")
+		nowBold := inBold || strings.Contains(style, "font-weight: bold") || strings.Contains(style, "font-weight:bold")
+
+		switch node.Data {
+		case "br":
+			b.WriteString("\n")
+		case "li":
+			// Buffer the item body into a sub-builder so we can collapse
+			// indent whitespace and inline the contained block. Otherwise
+			// the indented text node between <li> and its inner <div>
+			// breaks the line right after the bullet marker.
+			var item strings.Builder
+			walkLongform(n, &item, nowBold, true)
+			text := strings.ReplaceAll(strings.TrimSpace(item.String()), "\n", " ")
+			text = collapseInlineSpaces(text)
+			if text != "" {
+				b.WriteString("\n- ")
+				b.WriteString(text)
+			}
+		case "ul", "ol":
+			b.WriteString("\n")
+			walkLongform(n, b, nowBold, inListItem)
+			b.WriteString("\n")
+		case "a":
+			href, _ := n.Attr("href")
+			inner := strings.TrimSpace(n.Text())
+			if href != "" && inner != "" {
+				if nowBold {
+					fmt.Fprintf(b, "**[%s](%s)**", inner, href)
+				} else {
+					fmt.Fprintf(b, "[%s](%s)", inner, href)
+				}
+			} else {
+				walkLongform(n, b, nowBold, inListItem)
+			}
+		case "div":
+			class, _ := n.Attr("class")
+			isBlock := strings.Contains(class, "DraftStyleDefault-block")
+			walkLongform(n, b, nowBold, inListItem)
+			// Paragraph breaks belong to standalone blocks. A block inside
+			// a list item is just the item's body; the surrounding <li>
+			// already provides the line break.
+			if isBlock && !inListItem {
+				b.WriteString("\n\n")
+			}
+		default:
+			walkLongform(n, b, nowBold, inListItem)
+		}
+	})
 }
 
 func walkTextMarkdown(sel *goquery.Selection, b *strings.Builder) {
@@ -429,6 +525,47 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string(runes[:max]) + "…"
+}
+
+// normalizeLongformLines trims each line and drops lines that are pure
+// whitespace. Source HTML is heavily indented, so the walker inevitably
+// captures formatting whitespace between block-level elements; we don't
+// want that surfacing as runs of spaces or stranded `- ` bullet markers
+// inside the markdown body.
+func normalizeLongformLines(s string) string {
+	var b strings.Builder
+	for i, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		// Collapse internal runs of whitespace to a single space so multi-
+		// span paragraphs don't render with double-spaced text.
+		b.WriteString(collapseInlineSpaces(trimmed))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// collapseInlineSpaces compacts runs of whitespace within a single line to
+// one space. Leaves the empty string alone.
+func collapseInlineSpaces(line string) string {
+	if line == "" {
+		return ""
+	}
+	var b strings.Builder
+	prevSpace := false
+	for _, r := range line {
+		if r == ' ' || r == '\t' {
+			if !prevSpace {
+				b.WriteRune(' ')
+			}
+			prevSpace = true
+			continue
+		}
+		b.WriteRune(r)
+		prevSpace = false
+	}
+	return b.String()
 }
 
 // collapseBlankLines reduces 3+ consecutive newlines to exactly two, which
