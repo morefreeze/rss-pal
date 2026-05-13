@@ -301,7 +301,7 @@ export default function ArticleListPage() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedFeed, unreadOnly, savedOnly, tagFilter])
+  }, [selectedFeed, unreadOnly, savedOnly, sortMode, tagFilter])
 
   const loadMore = useCallback(() => {
     if (!loadingMore && hasMore) {
