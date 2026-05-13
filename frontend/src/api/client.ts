@@ -261,6 +261,8 @@ export const exportOPML = () =>
   api.get('/feeds/export/opml', { responseType: 'blob' }).then(res => res.data as Blob)
 
 // Articles
+export type ArticleSort = 'published' | 'captured'
+
 export const getArticles = (params?: {
   feed_id?: number
   unread?: boolean
@@ -269,6 +271,7 @@ export const getArticles = (params?: {
   untagged?: boolean
   limit?: number
   offset?: number
+  sort?: ArticleSort
 }) => api.get<Article[]>('/articles', { params }).then(res => res.data)
 
 export interface TopicGroup {

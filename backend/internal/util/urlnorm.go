@@ -3,6 +3,7 @@ package util
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -47,5 +48,24 @@ func NormalizeURL(raw string) string {
 	}
 
 	u.Host = strings.ToLower(u.Host)
+
+	// Twitter / X canonicalization: collapse legacy hosts onto x.com, then
+	// strip share-tracking query (`?s=20`, `?t=...`) from single-tweet
+	// permalinks. Tweet IDs are globally unique, so the query carries no
+	// content — only attribution noise that would otherwise split dedup.
+	switch u.Host {
+	case "twitter.com", "www.twitter.com", "mobile.twitter.com", "www.x.com":
+		u.Host = "x.com"
+	}
+	if u.Host == "x.com" && twitterStatusPathRe.MatchString(u.Path) {
+		u.RawQuery = ""
+	}
+
 	return u.String()
 }
+
+// twitterStatusPathRe matches /<handle>/status/<numeric_id> with optional
+// trailing slash. Used by NormalizeURL to recognize single-tweet permalinks
+// whose query string is always pure tracking. Kept here (not in package rss)
+// because url normalization is a util concern.
+var twitterStatusPathRe = regexp.MustCompile(`^/[A-Za-z0-9_]{1,15}/status/[0-9]+/?$`)
