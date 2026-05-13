@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle } from '../api/client'
+import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
 import GroupedArticleView from '../components/GroupedArticleView'
 import SavedPage from './SavedPage'
+import TagSidebar, { TagFilter } from '../components/TagSidebar'
+import SidebarToggleButton from '../components/SidebarToggleButton'
 import { usePlayer } from '../player/PlayerContext'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 
@@ -177,6 +179,16 @@ export default function ArticleListPage() {
       return new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]'))
     } catch { return new Set() }
   })
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('tagSidebarOpen') === 'true' } catch { return false }
+  })
+  const [tagFilter, setTagFilter] = useState<TagFilter>(() => {
+    try {
+      const raw = sessionStorage.getItem('articleTagFilter')
+      return raw ? JSON.parse(raw) as TagFilter : { kind: 'all' }
+    } catch { return { kind: 'all' } }
+  })
+  const [tagSidebarData, setTagSidebarData] = useState<TagSidebarData | null>(null)
   const [focusedIdx, setFocusedIdx] = useState<number>(-1)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -187,6 +199,20 @@ export default function ArticleListPage() {
   // mark-all-read are hidden because /api/saved doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
   const isClippingMode = selectedFeedObj?.feed_type === 'saved'
+
+  const toggleSidebar = () => {
+    setSidebarOpen(o => {
+      const next = !o
+      try { localStorage.setItem('tagSidebarOpen', String(next)) } catch {}
+      return next
+    })
+  }
+
+  const selectTag = (sel: TagFilter) => {
+    if (sel.kind !== 'all' && grouped) setGrouped(false)
+    setTagFilter(sel)
+    try { sessionStorage.setItem('articleTagFilter', JSON.stringify(sel)) } catch {}
+  }
 
   useEffect(() => {
     loadFeeds()
@@ -221,7 +247,16 @@ export default function ArticleListPage() {
     setHasMore(true)
     setFocusedIdx(-1)
     loadArticles(0, true)
-  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped])
+  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, tagFilter])
+
+  useEffect(() => {
+    if (!sidebarOpen || isClippingMode) return
+    getTagSidebar({
+      feed_id: selectedFeed || undefined,
+      unread: unreadOnly || undefined,
+      saved: savedOnly || undefined,
+    }).then(setTagSidebarData).catch(() => setTagSidebarData(null))
+  }, [sidebarOpen, isClippingMode, selectedFeed, unreadOnly, savedOnly])
 
   const loadFeeds = async () => {
     const data = await getFeeds()
@@ -237,6 +272,8 @@ export default function ArticleListPage() {
         feed_id: selectedFeed || undefined,
         unread: unreadOnly || undefined,
         saved: savedOnly || undefined,
+        tag_id: tagFilter.kind === 'tag' ? tagFilter.id : undefined,
+        untagged: tagFilter.kind === 'untagged' || undefined,
         limit: PAGE_SIZE,
         offset: off,
       })
@@ -260,7 +297,7 @@ export default function ArticleListPage() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedFeed, unreadOnly, savedOnly])
+  }, [selectedFeed, unreadOnly, savedOnly, tagFilter])
 
   const loadMore = useCallback(() => {
     if (!loadingMore && hasMore) {
@@ -502,7 +539,7 @@ export default function ArticleListPage() {
               已保存
             </label>
           )}
-          {!isClippingMode && !searchQuery && (
+          {!isClippingMode && !searchQuery && tagFilter.kind === 'all' && (
             <button
               type="button"
               className={grouped ? '' : 'btn-ghost'}
@@ -626,7 +663,7 @@ export default function ArticleListPage() {
         ) : null
       )}
 
-      {!isClippingMode && !searchQuery && grouped ? (
+      {!isClippingMode && !searchQuery && grouped && tagFilter.kind === 'all' ? (
         groupedLoading ? (
           <div className="card">Loading...</div>
         ) : groupedData ? (
@@ -670,7 +707,7 @@ export default function ArticleListPage() {
             <ArticleCard
               key={article.id}
               article={article}
-              manualTags={[]}
+              manualTags={article.manual_tags || []}
               isRead={isRead(article)}
               isFocused={focusedIdx === idx}
               idx={idx}
