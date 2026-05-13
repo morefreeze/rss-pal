@@ -1,4 +1,6 @@
+import { memo, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
@@ -51,52 +53,70 @@ function extractParagraphText(children: unknown): string | null {
   return null
 }
 
+// Module-scoped plugin lists and component overrides. Hoisted out of the
+// render function so their references are stable across re-renders —
+// otherwise ReactMarkdown sees a fresh `components` object each render,
+// rebuilds the entire AST + React tree, and lazy <img> elements get
+// remounted (cancelling and re-issuing image fetches mid-load).
+const REMARK_PLUGINS = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
+const COMPONENTS: Components = {
+  img: ({ src, alt, ...rest }) => {
+    if (isAvatarImg(src, alt)) return null
+    const proxied = src
+      ? `/api/proxy/image?url=${encodeURIComponent(src)}`
+      : undefined
+    return (
+      <img
+        src={proxied}
+        alt={alt ?? ''}
+        loading="lazy"
+        decoding="async"
+        style={{ maxWidth: '100%', height: 'auto' }}
+        {...rest}
+      />
+    )
+  },
+  a: ({ href, children, ...rest }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
+      {children}
+    </a>
+  ),
+  p: ({ children, ...rest }) => {
+    const text = extractParagraphText(children)
+    if (text) {
+      const v = parsePlaceholder(text)
+      if (v) return <VideoEmbed {...v} />
+    }
+    return <p {...rest}>{children}</p>
+  },
+}
+
 // Rewrites <img src="..."> to go through the backend proxy so hotlink-
 // protected sites (WeChat, Zhihu) actually render. Author/profile avatars
 // are dropped entirely (see isAvatarImg). LaTeX math via remark-math +
 // rehype-katex; Jina Reader's shadow duplicate is removed via stripMathShadow
 // before parsing. External links open in a new tab.
-export default function MarkdownArticle({ source }: Props) {
-  const cleaned = flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source)))
+//
+// Wrapped in React.memo so the parent (ArticlePage) re-rendering on every
+// scroll-progress / activity-tick state change doesn't force a full
+// markdown re-parse and image remount.
+function MarkdownArticle({ source }: Props) {
+  const cleaned = useMemo(
+    () => flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source))),
+    [source],
+  )
   return (
     <div className="markdown-body">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeHighlight, rehypeKatex]}
-        components={{
-          img: ({ src, alt, ...rest }) => {
-            if (isAvatarImg(src, alt)) return null
-            const proxied = src
-              ? `/api/proxy/image?url=${encodeURIComponent(src)}`
-              : undefined
-            return (
-              <img
-                src={proxied}
-                alt={alt ?? ''}
-                loading="lazy"
-                decoding="async"
-                style={{ maxWidth: '100%', height: 'auto' }}
-                {...rest}
-              />
-            )
-          },
-          a: ({ href, children, ...rest }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
-              {children}
-            </a>
-          ),
-          p: ({ children, ...rest }) => {
-            const text = extractParagraphText(children)
-            if (text) {
-              const v = parsePlaceholder(text)
-              if (v) return <VideoEmbed {...v} />
-            }
-            return <p {...rest}>{children}</p>
-          },
-        }}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={COMPONENTS}
       >
         {cleaned}
       </ReactMarkdown>
     </div>
   )
 }
+
+export default memo(MarkdownArticle)
