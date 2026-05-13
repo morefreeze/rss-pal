@@ -69,21 +69,13 @@ export default function MarkdownArticle({ source }: Props) {
             const proxied = src
               ? `/api/proxy/image?url=${encodeURIComponent(src)}`
               : undefined
-            // Default width/height give the browser an aspect-ratio hint
-            // (4:3) so it reserves vertical space before the image loads.
-            // Without this, lazy-loaded images expand from 0 → natural
-            // height at load time and jolt the scroll position. CSS
-            // `height: auto` lets the actual aspect ratio take over once
-            // dimensions are known.
             return (
               <img
                 src={proxied}
                 alt={alt ?? ''}
                 loading="lazy"
                 decoding="async"
-                width={1024}
-                height={768}
-                style={{ maxWidth: '100%', height: 'auto', background: 'var(--surface-2, #f3f4f6)' }}
+                style={{ maxWidth: '100%', height: 'auto' }}
                 {...rest}
               />
             )
