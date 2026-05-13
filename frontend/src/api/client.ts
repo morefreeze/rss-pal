@@ -119,6 +119,7 @@ export interface Article {
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
   prerank_score?: number | null
   editor_note?: string
+  manual_tags: UserTag[]
 }
 
 export interface CandidateView {
@@ -260,8 +261,15 @@ export const exportOPML = () =>
   api.get('/feeds/export/opml', { responseType: 'blob' }).then(res => res.data as Blob)
 
 // Articles
-export const getArticles = (params?: { feed_id?: number; unread?: boolean; saved?: boolean; limit?: number; offset?: number }) =>
-  api.get<Article[]>('/articles', { params }).then(res => res.data)
+export const getArticles = (params?: {
+  feed_id?: number
+  unread?: boolean
+  saved?: boolean
+  tag_id?: number
+  untagged?: boolean
+  limit?: number
+  offset?: number
+}) => api.get<Article[]>('/articles', { params }).then(res => res.data)
 
 export interface TopicGroup {
   topic: string
@@ -703,6 +711,18 @@ export const removeArticleTag = (articleId: number, tagId: number) =>
 
 export const dismissSuggestion = (articleId: number, name: string) =>
   api.post(`/articles/${articleId}/suggestions/dismiss`, { name })
+
+export interface TagSidebarData {
+  tags: UserTag[]
+  total_count: number
+  untagged_count: number
+}
+
+export const getTagSidebar = (params?: {
+  feed_id?: number
+  unread?: boolean
+  saved?: boolean
+}) => api.get<TagSidebarData>('/tags/sidebar', { params }).then(r => r.data)
 
 // === Saved (Phase 2) ===
 

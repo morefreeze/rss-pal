@@ -19,6 +19,7 @@ import (
 
 type ArticleHandler struct {
 	articleRepo    *repository.ArticleRepository
+	bindRepo       *repository.ArticleUserTagRepository
 	progressRepo   *repository.ProgressRepository
 	prefRepo       *repository.PreferenceRepository
 	summarizer     *service.SummarizerService
@@ -53,9 +54,10 @@ func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "已全部标记为已读"})
 }
 
-func NewArticleHandler(articleRepo *repository.ArticleRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, summarizer *service.SummarizerService, contentFetcher *rss.ContentFetcher) *ArticleHandler {
+func NewArticleHandler(articleRepo *repository.ArticleRepository, bindRepo *repository.ArticleUserTagRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, summarizer *service.SummarizerService, contentFetcher *rss.ContentFetcher) *ArticleHandler {
 	return &ArticleHandler{
 		articleRepo:    articleRepo,
+		bindRepo:       bindRepo,
 		progressRepo:   progressRepo,
 		prefRepo:       prefRepo,
 		summarizer:     summarizer,
@@ -113,12 +115,52 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 	unreadOnly := c.Query("unread") == "true"
 	savedOnly := c.Query("saved") == "true"
 
-	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, savedOnly, getUserID(c))
+	var tagID *int
+	if s := c.Query("tag_id"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tag_id must be an integer"})
+			return
+		}
+		tagID = &n
+	}
+	untagged := c.Query("untagged") == "true"
+	if tagID != nil && untagged {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tag_id and untagged cannot be combined"})
+		return
+	}
+
+	userID := getUserID(c)
+	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, savedOnly, userID, tagID, untagged)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, articles)
+
+	// Batch-load manual tags so every list item shows the chips that
+	// the per-article TagBar already lets users add.
+	ids := make([]int, len(articles))
+	for i, a := range articles {
+		ids[i] = a.ID
+	}
+	tagMap, err := h.bindRepo.GetManualForArticles(ids, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	type item struct {
+		model.Article
+		ManualTags []model.UserTag `json:"manual_tags"`
+	}
+	out := make([]item, len(articles))
+	for i, a := range articles {
+		out[i] = item{Article: a, ManualTags: tagMap[a.ID]}
+		if out[i].ManualTags == nil {
+			out[i].ManualTags = []model.UserTag{}
+		}
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (h *ArticleHandler) Search(c *gin.Context) {

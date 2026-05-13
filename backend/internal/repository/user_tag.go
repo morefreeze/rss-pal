@@ -12,6 +12,13 @@ import (
 	"github.com/lib/pq"
 )
 
+// TagSidebarData is the response shape for GET /api/tags/sidebar.
+type TagSidebarData struct {
+	Tags          []model.UserTag `json:"tags"`           // article_count populated
+	TotalCount    int             `json:"total_count"`    // articles under the filter (no tag scoping)
+	UntaggedCount int             `json:"untagged_count"` // articles with zero manual tags
+}
+
 // EffectiveSource is the user-facing source identifier for an article.
 // For bookmarklet (feed_type='saved') articles, it derives from URL host;
 // for normal feeds, it's the feed itself.
@@ -88,6 +95,80 @@ func (r *UserTagRepository) GetTagsForUser(userID int) ([]model.UserTag, error) 
 		tags = append(tags, t)
 	}
 	return tags, rows.Err()
+}
+
+// GetTagsForSidebar returns tags with dynamic counts under the article
+// filter, plus the matching total and untagged counts. Filter shape
+// matches what /api/articles accepts (without TagID/Untagged — those
+// would only filter on themselves).
+func (r *UserTagRepository) GetTagsForSidebar(filter ArticleFilter) (*TagSidebarData, error) {
+	// Tags + per-tag count
+	// $1 is reserved for t.user_id; filter args start at $2
+	joins, whereFrags, args, _ := buildArticleFilterSQL(filter, "a", 2)
+	tagsQuery := `
+        SELECT t.id, t.user_id, t.name, t.created_at,
+               COUNT(DISTINCT aut.article_id) AS article_count
+        FROM user_tags t
+        JOIN article_user_tags aut ON aut.tag_id = t.id AND aut.user_id = t.user_id
+        JOIN articles a ON a.id = aut.article_id` + joins + `
+        WHERE t.user_id = $1`
+	for _, w := range whereFrags {
+		tagsQuery += " AND " + w
+	}
+	tagsQuery += `
+        GROUP BY t.id, t.user_id, t.name, t.created_at
+        HAVING COUNT(DISTINCT aut.article_id) > 0
+        ORDER BY t.name ASC`
+	qargs := append([]any{filter.UserID}, args...)
+	rows, err := r.db.Query(tagsQuery, qargs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tags := []model.UserTag{}
+	for rows.Next() {
+		var t model.UserTag
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.CreatedAt, &t.ArticleCount); err != nil {
+			return nil, err
+		}
+		tags = append(tags, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// total + untagged counts — same filter, plus the feeds visibility
+	// guard that GetAll applies (so counts agree with what the list returns).
+	joins2, where2, args2, _ := buildArticleFilterSQL(filter, "articles", 1)
+	visibilityFrag := "(feeds.owner_id IS NULL OR feeds.owner_id = $1)"
+	totalQuery := `SELECT COUNT(*) FROM articles JOIN feeds ON articles.feed_id = feeds.id` + joins2
+	untaggedFrag := fmt.Sprintf(
+		`NOT EXISTS (SELECT 1 FROM article_user_tags aut WHERE aut.article_id = articles.id AND aut.user_id = $%d)`,
+		len(args2)+1)
+	untaggedArgs := append([]any{}, args2...)
+	untaggedArgs = append(untaggedArgs, filter.UserID)
+	untaggedQuery := `SELECT COUNT(*) FROM articles JOIN feeds ON articles.feed_id = feeds.id` + joins2
+
+	clause := " WHERE " + visibilityFrag
+	for _, w := range where2 {
+		clause += " AND " + w
+	}
+	totalQuery += clause
+	untaggedQuery += clause + " AND " + untaggedFrag
+
+	var total, untagged int
+	if err := r.db.QueryRow(totalQuery, args2...).Scan(&total); err != nil {
+		return nil, err
+	}
+	if err := r.db.QueryRow(untaggedQuery, untaggedArgs...).Scan(&untagged); err != nil {
+		return nil, err
+	}
+
+	return &TagSidebarData{
+		Tags:          tags,
+		TotalCount:    total,
+		UntaggedCount: untagged,
+	}, nil
 }
 
 // CreateTag inserts (or returns existing) a tag by (user_id, name).
