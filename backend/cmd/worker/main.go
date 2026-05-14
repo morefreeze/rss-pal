@@ -479,6 +479,15 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 		if articles[i].URL == "" {
 			continue
 		}
+		// Twitter / X captures come from the bookmarklet's tweet-aware
+		// parser; the short-content backfill (which calls Direct → Jina)
+		// would clobber a byline-only image-only capture with an unrelated
+		// Jina-extracted article, losing structure and ruining the title.
+		// Better to leave the byline as-is than overwrite with garbage.
+		if _, ok := rss.IsTwitterStatusURL(articles[i].URL); ok {
+			log.Printf("refetchShortContent: skipping Twitter status URL article=%d url=%s", articles[i].ID, articles[i].URL)
+			continue
+		}
 
 		wg.Add(1)
 		go func(article *model.Article) {

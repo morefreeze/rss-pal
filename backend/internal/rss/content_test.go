@@ -645,3 +645,105 @@ func TestFlattenImageAltBlankLines(t *testing.T) {
 		})
 	}
 }
+
+func TestAbsolutizeURLs(t *testing.T) {
+	html := `<div>
+		<img alt="root" src="/images/flowers.png">
+		<img alt="rel" src="figures/plot.png">
+		<img alt="abs" src="https://cdn.example.com/cat.png">
+		<img alt="proto" src="//cdn.example.com/dog.png">
+		<a href="/about">about</a>
+		<a href="https://other.com/x">other</a>
+	</div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	AbsolutizeURLs(doc.Selection, "https://elonlit.com/scrivings/a-theory-of-deep-learning/")
+
+	gotSrc := func(alt string) string {
+		s, _ := doc.Find(`img[alt="` + alt + `"]`).First().Attr("src")
+		return s
+	}
+	gotHref := func(text string) string {
+		h, _ := doc.Find("a").FilterFunction(func(_ int, sel *goquery.Selection) bool {
+			return strings.TrimSpace(sel.Text()) == text
+		}).First().Attr("href")
+		return h
+	}
+	cases := []struct {
+		name, got, want string
+	}{
+		{"root-relative img", gotSrc("root"), "https://elonlit.com/images/flowers.png"},
+		{"path-relative img", gotSrc("rel"), "https://elonlit.com/scrivings/a-theory-of-deep-learning/figures/plot.png"},
+		{"absolute img unchanged", gotSrc("abs"), "https://cdn.example.com/cat.png"},
+		{"protocol-relative img", gotSrc("proto"), "https://cdn.example.com/dog.png"},
+		{"root-relative anchor", gotHref("about"), "https://elonlit.com/about"},
+		{"absolute anchor unchanged", gotHref("other"), "https://other.com/x"},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s\n  got:  %q\n  want: %q", c.name, c.got, c.want)
+		}
+	}
+}
+
+// Source page (e.g. elonlit.com) defers MathJax rendering — math sits in the
+// HTML as raw text inside class="math" containers. Without the raw-text path,
+// html-to-markdown escapes every backslash and breaks the LaTeX.
+func TestExtractTexAnnotations_RawTextMathDivDisplay(t *testing.T) {
+	html := `<div><p>Definition:</p><div class="math">$$K_{SS}(w) = J_S(w) J_S(w)^\top$$</div><p>more</p></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	want := `$$K_{SS}(w) = J_S(w) J_S(w)^\top$$`
+	if !strings.Contains(got, want) {
+		t.Errorf("expected display math\n  want substring: %q\n  got: %q", want, got)
+	}
+	if strings.Contains(got, `\\top`) || strings.Contains(got, `\_{`) {
+		t.Errorf("LaTeX must not be markdown-escaped, got: %q", got)
+	}
+}
+
+func TestExtractTexAnnotations_RawTextMathSpanInline(t *testing.T) {
+	html := `<div><p>Decompose <span class="math">\(g\)</span> along eigenvectors <span class="math">\(v_i\)</span> of <span class="math">\(K_{SS}\)</span>.</p></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	want := `Decompose $g$ along eigenvectors $v_i$ of $K_{SS}$.`
+	if got != want {
+		t.Errorf("ExtractMarkdown\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestExtractTexAnnotations_RawTextMathBracketDisplay(t *testing.T) {
+	html := `<div><p>Then:</p><div class="math">\[\partial_t u = -K_{SS} g\]</div></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	want := `$$\partial_t u = -K_{SS} g$$`
+	if !strings.Contains(got, want) {
+		t.Errorf("expected display math\n  want substring: %q\n  got: %q", want, got)
+	}
+}
+
+// Containers whose body isn't a single math expression should pass through
+// untouched (no false positives on stray words containing "math").
+func TestExtractTexAnnotations_NonMathClassMathPassthrough(t *testing.T) {
+	html := `<div><p>This <span class="math">discussion</span> is not math.</p></div>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := ExtractMarkdown(doc.Selection)
+	want := `This discussion is not math.`
+	if got != want {
+		t.Errorf("ExtractMarkdown\n  got:  %q\n  want: %q", got, want)
+	}
+}
