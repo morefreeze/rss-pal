@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,13 @@ var DefaultRetention = RetentionPolicy{
 // removed. The most-recent backup overall is always preserved, regardless of
 // age, so a long-idle deployment never loses its last known state.
 func Prune(dir string, now time.Time, policy RetentionPolicy) ([]string, error) {
+	// First: sweep any orphan saved-archive files (no matching metadata).
+	// They can result from a crash between WriteSavedFile and WriteFile, or
+	// from a half-finished prune.
+	if err := sweepOrphanSavedFiles(dir); err != nil {
+		return nil, err
+	}
+
 	files, err := List(dir)
 	if err != nil {
 		return nil, err
@@ -40,20 +48,17 @@ func Prune(dir string, now time.Time, policy RetentionPolicy) ([]string, error) 
 		return nil, nil
 	}
 
-	// Sort newest-first so the first entry in each bucket is the one we keep.
 	sort.Slice(files, func(i, j int) bool { return files[i].CreatedAt.After(files[j].CreatedAt) })
 
-	keep := map[string]bool{files[0].Name: true} // always keep newest
+	keep := map[string]bool{files[0].Name: true}
 	seenBucket := map[string]bool{}
 
 	for _, f := range files {
 		age := now.Sub(f.CreatedAt)
 		switch {
 		case age < policy.KeepAllWithin:
-			// Recent tier: keep every backup.
 			keep[f.Name] = true
 		case age < policy.WeeklyUntil:
-			// Weekly tier: bucket by ISO year-week.
 			y, w := f.CreatedAt.ISOWeek()
 			key := fmt.Sprintf("w-%04d-%02d", y, w)
 			if !seenBucket[key] {
@@ -61,7 +66,6 @@ func Prune(dir string, now time.Time, policy RetentionPolicy) ([]string, error) 
 				keep[f.Name] = true
 			}
 		default:
-			// Monthly tier: bucket by calendar year-month.
 			key := fmt.Sprintf("m-%04d-%02d", f.CreatedAt.Year(), int(f.CreatedAt.Month()))
 			if !seenBucket[key] {
 				seenBucket[key] = true
@@ -75,10 +79,54 @@ func Prune(dir string, now time.Time, policy RetentionPolicy) ([]string, error) 
 		if keep[f.Name] {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, f.Name)); err != nil {
+		metaPath := filepath.Join(dir, f.Name)
+		if err := os.Remove(metaPath); err != nil {
 			return removed, fmt.Errorf("remove %s: %w", f.Name, err)
 		}
 		removed = append(removed, f.Name)
+		// Best-effort sibling delete. Missing sibling (legacy backup) is fine.
+		savedPath := savedSiblingPath(metaPath)
+		if err := os.Remove(savedPath); err != nil && !os.IsNotExist(err) {
+			return removed, fmt.Errorf("remove sibling %s: %w", filepath.Base(savedPath), err)
+		}
 	}
 	return removed, nil
+}
+
+// sweepOrphanSavedFiles deletes any *.saved.json.gz whose paired metadata
+// file is absent. Called at the top of Prune.
+func sweepOrphanSavedFiles(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	hasMeta := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if _, ok := parseFilename(e.Name()); ok {
+			hasMeta[e.Name()] = true
+		}
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, savedFileSuffix) {
+			continue
+		}
+		metaName := strings.TrimSuffix(name, savedFileSuffix) + fileNameSuffix
+		if hasMeta[metaName] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("sweep orphan %s: %w", name, err)
+		}
+	}
+	return nil
 }
