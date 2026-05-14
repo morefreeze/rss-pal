@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -47,6 +46,7 @@ func countMarkdownImages(s string) int {
 // Pure function so it can be unit-tested without a DB. Triggers a prompt on:
 //   - length regression: new content is below 1.5x the old length, or
 //   - image regression: new content has strictly fewer markdown images.
+//
 // force=true bypasses everything (used after the user explicitly chose
 // to overwrite).
 func shouldPromptDuplicate(newLen, oldLen, newImages, oldImages int, force bool) bool {
@@ -268,8 +268,7 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
 	rss.StripAvatars(doc)
 	rss.PromoteLazyImages(doc)
-
-	resolveURLs(doc, baseURL)
+	rss.ResolveURLs(doc, baseURL)
 
 	var content string
 	candidates := []string{
@@ -311,36 +310,6 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 		content = content[:50000] + "..."
 	}
 	return strings.TrimSpace(content), nil
-}
-
-// resolveURLs rewrites relative img[src] and a[href] attributes to absolute
-// URLs against baseURL. Bookmarklet captures send the source page's
-// outerHTML, which often contains site-relative ("/foo.jpg"),
-// protocol-relative ("//cdn/foo.jpg"), or path-relative ("foo.jpg") URLs —
-// these would otherwise render as broken links once the article is viewed
-// on the RSS Pal host. data: URIs are preserved as-is.
-func resolveURLs(doc *goquery.Document, baseURL string) {
-	base, err := url.Parse(baseURL)
-	if err != nil || !base.IsAbs() {
-		return
-	}
-	rewrite := func(s *goquery.Selection, attr string) {
-		raw, ok := s.Attr(attr)
-		if !ok {
-			return
-		}
-		raw = strings.TrimSpace(raw)
-		if raw == "" || strings.HasPrefix(raw, "data:") {
-			return
-		}
-		ref, err := url.Parse(raw)
-		if err != nil {
-			return
-		}
-		s.SetAttr(attr, base.ResolveReference(ref).String())
-	}
-	doc.Find("img[src]").Each(func(_ int, s *goquery.Selection) { rewrite(s, "src") })
-	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) { rewrite(s, "href") })
 }
 
 // GenerateBookmarkletToken returns a 32-byte random hex string suitable for

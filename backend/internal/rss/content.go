@@ -143,7 +143,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
 	StripAvatars(doc)
 	PromoteLazyImages(doc)
-	AbsolutizeURLs(doc.Selection, url)
+	ResolveURLs(doc, url)
 
 	// Try to find main content
 	var content string
@@ -170,7 +170,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 		"[class*=post-detail]",
 		"[id*=article-body]",
 		"[id*=articleBody]",
-		"[id*=js_content]",   // WeChat articles
+		"[id*=js_content]", // WeChat articles
 		".content",
 		".post",
 		"#content",
@@ -503,6 +503,35 @@ func promoteOneImg(s *goquery.Selection) {
 			}
 		}
 	}
+}
+
+// ResolveURLs rewrites relative img[src] and a[href] attributes to absolute
+// URLs against baseURL. Without this, a site-relative ("/foo.jpg"),
+// protocol-relative ("//cdn/foo.jpg"), or path-relative ("foo.jpg") path
+// stored in article content reaches the image proxy bare and gets rejected
+// for missing http/https scheme. data: URIs are preserved as-is.
+func ResolveURLs(doc *goquery.Document, baseURL string) {
+	base, err := url.Parse(baseURL)
+	if err != nil || !base.IsAbs() {
+		return
+	}
+	rewrite := func(s *goquery.Selection, attr string) {
+		raw, ok := s.Attr(attr)
+		if !ok {
+			return
+		}
+		raw = strings.TrimSpace(raw)
+		if raw == "" || strings.HasPrefix(raw, "data:") {
+			return
+		}
+		ref, err := url.Parse(raw)
+		if err != nil {
+			return
+		}
+		s.SetAttr(attr, base.ResolveReference(ref).String())
+	}
+	doc.Find("img[src]").Each(func(_ int, s *goquery.Selection) { rewrite(s, "src") })
+	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) { rewrite(s, "href") })
 }
 
 func srcNeedsPromotion(src string) bool {

@@ -246,6 +246,82 @@ func TestPromoteLazyImages_Srcset(t *testing.T) {
 	}
 }
 
+func TestResolveURLs(t *testing.T) {
+	cases := []struct {
+		name     string
+		baseURL  string
+		html     string
+		wantImg  string
+		wantHref string
+	}{
+		{
+			name:     "site-relative img resolved (the article-562 case)",
+			baseURL:  "https://lawsofsoftwareengineering.com",
+			html:     `<a href="/book/"><img src="/images/front-cover.png"></a>`,
+			wantImg:  "https://lawsofsoftwareengineering.com/images/front-cover.png",
+			wantHref: "https://lawsofsoftwareengineering.com/book/",
+		},
+		{
+			name:     "protocol-relative img resolved",
+			baseURL:  "https://example.com/post/1",
+			html:     `<a href="//other.com/page"><img src="//cdn.example.com/x.png"></a>`,
+			wantImg:  "https://cdn.example.com/x.png",
+			wantHref: "https://other.com/page",
+		},
+		{
+			name:     "absolute img untouched",
+			baseURL:  "https://example.com/post/1",
+			html:     `<a href="https://example.com/abs"><img src="https://cdn.example.com/abs.png"></a>`,
+			wantImg:  "https://cdn.example.com/abs.png",
+			wantHref: "https://example.com/abs",
+		},
+		{
+			name:     "data uri preserved",
+			baseURL:  "https://example.com/post/1",
+			html:     `<a href="/x"><img src="data:image/png;base64,abc"></a>`,
+			wantImg:  "data:image/png;base64,abc",
+			wantHref: "https://example.com/x",
+		},
+		{
+			name:     "path-relative img resolved",
+			baseURL:  "https://example.com/post/1",
+			html:     `<a href="next"><img src="cat.jpg"></a>`,
+			wantImg:  "https://example.com/post/cat.jpg",
+			wantHref: "https://example.com/post/next",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader("<html><body>" + tc.html + "</body></html>"))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			ResolveURLs(doc, tc.baseURL)
+			if got := doc.Find("img").AttrOr("src", ""); got != tc.wantImg {
+				t.Errorf("img src = %q, want %q", got, tc.wantImg)
+			}
+			if got := doc.Find("a").AttrOr("href", ""); got != tc.wantHref {
+				t.Errorf("a href = %q, want %q", got, tc.wantHref)
+			}
+		})
+	}
+}
+
+func TestResolveURLs_NoopOnBadBase(t *testing.T) {
+	html := `<img src="/foo.png"><a href="/bar">x</a>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader("<html><body>" + html + "</body></html>"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	ResolveURLs(doc, "not-a-url")
+	if got := doc.Find("img").AttrOr("src", ""); got != "/foo.png" {
+		t.Errorf("bad base should leave src untouched, got %q", got)
+	}
+	if got := doc.Find("a").AttrOr("href", ""); got != "/bar" {
+		t.Errorf("bad base should leave href untouched, got %q", got)
+	}
+}
+
 func TestFetchContentFromReader_PromotesLazyImage(t *testing.T) {
 	// Mimics WeChat: img has data-src but no real src.
 	html := `<html><body><article>
