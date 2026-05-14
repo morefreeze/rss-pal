@@ -516,16 +516,6 @@ export default function ArticleListPage() {
               📚 分组
             </button>
           )}
-          {!isClippingMode && !searchQuery && !grouped && (
-            <button
-              className="btn-ghost"
-              onClick={() => loadArticles(0, true)}
-              disabled={loading}
-              title="刷新文章列表"
-            >
-              ↻
-            </button>
-          )}
           {!isClippingMode && !searchQuery && articles.length > 0 && (
             <button
               className="btn-ghost"
