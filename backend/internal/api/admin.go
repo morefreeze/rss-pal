@@ -88,7 +88,14 @@ func (h *AdminHandler) RestoreBackup(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	stats, err := backup.Restore(c.Request.Context(), h.db, s)
+	// Sibling may be absent (legacy backup pre-saved-snapshot) — LoadSaved
+	// returns (nil, nil) in that case and Restore handles it.
+	ss, err := backup.LoadSaved(path)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "load saved sibling: " + err.Error()})
+		return
+	}
+	stats, err := backup.Restore(c.Request.Context(), h.db, s, ss)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

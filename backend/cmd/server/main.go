@@ -63,7 +63,7 @@ func main() {
 	insightsHandler := api.NewInsightsHandler(prefRepo, articleRepo, templateRepo, userInsightsRepo, summarizer, cfg)
 	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
-	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo)
+	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).WithBackupRunner(backupRunner)
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
 	eventHandler := api.NewEventHandler(eventRepo)
 	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
