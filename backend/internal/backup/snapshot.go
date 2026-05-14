@@ -60,41 +60,46 @@ type FileInfo struct {
 	Size      int64     `json:"size"`
 }
 
-// Build snapshots all backup-eligible tables. It uses a single transaction so
-// the snapshot is a consistent point-in-time view even if writes are
-// concurrent.
-func Build(ctx context.Context, db *sql.DB) (*Snapshot, error) {
+// Build snapshots both files in one read-only transaction so they are a
+// consistent point-in-time view of the DB. The two returned snapshots share
+// the same CreatedAt.
+func Build(ctx context.Context, db *sql.DB) (*Snapshot, *SavedSnapshot, error) {
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
+		return nil, nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
+	createdAt := time.Now().UTC()
 	s := &Snapshot{
 		Version:   SnapshotVersion,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: createdAt,
 	}
 
 	if s.Feeds, err = loadFeeds(ctx, tx); err != nil {
-		return nil, fmt.Errorf("load feeds: %w", err)
+		return nil, nil, fmt.Errorf("load feeds: %w", err)
 	}
 	if s.InterestCategories, err = loadInterestCategories(ctx, tx); err != nil {
-		return nil, fmt.Errorf("load interest_categories: %w", err)
+		return nil, nil, fmt.Errorf("load interest_categories: %w", err)
 	}
 	if s.InterestTopics, err = loadInterestTopics(ctx, tx); err != nil {
-		return nil, fmt.Errorf("load interest_topics: %w", err)
+		return nil, nil, fmt.Errorf("load interest_topics: %w", err)
 	}
 	if s.UserTags, err = loadUserTags(ctx, tx); err != nil {
-		return nil, fmt.Errorf("load user_tags: %w", err)
+		return nil, nil, fmt.Errorf("load user_tags: %w", err)
 	}
 	if s.ArticleUserTags, err = loadArticleUserTags(ctx, tx); err != nil {
-		return nil, fmt.Errorf("load article_user_tags: %w", err)
+		return nil, nil, fmt.Errorf("load article_user_tags: %w", err)
 	}
 	if s.UserPreferences, err = loadUserPreferences(ctx, tx); err != nil {
-		return nil, fmt.Errorf("load user_preferences: %w", err)
+		return nil, nil, fmt.Errorf("load user_preferences: %w", err)
 	}
 
-	return s, nil
+	ss, err := buildSaved(ctx, tx, createdAt)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build saved: %w", err)
+	}
+	return s, ss, nil
 }
 
 func loadFeeds(ctx context.Context, tx *sql.Tx) ([]model.Feed, error) {
@@ -248,6 +253,31 @@ func WriteFile(s *Snapshot, dir string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// WriteFiles writes the metadata snapshot (①) and the saved-archive sibling
+// (②) for one timestamp. Order is sibling-first so that ① — the file
+// List() enumerates — is the commit pointer: if we crash between writes,
+// an orphan ② is invisible to List and gets swept by the next Prune.
+//
+// Returns the absolute metadata path and the saved sibling path.
+func WriteFiles(s *Snapshot, ss *SavedSnapshot, dir string) (metadataPath, savedPath string, err error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", "", fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	name := fileNamePrefix + s.CreatedAt.UTC().Format(fileTimeLayout) + fileNameSuffix
+	metadataPath = filepath.Join(dir, name)
+	savedPath = savedSiblingPath(metadataPath)
+
+	if err := WriteSavedFile(ss, metadataPath); err != nil {
+		return "", "", fmt.Errorf("write saved sibling: %w", err)
+	}
+
+	if _, err := WriteFile(s, dir); err != nil {
+		os.Remove(savedPath)
+		return "", "", fmt.Errorf("write metadata: %w", err)
+	}
+	return metadataPath, savedPath, nil
 }
 
 // Load reads and parses a snapshot file from disk.

@@ -2,11 +2,15 @@ package backup
 
 import (
 	"compress/gzip"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // SavedSnapshotVersion is bumped when the on-disk SavedSnapshot shape changes
@@ -141,4 +145,79 @@ func savedSiblingPath(metadataPath string) string {
 	}
 	// Fallback: append. Shouldn't happen if caller passed a real metadata path.
 	return metadataPath + savedFileSuffix
+}
+
+// buildSaved runs inside the same read-only transaction as Build. It returns
+// the SavedSnapshot for the current DB state; never returns nil for an empty
+// DB (returns an empty-slice snapshot instead so the file always exists in a
+// recognizable form).
+func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSnapshot, error) {
+	ss := &SavedSnapshot{
+		Version:   SavedSnapshotVersion,
+		CreatedAt: createdAt,
+	}
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT a.id, f.url, COALESCE(a.title, ''), a.url, COALESCE(a.content, ''),
+		       a.published_at,
+		       COALESCE(a.summary_brief, ''), COALESCE(a.summary_detailed, ''),
+		       a.fetched_at, a.word_count, a.reading_minutes, a.is_read,
+		       COALESCE(a.editor_note, ''),
+		       COALESCE(a.media_url, ''), COALESCE(a.media_type, ''), COALESCE(a.media_duration_seconds, 0)
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		WHERE a.parent_article_id IS NULL
+		  AND (
+		    EXISTS (
+		      SELECT 1 FROM user_preferences p
+		      WHERE p.article_id = a.id AND p.signal_type = 'save'
+		    )
+		    OR f.feed_type = 'saved'
+		  )
+		ORDER BY a.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var savedIDs []int
+	for rows.Next() {
+		var r SavedArticleRow
+		if err := rows.Scan(&r.ExportID, &r.FeedURL, &r.Title, &r.URL, &r.Content,
+			&r.PublishedAt,
+			&r.SummaryBrief, &r.SummaryDetailed,
+			&r.FetchedAt, &r.WordCount, &r.ReadingMinutes, &r.IsRead,
+			&r.EditorNote,
+			&r.MediaURL, &r.MediaType, &r.MediaDurationSeconds); err != nil {
+			return nil, err
+		}
+		ss.SavedArticles = append(ss.SavedArticles, r)
+		savedIDs = append(savedIDs, r.ExportID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(savedIDs) == 0 {
+		return ss, nil
+	}
+
+	progRows, err := tx.QueryContext(ctx, `
+		SELECT user_id, article_id, scroll_position, last_read_at, is_completed
+		FROM reading_progress
+		WHERE article_id = ANY($1)
+		ORDER BY user_id, article_id`, pq.Array(savedIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer progRows.Close()
+
+	for progRows.Next() {
+		var p ReadingProgressRow
+		if err := progRows.Scan(&p.UserID, &p.ArticleExportID, &p.ScrollPosition, &p.LastReadAt, &p.IsCompleted); err != nil {
+			return nil, err
+		}
+		ss.ReadingProgress = append(ss.ReadingProgress, p)
+	}
+	return ss, progRows.Err()
 }
