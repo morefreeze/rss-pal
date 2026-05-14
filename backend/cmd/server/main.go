@@ -152,6 +152,7 @@ func main() {
 		apiGroup.POST("/articles/:id/expand", articleHandler.ExpandChild)
 		apiGroup.GET("/articles/:id/candidates", articleHandler.GetCandidates)
 		apiGroup.POST("/articles/:id/batch_fetch", articleHandler.BatchFetch)
+		apiGroup.POST("/articles/:id/confirm_link_set", articleHandler.ConfirmLinkSetSuggestion)
 
 		// Saved articles (filtered by tags / source / untagged)
 		apiGroup.GET("/saved", savedHandler.List)

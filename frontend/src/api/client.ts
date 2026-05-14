@@ -115,6 +115,7 @@ export interface Article {
   // link_set fields
   is_link_set?: boolean
   links_extendable?: boolean | null  // tri-state: null = unchecked, true/false = checked
+  link_set_suggested?: boolean | null  // worker thinks article is a link list, awaiting user confirmation
   parent_article_id?: number | null
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
   prerank_score?: number | null
@@ -139,6 +140,10 @@ export async function batchFetchCandidates(
 ): Promise<{ inserted: number }> {
   const { data } = await api.post(`/articles/${articleId}/batch_fetch`, { candidates })
   return data
+}
+
+export async function confirmLinkSetSuggestion(articleId: number): Promise<void> {
+  await api.post(`/articles/${articleId}/confirm_link_set`)
 }
 
 export interface ReadingProgress {

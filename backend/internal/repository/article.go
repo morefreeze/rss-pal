@@ -198,14 +198,14 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.parent_article_id, a.processing_state, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, a.prerank_score, a.editor_note
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
 	var a model.Article
 	var content, summaryBrief, summaryDetailed, feedTitle, feedType, mediaURL, mediaType sql.NullString
 	var mediaDuration sql.NullInt64
-	var linksExtendable sql.NullBool
+	var linksExtendable, linkSetSuggested sql.NullBool
 	var parentArticleID sql.NullInt64
 	var processingState, editorNote sql.NullString
 	var prerankScore sql.NullFloat64
@@ -214,7 +214,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 		&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
 		&mediaURL, &mediaType, &mediaDuration,
 		&feedTitle, &feedType,
-		&linksExtendable, &parentArticleID, &processingState, &prerankScore, &editorNote,
+		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &prerankScore, &editorNote,
 	)
 	if err != nil {
 		return nil, "", err
@@ -226,6 +226,10 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	if linksExtendable.Valid {
 		v := linksExtendable.Bool
 		a.LinksExtendable = &v
+	}
+	if linkSetSuggested.Valid {
+		v := linkSetSuggested.Bool
+		a.LinkSetSuggested = &v
 	}
 	if parentArticleID.Valid {
 		v := int(parentArticleID.Int64)
@@ -1306,5 +1310,46 @@ func (r *ArticleRepository) FindArticlesNeedingLinkCheck(limit int) ([]model.Art
 // SetLinksExtendable atomically writes the boolean flag.
 func (r *ArticleRepository) SetLinksExtendable(id int, val bool) error {
 	_, err := r.db.Exec(`UPDATE articles SET links_extendable = $1 WHERE id = $2`, val, id)
+	return err
+}
+
+// FindArticlesNeedingSuggestionCheck returns rss-typed articles that have
+// not yet been checked by the link-set suggestion detector. Excludes
+// articles already promoted to link_set (links_extendable IS NOT NULL).
+func (r *ArticleRepository) FindArticlesNeedingSuggestionCheck(limit int) ([]model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
+		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
+		       a.links_extendable, a.parent_article_id, a.processing_state,
+		       a.prerank_score, a.editor_note
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		WHERE a.link_set_suggested IS NULL
+		  AND a.links_extendable IS NULL
+		  AND a.parent_article_id IS NULL
+		  AND f.feed_type = 'rss'
+		ORDER BY a.fetched_at DESC
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+// SetLinkSetSuggested writes the boolean flag set by the rss-side detector.
+// true = worker thinks this article is a link list; false = checked and not.
+func (r *ArticleRepository) SetLinkSetSuggested(id int, val bool) error {
+	_, err := r.db.Exec(`UPDATE articles SET link_set_suggested = $1 WHERE id = $2`, val, id)
+	return err
+}
+
+// ConfirmLinkSetSuggestion promotes an article from "suggested" to a real
+// link_set: links_extendable=true so the batch-fetch button appears.
+func (r *ArticleRepository) ConfirmLinkSetSuggestion(id int) error {
+	_, err := r.db.Exec(`UPDATE articles SET links_extendable = true WHERE id = $1`, id)
 	return err
 }
