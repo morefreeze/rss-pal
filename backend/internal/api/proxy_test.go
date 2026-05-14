@@ -124,6 +124,52 @@ func TestProxyImage_StreamsAndInjectsReferer(t *testing.T) {
 	}
 }
 
+// TestProxyImage_OverridesUpstreamCacheControl pins the no-passthrough policy:
+// upstream's anti-caching headers must not leak through, or mobile browsers
+// re-fetch every image on scroll once they evict the decoded copy from memory.
+func TestProxyImage_OverridesUpstreamCacheControl(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cases := []struct {
+		name           string
+		upstreamHeader string
+	}{
+		{"upstream no-store", "no-store"},
+		{"upstream no-cache", "no-cache"},
+		{"upstream private", "private, max-age=0"},
+		{"upstream must-revalidate", "max-age=0, must-revalidate"},
+		{"upstream no header", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.upstreamHeader != "" {
+					w.Header().Set("Cache-Control", tc.upstreamHeader)
+				}
+				w.Header().Set("Content-Type", "image/png")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nx"))
+			}))
+			defer origin.Close()
+
+			proxy := newTestProxy(allowLoopbackValidator)
+			r := gin.New()
+			r.GET("/api/proxy/image", proxy.Handle)
+			req := httptest.NewRequest(http.MethodGet, "/api/proxy/image?url="+origin.URL+"/x.png", nil)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			got := rec.Header().Get("Cache-Control")
+			want := "public, max-age=604800, immutable"
+			if got != want {
+				t.Errorf("Cache-Control = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestProxyImage_RejectsNonImageContentType(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
