@@ -154,18 +154,18 @@ LEFT JOIN user_preferences up_save ON articles.id = up_save.article_id AND up_sa
 
 func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.parent_article_id, a.processing_state, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, a.prerank_score, a.editor_note
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
 	var a model.Article
 	var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
 	var mediaDuration sql.NullInt64
-	var linksExtendable sql.NullBool
+	var linksExtendable, linkSetSuggested sql.NullBool
 	var parentArticleID sql.NullInt64
 	var processingState, editorNote sql.NullString
 	var prerankScore sql.NullFloat64
-	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &linksExtendable, &parentArticleID, &processingState, &prerankScore, &editorNote)
+	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &prerankScore, &editorNote)
 	if err != nil {
 		return nil, err
 	}
@@ -176,6 +176,10 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	if linksExtendable.Valid {
 		v := linksExtendable.Bool
 		a.LinksExtendable = &v
+	}
+	if linkSetSuggested.Valid {
+		v := linkSetSuggested.Bool
+		a.LinkSetSuggested = &v
 	}
 	if parentArticleID.Valid {
 		v := int(parentArticleID.Int64)
