@@ -87,6 +87,28 @@ func TestWriteSavedFileAtomic(t *testing.T) {
 	}
 }
 
+func TestLoadSavedRejectsFutureVersion(t *testing.T) {
+	dir := t.TempDir()
+	metaPath := filepath.Join(dir, "rss-pal-backup-20260514-093015.json")
+
+	// Write a saved sibling whose Version is one beyond what this build supports.
+	ss := &SavedSnapshot{
+		Version:   SavedSnapshotVersion + 1,
+		CreatedAt: time.Date(2026, 5, 14, 9, 30, 15, 0, time.UTC),
+	}
+	if err := WriteSavedFile(ss, metaPath); err != nil {
+		t.Fatalf("WriteSavedFile: %v", err)
+	}
+
+	got, err := LoadSaved(metaPath)
+	if err == nil {
+		t.Fatalf("LoadSaved on future version: expected error, got snapshot %+v", got)
+	}
+	if got != nil {
+		t.Errorf("LoadSaved on future version: want nil snapshot, got %+v", got)
+	}
+}
+
 func TestSavedSiblingPath(t *testing.T) {
 	cases := []struct {
 		metadata, want string
