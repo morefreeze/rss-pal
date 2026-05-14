@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
@@ -66,6 +67,7 @@ type BookmarkletHandler struct {
 	userRepo    *repository.UserRepository
 	feedRepo    *repository.FeedRepository
 	articleRepo *repository.ArticleRepository
+	backup      *backup.Runner // nil when backup is disabled
 }
 
 func NewBookmarkletHandler(
@@ -78,6 +80,13 @@ func NewBookmarkletHandler(
 		feedRepo:    feedRepo,
 		articleRepo: articleRepo,
 	}
+}
+
+// WithBackupRunner wires a backup runner so successful captures trigger a
+// debounced snapshot. Pass nil to disable.
+func (h *BookmarkletHandler) WithBackupRunner(r *backup.Runner) *BookmarkletHandler {
+	h.backup = r
+	return h
 }
 
 // Capture is the POST /api/bookmarklet/capture handler. It does its own
@@ -192,6 +201,9 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 			log.Printf("bookmarklet: clear summary failed for article=%d: %v", existing.ID, err)
 		}
 		log.Printf("bookmarklet: updated article=%d user=%d url=%s len=%d (force=%v)", existing.ID, user.ID, normalized, newLen, req.Force)
+		if h.backup != nil {
+			h.backup.TriggerAsync()
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":     "updated",
 			"article_id": existing.ID,
@@ -221,6 +233,9 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		return
 	}
 	log.Printf("bookmarklet: created article=%d user=%d url=%s len=%d", article.ID, user.ID, normalized, len(content))
+	if h.backup != nil {
+		h.backup.TriggerAsync()
+	}
 	c.JSON(http.StatusCreated, gin.H{
 		"status":     "created",
 		"article_id": article.ID,
