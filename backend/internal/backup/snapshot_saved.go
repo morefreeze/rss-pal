@@ -112,7 +112,7 @@ func LoadSaved(metadataPath string) (*SavedSnapshot, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("open %s: %w", savedPath, err)
 	}
 	defer f.Close()
 
