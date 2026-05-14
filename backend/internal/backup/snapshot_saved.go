@@ -1,6 +1,10 @@
 package backup
 
 import (
+	"compress/gzip"
+	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -58,6 +62,75 @@ type SavedSnapshot struct {
 	CreatedAt       time.Time            `json:"created_at"`
 	SavedArticles   []SavedArticleRow    `json:"saved_articles"`
 	ReadingProgress []ReadingProgressRow `json:"reading_progress"`
+}
+
+// WriteSavedFile serializes ss as gzipped JSON to the sibling path derived
+// from metadataPath. Atomic via tmp + rename.
+func WriteSavedFile(ss *SavedSnapshot, metadataPath string) error {
+	savedPath := savedSiblingPath(metadataPath)
+	tmp := savedPath + ".tmp"
+
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
+
+	gz := gzip.NewWriter(f)
+	enc := json.NewEncoder(gz)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(ss); err != nil {
+		gz.Close()
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("encode saved snapshot: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("flush gzip: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, savedPath); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename %s -> %s: %w", tmp, savedPath, err)
+	}
+	return nil
+}
+
+// LoadSaved reads the sibling saved-archive for metadataPath. Returns
+// (nil, nil) if the sibling doesn't exist (legacy backup, or saved write
+// didn't complete — either way, callers fall back to metadata-only restore).
+// Returns an error only for non-IsNotExist conditions (corrupted gzip,
+// malformed JSON, unsupported version).
+func LoadSaved(metadataPath string) (*SavedSnapshot, error) {
+	savedPath := savedSiblingPath(metadataPath)
+	f, err := os.Open(savedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("gunzip %s: %w", savedPath, err)
+	}
+	defer gz.Close()
+
+	var ss SavedSnapshot
+	if err := json.NewDecoder(gz).Decode(&ss); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", savedPath, err)
+	}
+	if ss.Version > SavedSnapshotVersion {
+		return nil, fmt.Errorf("saved snapshot %s has version %d, this build supports %d",
+			savedPath, ss.Version, SavedSnapshotVersion)
+	}
+	return &ss, nil
 }
 
 // savedSiblingPath returns the path of the saved-archive sibling file for a
