@@ -18,6 +18,10 @@ func TestSavedSiblingPath(t *testing.T) {
 			metadata: "/tmp/x/y/foo.json",
 			want:     "/tmp/x/y/foo.saved.json.gz",
 		},
+		{
+			metadata: "rss-pal-backup-20260514", // no .json suffix → fallback path
+			want:     "rss-pal-backup-20260514.saved.json.gz",
+		},
 	}
 	for _, c := range cases {
 		got := savedSiblingPath(c.metadata)
