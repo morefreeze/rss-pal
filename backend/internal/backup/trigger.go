@@ -56,23 +56,23 @@ func (r *Runner) RunNow(ctx context.Context) error {
 	r.inflight.Lock()
 	defer r.inflight.Unlock()
 
-	s, err := Build(ctx, r.db)
+	s, ss, err := Build(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	path, err := WriteFile(s, r.dir)
+	metaPath, _, err := WriteFiles(s, ss, r.dir)
 	if err != nil {
 		return err
 	}
 	removed, err := Prune(r.dir, time.Now(), DefaultRetention)
 	if err != nil {
-		log.Printf("backup: wrote %s but prune failed: %v", path, err)
+		log.Printf("backup: wrote %s but prune failed: %v", metaPath, err)
 		return nil
 	}
 	if len(removed) > 0 {
-		log.Printf("backup: wrote %s, pruned %d old files", path, len(removed))
+		log.Printf("backup: wrote %s (+saved sibling), pruned %d old files", metaPath, len(removed))
 	} else {
-		log.Printf("backup: wrote %s", path)
+		log.Printf("backup: wrote %s (+saved sibling)", metaPath)
 	}
 	return nil
 }

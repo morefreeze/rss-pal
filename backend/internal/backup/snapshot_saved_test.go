@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/bytedance/rss-pal/internal/model"
 )
 
 func TestWriteAndLoadSavedFile(t *testing.T) {
@@ -135,5 +137,59 @@ func TestSavedSiblingPath(t *testing.T) {
 		if got != c.want {
 			t.Errorf("savedSiblingPath(%q) = %q, want %q", c.metadata, got, c.want)
 		}
+	}
+}
+
+func TestWriteFilesWritesPair(t *testing.T) {
+	dir := t.TempDir()
+	owner := 7
+	created := time.Date(2026, 5, 14, 9, 30, 15, 0, time.UTC)
+
+	s := &Snapshot{
+		Version:   SnapshotVersion,
+		CreatedAt: created,
+		Feeds: []model.Feed{
+			{ID: 1, URL: "bookmarklet://user/7", Title: "⭐ 网摘", OwnerID: &owner, FeedType: "saved", Status: "active", IsActive: true},
+		},
+	}
+	ss := &SavedSnapshot{
+		Version:   SavedSnapshotVersion,
+		CreatedAt: created,
+		SavedArticles: []SavedArticleRow{{
+			ExportID:  1,
+			FeedURL:   "bookmarklet://user/7",
+			Title:     "x",
+			URL:       "https://example.com/a",
+			Content:   "body",
+			FetchedAt: created,
+		}},
+	}
+
+	metaPath, savedPath, err := WriteFiles(s, ss, dir)
+	if err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+
+	if _, err := os.Stat(metaPath); err != nil {
+		t.Errorf("metadata file missing: %v", err)
+	}
+	if _, err := os.Stat(savedPath); err != nil {
+		t.Errorf("saved file missing: %v", err)
+	}
+
+	loadedS, err := Load(metaPath)
+	if err != nil {
+		t.Fatalf("Load metadata: %v", err)
+	}
+	if len(loadedS.Feeds) != 1 || loadedS.Feeds[0].URL != "bookmarklet://user/7" {
+		t.Errorf("metadata feeds roundtrip mismatch: %+v", loadedS.Feeds)
+	}
+
+	loadedSS, err := LoadSaved(metaPath)
+	if err != nil {
+		t.Fatalf("LoadSaved: %v", err)
+	}
+	if loadedSS == nil || len(loadedSS.SavedArticles) != 1 || loadedSS.SavedArticles[0].URL != "https://example.com/a" {
+		t.Errorf("saved roundtrip mismatch: %+v", loadedSS)
 	}
 }
