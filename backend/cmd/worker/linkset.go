@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	maxLinkSetParentsPerCycle  = 10
-	maxLinkSetChildrenPerCycle = 30
-	linkSetMinCandidates       = 3
+	maxLinkSetParentsPerCycle     = 10
+	maxLinkSetChildrenPerCycle    = 30
+	maxSuggestionChecksPerCycle   = 10
+	linkSetMinCandidates          = 3
 )
 
 // detectLinkSetCandidates inspects articles whose links_extendable is NULL
@@ -76,6 +77,66 @@ func detectLinkSetCandidates(
 			continue
 		}
 		log.Printf("link_set: %d → %d candidates → extendable=%v", a.ID, len(cands), extendable)
+	}
+}
+
+// detectLinkSetSuggestions inspects rss-typed articles that haven't been
+// checked by the suggestion detector yet, fetches their HTML, and writes
+// link_set_suggested = true when the article looks like a link list (>=11
+// candidate links forming a one-per-line sibling run with <=2 gap segments).
+// false otherwise so we don't keep re-checking. Caches the qualifying
+// candidates so the batch-fetch modal opens instantly after the user
+// confirms.
+func detectLinkSetSuggestions(
+	ctx context.Context,
+	articleRepo *repository.ArticleRepository,
+	contentFetcher *rss.ContentFetcher,
+) {
+	arts, err := articleRepo.FindArticlesNeedingSuggestionCheck(maxSuggestionChecksPerCycle)
+	if err != nil {
+		log.Printf("link_set suggest: find articles needing check: %v", err)
+		return
+	}
+	if len(arts) == 0 {
+		return
+	}
+	log.Printf("link_set suggest: checking %d rss articles", len(arts))
+
+	for _, a := range arts {
+		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		doc, err := contentFetcher.FetchHTMLDocument(fetchCtx, a.URL)
+		cancel()
+		if err != nil || doc == nil {
+			log.Printf("link_set suggest: %d fetch html: %v", a.ID, err)
+			if e := articleRepo.SetLinkSetSuggested(a.ID, false); e != nil {
+				log.Printf("link_set suggest: mark false on fetch fail %d: %v", a.ID, e)
+			}
+			continue
+		}
+		rawHTML, _ := doc.Html()
+		cands, qualifies := rss.DetectLinkSetSuggestion(rawHTML, a.URL)
+
+		if qualifies {
+			repoCands := make([]repository.LinkSetCandidate, 0, len(cands))
+			for i, c := range cands {
+				repoCands = append(repoCands, repository.LinkSetCandidate{
+					ParentArticleID: a.ID,
+					Title:           c.Title,
+					URL:             c.URL,
+					EditorNote:      c.EditorNote,
+					Position:        i,
+				})
+			}
+			if err := articleRepo.ReplaceLinkSetCandidates(a.ID, repoCands); err != nil {
+				log.Printf("link_set suggest: cache candidates for %d: %v", a.ID, err)
+			}
+		}
+
+		if err := articleRepo.SetLinkSetSuggested(a.ID, qualifies); err != nil {
+			log.Printf("link_set suggest: set suggested %d: %v", a.ID, err)
+			continue
+		}
+		log.Printf("link_set suggest: %d → %d candidates → suggested=%v", a.ID, len(cands), qualifies)
 	}
 }
 

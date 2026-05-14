@@ -5,6 +5,7 @@ import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
+  confirmLinkSetSuggestion,
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
@@ -965,6 +966,42 @@ export default function ArticlePage() {
           }}
         >
           📥 批量抓取
+        </button>
+      )}
+      {article.links_extendable !== true && article.link_set_suggested === true && (
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await confirmLinkSetSuggestion(article.id)
+              const data = await getArticle(article.id)
+              setArticle(data.article)
+              setLinkSetChildren(data.children ?? null)
+              setBatchModalOpen(true)
+            } catch (e) {
+              console.warn('confirm link_set failed', e)
+              toast.error('转换失败，请稍后重试')
+            }
+          }}
+          title="文章看起来是一组链接列表，确认后可批量抓取"
+          style={{
+            position: 'fixed',
+            right: 24,
+            bottom: 152,
+            padding: '10px 16px',
+            borderRadius: 24,
+            border: '1px solid var(--accent)',
+            background: 'var(--bg-elevated, #fff)',
+            color: 'var(--accent)',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            fontSize: 13,
+            fontWeight: 500,
+            zIndex: 1100,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          💡 转为 link_set
         </button>
       )}
       <BatchFetchModal
