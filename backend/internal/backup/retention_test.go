@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -228,5 +229,81 @@ func TestPruneIgnoresUnrelatedFiles(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 3 {
 		t.Errorf("expected unrelated files preserved, got %d entries", len(entries))
+	}
+}
+
+// makeFilesWithSaved drops one backup pair (metadata + saved sibling) per
+// timestamp into a fresh temp dir.
+func makeFilesWithSaved(t *testing.T, times []time.Time) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, ts := range times {
+		name := fileNamePrefix + ts.UTC().Format(fileTimeLayout) + fileNameSuffix
+		metaPath := filepath.Join(dir, name)
+		if err := os.WriteFile(metaPath, []byte("{}"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		savedPath := savedSiblingPath(metaPath)
+		if err := os.WriteFile(savedPath, []byte("dummy gz"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", savedPath, err)
+		}
+	}
+	return dir
+}
+
+func TestPruneDeletesSibling(t *testing.T) {
+	// Two timestamps in the same monthly bucket — prune should leave 1 pair.
+	now := time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
+	old := []time.Time{
+		time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC),
+	}
+	dir := makeFilesWithSaved(t, old)
+
+	if _, err := Prune(dir, now, DefaultRetention); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	entries, _ := os.ReadDir(dir)
+	jsonCount, gzCount := 0, 0
+	for _, e := range entries {
+		switch {
+		case strings.HasSuffix(e.Name(), ".saved.json.gz"):
+			gzCount++
+		case strings.HasSuffix(e.Name(), ".json"):
+			jsonCount++
+		}
+	}
+	if jsonCount != 1 || gzCount != 1 {
+		t.Errorf("expected 1 metadata + 1 sibling, got json=%d gz=%d", jsonCount, gzCount)
+	}
+}
+
+func TestPruneSweepsOrphanSaved(t *testing.T) {
+	// Orphan saved.json.gz with no matching metadata — Prune deletes it.
+	dir := t.TempDir()
+	orphan := filepath.Join(dir, "rss-pal-backup-20260101-000000.saved.json.gz")
+	if err := os.WriteFile(orphan, []byte("orphan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Prune(dir, time.Now(), DefaultRetention); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("expected orphan deleted, stat err = %v", err)
+	}
+}
+
+func TestPruneKeepsSiblingWhenMetadataKept(t *testing.T) {
+	// Single recent pair — neither file should be removed.
+	now := time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
+	dir := makeFilesWithSaved(t, []time.Time{now.Add(-1 * time.Hour)})
+
+	if _, err := Prune(dir, now, DefaultRetention); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		t.Errorf("expected pair preserved, got %d entries", len(entries))
 	}
 }
