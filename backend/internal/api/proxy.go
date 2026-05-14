@@ -173,11 +173,13 @@ func (p *ImageProxy) Handle(c *gin.Context) {
 	if et := resp.Header.Get("ETag"); et != "" {
 		c.Header("ETag", et)
 	}
-	if cc := resp.Header.Get("Cache-Control"); cc != "" {
-		c.Header("Cache-Control", cc)
-	} else {
-		c.Header("Cache-Control", "public, max-age=86400, immutable")
-	}
+	// Always emit cache-friendly headers regardless of upstream. The proxy
+	// URL is content-addressed by the upstream URL, so treating responses as
+	// immutable is safe. Passing upstream's no-cache/no-store/private through
+	// caused mobile browsers to re-fetch every image on scroll — Safari
+	// evicts decoded images from memory under pressure and follows whatever
+	// Cache-Control says when re-loading.
+	c.Header("Cache-Control", "public, max-age=604800, immutable")
 	c.Status(http.StatusOK)
 	_, _ = io.Copy(c.Writer, io.LimitReader(resp.Body, proxyMaxBytes))
 }
