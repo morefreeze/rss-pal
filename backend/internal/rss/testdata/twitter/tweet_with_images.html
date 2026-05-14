@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html><body>
+<main>
+  <article role="article" data-testid="tweet" tabindex="-1">
+    <div data-testid="User-Name">
+      <a role="link" href="/karpathy"><span>Andrej Karpathy</span></a>
+      <a role="link" href="/karpathy"><span>@karpathy</span></a>
+    </div>
+    <div data-testid="tweetText"><span>Two photos from today's experiment.</span></div>
+    <div data-testid="tweetPhoto">
+      <img src="https://pbs.twimg.com/media/AAA111.jpg?format=jpg&name=small" alt="photo 1" />
+    </div>
+    <div data-testid="tweetPhoto">
+      <img src="https://pbs.twimg.com/media/BBB222.jpg?format=jpg&name=medium" alt="photo 2" />
+    </div>
+    <!-- Profile image should NOT be picked up -->
+    <img src="https://pbs.twimg.com/profile_images/123/avatar.jpg" alt="avatar" />
+    <!-- Image inside a role=link (quote-tweet card) — also excluded -->
+    <div role="link">
+      <div data-testid="tweetPhoto">
+        <img src="https://pbs.twimg.com/media/CCC333.jpg?format=jpg&name=small" alt="quoted photo" />
+      </div>
+    </div>
+    <a href="/karpathy/status/2222222222222222222" role="link"><time datetime="2026-04-22T10:00:00.000Z">Apr 22</time></a>
+  </article>
+</main>
+</body></html>

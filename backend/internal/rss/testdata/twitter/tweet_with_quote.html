@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html><body>
+<main>
+  <article role="article" data-testid="tweet" tabindex="-1">
+    <div data-testid="User-Name">
+      <a role="link" href="/karpathy"><span>Andrej Karpathy</span></a>
+      <a role="link" href="/karpathy"><span>@karpathy</span></a>
+    </div>
+    <div data-testid="tweetText">
+      <span>+1 to this excellent thread.</span>
+    </div>
+    <!-- Quote-tweet card: <div role="link"> with inner User-Name, time, tweetText -->
+    <div role="link">
+      <a href="/someone_else/status/3333333333333333333">
+        <div data-testid="User-Name">
+          <a role="link" href="/someone_else"><span>Other Person</span></a>
+          <a role="link" href="/someone_else"><span>@someone_else</span></a>
+        </div>
+        <time datetime="2026-04-22T15:00:00.000Z">Apr 22</time>
+        <div data-testid="tweetText"><span>quoted tweet body — extracted as excerpt.</span></div>
+      </a>
+    </div>
+    <a href="/karpathy/status/2053872850101285137" role="link"><time datetime="2026-04-23T08:00:00.000Z">Apr 23</time></a>
+  </article>
+</main>
+</body></html>

@@ -26,6 +26,15 @@ func TestNormalizeURL(t *testing.T) {
 		{"strips ref and ref_src", "https://example.com/a?ref=foo&ref_src=bar&id=1", "https://example.com/a?id=1"},
 		{"strips msclkid yclid igshid", "https://example.com/a?msclkid=1&yclid=2&igshid=3", "https://example.com/a"},
 		{"strips _hsenc _hsmi mc_cid mc_eid", "https://example.com/a?_hsenc=1&_hsmi=2&mc_cid=3&mc_eid=4", "https://example.com/a"},
+		{"rewrites twitter.com host to x.com", "https://twitter.com/x/status/1", "https://x.com/x/status/1"},
+		{"rewrites mobile.twitter.com host to x.com", "https://mobile.twitter.com/x/status/1", "https://x.com/x/status/1"},
+		{"rewrites www.twitter.com host to x.com", "https://www.twitter.com/x/status/1", "https://x.com/x/status/1"},
+		{"rewrites www.x.com host to x.com", "https://www.x.com/x/status/1", "https://x.com/x/status/1"},
+		{"strips share-tracking query on x.com status path", "https://x.com/x/status/1?s=20", "https://x.com/x/status/1"},
+		{"strips multi-key share-tracking query", "https://x.com/x/status/1?t=abc&s=20", "https://x.com/x/status/1"},
+		{"keeps query on non-status x.com path", "https://x.com/search?q=go", "https://x.com/search?q=go"},
+		{"preserves handle casing on status path", "https://x.com/Karpathy/status/2053872850101285137", "https://x.com/Karpathy/status/2053872850101285137"},
+		{"twitter.com profile path keeps existing rules", "https://twitter.com/karpathy?ref_src=x", "https://x.com/karpathy"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

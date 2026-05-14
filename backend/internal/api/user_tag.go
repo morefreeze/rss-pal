@@ -234,3 +234,32 @@ func (h *UserTagHandler) RemoveArticleTag(c *gin.Context) {
 		c.Status(http.StatusOK)
 	}
 }
+
+// GetTagSidebar returns the user's tags + counts under the current
+// article-list filter. Mirrors the query params of GET /api/articles
+// minus the tag scoping itself.
+func (h *UserTagHandler) GetTagSidebar(c *gin.Context) {
+	userID := getUserID(c)
+
+	var feedID *int
+	if s := c.Query("feed_id"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "feed_id must be an integer"})
+			return
+		}
+		feedID = &n
+	}
+	filter := repository.ArticleFilter{
+		UserID:     userID,
+		FeedID:     feedID,
+		UnreadOnly: c.Query("unread") == "true",
+		SavedOnly:  c.Query("saved") == "true",
+	}
+	data, err := h.tagRepo.GetTagsForSidebar(filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, data)
+}
