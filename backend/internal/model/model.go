@@ -36,6 +36,7 @@ type Article struct {
 	ReadingMinutes       int        `json:"reading_minutes" db:"reading_minutes"`
 	IsRead               bool       `json:"is_read" db:"is_read"`
 	LinksExtendable      *bool      `json:"links_extendable,omitempty" db:"links_extendable"`
+	LinkSetSuggested     *bool      `json:"link_set_suggested,omitempty" db:"link_set_suggested"`
 	ParentArticleID      *int       `json:"parent_article_id,omitempty" db:"parent_article_id"`
 	ProcessingState      string     `json:"processing_state" db:"processing_state"`
 	PrerankScore         *float64   `json:"prerank_score,omitempty" db:"prerank_score"`
