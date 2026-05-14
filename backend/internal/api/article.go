@@ -596,3 +596,32 @@ func (h *ArticleHandler) BatchFetch(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"inserted": n})
 }
+
+// ConfirmLinkSetSuggestion is called when the user accepts the
+// "suggested link list" prompt on an rss-typed article. It flips
+// links_extendable=true so the standard batch-fetch flow takes over.
+func (h *ArticleHandler) ConfirmLinkSetSuggestion(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	article, err := h.articleRepo.GetByID(id, getUserID(c))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+	if article.LinksExtendable != nil && *article.LinksExtendable {
+		c.JSON(http.StatusOK, gin.H{"already_confirmed": true})
+		return
+	}
+	if article.LinkSetSuggested == nil || !*article.LinkSetSuggested {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no suggestion to confirm"})
+		return
+	}
+	if err := h.articleRepo.ConfirmLinkSetSuggestion(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"confirmed": true})
+}

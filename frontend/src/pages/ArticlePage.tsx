@@ -5,6 +5,7 @@ import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
+  confirmLinkSetSuggestion,
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
@@ -766,17 +767,11 @@ export default function ArticlePage() {
         </div>
       </div>
 
-      {/* Link-set stub/processing status banner */}
+      {/* Summary-stage banner — content-stage fetch is shown inline in the
+          原文内容 card below so the prompt sits where the body would be. */}
       {(() => {
         const state = article.processing_state
         const hasContent = !!article.content && article.content.length > 0
-        if (state === 'stub' || (state === 'processing' && !hasContent)) {
-          return (
-            <div className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>
-              正在抓取内容…
-            </div>
-          )
-        }
         if (state === 'processing' && hasContent) {
           return (
             <div className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>
@@ -881,6 +876,11 @@ export default function ArticlePage() {
       {(() => {
         const isVideo = article.media_type?.startsWith('video/')
         if (isVideo && !article.content) return null
+        const state = article.processing_state
+        const hasContent = !!article.content && article.content.length > 0
+        const workerFetching = state === 'stub' || (state === 'processing' && !hasContent)
+        const refetchDisabled = fetchingContent || workerFetching
+        const refetchTitle = workerFetching ? '正在抓取' : undefined
         return (
           <div className="card">
             <div className="flex-between mb-1">
@@ -890,7 +890,7 @@ export default function ArticlePage() {
                   🔁 通过书签重新抓取
                 </button>
               ) : (
-                <button onClick={handleFetchContent} disabled={fetchingContent}>
+                <button onClick={handleFetchContent} disabled={refetchDisabled} title={refetchTitle}>
                   {fetchingContent ? '获取中...' : '重新抓取'}
                 </button>
               ))}
@@ -899,6 +899,8 @@ export default function ArticlePage() {
               <div style={{ lineHeight: 1.8, fontSize: 15 }}>
                 <MarkdownArticle source={article.content} />
               </div>
+            ) : workerFetching ? (
+              <div className="text-muted">正在抓取...</div>
             ) : (
               <div className="text-muted">暂无内容，点击"重新抓取"从原文链接抓取</div>
             )}
@@ -965,6 +967,42 @@ export default function ArticlePage() {
           }}
         >
           📥 批量抓取
+        </button>
+      )}
+      {article.links_extendable !== true && article.link_set_suggested === true && (
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await confirmLinkSetSuggestion(article.id)
+              const data = await getArticle(article.id)
+              setArticle(data.article)
+              setLinkSetChildren(data.children ?? null)
+              setBatchModalOpen(true)
+            } catch (e) {
+              console.warn('confirm link_set failed', e)
+              toast.error('转换失败，请稍后重试')
+            }
+          }}
+          title="文章看起来是一组链接列表，确认后可批量抓取"
+          style={{
+            position: 'fixed',
+            right: 24,
+            bottom: 152,
+            padding: '10px 16px',
+            borderRadius: 24,
+            border: '1px solid var(--accent)',
+            background: 'var(--bg-elevated, #fff)',
+            color: 'var(--accent)',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            fontSize: 13,
+            fontWeight: 500,
+            zIndex: 1100,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          💡 转为 link_set
         </button>
       )}
       <BatchFetchModal

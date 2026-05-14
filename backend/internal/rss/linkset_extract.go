@@ -32,6 +32,18 @@ func ExtractCandidates(html, parentURL string) []Candidate {
 	if err != nil {
 		return nil
 	}
+	var out []Candidate
+	walkCandidates(doc, parentURL, func(c Candidate, _ *goquery.Selection) {
+		out = append(out, c)
+	})
+	return out
+}
+
+// walkCandidates applies the standard link-set filter to every <a> in doc and
+// invokes visit() for each kept candidate, passing the goquery selection so
+// callers can also inspect DOM position. Shared by ExtractCandidates and
+// DetectLinkSetSuggestion so the filter stays in one place.
+func walkCandidates(doc *goquery.Document, parentURL string, visit func(Candidate, *goquery.Selection)) {
 	parent, _ := url.Parse(parentURL)
 	parentHost := ""
 	parentDepth := 0
@@ -39,9 +51,7 @@ func ExtractCandidates(html, parentURL string) []Candidate {
 		parentHost = strings.ToLower(parent.Hostname())
 		parentDepth = linkSetPathDepth(parent.Path)
 	}
-
 	seen := make(map[string]struct{})
-	var out []Candidate
 
 	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
 		href, _ := s.Attr("href")
@@ -62,10 +72,6 @@ func ExtractCandidates(html, parentURL string) []Candidate {
 		}
 		host := strings.ToLower(u.Hostname())
 
-		// Exclude own-site links: same host (or subdomain) with a shallower path
-		// depth than the parent. This lets multi-tenant platforms (e.g. github.com)
-		// pass through links to other users while still rejecting nav/footer links
-		// on dedicated newsletter/blog domains.
 		if parentHost != "" && (host == parentHost || strings.HasSuffix(host, "."+parentHost)) {
 			if linkSetPathDepth(u.Path) < parentDepth {
 				return
@@ -81,7 +87,6 @@ func ExtractCandidates(html, parentURL string) []Candidate {
 		if _, isStop := linkSetStopwords[strings.ToLower(title)]; isStop {
 			return
 		}
-		// Reject pure icon links (only <img> child and very short visible text).
 		if len([]rune(title)) < 2 && s.Find("img").Length() > 0 && s.Children().Not("img").Length() == 0 {
 			return
 		}
@@ -93,10 +98,8 @@ func ExtractCandidates(html, parentURL string) []Candidate {
 		seen[normalised] = struct{}{}
 
 		note := extractEditorNote(s, title)
-		out = append(out, Candidate{Title: title, URL: normalised, EditorNote: note})
+		visit(Candidate{Title: title, URL: normalised, EditorNote: note}, s)
 	})
-
-	return out
 }
 
 // linkSetPathDepth returns the number of non-empty path segments in a URL path.

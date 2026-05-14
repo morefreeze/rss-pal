@@ -105,6 +105,7 @@ func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, art
 
 	fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
 	detectLinkSetCandidates(ctx, articleRepo, contentFetcher)
+	detectLinkSetSuggestions(ctx, articleRepo, contentFetcher)
 	processQueuedChildren(ctx, articleRepo, contentFetcher)
 	refetchShortContent(ctx, articleRepo, contentFetcher, summarizer)
 	if transcriptFetcher != nil {
