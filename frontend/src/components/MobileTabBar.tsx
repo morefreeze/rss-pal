@@ -5,9 +5,9 @@ import MoreSheet from './MoreSheet'
 type Tab = { to: string; icon: string; label: string; showUnread?: boolean }
 
 const TABS: Tab[] = [
-  { to: '/articles',    icon: '📰', label: '文章', showUnread: true },
-  { to: '/saved',       icon: '⭐', label: '网摘' },
-  { to: '/recommended', icon: '✨', label: '推荐' },
+  { to: '/articles', icon: '📰', label: '文章', showUnread: true },
+  { to: '/saved',    icon: '⭐', label: '网摘' },
+  { to: '/feeds',    icon: '📡', label: '订阅' },
 ]
 
 interface Props {
