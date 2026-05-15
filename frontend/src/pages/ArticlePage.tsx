@@ -1076,33 +1076,25 @@ export default function ArticlePage() {
           onChildrenUpdated={(updated) => setLinkSetChildren(updated)}
         />
       )}
-      {/* Bottom nav so readers don't have to scroll back up to leave the article. */}
+      {/* Bottom nav so readers don't have to scroll back up to switch articles.
+          BackFab handles the back-to-list affordance. */}
       <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between' }}>
         <button
           className="secondary"
-          onClick={handleBack}
+          disabled={!prevId}
+          onClick={() => prevId && navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
           style={{ fontSize: 13, padding: '6px 14px' }}
         >
-          ← 返回列表
+          ‹ 上一篇
         </button>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            className="secondary"
-            disabled={!prevId}
-            onClick={() => prevId && navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
-            style={{ fontSize: 13, padding: '6px 14px' }}
-          >
-            ‹ 上一篇
-          </button>
-          <button
-            className="secondary"
-            disabled={!nextId}
-            onClick={() => nextId && navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
-            style={{ fontSize: 13, padding: '6px 14px' }}
-          >
-            下一篇 ›
-          </button>
-        </div>
+        <button
+          className="secondary"
+          disabled={!nextId}
+          onClick={() => nextId && navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
+          style={{ fontSize: 13, padding: '6px 14px' }}
+        >
+          下一篇 ›
+        </button>
       </div>
       <BackFab onClick={handleBack} />
       <BackToTopButton />
