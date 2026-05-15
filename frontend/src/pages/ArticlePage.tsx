@@ -21,6 +21,7 @@ import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
 import TagBar from '../components/TagBar'
+import CollapsibleFab from '../components/CollapsibleFab'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
@@ -994,34 +995,23 @@ export default function ArticlePage() {
         </div>
       </div>
       {article.links_extendable === true && (
-        <button
-          type="button"
-          onClick={() => setBatchModalOpen(true)}
+        <CollapsibleFab
+          articleId={article.id}
+          icon="📥"
+          label="批量抓取"
+          variant="primary"
           title="检测到多个可抓取链接"
-          style={{
-            position: 'fixed',
-            right: 24,
-            bottom: 152,
-            padding: '10px 16px',
-            borderRadius: 24,
-            border: 'none',
-            background: 'var(--accent)',
-            color: 'var(--accent-fg)',
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
-            fontSize: 13,
-            fontWeight: 500,
-            zIndex: 1100,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          📥 批量抓取
-        </button>
+          onActivate={() => setBatchModalOpen(true)}
+        />
       )}
       {article.links_extendable !== true && article.link_set_suggested === true && (
-        <button
-          type="button"
-          onClick={async () => {
+        <CollapsibleFab
+          articleId={article.id}
+          icon="💡"
+          label="转为 link_set"
+          variant="outline"
+          title="文章看起来是一组链接列表，确认后可批量抓取"
+          onActivate={async () => {
             try {
               await confirmLinkSetSuggestion(article.id)
               const data = await getArticle(article.id)
@@ -1033,26 +1023,7 @@ export default function ArticlePage() {
               toast.error('转换失败，请稍后重试')
             }
           }}
-          title="文章看起来是一组链接列表，确认后可批量抓取"
-          style={{
-            position: 'fixed',
-            right: 24,
-            bottom: 152,
-            padding: '10px 16px',
-            borderRadius: 24,
-            border: '1px solid var(--accent)',
-            background: 'var(--bg-elevated, #fff)',
-            color: 'var(--accent)',
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
-            fontSize: 13,
-            fontWeight: 500,
-            zIndex: 1100,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          💡 转为 link_set
-        </button>
+        />
       )}
       <BatchFetchModal
         open={batchModalOpen}

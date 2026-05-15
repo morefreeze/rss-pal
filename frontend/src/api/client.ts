@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { clearAllFabCollapsed } from '../components/CollapsibleFab'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -63,6 +64,7 @@ export const logout = () => {
   sessionStorage.removeItem('selectedFeed')
   sessionStorage.removeItem('unreadOnly')
   sessionStorage.removeItem('savedOnly')
+  clearAllFabCollapsed()
 }
 
 export const getUser = () => {
