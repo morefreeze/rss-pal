@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react'
+import { memo, useContext, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -11,6 +11,7 @@ import { stripMathShadow, escapeAmbiguousMathDollars } from '../util/mathShadow'
 import { flattenImageAltBlankLines } from '../util/imageAlt'
 import VideoEmbed from './VideoEmbed'
 import { parsePlaceholder } from './parseVideoPlaceholder'
+import { CodeWrapContext } from './CodeWrapContext'
 
 type Props = {
   source: string
@@ -53,6 +54,29 @@ function extractParagraphText(children: unknown): string | null {
   return null
 }
 
+// Wraps each fenced <pre> so the wrap state can be toggled per-block on
+// top of the global CodeWrapContext setting. Local override is null
+// (= follow global) until the user clicks the toggle; reload resets it.
+function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) {
+  const globalWrap = useContext(CodeWrapContext)
+  const [override, setOverride] = useState<boolean | null>(null)
+  const wrapped = override ?? globalWrap
+  return (
+    <div className="code-block-wrap" data-wrap={wrapped ? 'true' : 'false'}>
+      <button
+        type="button"
+        className="code-wrap-toggle"
+        aria-label={wrapped ? '关闭自动换行' : '开启自动换行'}
+        title={wrapped ? '关闭自动换行' : '开启自动换行'}
+        onClick={() => setOverride(!wrapped)}
+      >
+        {wrapped ? '↵' : '→'}
+      </button>
+      <pre {...rest}>{children}</pre>
+    </div>
+  )
+}
+
 // Module-scoped plugin lists and component overrides. Hoisted out of the
 // render function so their references are stable across re-renders —
 // otherwise ReactMarkdown sees a fresh `components` object each render,
@@ -90,6 +114,7 @@ const COMPONENTS: Components = {
     }
     return <p {...rest}>{children}</p>
   },
+  pre: CodeBlock,
 }
 
 // Rewrites <img src="..."> to go through the backend proxy so hotlink-

@@ -22,6 +22,7 @@ import { useReadingChrome } from '../hooks/useReadingChrome'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
 import TagBar from '../components/TagBar'
 import CollapsibleFab from '../components/CollapsibleFab'
+import { CodeWrapContext } from '../components/CodeWrapContext'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
@@ -682,9 +683,11 @@ export default function ArticlePage() {
         }}
         fontSize={reader.fontSize}
         fontFamily={reader.fontFamily}
+        codeWrap={reader.codeWrap}
         onExit={() => reader.setMode('normal')}
         onFontSize={reader.setFontSize}
         onFontFamily={reader.setFontFamily}
+        onCodeWrap={reader.setCodeWrap}
         onTapBody={toggleReadingChrome}
       />
     )
@@ -947,7 +950,9 @@ export default function ArticlePage() {
             </div>
             {article.content ? (
               <div style={{ lineHeight: 1.8, fontSize: 15 }}>
-                <MarkdownArticle source={article.content} />
+                <CodeWrapContext.Provider value={reader.codeWrap}>
+                  <MarkdownArticle source={article.content} />
+                </CodeWrapContext.Provider>
               </div>
             ) : workerFetching ? (
               <div className="text-muted">正在抓取...</div>
