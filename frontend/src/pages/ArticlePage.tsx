@@ -52,6 +52,9 @@ export default function ArticlePage() {
   const contentRef = useRef<HTMLDivElement>(null)
   const summaryRef = useRef<HTMLDivElement>(null)
   const readStartTime = useRef<number>(Date.now())
+  // Tracks which article id has already had its scroll position restored, so
+  // later progress updates don't yank the user back to the saved position.
+  const scrollRestoredForRef = useRef<number | null>(null)
   // High-water mark so scrolling up (e.g. to nav buttons) can't regress saved progress.
   const maxScrollRef = useRef<number>(0)
   // Progress (0..1) at which the AI summary card has just exited the viewport.
@@ -100,15 +103,6 @@ export default function ArticlePage() {
         setDisliked((data.signals['dislike'] ?? 0) > 0)
         setSaved((data.signals['save'] ?? 0) > 0)
       }
-
-      // Scroll to saved position
-      const savedProgress = data.progress?.scroll_position
-      if (savedProgress && contentRef.current) {
-        setTimeout(() => {
-          const scrollHeight = contentRef.current?.scrollHeight || 0
-          window.scrollTo(0, scrollHeight * savedProgress)
-        }, 100)
-      }
     } catch (err: any) {
       if (err?.response?.status === 404) {
         setLoadError('文章不存在或无权访问')
@@ -122,6 +116,7 @@ export default function ArticlePage() {
   }
 
   useEffect(() => {
+    scrollRestoredForRef.current = null
     loadArticle()
 
     return () => {
@@ -133,6 +128,60 @@ export default function ArticlePage() {
       streamAbortRef.current?.abort()
     }
   }, [id])
+
+  // Restore scroll to the saved reading position, once per article load.
+  // Waits for images currently in the DOM to finish loading so scrollHeight
+  // is stable before scrolling; caps the wait at 5s. Skips restoration when
+  // saved progress is > 0.9 — at that point the user has effectively finished
+  // the article, so reopening it should start from the top.
+  useEffect(() => {
+    if (!article) return
+    if (scrollRestoredForRef.current === article.id) return
+    const saved = progress?.scroll_position ?? 0
+    scrollRestoredForRef.current = article.id
+    if (saved <= 0 || saved > 0.9) return
+
+    let done = false
+
+    const performScroll = () => {
+      if (done) return
+      done = true
+      if (window.scrollY > 50) return
+      const max = (contentRef.current?.scrollHeight ?? 0) - window.innerHeight
+      if (max > 0) window.scrollTo(0, max * saved)
+    }
+
+    const root = contentRef.current
+    const pending = root
+      ? Array.from(root.querySelectorAll('img')).filter(img => !img.complete)
+      : []
+
+    if (pending.length === 0) {
+      requestAnimationFrame(performScroll)
+      return
+    }
+
+    let remaining = pending.length
+    const onOne = () => {
+      remaining -= 1
+      if (remaining <= 0) performScroll()
+    }
+    pending.forEach(img => {
+      img.addEventListener('load', onOne, { once: true })
+      img.addEventListener('error', onOne, { once: true })
+    })
+
+    const timer = setTimeout(performScroll, 5000)
+
+    return () => {
+      done = true
+      clearTimeout(timer)
+      pending.forEach(img => {
+        img.removeEventListener('load', onOne)
+        img.removeEventListener('error', onOne)
+      })
+    }
+  }, [article?.id, progress?.scroll_position])
 
   // Auto-expand stub link_set children and poll until ready/failed
   useEffect(() => {
