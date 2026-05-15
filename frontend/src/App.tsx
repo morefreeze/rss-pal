@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { isLoggedIn, getMe, logout } from './api/client'
+import { isLoggedIn, getMe, getUser, logout } from './api/client'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import FeedListPage from './pages/FeedListPage'
@@ -30,30 +30,25 @@ function RequireAuth({ user, onLogout }: { user: User | null; onLogout: () => vo
 }
 
 function App() {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(isLoggedIn())
+  // Hydrate from the locally cached user so a flaky network on boot doesn't
+  // log the user out — the JWT in localStorage is still valid, and the 401
+  // path is already handled by the response interceptor in api/client.
+  const [user, setUser] = useState<User | null>(() => (isLoggedIn() ? getUser() : null))
 
   useEffect(() => {
-    if (!isLoggedIn()) {
-      setLoading(false)
-      return
-    }
+    if (!isLoggedIn()) return
     getMe()
       .then(u => setUser(u))
       .catch(() => {
-        logout()
+        // Transient errors (network, 5xx, DNS) — keep the cached session.
+        // The interceptor logs out on a real 401.
       })
-      .finally(() => setLoading(false))
   }, [])
 
   const handleLogout = () => {
     logout()
     setUser(null)
     window.location.href = '/login'
-  }
-
-  if (loading) {
-    return <div className="card">Loading...</div>
   }
 
   return (
