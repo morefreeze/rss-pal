@@ -504,6 +504,40 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
   margin: 8px 0;
 }
 .markdown-body pre code { background: none; padding: 0; }
+
+/* Wrap toggle (per-fenced-code block). Default is overflow-scroll —
+   matches the bare <pre> behavior — and data-wrap="true" flips to
+   word-wrap. Toggle button hides until pointer hover on desktop;
+   touch devices always show it. */
+.markdown-body .code-block-wrap { position: relative; }
+.markdown-body .code-block-wrap pre { margin: 8px 0; }
+.markdown-body .code-block-wrap[data-wrap="true"] pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: hidden;
+}
+.markdown-body .code-wrap-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.markdown-body .code-block-wrap:hover .code-wrap-toggle { opacity: 1; }
+.markdown-body .code-wrap-toggle:hover { color: var(--fg); border-color: var(--accent); }
+@media (hover: none) {
+  .markdown-body .code-wrap-toggle { opacity: 1; }
+}
 .markdown-body blockquote {
   border-left: 3px solid var(--accent);
   padding-left: 12px;

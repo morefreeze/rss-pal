@@ -5,12 +5,14 @@ import { useBreakpoint } from '../hooks/useBreakpoint'
 type Props = {
   fontSize: number
   fontFamily: ReaderFontFamily
+  codeWrap: boolean
   onFontSize: (n: number) => void
   onFontFamily: (f: ReaderFontFamily) => void
+  onCodeWrap: (v: boolean) => void
 }
 
 export default function ReaderSettingsPanel({
-  fontSize, fontFamily, onFontSize, onFontFamily,
+  fontSize, fontFamily, codeWrap, onFontSize, onFontFamily, onCodeWrap,
 }: Props) {
   const [open, setOpen] = useState(false)
   const bp = useBreakpoint()
@@ -42,7 +44,7 @@ export default function ReaderSettingsPanel({
       </div>
 
       <div className="text-sm text-muted" style={{ marginBottom: 6 }}>字体</div>
-      <div className="flex gap-2">
+      <div className="flex gap-2" style={{ marginBottom: 14 }}>
         <button
           className={fontFamily === 'sans' ? 'btn-sm' : 'btn-ghost btn-sm'}
           onClick={() => onFontFamily('sans')}
@@ -53,6 +55,20 @@ export default function ReaderSettingsPanel({
           onClick={() => onFontFamily('serif')}
           style={{ flex: 1, fontFamily: 'var(--font-serif)' }}
         >Serif</button>
+      </div>
+
+      <div className="text-sm text-muted" style={{ marginBottom: 6 }}>代码块自动换行</div>
+      <div className="flex gap-2">
+        <button
+          className={!codeWrap ? 'btn-sm' : 'btn-ghost btn-sm'}
+          onClick={() => onCodeWrap(false)}
+          style={{ flex: 1 }}
+        >横向滚动</button>
+        <button
+          className={codeWrap ? 'btn-sm' : 'btn-ghost btn-sm'}
+          onClick={() => onCodeWrap(true)}
+          style={{ flex: 1 }}
+        >自动换行</button>
       </div>
     </>
   )

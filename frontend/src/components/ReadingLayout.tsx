@@ -2,6 +2,7 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import MarkdownArticle from './MarkdownArticle'
 import ReaderSettingsPanel from './ReaderSettingsPanel'
+import { CodeWrapContext } from './CodeWrapContext'
 import type { ReaderFontFamily } from '../hooks/useReaderSettings'
 
 type ArticleLite = {
@@ -19,14 +20,16 @@ type Props = {
   article: ArticleLite
   fontSize: number
   fontFamily: ReaderFontFamily
+  codeWrap: boolean
   onExit: () => void
   onFontSize: (n: number) => void
   onFontFamily: (f: ReaderFontFamily) => void
+  onCodeWrap: (v: boolean) => void
   onTapBody?: () => void
 }
 
 export default function ReadingLayout(props: Props) {
-  const { article, fontSize, fontFamily, onExit, onTapBody } = props
+  const { article, fontSize, fontFamily, codeWrap, onExit, onTapBody } = props
 
   const [summaryOpen, setSummaryOpen] = useState(false)
 
@@ -84,7 +87,11 @@ export default function ReadingLayout(props: Props) {
         )}
 
         {article.content
-          ? <MarkdownArticle source={article.content} />
+          ? (
+            <CodeWrapContext.Provider value={codeWrap}>
+              <MarkdownArticle source={article.content} />
+            </CodeWrapContext.Provider>
+          )
           : <div className="text-muted">暂无内容</div>
         }
       </article>
@@ -92,8 +99,10 @@ export default function ReadingLayout(props: Props) {
       <ReaderSettingsPanel
         fontSize={fontSize}
         fontFamily={fontFamily}
+        codeWrap={codeWrap}
         onFontSize={props.onFontSize}
         onFontFamily={props.onFontFamily}
+        onCodeWrap={props.onCodeWrap}
       />
     </div>
   )

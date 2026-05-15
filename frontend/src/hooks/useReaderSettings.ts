@@ -11,6 +11,7 @@ export type ReaderSettings = {
   fontSize: number      // 12..24, step 1
   fontFamily: ReaderFontFamily
   confettiEnabled: boolean
+  codeWrap: boolean
 }
 
 const STORAGE_KEY = 'rsspal:reader-settings'
@@ -19,6 +20,7 @@ const DEFAULTS: ReaderSettings = {
   fontSize: 16,
   fontFamily: 'sans',
   confettiEnabled: true,
+  codeWrap: false,
 }
 
 function load(): ReaderSettings {
@@ -30,6 +32,7 @@ function load(): ReaderSettings {
       fontSize: clampFont(parsed.fontSize ?? DEFAULTS.fontSize),
       fontFamily: parsed.fontFamily === 'serif' ? 'serif' : 'sans',
       confettiEnabled: parsed.confettiEnabled !== false,
+      codeWrap: parsed.codeWrap === true,
     }
   } catch {
     return DEFAULTS
@@ -66,6 +69,8 @@ export function useReaderSettings() {
     setSettings(s => ({ ...s, fontFamily })), [])
   const setConfettiEnabled = useCallback((confettiEnabled: boolean) =>
     setSettings(s => ({ ...s, confettiEnabled })), [])
+  const setCodeWrap = useCallback((codeWrap: boolean) =>
+    setSettings(s => ({ ...s, codeWrap })), [])
 
   return {
     ...settings,
@@ -75,5 +80,6 @@ export function useReaderSettings() {
     setFontSize,
     setFontFamily,
     setConfettiEnabled,
+    setCodeWrap,
   }
 }
