@@ -86,6 +86,11 @@ func main() {
 		c.Next()
 	})
 
+	// Health check (public, no auth)
+	router.GET("/api/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+
 	// Public routes
 	router.POST("/api/auth/init", authHandler.InitAdmin)
 	router.POST("/api/auth/login", authHandler.Login)

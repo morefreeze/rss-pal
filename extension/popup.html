@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="popup-container">
+    <div class="popup-header">
+      <h1>📡 RSS Pal</h1>
+      <a href="#" class="settings-link" id="settingsLink" title="设置">⚙️</a>
+    </div>
+
+    <!-- Not configured state -->
+    <div id="notConfigured" style="display:none;">
+      <div class="config-missing">
+        <p id="notConfiguredMsg">请先配置 RSS Pal 服务器地址和 Token</p>
+        <button class="btn btn-primary" id="autoConfigBtn" style="display:none;">一键配置</button>
+        <button class="btn btn-primary" id="goSettings">打开设置</button>
+      </div>
+    </div>
+
+    <!-- Main state -->
+    <div id="mainContent" style="display:none;">
+      <div class="page-info">
+        <div class="page-title" id="pageTitle">加载中…</div>
+        <div class="page-url" id="pageUrl"></div>
+      </div>
+
+      <button class="btn btn-primary" id="captureBtn">⭐ 发送到 RSS Pal</button>
+
+      <div class="status" id="status"></div>
+
+      <!-- Duplicate overwrite prompt -->
+      <div id="duplicatePrompt" style="display:none;">
+        <div class="status status-warning show">
+          <strong>文章已存在</strong>
+          <p style="margin-top:4px;font-size:12px;" id="dupMessage"></p>
+        </div>
+        <div class="duplicate-actions">
+          <button class="btn btn-danger" id="overwriteBtn">覆盖</button>
+          <button class="btn btn-secondary" id="cancelBtn">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

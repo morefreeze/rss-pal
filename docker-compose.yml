@@ -88,11 +88,11 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     ports:
       - "80:80"
-      - "443:443"
+      - "8443:443"
     volumes:
       - ./certs:/etc/nginx/certs:ro
     depends_on:
