@@ -198,8 +198,8 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
-
 	userID := getUserID(c)
+
 	progress, _ := h.progressRepo.GetByArticleAndUser(id, userID)
 	signals, _ := h.prefRepo.GetUserSignals(userID, id)
 

@@ -329,6 +329,148 @@ function BookmarkletSection() {
   )
 }
 
+function ExtensionSection() {
+  const [token, setToken] = useState<string | null>(null)
+  const [step, setStep] = useState<'intro' | 'install' | 'configure'>('intro')
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    getBookmarkletToken().then(setToken).catch(() => setToken(null))
+  }, [])
+
+  const apiBase = window.location.origin
+
+  // Expose config for the extension popup to auto-detect
+  useEffect(() => {
+    if (token) {
+      (window as any).__RSS_PAL_CONFIG = { serverUrl: apiBase, token }
+    }
+    return () => { delete (window as any).__RSS_PAL_CONFIG }
+  }, [token, apiBase])
+
+  const handleCopyToken = () => {
+    if (!token) return
+    navigator.clipboard.writeText(token).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  const handleCopyServerUrl = () => {
+    navigator.clipboard.writeText(apiBase).then(() => {
+      toast.success('已复制服务器地址')
+    })
+  }
+
+  return (
+    <div className="card mb-2">
+      <h3 className="mb-1">🧩 Chrome 扩展</h3>
+      <p className="text-muted text-sm mb-2">
+        安装浏览器扩展后，在任何网页点击扩展图标即可一键保存 — 支持微信公众号等需要 JS 渲染的页面，比书签方式更稳定。
+      </p>
+
+      {step === 'intro' && (
+        <div>
+          <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => setStep('install')}>
+              📦 安装扩展
+            </button>
+            <button type="button" className="secondary" onClick={() => setStep('configure')}>
+              ⚙️ 已安装，去配置
+            </button>
+          </div>
+          <div style={{ marginTop: 8, padding: '10px 12px', background: 'var(--hover-bg, #f6f8fa)', borderRadius: 6 }}>
+            <p className="text-sm" style={{ margin: 0 }}>
+              <strong>扩展 vs 书签的区别：</strong>
+            </p>
+            <ul className="text-sm text-muted" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              <li>扩展获取 <strong>JS 渲染后</strong> 的完整页面内容（书签只能拿到初始 HTML）</li>
+              <li>微信文章图片、SPA 页面支持更好</li>
+              <li>点击工具栏图标即可，不需要拖拽书签</li>
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {step === 'install' && (
+        <div>
+          <div style={{ padding: '12px', background: 'var(--hover-bg, #f6f8fa)', borderRadius: 6, marginBottom: 12 }}>
+            <p className="text-sm" style={{ margin: '0 0 8px' }}><strong>安装步骤：</strong></p>
+            <ol className="text-sm" style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
+              <li>
+                <a href={`${apiBase}/rss-pal-extension.zip`} download style={{ color: 'var(--accent)' }}>
+                  下载扩展 zip
+                </a> 并解压
+              </li>
+              <li>
+                打开 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>chrome://extensions/</code>
+              </li>
+              <li>打开右上角「开发者模式」</li>
+              <li>点击「加载已解压的扩展程序」，选择解压后的 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3, fontSize: 12 }}>extension/</code> 目录</li>
+              <li>安装完成后，点击下方「已安装 → 下一步配置」</li>
+            </ol>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" className="secondary" onClick={() => setStep('configure')}>
+              已安装 → 下一步配置
+            </button>
+            <button type="button" className="secondary" onClick={() => setStep('intro')}>
+              ← 返回
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 'configure' && (
+        <div>
+          <p className="text-sm mb-2">在扩展设置页填入以下信息：</p>
+          <div style={{ marginBottom: 12 }}>
+            <div className="flex gap-2" style={{ alignItems: 'center', marginBottom: 8 }}>
+              <span className="text-sm text-bold" style={{ minWidth: 80 }}>服务器：</span>
+              <code style={{ background: 'var(--code-bg)', padding: '3px 8px', borderRadius: 4, fontSize: 12 }}>
+                {apiBase}
+              </code>
+              <button
+                type="button"
+                className="secondary"
+                style={{ fontSize: 11, padding: '2px 8px' }}
+                onClick={handleCopyServerUrl}
+              >
+                复制
+              </button>
+            </div>
+            <div className="flex gap-2" style={{ alignItems: 'center' }}>
+              <span className="text-sm text-bold" style={{ minWidth: 80 }}>Token：</span>
+              {token ? (
+                <>
+                  <code style={{ background: 'var(--code-bg)', padding: '3px 8px', borderRadius: 4, fontSize: 12, wordBreak: 'break-all' }}>
+                    {token.slice(0, 12)}…{token.slice(-8)}
+                  </code>
+                  <button
+                    type="button"
+                    className="secondary"
+                    style={{ fontSize: 11, padding: '2px 8px' }}
+                    onClick={handleCopyToken}
+                  >
+                    {copied ? '✓ 已复制' : '复制'}
+                  </button>
+                </>
+              ) : (
+                <span className="text-muted text-sm">请先生成 Token（上方书签区域）</span>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" className="secondary" onClick={() => setStep('intro')}>
+              ← 返回
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 type TabId = 'appearance' | 'account' | 'ai' | 'tools'
 
 const TABS: { id: TabId; label: string }[] = [
@@ -980,6 +1122,9 @@ export default function SettingsPage({ user }: SettingsPageProps) {
 
           {/* 浏览器抓取（bookmarklet） */}
           <BookmarkletSection />
+
+          {/* Chrome 扩展 */}
+          <ExtensionSection />
 
           {/* 备份与恢复（仅管理员可见） */}
           <BackupSection isAdmin={!!user?.is_admin} />

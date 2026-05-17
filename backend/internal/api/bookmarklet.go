@@ -276,23 +276,34 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Cleanup must not strip top-level containers even if their class happens
-	// to match an attribute-substring selector. WeChat sets
-	// <body class="… comment_feature …"> which would otherwise be wiped by
-	// [class*=comment], leaving the document empty.
-	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
+	// If the HTML is a clean extraction from our extension (body contains
+	// #js_content and optionally #wx_images), skip the aggressive generic
+	// cleanup — the extension already did targeted cleanup and the generic
+	// selectors (e.g. [class*=share], [class*=comment]) would strip WeChat
+	// article content.
+	isCleanExtraction := doc.Find("body > #js_content").Length() == 1
+
+	if !isCleanExtraction {
+		doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
+	} else {
+		doc.Find("script, style").Remove()
+	}
+
 	rss.StripAvatars(doc)
 	rss.PromoteLazyImages(doc)
 	rss.ResolveURLs(doc, baseURL)
 
 	var content string
 	candidates := []string{
+		// WeChat: #js_content is the authoritative content container; check first
+		// so the 200-char early-break doesn't settle on a noisier candidate.
+		"#js_content",
 		"article", "[role='main']", "main",
 		".post-content", ".article-content", ".article-body", ".entry-content",
 		".story-body", ".post-body", ".field-item",
 		".article-text", ".article__body", ".content-article",
 		"[class*=article-detail]", "[class*=articleDetail]", "[class*=post-detail]",
-		"[id*=article-body]", "[id*=articleBody]", "[id*=js_content]",
+		"[id*=article-body]", "[id*=articleBody]",
 		".content", ".post", "#content", "#main", "body",
 	}
 	for _, sel := range candidates {
