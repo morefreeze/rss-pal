@@ -30,6 +30,10 @@ const savedFileSuffix = ".saved.json.gz"
 //
 // FeedURL is the natural-key reference into the metadata file's feeds list —
 // after feed upsert we look up the new feed_id by URL.
+//
+// Read state is intentionally NOT a field here: it is per-user
+// (reading_progress.is_completed) and the SavedSnapshot exports
+// ReadingProgress rows separately.
 type SavedArticleRow struct {
 	ExportID             int        `json:"export_id"`
 	FeedURL              string     `json:"feed_url"`
@@ -42,7 +46,6 @@ type SavedArticleRow struct {
 	FetchedAt            time.Time  `json:"fetched_at"`
 	WordCount            int        `json:"word_count"`
 	ReadingMinutes       int        `json:"reading_minutes"`
-	IsRead               bool       `json:"is_read"`
 	EditorNote           string     `json:"editor_note,omitempty"`
 	MediaURL             string     `json:"media_url,omitempty"`
 	MediaType            string     `json:"media_type,omitempty"`
@@ -161,7 +164,7 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 		SELECT a.id, f.url, COALESCE(a.title, ''), a.url, COALESCE(a.content, ''),
 		       a.published_at,
 		       COALESCE(a.summary_brief, ''), COALESCE(a.summary_detailed, ''),
-		       a.fetched_at, a.word_count, a.reading_minutes, a.is_read,
+		       a.fetched_at, a.word_count, a.reading_minutes,
 		       COALESCE(a.editor_note, ''),
 		       COALESCE(a.media_url, ''), COALESCE(a.media_type, ''), COALESCE(a.media_duration_seconds, 0)
 		FROM articles a
@@ -186,7 +189,7 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 		if err := rows.Scan(&r.ExportID, &r.FeedURL, &r.Title, &r.URL, &r.Content,
 			&r.PublishedAt,
 			&r.SummaryBrief, &r.SummaryDetailed,
-			&r.FetchedAt, &r.WordCount, &r.ReadingMinutes, &r.IsRead,
+			&r.FetchedAt, &r.WordCount, &r.ReadingMinutes,
 			&r.EditorNote,
 			&r.MediaURL, &r.MediaType, &r.MediaDurationSeconds); err != nil {
 			return nil, err

@@ -100,12 +100,12 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 	for i := range s.InterestTopics {
 		t := &s.InterestTopics[i]
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO interest_topics (topic, weight, last_reinforced_at)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (topic) DO UPDATE SET
+			INSERT INTO interest_topics (user_id, topic, weight, last_reinforced_at)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (user_id, topic) DO UPDATE SET
 				weight = EXCLUDED.weight,
 				last_reinforced_at = EXCLUDED.last_reinforced_at`,
-			t.Topic, t.Weight, t.LastReinforcedAt)
+			ownerOrNil(t.UserID), t.Topic, t.Weight, t.LastReinforcedAt)
 		if err != nil {
 			return stats, fmt.Errorf("upsert interest_topic %s: %w", t.Topic, err)
 		}
@@ -131,15 +131,15 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 				INSERT INTO articles (
 					feed_id, title, url, content, published_at,
 					summary_brief, summary_detailed, fetched_at,
-					word_count, reading_minutes, is_read, editor_note,
+					word_count, reading_minutes, editor_note,
 					media_url, media_type, media_duration_seconds
-				) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11,$12, $13,$14,$15)
+				) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14)
 				ON CONFLICT (feed_id, url) WHERE parent_article_id IS NULL
 				DO NOTHING
 				RETURNING id`,
 				feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
 				ar.SummaryBrief, ar.SummaryDetailed, ar.FetchedAt,
-				ar.WordCount, ar.ReadingMinutes, ar.IsRead, ar.EditorNote,
+				ar.WordCount, ar.ReadingMinutes, ar.EditorNote,
 				ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds,
 			).Scan(&newID)
 			if err == sql.ErrNoRows {

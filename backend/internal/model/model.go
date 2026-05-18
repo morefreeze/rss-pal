@@ -72,6 +72,7 @@ type UserPreference struct {
 
 type InterestTopic struct {
 	ID               int       `json:"id" db:"id"`
+	UserID           *int      `json:"user_id,omitempty" db:"user_id"`
 	Topic            string    `json:"topic" db:"topic"`
 	Weight           float64   `json:"weight" db:"weight"`
 	LastReinforcedAt time.Time `json:"last_reinforced_at" db:"last_reinforced_at"`
