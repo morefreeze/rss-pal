@@ -594,6 +594,18 @@ export const createBackupNow = () =>
 export const restoreBackup = (name: string) =>
   api.post<{ ok: boolean; stats: BackupRestoreStats }>('/admin/backups/restore', { name }).then(res => res.data)
 
+// restoreBackupUpload restores from a user-picked local file pair (metadata
+// .json + optional .saved.json.gz sibling). The server writes them to a temp
+// dir, restores, then deletes — backup.Dir on the host is not touched.
+export const restoreBackupUpload = (metadata: File, saved?: File | null) => {
+  const form = new FormData()
+  form.append('metadata', metadata)
+  if (saved) form.append('saved', saved)
+  return api
+    .post<{ ok: boolean; stats: BackupRestoreStats }>('/admin/backups/restore-upload', form)
+    .then(res => res.data)
+}
+
 export interface RecommendedFeed {
   id: number
   url: string
