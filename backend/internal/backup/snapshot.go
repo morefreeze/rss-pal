@@ -54,10 +54,14 @@ type Snapshot struct {
 }
 
 // FileInfo is the metadata of a backup file on disk, exposed by List.
+//
+// HasSaved tells the UI whether the .saved.json.gz sibling exists, so
+// the download flow knows to fetch it too.
 type FileInfo struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 	Size      int64     `json:"size"`
+	HasSaved  bool      `json:"has_saved"`
 }
 
 // Build snapshots both files in one read-only transaction so they are a
@@ -309,6 +313,16 @@ func List(dir string) ([]FileInfo, error) {
 		return nil, err
 	}
 
+	// Build a set of present sibling names so we can flag HasSaved without a
+	// second stat per file.
+	siblings := make(map[string]struct{})
+	for _, e := range entries {
+		n := e.Name()
+		if strings.HasSuffix(n, savedFileSuffix) {
+			siblings[n] = struct{}{}
+		}
+	}
+
 	var out []FileInfo
 	for _, e := range entries {
 		if e.IsDir() {
@@ -322,7 +336,8 @@ func List(dir string) ([]FileInfo, error) {
 		if err != nil {
 			continue
 		}
-		out = append(out, FileInfo{Name: e.Name(), CreatedAt: t, Size: info.Size()})
+		_, hasSaved := siblings[savedSiblingName(e.Name())]
+		out = append(out, FileInfo{Name: e.Name(), CreatedAt: t, Size: info.Size(), HasSaved: hasSaved})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil

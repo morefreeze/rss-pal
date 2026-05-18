@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, restoreBackupUpload, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, restoreBackupUpload, downloadBackupFile, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useTheme, type Theme } from '../util/theme'
@@ -183,6 +183,26 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  // Download: pull a backup file pair to the user's disk via the auth'd
+  // client. has_saved is set by the server so we only attempt the sibling
+  // when it exists; legacy backups without one still work.
+  const handleDownload = async (f: BackupFile) => {
+    setBusy(true)
+    try {
+      await downloadBackupFile(f.name)
+      if (f.has_saved) {
+        const sibling = f.name.replace(/\.json$/, '.saved.json.gz')
+        await downloadBackupFile(sibling)
+      }
+      toast.success(f.has_saved ? '已下载元数据和网摘归档' : '已下载元数据（无网摘归档）')
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || '未知错误'
+      toast.error(`下载失败：${msg}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // Upload-restore: user picks one .json (metadata) and optionally its
   // .saved.json.gz sibling. Split files by extension so order in the file
   // picker doesn't matter; reject anything unrecognised so a wrong-folder
@@ -297,14 +317,25 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
                   {new Date(f.created_at).toLocaleString('zh-CN')} · {(f.size / 1024).toFixed(1)} KB
                 </span>
               </div>
-              <button
-                className="secondary"
-                style={{ fontSize: 12, padding: '2px 10px' }}
-                onClick={() => handleRestore(f.name)}
-                disabled={busy}
-              >
-                恢复
-              </button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  className="secondary"
+                  style={{ fontSize: 12, padding: '2px 10px' }}
+                  onClick={() => handleDownload(f)}
+                  disabled={busy}
+                  title={f.has_saved ? '下载元数据 + 网摘归档' : '下载元数据（此备份无网摘归档）'}
+                >
+                  下载{f.has_saved ? ' ⇣2' : ''}
+                </button>
+                <button
+                  className="secondary"
+                  style={{ fontSize: 12, padding: '2px 10px' }}
+                  onClick={() => handleRestore(f.name)}
+                  disabled={busy}
+                >
+                  恢复
+                </button>
+              </div>
             </div>
           ))}
         </div>

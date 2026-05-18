@@ -216,6 +216,7 @@ func main() {
 		apiGroup.POST("/admin/backups", adminHandler.CreateBackupNow)
 		apiGroup.POST("/admin/backups/restore", adminHandler.RestoreBackup)
 		apiGroup.POST("/admin/backups/restore-upload", adminHandler.RestoreBackupUpload)
+		apiGroup.GET("/admin/backups/download/:name", adminHandler.DownloadBackup)
 	}
 
 	log.Printf("Server starting on port %s", cfg.Server.Port)

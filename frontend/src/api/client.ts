@@ -573,6 +573,7 @@ export interface BackupFile {
   name: string
   created_at: string
   size: number
+  has_saved: boolean
 }
 export interface BackupListResponse {
   backups: BackupFile[]
@@ -604,6 +605,24 @@ export const restoreBackupUpload = (metadata: File, saved?: File | null) => {
   return api
     .post<{ ok: boolean; stats: BackupRestoreStats }>('/admin/backups/restore-upload', form)
     .then(res => res.data)
+}
+
+// downloadBackupFile fetches one backup file as a Blob via the auth'd axios
+// client (needed because <a download> can't carry Bearer headers) and triggers
+// a browser save with the original filename.
+export const downloadBackupFile = async (name: string): Promise<void> => {
+  const res = await api.get<Blob>(`/admin/backups/download/${encodeURIComponent(name)}`, {
+    responseType: 'blob',
+  })
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  // Revoke after the click handler has a chance to start the download.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export interface RecommendedFeed {

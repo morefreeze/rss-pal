@@ -111,6 +111,39 @@ func (h *AdminHandler) RestoreBackup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "stats": stats})
 }
 
+// DownloadBackup streams a backup file (either the .json metadata or its
+// .saved.json.gz sibling) as an attachment. Path traversal is blocked the
+// same way as Restore — name must have no slashes and no `..`, and must
+// resolve under the configured backup dir.
+func (h *AdminHandler) DownloadBackup(c *gin.Context) {
+	if !h.requireAdmin(c) {
+		return
+	}
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+		return
+	}
+	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
+		return
+	}
+	// Only serve files that look like our backup pair — metadata .json or the
+	// .saved.json.gz sibling. Anything else, refuse, so this endpoint can't
+	// double as an arbitrary-file reader within backup.Dir.
+	lower := strings.ToLower(name)
+	if !strings.HasSuffix(lower, ".json") && !strings.HasSuffix(lower, ".saved.json.gz") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name must be a backup .json or .saved.json.gz"})
+		return
+	}
+	path := filepath.Join(h.cfg.Backup.Dir, name)
+	if _, err := os.Stat(path); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.FileAttachment(path, name)
+}
+
 // RestoreBackupUpload restores from a user-supplied backup pair uploaded as
 // multipart/form-data. The on-disk backup dir is not touched — uploaded files
 // land in a private temp dir that is removed before returning.
