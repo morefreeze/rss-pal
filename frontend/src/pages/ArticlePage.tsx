@@ -97,7 +97,10 @@ export default function ArticlePage() {
       const data = await getArticle(Number(id))
       setArticle(data.article)
       setProgress(data.progress)
-      maxScrollRef.current = data.progress?.scroll_position ?? 0
+      // Clamp: historical rows may have >1 from before write-side clamping,
+      // and without this they'd block all future scroll persistence (handleScroll
+      // requires scrollPosition > maxScrollRef.current to write).
+      maxScrollRef.current = Math.min(1, data.progress?.scroll_position ?? 0)
       setFromBookmarklet(Boolean(data.from_bookmarklet))
       setLinkSetChildren(data.children ?? null)
       if (data.signals) {
@@ -332,7 +335,11 @@ export default function ArticlePage() {
 
     const scrollTop = window.scrollY
     const scrollHeight = contentRef.current.scrollHeight - window.innerHeight
-    const scrollPosition = scrollHeight > 0 ? scrollTop / scrollHeight : 0
+    // Clamp to [0,1]: iOS rubber-band overscroll and mid-load scrollHeight
+    // shrinkage can otherwise push the ratio past 1, which then gets persisted
+    // and displays as >100% on reload.
+    const rawPosition = scrollHeight > 0 ? scrollTop / scrollHeight : 0
+    const scrollPosition = Math.min(1, Math.max(0, rawPosition))
 
     // Monotonic: only persist when we've read further than before.
     if (scrollPosition <= maxScrollRef.current) return
@@ -658,7 +665,7 @@ export default function ArticlePage() {
     return new Date(dateStr).toLocaleString('zh-CN')
   }
 
-  const progressPercent = progress?.scroll_position ? Math.round(progress.scroll_position * 100) : 0
+  const progressPercent = progress?.scroll_position ? Math.min(100, Math.round(progress.scroll_position * 100)) : 0
 
   if (loading) return <div className="card">Loading...</div>
   if (loadError || !article) return (
