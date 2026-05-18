@@ -60,6 +60,7 @@ export default function RecommendedPage() {
               onClick={() => setShowHelp((v) => !v)}
               aria-label="说明"
               aria-expanded={showHelp}
+              aria-controls="link-set-help"
               style={{
                 background: 'none',
                 border: 'none',
@@ -73,7 +74,7 @@ export default function RecommendedPage() {
             </button>
           </div>
           {showHelp && (
-            <div className="card text-sm" style={{ background: 'var(--surface-hover)', marginBottom: 12 }}>
+            <div id="link-set-help" className="card text-sm" style={{ background: 'var(--surface-hover)', marginBottom: 12 }}>
               <p style={{ marginTop: 0 }}>
                 这里的文章来自你订阅源里"内含链接合集"的文章(如 Hacker Newsletter)。系统会自动展开链接、抓取正文,按以下规则推荐:
               </p>
@@ -105,15 +106,23 @@ export default function RecommendedPage() {
                 {a.parent_title && a.parent_article_id != null && (
                   <div className="text-muted text-sm mt-1">
                     来自《
-                    <span
+                    <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation()
                         navigate(`/articles/${a.parent_article_id}`)
                       }}
-                      style={{ color: 'var(--accent)', cursor: 'pointer' }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: 'var(--accent)',
+                        cursor: 'pointer',
+                        font: 'inherit',
+                      }}
                     >
                       {a.parent_title}
-                    </span>
+                    </button>
                     》
                     {a.is_fallback && (
                       <span className="text-muted" style={{ marginLeft: 8, fontSize: 11 }}>
