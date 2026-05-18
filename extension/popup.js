@@ -66,25 +66,9 @@
     if (!serverUrl || !token) {
       notConfigured.style.display = 'block';
       mainContent.style.display = 'none';
-
-      // Try to detect config from current page (RSS Pal settings page)
-      try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tab && tab.id && tab.url && tab.url.startsWith('http')) {
-          const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: () => window.__RSS_PAL_CONFIG || null,
-          });
-          const config = results && results[0] && results[0].result;
-          if (config && config.serverUrl && config.token) {
-            detectedConfig = config;
-            notConfiguredMsg.textContent = '检测到当前页面的 RSS Pal 配置';
-            autoConfigBtn.style.display = '';
-          }
-        }
-      } catch (e) {
-        // Not on an RSS Pal page or no permission — show default message
-      }
+      // Fire-and-forget: scripting.executeScript is slow on heavy pages and
+      // would otherwise block the popup from appearing.
+      detectConfigFromPage();
       return;
     }
 
@@ -98,6 +82,25 @@
       currentPage.title = tab.title || '';
       pageTitle.textContent = currentPage.title || '(无标题)';
       pageUrl.textContent = currentPage.url;
+    }
+  }
+
+  async function detectConfigFromPage() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !tab.id || !tab.url || !tab.url.startsWith('http')) return;
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.__RSS_PAL_CONFIG || null,
+      });
+      const config = results && results[0] && results[0].result;
+      if (config && config.serverUrl && config.token) {
+        detectedConfig = config;
+        notConfiguredMsg.textContent = '检测到当前页面的 RSS Pal 配置';
+        autoConfigBtn.style.display = '';
+      }
+    } catch (e) {
+      // Not on an RSS Pal page or no permission
     }
   }
 

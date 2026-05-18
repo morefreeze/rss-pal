@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RSS Pal",
-  "version": "1.1.6",
+  "version": "1.2.0",
   "description": "将网页内容捕获并发送到 RSS Pal",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["<all_urls>"],
@@ -23,6 +23,11 @@
     {
       "matches": ["https://mp.weixin.qq.com/*", "http://mp.weixin.qq.com/*"],
       "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*/extension-config"],
+      "js": ["config-receiver.js"],
       "run_at": "document_idle"
     }
   ],
