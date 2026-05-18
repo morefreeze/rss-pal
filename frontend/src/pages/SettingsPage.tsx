@@ -364,11 +364,15 @@ function ExtensionSection() {
 
   const handleOpenChromeExtensions = () => {
     const url = 'chrome://extensions/'
+    // window.open MUST be called synchronously in the click handler or popup
+    // blockers reject it. Chrome silently refuses chrome:// navigation from
+    // web pages, so open about:blank — the new-tab address bar is auto-focused
+    // and the user can ⌘V + Enter.
+    window.open('about:blank', '_blank', 'noopener,noreferrer')
     navigator.clipboard.writeText(url).then(
-      () => toast.success('已复制 chrome://extensions/，在新标签地址栏粘贴 (⌘V) 回车即可'),
+      () => toast.success('已复制 chrome://extensions/，在新标签按 ⌘V 回车'),
       () => toast.error('复制失败，请手动复制 chrome://extensions/'),
     )
-    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   return (
