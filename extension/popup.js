@@ -41,6 +41,24 @@
     duplicatePrompt.style.display = 'none';
   }
 
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function buildArticleLink(serverUrl, articleId) {
+    if (!articleId) return '';
+    const base = String(serverUrl || '').replace(/\/+$/, '');
+    if (!base) return '';
+    const href = base + '/articles/' + encodeURIComponent(articleId);
+    return ' · <a class="article-link" href="' + href +
+      '" target="_blank" rel="noopener noreferrer">打开文章 ↗</a>';
+  }
+
   function setLoading(btn, loading) {
     btn.disabled = loading;
     if (loading) {
@@ -251,13 +269,15 @@
 
       if (result.status === 'duplicate' && !force) {
         hideStatus();
-        dupMessage.textContent = result.message || '该文章已存在，是否覆盖？';
+        const link = buildArticleLink(serverUrl, result.article_id);
+        dupMessage.innerHTML = escapeHtml(result.message || '该文章已存在，是否覆盖？') + link;
         duplicatePrompt.style.display = 'block';
       } else {
-        showStatus('success', '✅ ' + (result.message || '发送成功'));
+        const link = buildArticleLink(serverUrl, result.article_id);
+        showStatus('success', '✅ ' + escapeHtml(result.message || '发送成功') + link);
       }
     } catch (err) {
-      showStatus('error', '❌ ' + err.message);
+      showStatus('error', '❌ ' + escapeHtml(err.message));
     } finally {
       setLoading(captureBtn, false);
     }
@@ -276,9 +296,10 @@
         lastCapture.url, lastCapture.title, lastCapture.html,
         lastCapture.serverUrl, lastCapture.token, true
       );
-      showStatus('success', '✅ ' + (result.message || '覆盖成功'));
+      const link = buildArticleLink(lastCapture.serverUrl, result.article_id);
+      showStatus('success', '✅ ' + escapeHtml(result.message || '覆盖成功') + link);
     } catch (err) {
-      showStatus('error', '❌ ' + err.message);
+      showStatus('error', '❌ ' + escapeHtml(err.message));
     } finally {
       setLoading(overwriteBtn, false);
     }
