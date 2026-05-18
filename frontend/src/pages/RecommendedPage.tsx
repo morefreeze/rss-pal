@@ -10,6 +10,7 @@ export default function RecommendedPage() {
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [linkSetRecs, setLinkSetRecs] = useState<Article[]>([])
+  const [showHelp, setShowHelp] = useState(false)
 
   useEffect(() => {
     getLinkSetRecommendations(7, 20)
@@ -53,7 +54,39 @@ export default function RecommendedPage() {
     <div>
       {linkSetRecs.length > 0 && (
         <section className="mb-8">
-          <h2 className="text-lg font-semibold mb-3">本周精选 link_set 链接</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <h2 className="text-lg font-semibold" style={{ margin: 0 }}>本周精选 link_set 链接</h2>
+            <button
+              onClick={() => setShowHelp((v) => !v)}
+              aria-label="说明"
+              aria-expanded={showHelp}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 16,
+                padding: 0,
+                lineHeight: 1,
+              }}
+            >
+              ℹ️
+            </button>
+          </div>
+          {showHelp && (
+            <div className="card text-sm" style={{ background: 'var(--surface-hover)', marginBottom: 12 }}>
+              <p style={{ marginTop: 0 }}>
+                这里的文章来自你订阅源里"内含链接合集"的文章(如 Hacker Newsletter)。系统会自动展开链接、抓取正文,按以下规则推荐:
+              </p>
+              <ol style={{ paddingLeft: 20, marginBottom: 8 }}>
+                <li>优先按你的偏好(过去 30 天 like / save / 收听时长加权)排序</li>
+                <li>没有偏好数据时按编辑加权 + 发布时间排序,保证质量</li>
+                <li>已读完的文章默认不出现,但当合格文章不足时会作为兜底补齐(会标注"兜底推荐")</li>
+              </ol>
+              <p className="text-muted" style={{ marginBottom: 0 }}>
+                如果某期 newsletter 没出现,可能是该订阅源还未被系统识别为"含链接合集",或该期所有文章都已读完。
+              </p>
+            </div>
+          )}
           <div className="space-y-3">
             {linkSetRecs.map((a) => (
               <div
@@ -69,6 +102,26 @@ export default function RecommendedPage() {
                 {a.feed_title && (
                   <div className="text-muted text-sm mt-1" style={{ color: 'var(--accent)' }}>{a.feed_title}</div>
                 )}
+                {a.parent_title && a.parent_article_id != null && (
+                  <div className="text-muted text-sm mt-1">
+                    来自《
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigate(`/articles/${a.parent_article_id}`)
+                      }}
+                      style={{ color: 'var(--accent)', cursor: 'pointer' }}
+                    >
+                      {a.parent_title}
+                    </span>
+                    》
+                    {a.is_fallback && (
+                      <span className="text-muted" style={{ marginLeft: 8, fontSize: 11 }}>
+                        · 兜底推荐(可能已读过)
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -76,7 +129,7 @@ export default function RecommendedPage() {
       )}
       <h2 style={{ marginBottom: 16 }}>推荐订阅</h2>
       <p className="text-muted text-sm" style={{ marginBottom: 16 }}>
-        以下是从 bestblogs.dev 精选的高质量来源。点击「订阅」即可添加到你的订阅列表。
+        以下是预置的优质订阅源,按内容方向分类。点击「订阅」加入你的订阅列表。
       </p>
       {CATEGORY_ORDER.filter(c => grouped[c]?.length).map(cat => (
         <section key={cat} style={{ marginBottom: 24 }}>
