@@ -119,6 +119,8 @@ export interface Article {
   links_extendable?: boolean | null  // tri-state: null = unchecked, true/false = checked
   link_set_suggested?: boolean | null  // worker thinks article is a link list, awaiting user confirmation
   parent_article_id?: number | null
+  parent_title?: string  // populated only by GET /articles/recommended/link_set
+  is_fallback?: boolean  // true = surfaced by quality-fallback (may be already-read)
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
   prerank_score?: number | null
   editor_note?: string
