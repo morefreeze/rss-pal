@@ -2,6 +2,7 @@ import { memo, useContext, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkCjkFriendly from 'remark-cjk-friendly'
 import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
@@ -82,7 +83,7 @@ function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) 
 // otherwise ReactMarkdown sees a fresh `components` object each render,
 // rebuilds the entire AST + React tree, and lazy <img> elements get
 // remounted (cancelling and re-issuing image fetches mid-load).
-const REMARK_PLUGINS = [remarkGfm, remarkMath]
+const REMARK_PLUGINS = [remarkGfm, remarkCjkFriendly, remarkMath]
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
 const COMPONENTS: Components = {
   img: ({ src, alt, ...rest }) => {
