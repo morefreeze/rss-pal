@@ -595,33 +595,48 @@ export const createBackupNow = () =>
 export const restoreBackup = (name: string) =>
   api.post<{ ok: boolean; stats: BackupRestoreStats }>('/admin/backups/restore', { name }).then(res => res.data)
 
-// restoreBackupUpload restores from a user-picked local file pair (metadata
-// .json + optional .saved.json.gz sibling). The server writes them to a temp
-// dir, restores, then deletes — backup.Dir on the host is not touched.
-export const restoreBackupUpload = (metadata: File, saved?: File | null) => {
+// RestoreUploadInput is one of:
+//   - { archive: File }                       — single .tar.gz / .tgz bundle
+//   - { metadata: File; saved?: File | null } — raw .json (+ optional sibling)
+export type RestoreUploadInput =
+  | { archive: File }
+  | { metadata: File; saved?: File | null }
+
+// restoreBackupUpload sends a user-picked local backup to the server. The
+// server writes the bytes to a temp dir, restores, then deletes — backup.Dir
+// on the host is not touched.
+export const restoreBackupUpload = (input: RestoreUploadInput) => {
   const form = new FormData()
-  form.append('metadata', metadata)
-  if (saved) form.append('saved', saved)
+  if ('archive' in input) {
+    form.append('archive', input.archive)
+  } else {
+    form.append('metadata', input.metadata)
+    if (input.saved) form.append('saved', input.saved)
+  }
   return api
     .post<{ ok: boolean; stats: BackupRestoreStats }>('/admin/backups/restore-upload', form)
     .then(res => res.data)
 }
 
-// downloadBackupFile fetches one backup file as a Blob via the auth'd axios
-// client (needed because <a download> can't carry Bearer headers) and triggers
-// a browser save with the original filename.
-export const downloadBackupFile = async (name: string): Promise<void> => {
-  const res = await api.get<Blob>(`/admin/backups/download/${encodeURIComponent(name)}`, {
+// downloadBackup fetches the backup as a Blob via the auth'd axios client
+// (plain <a download> can't carry Bearer headers) and triggers a browser
+// save. When the backup has a saved-archive sibling, the server bundles both
+// files into one .tar.gz; otherwise the plain .json is returned. The output
+// filename follows server-set Content-Disposition when present.
+export const downloadBackup = async (metadataName: string, hasSaved: boolean): Promise<void> => {
+  const res = await api.get<Blob>(`/admin/backups/download/${encodeURIComponent(metadataName)}`, {
     responseType: 'blob',
   })
+  const dispo = res.headers['content-disposition'] || ''
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(dispo)
+  const filename = m?.[1] ? decodeURIComponent(m[1]) : (hasSaved ? metadataName.replace(/\.json$/, '.tar.gz') : metadataName)
   const url = URL.createObjectURL(res.data)
   const a = document.createElement('a')
   a.href = url
-  a.download = name
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  // Revoke after the click handler has a chance to start the download.
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 

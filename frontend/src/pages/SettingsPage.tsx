@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, restoreBackupUpload, downloadBackupFile, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, restoreBackupUpload, downloadBackup, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useTheme, type Theme } from '../util/theme'
@@ -183,18 +183,13 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  // Download: pull a backup file pair to the user's disk via the auth'd
-  // client. has_saved is set by the server so we only attempt the sibling
-  // when it exists; legacy backups without one still work.
+  // Download: paired backups come back as one .tar.gz, lone metadata as a
+  // raw .json — either way the user gets exactly one file per click.
   const handleDownload = async (f: BackupFile) => {
     setBusy(true)
     try {
-      await downloadBackupFile(f.name)
-      if (f.has_saved) {
-        const sibling = f.name.replace(/\.json$/, '.saved.json.gz')
-        await downloadBackupFile(sibling)
-      }
-      toast.success(f.has_saved ? '已下载元数据和网摘归档' : '已下载元数据（无网摘归档）')
+      await downloadBackup(f.name, f.has_saved)
+      toast.success(f.has_saved ? '已下载 .tar.gz（含网摘）' : '已下载 .json（无网摘归档）')
     } catch (err: any) {
       const msg = err?.response?.data?.error || err?.message || '未知错误'
       toast.error(`下载失败：${msg}`)
@@ -203,20 +198,25 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  // Upload-restore: user picks one .json (metadata) and optionally its
-  // .saved.json.gz sibling. Split files by extension so order in the file
-  // picker doesn't matter; reject anything unrecognised so a wrong-folder
-  // selection fails fast on the client instead of as a server 400.
+  // Upload-restore: user picks either
+  //   - a single .tar.gz / .tgz bundle (what 下载 produces for paired
+  //     backups), or
+  //   - one .json (metadata) and optionally its .saved.json.gz sibling.
+  // Files are classified by extension so picker order doesn't matter.
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
   const handleUploadRestore = async (files: FileList | null) => {
     if (!files || files.length === 0) return
+    let archive: File | null = null
     let metadata: File | null = null
     let saved: File | null = null
     const rejected: string[] = []
     for (const f of Array.from(files)) {
       const lower = f.name.toLowerCase()
-      if (lower.endsWith('.saved.json.gz') || lower.endsWith('.json.gz')) {
+      if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+        if (archive) rejected.push(f.name)
+        else archive = f
+      } else if (lower.endsWith('.saved.json.gz') || lower.endsWith('.json.gz')) {
         if (saved) rejected.push(f.name)
         else saved = f
       } else if (lower.endsWith('.json')) {
@@ -226,20 +226,26 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
         rejected.push(f.name)
       }
     }
-    if (!metadata) {
-      toast.error('请选择一个 .json 备份元数据文件')
-      return
-    }
     if (rejected.length > 0) {
-      toast.error(`忽略未识别的文件：${rejected.join(', ')}`)
+      toast.error(`忽略未识别或重复的文件：${rejected.join(', ')}`)
       return
     }
-    const sizeKB = (metadata.size + (saved?.size ?? 0)) / 1024
+    if (archive && (metadata || saved)) {
+      toast.error('请选择 .tar.gz 单文件，或选择 .json (+ 可选 .saved.json.gz)，二者不可混用')
+      return
+    }
+    if (!archive && !metadata) {
+      toast.error('请选择 .tar.gz、或 .json 备份元数据文件')
+      return
+    }
+    const size = (archive?.size ?? 0) + (metadata?.size ?? 0) + (saved?.size ?? 0)
     const ok = window.confirm(
       `确定恢复以下文件吗？\n\n` +
-      `元数据：${metadata.name}\n` +
-      (saved ? `网摘归档：${saved.name}\n` : `（未选择 .saved.json.gz；将只恢复订阅/标签/兴趣，跳过网摘）\n`) +
-      `共 ${sizeKB.toFixed(1)} KB\n\n` +
+      (archive
+        ? `归档：${archive.name}\n`
+        : `元数据：${metadata!.name}\n` +
+          (saved ? `网摘归档：${saved.name}\n` : `（未选择 .saved.json.gz；将只恢复订阅/标签/兴趣，跳过网摘）\n`)) +
+      `共 ${(size / 1024).toFixed(1)} KB\n\n` +
       `合并规则同左侧已有备份恢复。`
     )
     if (!ok) {
@@ -248,7 +254,9 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
     }
     setBusy(true)
     try {
-      const result = await restoreBackupUpload(metadata, saved)
+      const result = archive
+        ? await restoreBackupUpload({ archive })
+        : await restoreBackupUpload({ metadata: metadata!, saved })
       const s = result.stats
       toast.success(`已恢复：${s.feeds} feeds / ${s.user_tags} tags / ${s.interest_categories} cats / ${s.interest_topics} topics`)
       if (s.skipped_article_link > 0) {
@@ -287,7 +295,7 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
       <input
         ref={uploadInputRef}
         type="file"
-        accept=".json,.gz"
+        accept=".json,.gz,.tgz,.tar.gz"
         multiple
         style={{ display: 'none' }}
         onChange={e => handleUploadRestore(e.target.files)}
@@ -297,7 +305,7 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
         文件存在主机 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>./backups/</code>
         （容器内 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>{dir || '/backups'}</code>），
         每次 feed 增删后 5 分钟自动备份，每日定时一次；保留策略 7 天 / 周 / 月分级。
-        「上传恢复」可从本地选择一份 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.json</code> 元数据（可同时选配套的 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.saved.json.gz</code>）。
+        「下载」单文件:无网摘 = <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.json</code>,有网摘 = <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.tar.gz</code>。「上传恢复」接收单个 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.tar.gz</code>,或裸的 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.json</code>(+ 可选 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.saved.json.gz</code>)。
       </p>
       {loading ? (
         <div className="text-muted text-sm">加载中...</div>
@@ -323,9 +331,9 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
                   style={{ fontSize: 12, padding: '2px 10px' }}
                   onClick={() => handleDownload(f)}
                   disabled={busy}
-                  title={f.has_saved ? '下载元数据 + 网摘归档' : '下载元数据（此备份无网摘归档）'}
+                  title={f.has_saved ? '下载 .tar.gz（含网摘归档）' : '下载 .json'}
                 >
-                  下载{f.has_saved ? ' ⇣2' : ''}
+                  下载
                 </button>
                 <button
                   className="secondary"
