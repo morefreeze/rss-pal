@@ -164,6 +164,17 @@ body {
   border: 1px solid #ffe58f;
 }
 
+.article-link {
+  color: inherit;
+  text-decoration: underline;
+  font-weight: 500;
+  margin-left: 2px;
+}
+
+.article-link:hover {
+  opacity: 0.8;
+}
+
 .duplicate-actions {
   margin-top: 8px;
   display: flex;
