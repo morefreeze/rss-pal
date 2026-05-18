@@ -44,6 +44,9 @@ type Article struct {
 	MediaURL             string     `json:"media_url,omitempty" db:"media_url"`
 	MediaType            string     `json:"media_type,omitempty" db:"media_type"`
 	MediaDurationSeconds int        `json:"media_duration_seconds,omitempty" db:"media_duration_seconds"`
+	// Transient fields populated by GetLinkSetRecommendations only — not stored in DB.
+	ParentTitle string `json:"parent_title,omitempty"`
+	IsFallback  bool   `json:"is_fallback,omitempty"`
 }
 
 // TopicGroup is one bucket in the /articles 分组 view.
