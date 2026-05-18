@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, restoreBackupUpload, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useTheme, type Theme } from '../util/theme'
@@ -183,21 +183,101 @@ function BackupSection({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  // Upload-restore: user picks one .json (metadata) and optionally its
+  // .saved.json.gz sibling. Split files by extension so order in the file
+  // picker doesn't matter; reject anything unrecognised so a wrong-folder
+  // selection fails fast on the client instead of as a server 400.
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+
+  const handleUploadRestore = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    let metadata: File | null = null
+    let saved: File | null = null
+    const rejected: string[] = []
+    for (const f of Array.from(files)) {
+      const lower = f.name.toLowerCase()
+      if (lower.endsWith('.saved.json.gz') || lower.endsWith('.json.gz')) {
+        if (saved) rejected.push(f.name)
+        else saved = f
+      } else if (lower.endsWith('.json')) {
+        if (metadata) rejected.push(f.name)
+        else metadata = f
+      } else {
+        rejected.push(f.name)
+      }
+    }
+    if (!metadata) {
+      toast.error('请选择一个 .json 备份元数据文件')
+      return
+    }
+    if (rejected.length > 0) {
+      toast.error(`忽略未识别的文件：${rejected.join(', ')}`)
+      return
+    }
+    const sizeKB = (metadata.size + (saved?.size ?? 0)) / 1024
+    const ok = window.confirm(
+      `确定恢复以下文件吗？\n\n` +
+      `元数据：${metadata.name}\n` +
+      (saved ? `网摘归档：${saved.name}\n` : `（未选择 .saved.json.gz；将只恢复订阅/标签/兴趣，跳过网摘）\n`) +
+      `共 ${sizeKB.toFixed(1)} KB\n\n` +
+      `合并规则同左侧已有备份恢复。`
+    )
+    if (!ok) {
+      if (uploadInputRef.current) uploadInputRef.current.value = ''
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await restoreBackupUpload(metadata, saved)
+      const s = result.stats
+      toast.success(`已恢复：${s.feeds} feeds / ${s.user_tags} tags / ${s.interest_categories} cats / ${s.interest_topics} topics`)
+      if (s.skipped_article_link > 0) {
+        toast.info(`${s.skipped_article_link} 条 article-linked 记录已跳过（无法重新关联）`)
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || '未知错误'
+      toast.error(`上传恢复失败：${msg}`)
+    } finally {
+      setBusy(false)
+      if (uploadInputRef.current) uploadInputRef.current.value = ''
+    }
+  }
+
   if (!isAdmin) return null
 
   return (
     <div className="card mb-2">
       <div className="flex-between mb-1">
         <h3>备份与恢复</h3>
-        <button onClick={handleBackupNow} disabled={busy} style={{ fontSize: 13 }}>
-          {busy ? '...' : '立即备份'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="secondary"
+            onClick={() => uploadInputRef.current?.click()}
+            disabled={busy}
+            style={{ fontSize: 13 }}
+            title="从本地选择备份文件恢复（不写入服务器 backups 目录）"
+          >
+            上传恢复
+          </button>
+          <button onClick={handleBackupNow} disabled={busy} style={{ fontSize: 13 }}>
+            {busy ? '...' : '立即备份'}
+          </button>
+        </div>
       </div>
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept=".json,.gz"
+        multiple
+        style={{ display: 'none' }}
+        onChange={e => handleUploadRestore(e.target.files)}
+      />
       <p className="text-muted text-sm mb-2">
         快照内容：订阅源、标签、兴趣分类与主题、用户偏好。文章本体不在备份内（worker 会重新抓）。
         文件存在主机 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>./backups/</code>
         （容器内 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>{dir || '/backups'}</code>），
         每次 feed 增删后 5 分钟自动备份，每日定时一次；保留策略 7 天 / 周 / 月分级。
+        「上传恢复」可从本地选择一份 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.json</code> 元数据（可同时选配套的 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>.saved.json.gz</code>）。
       </p>
       {loading ? (
         <div className="text-muted text-sm">加载中...</div>
