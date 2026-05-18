@@ -1,14 +1,25 @@
 (function () {
   'use strict';
-  if (location.pathname !== '/extension-config') return;
+  console.log('[RSS Pal] config-receiver loaded on', location.href);
+  if (location.pathname !== '/extension-config') {
+    console.log('[RSS Pal] path mismatch, skipping');
+    return;
+  }
   var raw = location.hash.replace(/^#/, '');
-  if (!raw) return;
+  if (!raw) {
+    console.log('[RSS Pal] no hash, skipping');
+    return;
+  }
   var params = new URLSearchParams(raw);
   var token = params.get('token');
   var serverUrl = params.get('serverUrl');
-  if (!token || !serverUrl) return;
+  if (!token || !serverUrl) {
+    console.log('[RSS Pal] missing token or serverUrl in hash');
+    return;
+  }
 
   chrome.storage.sync.set({ serverUrl: serverUrl, token: token }, function () {
+    console.log('[RSS Pal] config saved, notifying page');
     function notify() {
       window.postMessage({ type: 'RSS_PAL_EXTENSION_CONFIGURED' }, '*');
     }

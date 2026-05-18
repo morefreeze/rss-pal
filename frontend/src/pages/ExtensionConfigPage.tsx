@@ -14,7 +14,8 @@ export default function ExtensionConfigPage() {
     }
 
     const onMsg = (e: MessageEvent) => {
-      if (e.source !== window) return
+      // Content scripts post from an isolated world — don't require e.source
+      // identity. Just trust the type marker.
       if (e.data && e.data.type === 'RSS_PAL_EXTENSION_CONFIGURED') {
         setStatus('ok')
       }
