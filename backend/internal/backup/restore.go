@@ -202,9 +202,13 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 			stats.SkippedArticleLink++
 			continue
 		}
+		// Explicit casts: the bare SELECT has no column context to anchor
+		// parameter types, and $3 (signal_type) also appears in the WHERE as
+		// varchar — Postgres rejects the conflicting inferences ("inconsistent
+		// types deduced for parameter $3") unless we pin them here.
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO user_preferences (user_id, article_id, signal_type, signal_value, created_at)
-			SELECT $1, $2, $3, $4, $5
+			SELECT $1::int, $2::int, $3::varchar, $4::float8, $5::timestamptz
 			WHERE NOT EXISTS (
 				SELECT 1 FROM user_preferences
 				WHERE user_id = $1 AND article_id = $2 AND signal_type = $3
