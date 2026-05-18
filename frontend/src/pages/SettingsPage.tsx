@@ -362,6 +362,15 @@ function ExtensionSection() {
     })
   }
 
+  const handleOpenChromeExtensions = () => {
+    const url = 'chrome://extensions/'
+    navigator.clipboard.writeText(url).then(
+      () => toast.success('已复制 chrome://extensions/，在新标签地址栏粘贴 (⌘V) 回车即可'),
+      () => toast.error('复制失败，请手动复制 chrome://extensions/'),
+    )
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
   return (
     <div className="card mb-2">
       <h3 className="mb-1">🧩 Chrome 扩展</h3>
@@ -403,13 +412,16 @@ function ExtensionSection() {
                 </a> 并解压
               </li>
               <li>
-                打开 <a
-                  href="chrome://extensions/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3, color: 'var(--accent)', textDecoration: 'none', fontFamily: 'monospace' }}
-                >chrome://extensions/</a>
-                <span className="text-muted" style={{ marginLeft: 6, fontSize: 12 }}>（如点击无响应，请手动复制到地址栏）</span>
+                打开 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>chrome://extensions/</code>
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ marginLeft: 8, fontSize: 11, padding: '2px 8px' }}
+                  onClick={handleOpenChromeExtensions}
+                  title="复制 URL 并打开新标签，在新标签粘贴回车即可"
+                >
+                  复制并打开新标签
+                </button>
               </li>
               <li>打开右上角「开发者模式」</li>
               <li>点击「加载已解压的扩展程序」，选择解压后的 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3, fontSize: 12 }}>extension/</code> 目录</li>
