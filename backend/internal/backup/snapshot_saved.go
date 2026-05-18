@@ -150,6 +150,14 @@ func savedSiblingPath(metadataPath string) string {
 	return metadataPath + savedFileSuffix
 }
 
+// savedSiblingName is the basename-level equivalent of savedSiblingPath.
+func savedSiblingName(metadataName string) string {
+	if strings.HasSuffix(metadataName, fileNameSuffix) {
+		return strings.TrimSuffix(metadataName, fileNameSuffix) + savedFileSuffix
+	}
+	return metadataName + savedFileSuffix
+}
+
 // buildSaved runs inside the same read-only transaction as Build. It returns
 // the SavedSnapshot for the current DB state; never returns nil for an empty
 // DB (returns an empty-slice snapshot instead so the file always exists in a
