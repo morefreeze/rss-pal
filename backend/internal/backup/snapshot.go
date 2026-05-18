@@ -4,10 +4,13 @@
 package backup
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,10 +26,20 @@ const SnapshotVersion = 1
 
 // fileNameLayout is the time.Parse layout for filenames. Seconds are included
 // so two backups in the same minute (e.g. rapid add/delete) don't collide.
+//
+// Two canonical on-disk shapes exist:
+//
+//	rss-pal-backup-<ts>.tar.gz   — single bundle (current format)
+//	rss-pal-backup-<ts>.json     — legacy metadata, optionally paired with
+//	                               .saved.json.gz sibling
+//
+// Both are listable / restorable. New backups are always written as .tar.gz;
+// legacy pairs survive until migrated by cmd/backup_migrate.
 const (
-	fileNamePrefix = "rss-pal-backup-"
-	fileNameSuffix = ".json"
-	fileTimeLayout = "20060102-150405"
+	fileNamePrefix    = "rss-pal-backup-"
+	fileNameSuffix    = ".json"
+	tarballFileSuffix = ".tar.gz"
+	fileTimeLayout    = "20060102-150405"
 )
 
 // ArticleUserTagRow is the on-disk shape of the article_user_tags join table.
@@ -55,8 +68,9 @@ type Snapshot struct {
 
 // FileInfo is the metadata of a backup file on disk, exposed by List.
 //
-// HasSaved tells the UI whether the .saved.json.gz sibling exists, so
-// the download flow knows to fetch it too.
+// HasSaved tells the UI whether saved-article data is included:
+//   - .tar.gz : true if the archive contains a *.saved.json.gz member
+//   - .json   : true if a paired .saved.json.gz sibling sits next to it
 type FileInfo struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
@@ -264,29 +278,88 @@ func WriteFile(s *Snapshot, dir string) (string, error) {
 	return path, nil
 }
 
-// WriteFiles writes the metadata snapshot (①) and the saved-archive sibling
-// (②) for one timestamp. Order is sibling-first so that ① — the file
-// List() enumerates — is the commit pointer: if we crash between writes,
-// an orphan ② is invisible to List and gets swept by the next Prune.
-//
-// Returns the absolute metadata path and the saved sibling path.
-func WriteFiles(s *Snapshot, ss *SavedSnapshot, dir string) (metadataPath, savedPath string, err error) {
+// WriteFiles writes a single self-contained .tar.gz that bundles the
+// metadata snapshot and the saved-archive sibling for one timestamp. Atomic
+// via .tmp + rename — a crash mid-write leaves no half-written file visible
+// to List. Returns the absolute archive path. The savedPath return value is
+// the inner member name (preserved for caller back-compat with the prior
+// pair-writing signature) and does not exist on disk as a separate file.
+func WriteFiles(s *Snapshot, ss *SavedSnapshot, dir string) (archivePath, savedMemberName string, err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", fmt.Errorf("mkdir %s: %w", dir, err)
 	}
-	name := fileNamePrefix + s.CreatedAt.UTC().Format(fileTimeLayout) + fileNameSuffix
-	metadataPath = filepath.Join(dir, name)
-	savedPath = savedSiblingPath(metadataPath)
+	stamp := s.CreatedAt.UTC().Format(fileTimeLayout)
+	archivePath = filepath.Join(dir, fileNamePrefix+stamp+tarballFileSuffix)
+	metaMemberName := fileNamePrefix + stamp + fileNameSuffix
+	savedMemberName = fileNamePrefix + stamp + savedFileSuffix
 
-	if err := WriteSavedFile(ss, metadataPath); err != nil {
-		return "", "", fmt.Errorf("write saved sibling: %w", err)
+	metaBytes, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return "", "", fmt.Errorf("marshal metadata: %w", err)
+	}
+	savedBytes, err := encodeSavedGzip(ss)
+	if err != nil {
+		return "", "", fmt.Errorf("encode saved member: %w", err)
 	}
 
-	if _, err := WriteFile(s, dir); err != nil {
-		os.Remove(savedPath)
-		return "", "", fmt.Errorf("write metadata: %w", err)
+	tmp := archivePath + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return "", "", fmt.Errorf("create %s: %w", tmp, err)
 	}
-	return metadataPath, savedPath, nil
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+
+	if err := writeTarMember(tw, metaMemberName, metaBytes, s.CreatedAt); err != nil {
+		tw.Close()
+		gz.Close()
+		f.Close()
+		os.Remove(tmp)
+		return "", "", err
+	}
+	if err := writeTarMember(tw, savedMemberName, savedBytes, s.CreatedAt); err != nil {
+		tw.Close()
+		gz.Close()
+		f.Close()
+		os.Remove(tmp)
+		return "", "", err
+	}
+	if err := tw.Close(); err != nil {
+		gz.Close()
+		f.Close()
+		os.Remove(tmp)
+		return "", "", fmt.Errorf("close tar: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return "", "", fmt.Errorf("close gzip: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return "", "", fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, archivePath); err != nil {
+		os.Remove(tmp)
+		return "", "", fmt.Errorf("rename %s -> %s: %w", tmp, archivePath, err)
+	}
+	return archivePath, savedMemberName, nil
+}
+
+func writeTarMember(tw *tar.Writer, name string, data []byte, modTime time.Time) error {
+	hdr := &tar.Header{
+		Name:    name,
+		Mode:    0o644,
+		Size:    int64(len(data)),
+		ModTime: modTime,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return fmt.Errorf("tar header %s: %w", name, err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("tar body %s: %w", name, err)
+	}
+	return nil
 }
 
 // Load reads and parses a snapshot file from disk.
@@ -303,7 +376,9 @@ func Load(path string) (*Snapshot, error) {
 }
 
 // List returns all backup files in dir, newest first. Files whose names don't
-// match the expected layout are silently skipped — we only own files we wrote.
+// match the expected layout (.tar.gz or legacy .json) are silently skipped —
+// we only own files we wrote. When two entries share a timestamp the .tar.gz
+// wins, so a half-completed migration (legacy pair + new tarball) lists once.
 func List(dir string) ([]FileInfo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -313,22 +388,19 @@ func List(dir string) ([]FileInfo, error) {
 		return nil, err
 	}
 
-	// Build a set of present sibling names so we can flag HasSaved without a
-	// second stat per file.
 	siblings := make(map[string]struct{})
 	for _, e := range entries {
-		n := e.Name()
-		if strings.HasSuffix(n, savedFileSuffix) {
-			siblings[n] = struct{}{}
+		if strings.HasSuffix(e.Name(), savedFileSuffix) {
+			siblings[e.Name()] = struct{}{}
 		}
 	}
 
-	var out []FileInfo
+	byStamp := make(map[time.Time]FileInfo)
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
-		t, ok := parseFilename(e.Name())
+		t, isTar, ok := parseFilenameAny(e.Name())
 		if !ok {
 			continue
 		}
@@ -336,23 +408,158 @@ func List(dir string) ([]FileInfo, error) {
 		if err != nil {
 			continue
 		}
-		_, hasSaved := siblings[savedSiblingName(e.Name())]
-		out = append(out, FileInfo{Name: e.Name(), CreatedAt: t, Size: info.Size(), HasSaved: hasSaved})
+		fi := FileInfo{Name: e.Name(), CreatedAt: t, Size: info.Size()}
+		if isTar {
+			fi.HasSaved = tarballHasSaved(filepath.Join(dir, e.Name()))
+		} else {
+			_, fi.HasSaved = siblings[savedSiblingName(e.Name())]
+		}
+		// .tar.gz wins on collision with the same timestamp.
+		if existing, dup := byStamp[t]; dup && !isTar && strings.HasSuffix(existing.Name, tarballFileSuffix) {
+			continue
+		}
+		byStamp[t] = fi
+	}
+
+	out := make([]FileInfo, 0, len(byStamp))
+	for _, fi := range byStamp {
+		out = append(out, fi)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
 
-// parseFilename extracts the timestamp embedded in a backup filename, or
-// reports !ok if the name isn't one of ours.
+// parseFilename extracts the timestamp embedded in a legacy .json backup
+// filename. Kept for the orphan-sibling sweep and existing tests; new code
+// should use parseFilenameAny which also accepts .tar.gz.
 func parseFilename(name string) (time.Time, bool) {
-	if !strings.HasPrefix(name, fileNamePrefix) || !strings.HasSuffix(name, fileNameSuffix) {
-		return time.Time{}, false
+	t, _, ok := parseFilenameAny(name)
+	return t, ok
+}
+
+// parseFilenameAny accepts either the .tar.gz canonical format or the legacy
+// .json metadata. Returns the parsed timestamp and a flag for which suffix
+// matched.
+func parseFilenameAny(name string) (ts time.Time, isTarball bool, ok bool) {
+	if !strings.HasPrefix(name, fileNamePrefix) {
+		return time.Time{}, false, false
 	}
-	core := strings.TrimSuffix(strings.TrimPrefix(name, fileNamePrefix), fileNameSuffix)
+	core := strings.TrimPrefix(name, fileNamePrefix)
+	switch {
+	case strings.HasSuffix(core, tarballFileSuffix):
+		core = strings.TrimSuffix(core, tarballFileSuffix)
+		isTarball = true
+	case strings.HasSuffix(core, fileNameSuffix):
+		core = strings.TrimSuffix(core, fileNameSuffix)
+	default:
+		return time.Time{}, false, false
+	}
 	t, err := time.ParseInLocation(fileTimeLayout, core, time.UTC)
 	if err != nil {
-		return time.Time{}, false
+		return time.Time{}, false, false
 	}
-	return t, true
+	return t, isTarball, true
+}
+
+// tarballHasSaved peeks the tarball for a .saved.json.gz member. Returns
+// false on any I/O or format error — List doesn't surface those, the listing
+// just shows HasSaved=false and the user finds out at restore time.
+func tarballHasSaved(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return false
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			return false
+		}
+		if strings.HasSuffix(strings.ToLower(hdr.Name), savedFileSuffix) {
+			return true
+		}
+	}
+}
+
+// ExtractTarball opens a backup .tar.gz and writes the .json metadata member
+// to metaDst plus, if present, the .saved.json.gz member to savedDst. Returns
+// (hasSaved, error). Members with paths containing `..` or starting with `/`
+// are rejected (tar-slip), and the archive must contain a .json member
+// otherwise it's malformed and an error is returned — callers should NOT
+// silently fall back to a legacy-restore path on this error.
+func ExtractTarball(path, metaDst, savedDst string) (hasSaved bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	return extractTarballStream(f, metaDst, savedDst)
+}
+
+// ExtractTarballStream is the streaming variant of ExtractTarball — useful
+// when the source is an uploaded multipart file that hasn't been written to
+// disk yet. Same validation rules.
+func ExtractTarballStream(src io.Reader, metaDst, savedDst string) (hasSaved bool, err error) {
+	return extractTarballStream(src, metaDst, savedDst)
+}
+
+func extractTarballStream(src io.Reader, metaDst, savedDst string) (hasSaved bool, err error) {
+	gz, err := gzip.NewReader(src)
+	if err != nil {
+		return false, fmt.Errorf("gunzip: %w", err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	var foundMeta bool
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return false, fmt.Errorf("read tar: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA { //nolint:staticcheck
+			continue
+		}
+		base := filepath.Base(hdr.Name)
+		if base == "" || base == "." || strings.Contains(hdr.Name, "..") || strings.HasPrefix(hdr.Name, "/") {
+			return false, fmt.Errorf("rejected tar entry: %q", hdr.Name)
+		}
+		lower := strings.ToLower(base)
+		switch {
+		case strings.HasSuffix(lower, savedFileSuffix):
+			if err := copyToFile(tr, savedDst); err != nil {
+				return false, fmt.Errorf("write saved member: %w", err)
+			}
+			hasSaved = true
+		case strings.HasSuffix(lower, fileNameSuffix):
+			if err := copyToFile(tr, metaDst); err != nil {
+				return false, fmt.Errorf("write metadata member: %w", err)
+			}
+			foundMeta = true
+		}
+	}
+	if !foundMeta {
+		return false, fmt.Errorf("archive contains no .json metadata member")
+	}
+	return hasSaved, nil
+}
+
+func copyToFile(src io.Reader, dst string) error {
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, src); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }

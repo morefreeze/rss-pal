@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,7 +140,7 @@ func TestSavedSiblingPath(t *testing.T) {
 	}
 }
 
-func TestWriteFilesWritesPair(t *testing.T) {
+func TestWriteFilesWritesTarball(t *testing.T) {
 	dir := t.TempDir()
 	owner := 7
 	created := time.Date(2026, 5, 14, 9, 30, 15, 0, time.UTC)
@@ -164,27 +165,39 @@ func TestWriteFilesWritesPair(t *testing.T) {
 		}},
 	}
 
-	metaPath, savedPath, err := WriteFiles(s, ss, dir)
+	archivePath, savedMember, err := WriteFiles(s, ss, dir)
 	if err != nil {
 		t.Fatalf("WriteFiles: %v", err)
 	}
-
-	if _, err := os.Stat(metaPath); err != nil {
-		t.Errorf("metadata file missing: %v", err)
+	if !strings.HasSuffix(archivePath, ".tar.gz") {
+		t.Errorf("archive should end in .tar.gz, got %s", archivePath)
 	}
-	if _, err := os.Stat(savedPath); err != nil {
-		t.Errorf("saved file missing: %v", err)
+	if !strings.HasSuffix(savedMember, ".saved.json.gz") {
+		t.Errorf("saved member should end in .saved.json.gz, got %s", savedMember)
+	}
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Errorf("archive missing: %v", err)
 	}
 
-	loadedS, err := Load(metaPath)
+	// Extract back out and round-trip via Load/LoadSaved.
+	extractDir := t.TempDir()
+	metaDst := filepath.Join(extractDir, "restore.json")
+	savedDst := filepath.Join(extractDir, "restore.saved.json.gz")
+	hasSaved, err := ExtractTarball(archivePath, metaDst, savedDst)
+	if err != nil {
+		t.Fatalf("ExtractTarball: %v", err)
+	}
+	if !hasSaved {
+		t.Errorf("archive should have a saved member")
+	}
+	loadedS, err := Load(metaDst)
 	if err != nil {
 		t.Fatalf("Load metadata: %v", err)
 	}
 	if len(loadedS.Feeds) != 1 || loadedS.Feeds[0].URL != "bookmarklet://user/7" {
 		t.Errorf("metadata feeds roundtrip mismatch: %+v", loadedS.Feeds)
 	}
-
-	loadedSS, err := LoadSaved(metaPath)
+	loadedSS, err := LoadSaved(metaDst)
 	if err != nil {
 		t.Fatalf("LoadSaved: %v", err)
 	}
