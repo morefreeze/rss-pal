@@ -403,7 +403,13 @@ function ExtensionSection() {
                 </a> 并解压
               </li>
               <li>
-                打开 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>chrome://extensions/</code>
+                打开 <a
+                  href="chrome://extensions/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3, color: 'var(--accent)', textDecoration: 'none', fontFamily: 'monospace' }}
+                >chrome://extensions/</a>
+                <span className="text-muted" style={{ marginLeft: 6, fontSize: 12 }}>（如点击无响应，请手动复制到地址栏）</span>
               </li>
               <li>打开右上角「开发者模式」</li>
               <li>点击「加载已解压的扩展程序」，选择解压后的 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3, fontSize: 12 }}>extension/</code> 目录</li>
