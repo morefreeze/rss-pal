@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"database/sql"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -76,8 +75,10 @@ func (h *AdminHandler) CreateBackupNow(c *gin.Context) {
 }
 
 // RestoreBackup loads a named backup from disk and upserts it into the DB.
-// Path traversal is guarded by enforcing that the filename has no slash and
-// resolves under the configured backup dir.
+// Accepts either the canonical .tar.gz format (extracted to a temp dir) or
+// the legacy .json (which uses the sibling-lookup path). A .tar.gz whose
+// contents cannot be parsed surfaces a 400 — there is no silent fallback,
+// per spec.
 func (h *AdminHandler) RestoreBackup(c *gin.Context) {
 	if !h.requireAdmin(c) {
 		return
@@ -93,17 +94,49 @@ func (h *AdminHandler) RestoreBackup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
 		return
 	}
+	lower := strings.ToLower(req.Name)
+	if !strings.HasSuffix(lower, ".tar.gz") && !strings.HasSuffix(lower, ".json") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name must end in .tar.gz or .json"})
+		return
+	}
 	path := filepath.Join(h.cfg.Backup.Dir, req.Name)
-	s, err := backup.Load(path)
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	// Sibling may be absent (legacy backup pre-saved-snapshot) — LoadSaved
-	// returns (nil, nil) in that case and Restore handles it.
-	ss, err := backup.LoadSaved(path)
+
+	var (
+		metaPath  = path
+		savedPath = ""
+		cleanup   = func() {}
+	)
+	if strings.HasSuffix(lower, ".tar.gz") {
+		tmpDir, err := os.MkdirTemp("", "rss-pal-restore-disk-*")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "mkdir tmp: " + err.Error()})
+			return
+		}
+		cleanup = func() { os.RemoveAll(tmpDir) }
+		defer cleanup()
+		metaPath = filepath.Join(tmpDir, "restore.json")
+		savedPath = filepath.Join(tmpDir, "restore.saved.json.gz")
+		if _, err := backup.ExtractTarball(path, metaPath, savedPath); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "extract tarball: " + err.Error()})
+			return
+		}
+	}
+
+	s, err := backup.Load(metaPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "load saved sibling: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "parse metadata: " + err.Error()})
+		return
+	}
+	// LoadSaved derives the sibling path from metaPath. For legacy .json this
+	// finds the .saved.json.gz next to it; for the tarball-extracted case the
+	// extracted savedPath is already named correctly.
+	ss, err := backup.LoadSaved(metaPath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "parse saved sibling: " + err.Error()})
 		return
 	}
 	stats, err := backup.Restore(c.Request.Context(), h.db, s, ss)
@@ -114,14 +147,13 @@ func (h *AdminHandler) RestoreBackup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "stats": stats})
 }
 
-// DownloadBackup serves one backup, picked by metadata-file name. If the
-// saved-archive sibling exists, both files are streamed as a single .tar.gz
-// so the user always gets exactly one file per click. If there is no
-// sibling, the plain .json is sent unchanged.
+// DownloadBackup serves a backup as exactly one file:
+//   - .tar.gz on disk          → served as-is
+//   - .json on disk, no sibling → served as-is (legacy)
+//   - .json on disk, has sibling (legacy pair) → bundled on the fly as .tar.gz
 //
 // Path traversal is blocked the same way as Restore — name must have no
-// slashes and no `..`. The filename must end in `.json` (the metadata
-// pointer); we resolve the sibling internally.
+// slashes and no `..`.
 func (h *AdminHandler) DownloadBackup(c *gin.Context) {
 	if !h.requireAdmin(c) {
 		return
@@ -135,10 +167,23 @@ func (h *AdminHandler) DownloadBackup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
 		return
 	}
-	if !strings.HasSuffix(strings.ToLower(name), ".json") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name must be a backup .json"})
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, ".tar.gz"):
+		path := filepath.Join(h.cfg.Backup.Dir, name)
+		if _, err := os.Stat(path); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.FileAttachment(path, name)
+		return
+	case strings.HasSuffix(lower, ".json"):
+		// fallthrough to legacy bundling below
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name must end in .tar.gz or .json"})
 		return
 	}
+
 	metaPath := filepath.Join(h.cfg.Backup.Dir, name)
 	metaInfo, err := os.Stat(metaPath)
 	if err != nil {
@@ -149,13 +194,12 @@ func (h *AdminHandler) DownloadBackup(c *gin.Context) {
 	savedPath := filepath.Join(h.cfg.Backup.Dir, savedName)
 	savedInfo, savedErr := os.Stat(savedPath)
 	if savedErr != nil {
-		// No sibling — single file, serve as-is.
+		// Solo legacy .json — single file, serve as-is.
 		c.FileAttachment(metaPath, name)
 		return
 	}
 
-	// Pair — bundle as tar.gz so the user gets one file per click and the
-	// inner structure stays restorable in one shot.
+	// Legacy pair — bundle on the fly so the user gets one file per click.
 	archiveName := strings.TrimSuffix(name, ".json") + ".tar.gz"
 	c.Header("Content-Disposition", `attachment; filename="`+archiveName+`"`)
 	c.Header("Content-Type", "application/gzip")
@@ -166,8 +210,6 @@ func (h *AdminHandler) DownloadBackup(c *gin.Context) {
 	defer tw.Close()
 
 	if err := writeTarFile(tw, metaPath, name, metaInfo); err != nil {
-		// Headers already flushed — best-effort log via response is impossible.
-		// Truncating the stream is the only signal the client gets.
 		return
 	}
 	_ = writeTarFile(tw, savedPath, savedName, savedInfo)
@@ -292,59 +334,22 @@ func (h *AdminHandler) RestoreBackupUpload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "stats": stats})
 }
 
-// extractBackupArchive walks the tar.gz, picking out the .json member
-// (required) and the .saved.json.gz member (optional). Any other member is
-// skipped; absolute paths and `..` entries are rejected (tar-slip).
 func extractBackupArchive(fh *multipart.FileHeader, metaDst, savedDst string) error {
 	src, err := fh.Open()
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-
-	gz, err := gzip.NewReader(src)
-	if err != nil {
-		return fmt.Errorf("gunzip: %w", err)
-	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
-	var foundMeta bool
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA { //nolint:staticcheck
-			continue
-		}
-		base := filepath.Base(hdr.Name)
-		if base == "" || base == "." || strings.Contains(hdr.Name, "..") || strings.HasPrefix(hdr.Name, "/") {
-			return fmt.Errorf("rejected tar entry: %q", hdr.Name)
-		}
-		lower := strings.ToLower(base)
-		switch {
-		case strings.HasSuffix(lower, ".saved.json.gz"):
-			if err := writeStream(tr, savedDst); err != nil {
-				return fmt.Errorf("write saved member: %w", err)
-			}
-		case strings.HasSuffix(lower, ".json"):
-			if err := writeStream(tr, metaDst); err != nil {
-				return fmt.Errorf("write metadata member: %w", err)
-			}
-			foundMeta = true
-		}
-	}
-	if !foundMeta {
-		return fmt.Errorf("archive contains no .json metadata member")
-	}
-	return nil
+	_, err = backup.ExtractTarballStream(src, metaDst, savedDst)
+	return err
 }
 
-func writeStream(src io.Reader, dst string) error {
+func saveUpload(fh *multipart.FileHeader, dst string) error {
+	src, err := fh.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -354,13 +359,4 @@ func writeStream(src io.Reader, dst string) error {
 		return err
 	}
 	return out.Close()
-}
-
-func saveUpload(fh *multipart.FileHeader, dst string) error {
-	src, err := fh.Open()
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	return writeStream(src, dst)
 }

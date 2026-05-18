@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"database/sql"
@@ -69,6 +70,24 @@ type SavedSnapshot struct {
 	CreatedAt       time.Time            `json:"created_at"`
 	SavedArticles   []SavedArticleRow    `json:"saved_articles"`
 	ReadingProgress []ReadingProgressRow `json:"reading_progress"`
+}
+
+// encodeSavedGzip returns ss serialized as gzipped JSON, the same byte layout
+// WriteSavedFile would produce. Used by WriteFiles to build the .saved.json.gz
+// member of the on-disk .tar.gz without a sibling file on disk.
+func encodeSavedGzip(ss *SavedSnapshot) ([]byte, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	enc := json.NewEncoder(gz)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(ss); err != nil {
+		gz.Close()
+		return nil, fmt.Errorf("encode saved snapshot: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return nil, fmt.Errorf("flush gzip: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // WriteSavedFile serializes ss as gzipped JSON to the sibling path derived
