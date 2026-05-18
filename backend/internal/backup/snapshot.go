@@ -153,7 +153,7 @@ func loadInterestCategories(ctx context.Context, tx *sql.Tx) ([]model.InterestCa
 
 func loadInterestTopics(ctx context.Context, tx *sql.Tx) ([]model.InterestTopic, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, topic, weight, last_reinforced_at
+		SELECT id, user_id, topic, weight, last_reinforced_at
 		FROM interest_topics ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -163,8 +163,13 @@ func loadInterestTopics(ctx context.Context, tx *sql.Tx) ([]model.InterestTopic,
 	var out []model.InterestTopic
 	for rows.Next() {
 		var t model.InterestTopic
-		if err := rows.Scan(&t.ID, &t.Topic, &t.Weight, &t.LastReinforcedAt); err != nil {
+		var userID sql.NullInt64
+		if err := rows.Scan(&t.ID, &userID, &t.Topic, &t.Weight, &t.LastReinforcedAt); err != nil {
 			return nil, err
+		}
+		if userID.Valid {
+			uid := int(userID.Int64)
+			t.UserID = &uid
 		}
 		out = append(out, t)
 	}

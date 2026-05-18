@@ -27,7 +27,6 @@ func TestWriteAndLoadSavedFile(t *testing.T) {
 			PublishedAt: &pub,
 			FetchedAt:   time.Date(2026, 5, 14, 10, 1, 0, 0, time.UTC),
 			WordCount:   3,
-			IsRead:      true,
 		}},
 		ReadingProgress: []ReadingProgressRow{{
 			UserID:          1,
