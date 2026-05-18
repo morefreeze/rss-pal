@@ -169,6 +169,55 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 	return articles, nil
 }
 
+// scanArticleWithParentTitle is like scanArticleNoFeedTitle but expects an
+// extra trailing column `parent_title` from a JOIN against the parent article.
+// Used by GetLinkSetRecommendations primary and fallback queries.
+func (r *ArticleRepository) scanArticleWithParentTitle(rows *sql.Rows) ([]model.Article, error) {
+	var articles []model.Article
+	for rows.Next() {
+		var a model.Article
+		var content, summaryBrief, summaryDetailed, mediaURL, mediaType, parentTitle sql.NullString
+		var mediaDuration sql.NullInt64
+		var linksExtendable sql.NullBool
+		var parentArticleID sql.NullInt64
+		var processingState, editorNote sql.NullString
+		var prerankScore sql.NullFloat64
+		err := rows.Scan(
+			&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
+			&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount,
+			&a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration,
+			&linksExtendable, &parentArticleID, &processingState,
+			&prerankScore, &editorNote, &parentTitle,
+		)
+		if err != nil {
+			return nil, err
+		}
+		a.Content = content.String
+		a.SummaryBrief = summaryBrief.String
+		a.SummaryDetailed = summaryDetailed.String
+		if linksExtendable.Valid {
+			v := linksExtendable.Bool
+			a.LinksExtendable = &v
+		}
+		if parentArticleID.Valid {
+			v := int(parentArticleID.Int64)
+			a.ParentArticleID = &v
+		}
+		a.ProcessingState = processingState.String
+		if prerankScore.Valid {
+			v := prerankScore.Float64
+			a.PrerankScore = &v
+		}
+		a.EditorNote = editorNote.String
+		a.MediaURL = mediaURL.String
+		a.MediaType = mediaType.String
+		a.MediaDurationSeconds = int(mediaDuration.Int64)
+		a.ParentTitle = parentTitle.String
+		articles = append(articles, a)
+	}
+	return articles, nil
+}
+
 // SortMode selects which timestamp orders the /articles list:
 //   - SortPublished: the smart published_at sort with a 7-day fetched-at
 //     floor that bubbles freshly-subscribed backlog briefly to the top.
