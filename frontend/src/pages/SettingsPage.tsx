@@ -445,7 +445,27 @@ function ExtensionSection() {
 
       {step === 'configure' && (
         <div>
-          <p className="text-sm mb-2">在扩展设置页填入以下信息：</p>
+          {token && (
+            <div style={{ padding: '12px', background: 'var(--accent-soft, #eff6ff)', border: '1px solid var(--accent, #3b82f6)', borderRadius: 6, marginBottom: 12 }}>
+              <p className="text-sm" style={{ margin: '0 0 8px' }}>
+                <strong>✨ 推荐：一键配置（无需复制粘贴）</strong>
+              </p>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  const url = `${apiBase}/extension-config#serverUrl=${encodeURIComponent(apiBase)}&token=${encodeURIComponent(token)}`
+                  window.open(url, '_blank', 'noopener,noreferrer')
+                }}
+              >
+                一键配置扩展
+              </button>
+              <p className="text-muted text-sm" style={{ margin: '8px 0 0' }}>
+                打开新标签后，扩展会自动填入配置（需先安装扩展）
+              </p>
+            </div>
+          )}
+          <p className="text-sm mb-2">或手动在扩展设置页填入以下信息：</p>
           <div style={{ marginBottom: 12 }}>
             <div className="flex gap-2" style={{ alignItems: 'center', marginBottom: 8 }}>
               <span className="text-sm text-bold" style={{ minWidth: 80 }}>服务器：</span>

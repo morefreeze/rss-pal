@@ -14,6 +14,7 @@ import RecommendedPage from './pages/RecommendedPage'
 import WeeklyPage from './pages/WeeklyPage'
 import FeedHealthPage from './pages/FeedHealthPage'
 import SavedPage from './pages/SavedPage'
+import ExtensionConfigPage from './pages/ExtensionConfigPage'
 import Layout from './components/Layout'
 
 interface User {
@@ -57,6 +58,7 @@ function App() {
         <Route path="/login" element={<LoginPage onLogin={setUser} />} />
         <Route path="/register" element={<RegisterPage onLogin={setUser} />} />
         <Route path="/share/:token" element={<SharePage />} />
+        <Route path="/extension-config" element={<ExtensionConfigPage />} />
         <Route element={<RequireAuth user={user} onLogout={handleLogout} />}>
           <Route index element={<Navigate to="/articles" replace />} />
           <Route path="feeds" element={<FeedListPage />} />
