@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleSort, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
@@ -142,6 +142,8 @@ function SearchArticleRow({
 
 export default function ArticleListPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const wantsClip = searchParams.get('view') === 'clip'
   const player = usePlayer()
   const [articles, setArticles] = useState<Article[]>([])
   const [recommended, setRecommended] = useState<Article[]>([])
@@ -228,6 +230,30 @@ export default function ArticleListPage() {
     window.addEventListener('refresh-unread', onRefreshUnread)
     return () => window.removeEventListener('refresh-unread', onRefreshUnread)
   }, [])
+
+  // Reconcile the ?view=clip URL param with the dropdown selection.
+  // - view=clip + non-clip selection → switch to the clip feed
+  // - view=clip + no clip feed exists → leave selection null and show hint
+  // - no view param + currently on clip feed → clear selection back to "all"
+  useEffect(() => {
+    if (feeds.length === 0) return
+    const clipFeed = feeds.find(f => f.feed_type === 'clip')
+    const selectedIsClip = feeds.find(f => f.id === selectedFeed)?.feed_type === 'clip'
+    if (wantsClip) {
+      if (clipFeed && selectedFeed !== clipFeed.id) {
+        setSelectedFeed(clipFeed.id)
+        try { sessionStorage.setItem('selectedFeed', JSON.stringify(clipFeed.id)) } catch {}
+      } else if (!clipFeed && selectedFeed !== null) {
+        setSelectedFeed(null)
+        try { sessionStorage.setItem('selectedFeed', 'null') } catch {}
+      }
+    } else {
+      if (selectedIsClip) {
+        setSelectedFeed(null)
+        try { sessionStorage.setItem('selectedFeed', 'null') } catch {}
+      }
+    }
+  }, [feeds, wantsClip])
 
   useEffect(() => {
     // ClipPage component owns its own data fetching when in clipping
@@ -516,6 +542,12 @@ export default function ArticleListPage() {
               const val = e.target.value ? Number(e.target.value) : null
               setSelectedFeed(val)
               try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
+              const pickedClip = val != null && feeds.find(f => f.id === val)?.feed_type === 'clip'
+              if (pickedClip && !wantsClip) {
+                setSearchParams({ view: 'clip' })
+              } else if (!pickedClip && wantsClip) {
+                setSearchParams({})
+              }
             }}
             className="toolbar-control"
             disabled={!!searchQuery}
@@ -594,6 +626,12 @@ export default function ArticleListPage() {
           )}
         </div>
       </div>
+
+      {wantsClip && !isClippingMode && !feeds.find(f => f.feed_type === 'clip') && (
+        <div className="text-muted" style={{ padding: 24, textAlign: 'center' }}>
+          还没有网摘 — 安装浏览器扩展或书签后再来收藏文章。
+        </div>
+      )}
 
       {isClippingMode && selectedFeed != null && (
         <ClipPage
