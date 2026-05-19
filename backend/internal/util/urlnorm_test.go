@@ -45,3 +45,27 @@ func TestNormalizeURL(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeURLKeepFragment(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"keeps simple fragment", "https://example.com/a#section", "https://example.com/a#section"},
+		{"keeps gmail hash-route", "https://mail.google.com/mail/u/0/#inbox/abc", "https://mail.google.com/mail/u/0/#inbox/abc"},
+		{"keeps hash-bang route", "https://example.com/app#!/page/1", "https://example.com/app#!/page/1"},
+		{"strips utm while keeping fragment", "https://Example.com/a?utm_source=x&id=1#sec", "https://example.com/a?id=1#sec"},
+		{"lowercases host but keeps fragment", "https://EXAMPLE.com/path#frag", "https://example.com/path#frag"},
+		{"unparseable returned as-is", "not a url", "not a url"},
+		{"clean url without fragment unchanged", "https://example.com/a", "https://example.com/a"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeURLKeepFragment(tt.in)
+			if got != tt.want {
+				t.Errorf("NormalizeURLKeepFragment(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
