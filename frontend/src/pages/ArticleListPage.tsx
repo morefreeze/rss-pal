@@ -606,7 +606,7 @@ export default function ArticleListPage() {
                 try { sessionStorage.setItem('articlesSortField', field) } catch {}
               }
             }
-            const arrow = sortDir === 'asc' ? '↑' : '↓'
+            const arrow = sortDir === 'asc' ? '↓' : '↑'
             const btn = (field: ArticleSort, label: string) => {
               const active = sortField === field
               return (
