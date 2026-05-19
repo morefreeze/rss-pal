@@ -204,11 +204,11 @@ export default function ArticleListPage() {
   const [focusedIdx, setFocusedIdx] = useState<number>(-1)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // 网摘 (clipping) mode: when the selected feed is the user's saved-clip
-  // bin, swap the regular article list for the tag-sidebar layout that
-  // used to live at /saved. The dropdown stays so the user can switch
-  // back to other feeds, but unread/saved checkboxes, search, and
-  // mark-all-read are hidden because /api/saved doesn't support them.
+  // 网摘 (clip) mode: when the selected feed is the user's clip bin,
+  // swap the regular article list for the tag-sidebar layout that used
+  // to live at /saved. The dropdown stays so the user can switch back
+  // to other feeds, but unread/saved checkboxes, search, and
+  // mark-all-read are hidden because /api/clip doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
   const isClippingMode = selectedFeedObj?.feed_type === 'clip'
 
