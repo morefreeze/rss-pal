@@ -212,9 +212,9 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		return
 	}
 
-	feed, err := h.feedRepo.GetOrCreateSavedFeed(user.ID)
+	feed, err := h.feedRepo.GetOrCreateClipFeed(user.ID)
 	if err != nil {
-		log.Printf("bookmarklet: GetOrCreateSavedFeed failed for user=%d: %v", user.ID, err)
+		log.Printf("bookmarklet: GetOrCreateClipFeed failed for user=%d: %v", user.ID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建网摘 feed 失败"})
 		return
 	}

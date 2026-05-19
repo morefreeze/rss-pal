@@ -329,7 +329,7 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 }
 
 // GetByIDWithFeedType returns the article alongside its feed's feed_type
-// (e.g., "rss" / "saved" / "youtube"). Used by the article handler to derive
+// (e.g., "rss" / "clip" / "youtube"). Used by the article handler to derive
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
@@ -1496,7 +1496,7 @@ func (r *ArticleRepository) FindArticlesNeedingLinkCheck(limit int) ([]model.Art
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.links_extendable IS NULL
 		  AND a.parent_article_id IS NULL
-		  AND f.feed_type IN ('link_set', 'saved')
+		  AND f.feed_type IN ('link_set', 'clip')
 		ORDER BY a.fetched_at DESC
 		LIMIT $1
 	`
