@@ -207,7 +207,7 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		"article":          article,
 		"progress":         progress,
 		"signals":          signals,
-		"from_bookmarklet": feedType == "saved",
+		"from_bookmarklet": feedType == "clip",
 	}
 	if article.LinksExtendable != nil && *article.LinksExtendable {
 		children, err := h.articleRepo.GetChildren(article.ID)

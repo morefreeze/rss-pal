@@ -214,19 +214,19 @@ func (r *FeedRepository) UpdateWeight(id int, weight float64) error {
 	return err
 }
 
-// GetOrCreateSavedFeed returns the user's "⭐ 网摘" feed, creating it if it
-// doesn't exist. Saved feeds are the destination for articles captured via
+// GetOrCreateClipFeed returns the user's "⭐ 网摘" feed, creating it if it
+// doesn't exist. Clip feeds are the destination for articles captured via
 // the browser bookmarklet when no existing article matches the captured URL.
 // The url column has a global UNIQUE constraint, so we use a per-user
 // sentinel of `bookmarklet://user/<id>`.
-func (r *FeedRepository) GetOrCreateSavedFeed(ownerID int) (*model.Feed, error) {
+func (r *FeedRepository) GetOrCreateClipFeed(ownerID int) (*model.Feed, error) {
 	var f model.Feed
 	var title, etag, lastModified, feedType, status sql.NullString
 	var dbOwnerID sql.NullInt64
 	var expandLinks sql.NullBool
 	err := r.db.QueryRow(
 		`SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links
-		 FROM feeds WHERE owner_id = $1 AND feed_type = 'saved'`,
+		 FROM feeds WHERE owner_id = $1 AND feed_type = 'clip'`,
 		ownerID,
 	).Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &dbOwnerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks)
 	if err == nil {
@@ -256,7 +256,7 @@ func (r *FeedRepository) GetOrCreateSavedFeed(ownerID int) (*model.Feed, error) 
 		FetchIntervalMin: 60,
 		IsActive:         true,
 		OwnerID:          &owner,
-		FeedType:         "saved",
+		FeedType:         "clip",
 	}
 	insertErr := r.db.QueryRow(
 		`INSERT INTO feeds (url, title, fetch_interval_minutes, is_active, owner_id, feed_type, expand_links)

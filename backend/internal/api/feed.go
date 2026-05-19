@@ -493,7 +493,7 @@ func extractStatusFromErr(s string) string {
 // and inserts a parent article. The worker pass detects links_extendable within seconds.
 //
 // When expand=false: saves the URL as a single article into the user's "⭐ 网摘"
-// feed (GetOrCreateSavedFeed), with no link expansion.
+// feed (GetOrCreateClipFeed), with no link expansion.
 func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 	var req struct {
 		URL    string `json:"url"`
@@ -572,7 +572,7 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "需要登录"})
 			return
 		}
-		saved, err := h.repo.GetOrCreateSavedFeed(*ownerID)
+		saved, err := h.repo.GetOrCreateClipFeed(*ownerID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
