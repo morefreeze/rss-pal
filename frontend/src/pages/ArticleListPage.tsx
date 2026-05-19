@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleSort, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
+import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
 import GroupedArticleView from '../components/GroupedArticleView'
@@ -160,8 +160,15 @@ export default function ArticleListPage() {
   const [savedOnly, setSavedOnly] = useState(() => {
     try { return sessionStorage.getItem('savedOnly') === 'true' } catch { return false }
   })
-  const [sortMode, setSortMode] = useState<ArticleSort>(() => {
-    try { return (sessionStorage.getItem('articlesSort') as ArticleSort) === 'captured' ? 'captured' : 'published' } catch { return 'published' }
+  const [sortField, setSortField] = useState<ArticleSort>(() => {
+    try {
+      const v = sessionStorage.getItem('articlesSortField')
+        ?? sessionStorage.getItem('articlesSort') // legacy fallback
+      return v === 'captured' ? 'captured' : 'published'
+    } catch { return 'published' }
+  })
+  const [sortDir, setSortDir] = useState<ArticleOrder>(() => {
+    try { return sessionStorage.getItem('articlesSortDir') === 'asc' ? 'asc' : 'desc' } catch { return 'desc' }
   })
   const [showRecommended, setShowRecommended] = useState(() => {
     try { return localStorage.getItem('showRecommended') === 'true' } catch { return false }
@@ -276,7 +283,7 @@ export default function ArticleListPage() {
     setHasMore(true)
     setFocusedIdx(-1)
     loadArticles(0, true)
-  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, sortMode, tagFilter])
+  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, sortField, sortDir, tagFilter])
 
   useEffect(() => {
     if (!sidebarOpen || isClippingMode) return
@@ -305,7 +312,8 @@ export default function ArticleListPage() {
         untagged: tagFilter.kind === 'untagged' || undefined,
         limit: PAGE_SIZE,
         offset: off,
-        sort: sortMode,
+        sort: sortField,
+        order: sortDir,
       })
       const data = raw || []
       if (reset) {
@@ -327,7 +335,7 @@ export default function ArticleListPage() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedFeed, unreadOnly, savedOnly, sortMode, tagFilter])
+  }, [selectedFeed, unreadOnly, savedOnly, sortField, sortDir, tagFilter])
 
   const loadMore = useCallback(() => {
     if (!loadingMore && hasMore) {
@@ -587,20 +595,43 @@ export default function ArticleListPage() {
               已保存
             </label>
           )}
-          {!isClippingMode && !searchQuery && !grouped && (
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => {
-                const next: ArticleSort = sortMode === 'captured' ? 'published' : 'captured'
-                setSortMode(next)
-                try { sessionStorage.setItem('articlesSort', next) } catch {}
-              }}
-              title={sortMode === 'captured' ? '当前按抓取时间排序,点击切换为发布时间' : '当前按发布时间排序,点击切换为抓取时间'}
-            >
-              ⏱ {sortMode === 'captured' ? '抓取时间' : '发布时间'}
-            </button>
-          )}
+          {!isClippingMode && !searchQuery && !grouped && (() => {
+            const pick = (field: ArticleSort) => {
+              if (field === sortField) {
+                const next: ArticleOrder = sortDir === 'desc' ? 'asc' : 'desc'
+                setSortDir(next)
+                try { sessionStorage.setItem('articlesSortDir', next) } catch {}
+              } else {
+                setSortField(field)
+                try { sessionStorage.setItem('articlesSortField', field) } catch {}
+              }
+            }
+            const arrow = sortDir === 'asc' ? '↑' : '↓'
+            const btn = (field: ArticleSort, label: string) => {
+              const active = sortField === field
+              return (
+                <button
+                  type="button"
+                  className={active ? '' : 'btn-ghost'}
+                  onClick={() => pick(field)}
+                  style={{ padding: '4px 8px', minWidth: 0 }}
+                  title={
+                    active
+                      ? '再点切换升序/降序'
+                      : `点击按${label}排序`
+                  }
+                >
+                  {label}{active ? ` ${arrow}` : ''}
+                </button>
+              )
+            }
+            return (
+              <div style={{ display: 'inline-flex', gap: 4 }}>
+                {btn('published', '发布')}
+                {btn('captured', '抓取')}
+              </div>
+            )
+          })()}
           {!isClippingMode && !searchQuery && tagFilter.kind === 'all' && (
             <button
               type="button"
