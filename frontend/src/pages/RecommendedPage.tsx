@@ -50,7 +50,7 @@ export default function RecommendedPage() {
           <ol style={{ paddingLeft: 20, marginBottom: 8 }}>
             <li>优先按你的偏好(过去 30 天 like / save / 收听时长加权)排序</li>
             <li>没有偏好数据时按编辑加权 + 发布时间排序,保证质量</li>
-            <li>已读完的文章默认不出现,但当合格文章不足时会作为兜底补齐(会标注"兜底推荐")</li>
+            <li>已读完的文章默认不出现,但当合格文章不足时会作为兜底补齐</li>
           </ol>
           <p className="text-muted" style={{ marginBottom: 0 }}>
             如果某期 newsletter 没出现,可能是该订阅源还未被系统识别为"含链接合集",或该期所有文章都已读完。
@@ -93,11 +93,6 @@ export default function RecommendedPage() {
                   {a.parent_title}
                 </button>
                 》
-                {a.is_fallback && (
-                  <span className="text-muted" style={{ marginLeft: 8, fontSize: 11 }}>
-                    · 兜底推荐(可能已读过)
-                  </span>
-                )}
               </div>
             )}
           </div>
