@@ -10,20 +10,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type SavedHandler struct {
-	saved    *repository.SavedRepository
+type ClipHandler struct {
+	clip     *repository.ClipRepository
 	bindRepo *repository.ArticleUserTagRepository
 }
 
-func NewSavedHandler(saved *repository.SavedRepository, bindRepo *repository.ArticleUserTagRepository) *SavedHandler {
-	return &SavedHandler{saved: saved, bindRepo: bindRepo}
+func NewClipHandler(clip *repository.ClipRepository, bindRepo *repository.ArticleUserTagRepository) *ClipHandler {
+	return &ClipHandler{clip: clip, bindRepo: bindRepo}
 }
 
-// GET /api/saved
-func (h *SavedHandler) List(c *gin.Context) {
+// GET /api/clip
+func (h *ClipHandler) List(c *gin.Context) {
 	userID := getUserID(c)
 
-	q := repository.SavedQuery{
+	q := repository.ClipQuery{
 		UserID: userID,
 		Mode:   strings.ToLower(c.DefaultQuery("mode", "and")),
 		Limit:  20,
@@ -49,8 +49,6 @@ func (h *SavedHandler) List(c *gin.Context) {
 			}
 		}
 	}
-	// New: source=<kind>:<value>, e.g. "feed:8" or "host:walkinglabs.github.io".
-	// Replaces the old source_feed_id query param (this branch hasn't shipped).
 	if v := c.Query("source"); v != "" {
 		if i := strings.Index(v, ":"); i > 0 {
 			kind := v[:i]
@@ -62,16 +60,15 @@ func (h *SavedHandler) List(c *gin.Context) {
 		}
 	}
 
-	rows, total, err := h.saved.ListSaved(q)
+	rows, total, err := h.clip.ListClipped(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if rows == nil {
-		rows = []repository.SavedRow{}
+		rows = []repository.ClipRow{}
 	}
 
-	// Attach manual tags per article
 	ids := make([]int, len(rows))
 	for i, r := range rows {
 		ids[i] = r.Article.ID

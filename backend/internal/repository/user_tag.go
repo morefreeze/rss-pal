@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/bytedance/rss-pal/internal/model"
@@ -20,7 +19,7 @@ type TagSidebarData struct {
 }
 
 // EffectiveSource is the user-facing source identifier for an article.
-// For bookmarklet (feed_type='saved') articles, it derives from URL host;
+// For clip-bin (feed_type='clip') articles, it derives from URL host;
 // for normal feeds, it's the feed itself.
 type EffectiveSource struct {
 	Key   string `json:"key"`   // "feed:<id>" or "host:<host>"
@@ -38,10 +37,10 @@ func extractHost(rawURL string) string {
 }
 
 // effectiveSourceFor builds an EffectiveSource from a feed and article URL.
-// Saved-feed articles surface their host; everything else falls back to
-// the feed's own (id, title) pair so the chip in the UI stays stable.
+// Clip-bin (feed_type='clip') articles surface their host; everything else
+// falls back to the feed's own (id, title) pair so the chip in the UI stays stable.
 func effectiveSourceFor(feedID int, feedTitle, feedType, articleURL string) EffectiveSource {
-	if feedType == "saved" {
+	if feedType == "clip" {
 		if host := extractHost(articleURL); host != "" {
 			return EffectiveSource{Key: "host:" + host, Title: host}
 		}
@@ -279,7 +278,7 @@ func (r *ArticleUserTagRepository) Unbind(articleID, tagID, userID int) error {
 // Enforces feed ownership: returns sql.ErrNoRows if the article belongs to
 // a feed owned by another user.
 //
-// For bookmarklet (feed_type='saved') articles the human-readable title is
+// For clip-bin (feed_type='clip') articles the human-readable title is
 // the article URL's host, not the bin's own "⭐ 网摘". The FeedID stays the
 // real feeds.id so any caller mapping back to a feed still works.
 func (r *ArticleUserTagRepository) GetSourceForArticle(articleID, userID int) (model.ArticleTagSource, error) {
@@ -296,7 +295,7 @@ func (r *ArticleUserTagRepository) GetSourceForArticle(articleID, userID int) (m
 		return s, err
 	}
 	s.FeedID = feedID
-	if feedType == "saved" {
+	if feedType == "clip" {
 		if host := extractHost(articleURL); host != "" {
 			s.Title = host
 			return s, nil
@@ -332,7 +331,7 @@ func (r *ArticleUserTagRepository) GetManualForArticle(articleID, userID int) ([
 }
 
 // GetManualForArticles batch version — returns map[articleID][]UserTag.
-// Used by /api/saved to attach tags to article cards.
+// Used by /api/clip to attach tags to article cards.
 func (r *ArticleUserTagRepository) GetManualForArticles(articleIDs []int, userID int) (map[int][]model.UserTag, error) {
 	out := map[int][]model.UserTag{}
 	if len(articleIDs) == 0 {
@@ -359,157 +358,6 @@ func (r *ArticleUserTagRepository) GetManualForArticles(articleIDs []int, userID
 		out[aid] = append(out[aid], t)
 	}
 	return out, rows.Err()
-}
-
-type SavedRepository struct {
-	db *sql.DB
-}
-
-func NewSavedRepository(db *sql.DB) *SavedRepository {
-	return &SavedRepository{db: db}
-}
-
-// SavedQuery describes a /api/saved request.
-//
-// SourceKind / SourceValue replace the old SourceFeedID. Two modes:
-//   - kind="feed", value="<id>"   → filter a.feed_id = id
-//   - kind="host", value="<host>" → filter on host extracted from a.url
-//     (lower-cased, "www." stripped) — used to drill into a single
-//     bookmarklet source.
-type SavedQuery struct {
-	UserID      int
-	TagIDs      []int  // empty = "all"
-	Mode        string // "and" | "or"; only honored when len(TagIDs)>1
-	Untagged    bool   // overrides TagIDs when true
-	SourceKind  string // "" | "feed" | "host"
-	SourceValue string // feed-id-as-string for "feed", host string for "host"
-	Limit       int
-	Offset      int
-}
-
-// SavedRow pairs an Article with the EffectiveSource the UI should render.
-// Centralising this here lets the handler build the response without an
-// extra DB round-trip per item.
-type SavedRow struct {
-	Article         model.Article
-	EffectiveSource EffectiveSource
-}
-
-// ListSaved returns one SavedRow per saved article (in published order) and a total count.
-func (r *SavedRepository) ListSaved(q SavedQuery) ([]SavedRow, int, error) {
-	args := []interface{}{q.UserID}
-	// "In my collection" = either I save-signaled it, or it's in my bookmarklet
-	// (网摘) feed. Both branches are user-scoped via $1.
-	where := []string{`(
-		EXISTS (
-			SELECT 1 FROM user_preferences p
-			WHERE p.article_id = a.id
-			  AND p.user_id = $1
-			  AND p.signal_type = 'save'
-		)
-		OR (f.feed_type = 'saved' AND f.owner_id = $1)
-	)`}
-	// Tenancy: never expose articles from feeds owned by another user.
-	// Mirrors the pattern used by every other articles query in this codebase.
-	where = append(where, `(f.owner_id IS NULL OR f.owner_id = $1)`)
-
-	if q.Untagged {
-		where = append(where, `NOT EXISTS (
-			SELECT 1 FROM article_user_tags aut
-			WHERE aut.article_id = a.id AND aut.user_id = $1
-		)`)
-	} else if len(q.TagIDs) > 0 {
-		args = append(args, pq.Array(q.TagIDs))
-		idsParam := "$" + strconv.Itoa(len(args))
-		if q.Mode == "and" && len(q.TagIDs) > 1 {
-			args = append(args, len(q.TagIDs))
-			countParam := "$" + strconv.Itoa(len(args))
-			where = append(where, `(
-				SELECT COUNT(DISTINCT aut.tag_id) FROM article_user_tags aut
-				WHERE aut.article_id = a.id AND aut.user_id = $1
-				  AND aut.tag_id = ANY(`+idsParam+`::int[])
-			) = `+countParam)
-		} else {
-			where = append(where, `EXISTS (
-				SELECT 1 FROM article_user_tags aut
-				WHERE aut.article_id = a.id AND aut.user_id = $1
-				  AND aut.tag_id = ANY(`+idsParam+`::int[])
-			)`)
-		}
-	}
-
-	switch q.SourceKind {
-	case "feed":
-		if q.SourceValue != "" {
-			args = append(args, q.SourceValue)
-			where = append(where, `a.feed_id::text = $`+strconv.Itoa(len(args)))
-		}
-	case "host":
-		if q.SourceValue != "" {
-			args = append(args, q.SourceValue)
-			// Extract host from a.url in SQL: strip optional scheme + "www." prefix,
-			// take everything up to the next "/", and lowercase. Mirrors extractHost.
-			where = append(where, `lower(regexp_replace(a.url, '^https?://(?:www\.)?([^/]+).*$', '\1')) = lower($`+strconv.Itoa(len(args))+`)`)
-		}
-	}
-
-	whereSQL := strings.Join(where, " AND ")
-
-	// Count
-	var total int
-	if err := r.db.QueryRow(`
-		SELECT COUNT(*) FROM articles a
-		JOIN feeds f ON f.id = a.feed_id
-		WHERE `+whereSQL, args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	// Page — also fetch f.feed_type so we can build effective_source per row
-	// without an extra round-trip.
-	args = append(args, q.Limit, q.Offset)
-	limitParam := "$" + strconv.Itoa(len(args)-1)
-	offsetParam := "$" + strconv.Itoa(len(args))
-	rows, err := r.db.Query(`
-		SELECT a.id, a.feed_id, f.title AS feed_title, COALESCE(f.feed_type, 'rss') AS feed_type,
-		       a.title, a.url,
-		       a.published_at, a.summary_brief, a.fetched_at,
-		       COALESCE(a.word_count, 0), COALESCE(a.reading_minutes, 0),
-		       COALESCE(a.media_type, ''),
-		       COALESCE(rp.is_completed, false) AS is_read
-		FROM articles a
-		JOIN feeds f ON f.id = a.feed_id
-		LEFT JOIN reading_progress rp ON rp.article_id = a.id AND rp.user_id = $1
-		WHERE `+whereSQL+`
-		ORDER BY a.published_at DESC NULLS LAST, a.id DESC
-		LIMIT `+limitParam+` OFFSET `+offsetParam, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	var out []SavedRow
-	for rows.Next() {
-		var a model.Article
-		var summary, mediaType sql.NullString
-		var feedTitle sql.NullString
-		var feedType string
-		if err := rows.Scan(
-			&a.ID, &a.FeedID, &feedTitle, &feedType, &a.Title, &a.URL,
-			&a.PublishedAt, &summary, &a.FetchedAt,
-			&a.WordCount, &a.ReadingMinutes, &mediaType,
-			&a.IsRead,
-		); err != nil {
-			return nil, 0, err
-		}
-		a.FeedTitle = feedTitle.String
-		a.SummaryBrief = summary.String
-		a.MediaType = mediaType.String
-		out = append(out, SavedRow{
-			Article:         a,
-			EffectiveSource: effectiveSourceFor(a.FeedID, feedTitle.String, feedType, a.URL),
-		})
-	}
-	return out, total, rows.Err()
 }
 
 type TagSuggestionRepository struct {
