@@ -400,7 +400,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 }
 
 func (r *ArticleRepository) Create(article *model.Article) error {
-	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, parent_article_id, processing_state, prerank_score, editor_note) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id, fetched_at`
+	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, parent_article_id, processing_state, prerank_score, editor_note, is_clip) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id, fetched_at`
 	mediaURL := nullableString(article.MediaURL)
 	mediaType := nullableString(article.MediaType)
 	mediaDuration := nullableInt(article.MediaDurationSeconds)
@@ -416,7 +416,7 @@ func (r *ArticleRepository) Create(article *model.Article) error {
 	if state == "" {
 		state = "ready"
 	}
-	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration, parentArticleID, state, prerankScore, article.EditorNote).Scan(&article.ID, &article.FetchedAt)
+	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration, parentArticleID, state, prerankScore, article.EditorNote, article.IsClip).Scan(&article.ID, &article.FetchedAt)
 }
 
 // nullableString returns a sql.NullString that's NULL when s is empty.
@@ -469,6 +469,7 @@ func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*mo
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE (f.owner_id IS NULL OR f.owner_id = $1) AND a.url = $2
+		ORDER BY a.fetched_at DESC
 		LIMIT 1
 	`
 	var a model.Article
