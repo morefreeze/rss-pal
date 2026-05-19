@@ -271,6 +271,7 @@ export const exportOPML = () =>
 
 // Articles
 export type ArticleSort = 'published' | 'captured'
+export type ArticleOrder = 'asc' | 'desc'
 
 export const getArticles = (params?: {
   feed_id?: number
@@ -281,6 +282,7 @@ export const getArticles = (params?: {
   limit?: number
   offset?: number
   sort?: ArticleSort
+  order?: ArticleOrder
 }) => api.get<Article[]>('/articles', { params }).then(res => res.data)
 
 export interface TopicGroup {
@@ -762,27 +764,27 @@ export const getTagSidebar = (params?: {
   saved?: boolean
 }) => api.get<TagSidebarData>('/tags/sidebar', { params }).then(r => r.data)
 
-// === Saved (Phase 2) ===
+// === Clip (网摘) ===
 
-// EffectiveSource: what the source-tag chip on a saved article should say.
+// EffectiveSource: what the source-tag chip on a clip article should say.
 // `key` is "feed:<id>" or "host:<host>" — opaque to the UI, passed back as
-// the `source` filter on /api/saved.
+// the `source` filter on /api/clip.
 export interface EffectiveSource {
   key: string
   title: string
 }
 
-export type SavedItem = Article & {
+export type ClipItem = Article & {
   manual_tags: UserTag[]
   effective_source: EffectiveSource
 }
 
-export interface SavedListResponse {
-  items: SavedItem[]
+export interface ClipListResponse {
+  items: ClipItem[]
   total: number
 }
 
-export interface GetSavedParams {
+export interface GetClipParams {
   tag_ids?: number[]
   mode?: 'and' | 'or'
   untagged?: boolean
@@ -791,7 +793,7 @@ export interface GetSavedParams {
   offset?: number
 }
 
-export const getSaved = (params: GetSavedParams = {}) => {
+export const getClip = (params: GetClipParams = {}) => {
   const query: Record<string, string | number | boolean> = {}
   if (params.untagged) {
     query.untagged = 'true'
@@ -804,5 +806,5 @@ export const getSaved = (params: GetSavedParams = {}) => {
   if (params.source) query.source = params.source
   if (params.limit !== undefined) query.limit = params.limit
   if (params.offset !== undefined) query.offset = params.offset
-  return api.get<SavedListResponse>('/saved', { params: query }).then(r => r.data)
+  return api.get<ClipListResponse>('/clip', { params: query }).then(r => r.data)
 }

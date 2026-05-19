@@ -234,7 +234,23 @@ const (
 	SortCaptured
 )
 
-func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool, sort SortMode) ([]model.Article, error) {
+// SortDir selects ascending vs descending for the chosen SortMode. Defaults
+// to SortDesc; SortAsc is exposed so the UI can flip per field independently.
+type SortDir int
+
+const (
+	SortDesc SortDir = iota
+	SortAsc
+)
+
+func (d SortDir) sql() string {
+	if d == SortAsc {
+		return "ASC"
+	}
+	return "DESC"
+}
+
+func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool, sort SortMode, dir SortDir) ([]model.Article, error) {
 	filter := ArticleFilter{
 		UserID:     userID,
 		FeedID:     feedID,
@@ -264,13 +280,14 @@ JOIN feeds ON articles.feed_id = feeds.id` + joins
 	case SortCaptured:
 		// Strict capture-time order: a freshly bookmarked tweet always
 		// appears at the top, even if its published_at is months old.
-		query += fmt.Sprintf(" ORDER BY articles.fetched_at DESC LIMIT $%d OFFSET $%d", nextArg, nextArg+1)
+		query += fmt.Sprintf(" ORDER BY articles.fetched_at %s LIMIT $%d OFFSET $%d", dir.sql(), nextArg, nextArg+1)
 	default:
 		// Sort by GREATEST(published_at, fetched_at): typical articles
 		// (published ≤ fetched) keep chronological feel, but backfilled articles
 		// from newly-added feeds (old published_at, recent fetched_at) bubble up
 		// briefly so the new subscription is visible on /articles page 1.
-		query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) DESC, COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", nextArg, nextArg+1)
+		d := dir.sql()
+		query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) %s, COALESCE(articles.published_at, articles.fetched_at) %s LIMIT $%d OFFSET $%d", d, d, nextArg, nextArg+1)
 	}
 	args = append(args, limit, offset)
 
@@ -329,7 +346,7 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 }
 
 // GetByIDWithFeedType returns the article alongside its feed's feed_type
-// (e.g., "rss" / "saved" / "youtube"). Used by the article handler to derive
+// (e.g., "rss" / "clip" / "youtube"). Used by the article handler to derive
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
@@ -1496,7 +1513,7 @@ func (r *ArticleRepository) FindArticlesNeedingLinkCheck(limit int) ([]model.Art
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.links_extendable IS NULL
 		  AND a.parent_article_id IS NULL
-		  AND f.feed_type IN ('link_set', 'saved')
+		  AND f.feed_type IN ('link_set', 'clip')
 		ORDER BY a.fetched_at DESC
 		LIMIT $1
 	`

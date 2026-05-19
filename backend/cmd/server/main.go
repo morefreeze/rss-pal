@@ -37,7 +37,7 @@ func main() {
 	userTagRepo := repository.NewUserTagRepository(db)
 	articleUserTagRepo := repository.NewArticleUserTagRepository(db)
 	tagSuggestRepo := repository.NewTagSuggestionRepository(db)
-	savedRepo := repository.NewSavedRepository(db)
+	clipRepo := repository.NewClipRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	summarizerService := service.NewSummarizerService(summarizer)
@@ -66,7 +66,7 @@ func main() {
 	eventHandler := api.NewEventHandler(eventRepo)
 	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
 	userTagHandler := api.NewUserTagHandler(userTagRepo, articleUserTagRepo, tagSuggestRepo)
-	savedHandler := api.NewSavedHandler(savedRepo, articleUserTagRepo)
+	clipHandler := api.NewClipHandler(clipRepo, articleUserTagRepo)
 
 	router := gin.Default()
 	// Trust only requests from localhost/private networks (running behind nginx)
@@ -159,8 +159,8 @@ func main() {
 		apiGroup.POST("/articles/:id/batch_fetch", articleHandler.BatchFetch)
 		apiGroup.POST("/articles/:id/confirm_link_set", articleHandler.ConfirmLinkSetSuggestion)
 
-		// Saved articles (filtered by tags / source / untagged)
-		apiGroup.GET("/saved", savedHandler.List)
+		// Clip articles (filtered by tags / source / untagged)
+		apiGroup.GET("/clip", clipHandler.List)
 
 		// Preferences
 		apiGroup.POST("/preferences/like", prefHandler.Like)
