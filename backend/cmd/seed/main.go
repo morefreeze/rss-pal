@@ -55,13 +55,12 @@ func probeURL(canonicalURL string) string {
 }
 
 type report struct {
-	URL          string `json:"url"`
-	Title        string `json:"title"`
-	HTTPStatus   int    `json:"http_status"`
-	ProbeError   string `json:"probe_error,omitempty"`
-	IsBroken     bool   `json:"is_broken"`
-	WroteFeeds   bool   `json:"wrote_feeds"`
-	WroteCatalog bool   `json:"wrote_catalog"`
+	URL        string `json:"url"`
+	Title      string `json:"title"`
+	HTTPStatus int    `json:"http_status"`
+	ProbeError string `json:"probe_error,omitempty"`
+	IsBroken   bool   `json:"is_broken"`
+	WroteFeeds bool   `json:"wrote_feeds"`
 }
 
 func probe(url string) (int, error) {
@@ -105,26 +104,7 @@ func main() {
 			r.IsBroken = true
 		}
 
-		// Always upsert into recommended_feeds catalog using the canonical URL.
-		_, errC := db.Exec(`
-			INSERT INTO recommended_feeds (url, title, description, category, language, feed_type, is_broken, sort_order)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			ON CONFLICT (url) DO UPDATE SET
-				title = EXCLUDED.title,
-				description = EXCLUDED.description,
-				category = EXCLUDED.category,
-				language = EXCLUDED.language,
-				feed_type = EXCLUDED.feed_type,
-				is_broken = EXCLUDED.is_broken,
-				sort_order = EXCLUDED.sort_order
-		`, s.URL, s.Title, s.Description, s.Category, s.Language, s.FeedType, r.IsBroken, s.SortOrder)
-		if errC != nil {
-			log.Printf("catalog upsert failed for %s: %v", s.URL, errC)
-		} else {
-			r.WroteCatalog = true
-		}
-
-		// If healthy, also seed into feeds (shared, owner_id=NULL).
+		// If healthy, seed into feeds (shared, owner_id=NULL).
 		if !r.IsBroken {
 			_, errF := db.Exec(`
 				INSERT INTO feeds (url, title, fetch_interval_minutes, owner_id, feed_type, is_active)
@@ -150,7 +130,12 @@ func main() {
 
 	// Sanity: count what we wrote.
 	var ok, broken int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM recommended_feeds WHERE is_broken=false`).Scan(&ok)
-	_ = db.QueryRow(`SELECT COUNT(*) FROM recommended_feeds WHERE is_broken=true`).Scan(&broken)
-	log.Printf("seed complete: %d healthy, %d broken", ok, broken)
+	for _, r := range reports {
+		if r.IsBroken {
+			broken++
+		} else if r.WroteFeeds {
+			ok++
+		}
+	}
+	log.Printf("seed complete: %d healthy feeds written, %d broken (skipped)", ok, broken)
 }

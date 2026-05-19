@@ -169,6 +169,55 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 	return articles, nil
 }
 
+// scanArticleWithParentTitle is like scanArticleNoFeedTitle but expects an
+// extra trailing column `parent_title` from a JOIN against the parent article.
+// Used by GetLinkSetRecommendations primary and fallback queries.
+func (r *ArticleRepository) scanArticleWithParentTitle(rows *sql.Rows) ([]model.Article, error) {
+	var articles []model.Article
+	for rows.Next() {
+		var a model.Article
+		var content, summaryBrief, summaryDetailed, mediaURL, mediaType, parentTitle sql.NullString
+		var mediaDuration sql.NullInt64
+		var linksExtendable sql.NullBool
+		var parentArticleID sql.NullInt64
+		var processingState, editorNote sql.NullString
+		var prerankScore sql.NullFloat64
+		err := rows.Scan(
+			&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
+			&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount,
+			&a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration,
+			&linksExtendable, &parentArticleID, &processingState,
+			&prerankScore, &editorNote, &parentTitle,
+		)
+		if err != nil {
+			return nil, err
+		}
+		a.Content = content.String
+		a.SummaryBrief = summaryBrief.String
+		a.SummaryDetailed = summaryDetailed.String
+		if linksExtendable.Valid {
+			v := linksExtendable.Bool
+			a.LinksExtendable = &v
+		}
+		if parentArticleID.Valid {
+			v := int(parentArticleID.Int64)
+			a.ParentArticleID = &v
+		}
+		a.ProcessingState = processingState.String
+		if prerankScore.Valid {
+			v := prerankScore.Float64
+			a.PrerankScore = &v
+		}
+		a.EditorNote = editorNote.String
+		a.MediaURL = mediaURL.String
+		a.MediaType = mediaType.String
+		a.MediaDurationSeconds = int(mediaDuration.Int64)
+		a.ParentTitle = parentTitle.String
+		articles = append(articles, a)
+	}
+	return articles, nil
+}
+
 // SortMode selects which timestamp orders the /articles list:
 //   - SortPublished: the smart published_at sort with a 7-day fetched-at
 //     floor that bubbles freshly-subscribed backlog briefly to the top.
@@ -1186,14 +1235,34 @@ func (r *ArticleRepository) MarkFailedAfterRetries(id, threshold int) error {
 }
 
 // GetLinkSetRecommendations returns processed children from link_set parents
-// fetched in the last `days` days, scored by the same formula as GetRecommended.
-// Filters to processing_state='ready' and visible-to-user feeds.
+// fetched in the last `days` days. It runs a primary preference-ranked query
+// (excludes already-read) and tops up from a quality-gated fallback query
+// (allows already-read) if primary returns fewer than `limit` results.
+//
+// Articles from the fallback are marked with IsFallback=true so the UI can
+// label them. Both queries JOIN the parent article to surface parent_title.
 func (r *ArticleRepository) GetLinkSetRecommendations(userID, days, limit int) ([]model.Article, error) {
+	primary, err := r.queryLinkSetPrimary(userID, days, limit)
+	if err != nil {
+		return nil, err
+	}
+	return combineLinkSetResults(primary, func() ([]model.Article, error) {
+		excludeIDs := collectArticleIDs(primary)
+		return r.queryLinkSetFallback(userID, days, limit-len(primary), excludeIDs)
+	}, limit)
+}
+
+// queryLinkSetPrimary is the preference-ranked recommendation query.
+// Filters: ready, has parent, parent fetched within `days`, visible to user,
+// not already completed. Ordered by (pref_score + prerank_score) DESC then
+// published_at DESC.
+func (r *ArticleRepository) queryLinkSetPrimary(userID, days, limit int) ([]model.Article, error) {
 	query := `
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
 		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
 		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
-		       a.links_extendable, a.parent_article_id, a.processing_state, a.prerank_score, a.editor_note
+		       a.links_extendable, a.parent_article_id, a.processing_state,
+		       a.prerank_score, a.editor_note, parent.title AS parent_title
 		FROM articles a
 		JOIN articles parent ON a.parent_article_id = parent.id
 		JOIN feeds f ON a.feed_id = f.id
@@ -1227,7 +1296,44 @@ func (r *ArticleRepository) GetLinkSetRecommendations(userID, days, limit int) (
 		return nil, err
 	}
 	defer rows.Close()
-	return r.scanArticleNoFeedTitle(rows)
+	return r.scanArticleWithParentTitle(rows)
+}
+
+// queryLinkSetFallback is the quality-gated fallback used when primary
+// returns fewer than `limit`. Drops the pref_score JOIN and the
+// is_completed=false filter, adds word_count >= 500 and summary_brief IS
+// NOT NULL as quality gates, excludes IDs already returned by primary.
+func (r *ArticleRepository) queryLinkSetFallback(userID, days, limit int, excludeIDs []int) ([]model.Article, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
+		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
+		       a.links_extendable, a.parent_article_id, a.processing_state,
+		       a.prerank_score, a.editor_note, parent.title AS parent_title
+		FROM articles a
+		JOIN articles parent ON a.parent_article_id = parent.id
+		JOIN feeds f ON a.feed_id = f.id
+		WHERE a.processing_state = 'ready'
+		  AND a.parent_article_id IS NOT NULL
+		  AND parent.fetched_at > NOW() - ($2 || ' days')::INTERVAL
+		  AND (f.owner_id IS NULL OR f.owner_id = $1)
+		  AND a.word_count >= 500
+		  AND a.summary_brief IS NOT NULL
+		  AND a.summary_brief <> ''
+		  AND NOT (a.id = ANY($4::int[]))
+		ORDER BY a.prerank_score DESC NULLS LAST,
+		         a.published_at DESC NULLS LAST
+		LIMIT $3
+	`
+	rows, err := r.db.Query(query, userID, days, limit, pq.Array(excludeIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleWithParentTitle(rows)
 }
 
 // GetInsightCandidates returns up to (unreadLimit + readLimit) candidate
