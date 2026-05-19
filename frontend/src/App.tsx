@@ -13,7 +13,7 @@ import SharePage from './pages/SharePage'
 import RecommendedPage from './pages/RecommendedPage'
 import WeeklyPage from './pages/WeeklyPage'
 import FeedHealthPage from './pages/FeedHealthPage'
-import SavedPage from './pages/SavedPage'
+import ClipPage from './pages/ClipPage'
 import ExtensionConfigPage from './pages/ExtensionConfigPage'
 import Layout from './components/Layout'
 
@@ -67,7 +67,7 @@ function App() {
           <Route path="weekly" element={<WeeklyPage />} />
           <Route path="articles" element={<ArticleListPage />} />
           <Route path="articles/:id" element={<ArticlePage />} />
-          <Route path="saved" element={<SavedPage />} />
+          <Route path="clip" element={<ClipPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="stats" element={<StatsPage />} />
           <Route path="settings" element={<SettingsPage user={user} />} />

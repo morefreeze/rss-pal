@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  GetSavedParams,
-  SavedItem,
-  SavedListResponse,
+  GetClipParams,
+  ClipItem,
+  ClipListResponse,
   UserTag,
-  getSaved,
+  getClip,
   listTags,
 } from '../api/client'
 import ArticleCard from '../components/ArticleCard'
-import SavedTagSidebar, {
-  SavedSelection,
-  SavedSourceRow,
-} from '../components/SavedTagSidebar'
-import SavedTagChipBar from '../components/SavedTagChipBar'
+import ClipTagSidebar, {
+  ClipSelection,
+  ClipSourceRow,
+} from '../components/ClipTagSidebar'
+import ClipTagChipBar from '../components/ClipTagChipBar'
 import { usePlayer } from '../player/PlayerContext'
 import { reportClick } from '../hooks/useExposureTracking'
 import { useBreakpoint } from '../hooks/useBreakpoint'
@@ -40,7 +40,7 @@ const stripMarkdown = (text: string) =>
     .replace(/\s{2,}/g, ' ')
     .trim()
 
-function selectionToParams(sel: SavedSelection): GetSavedParams {
+function selectionToParams(sel: ClipSelection): GetClipParams {
   switch (sel.kind) {
     case 'all':
       return {}
@@ -55,33 +55,33 @@ function selectionToParams(sel: SavedSelection): GetSavedParams {
   }
 }
 
-interface SavedPageProps {
-  // When set, every /api/saved request is force-scoped to this feed via
-  // `source=feed:<id>`. Used when SavedPage is embedded inside
+interface ClipPageProps {
+  // When set, every /api/clip request is force-scoped to this feed via
+  // `source=feed:<id>`. Used when ClipPage is embedded inside
   // ArticleListPage as the 网摘 (clipping) feed view, where the parent
   // feed dropdown already constrains the source.
   restrictToFeedId?: number
   // Path to record as the entry path on session storage when opening an
-  // article — defaults to '/saved' (standalone page) but the embed passes
+  // article — defaults to '/clip' (standalone page) but the embed passes
   // '/articles' so back-navigation lands on the article list.
   entryPath?: string
-  // When undefined (standalone /saved route), sidebar is always shown.
+  // When undefined (standalone /clip route), sidebar is always shown.
   // When provided by ArticleListPage in clipping mode, follows the parent toggle.
   sidebarOpen?: boolean
 }
 
-export default function SavedPage({ restrictToFeedId, entryPath = '/saved', sidebarOpen }: SavedPageProps = {}) {
+export default function ClipPage({ restrictToFeedId, entryPath = '/clip', sidebarOpen }: ClipPageProps = {}) {
   const navigate = useNavigate()
   const bp = useBreakpoint()
   const player = usePlayer()
   const [tags, setTags] = useState<UserTag[]>([])
-  // Sources are aggregated client-side from saved items' effective_source.
+  // Sources are aggregated client-side from clip items' effective_source.
   // We only refresh this aggregation when the user is viewing an unfiltered
   // ('all' or 'untagged') list — filtering by source/tag would otherwise
   // collapse the sidebar to one row and lose the navigation tree.
-  const [sources, setSources] = useState<SavedSourceRow[]>([])
-  const [selection, setSelection] = useState<SavedSelection>({ kind: 'all' })
-  const [items, setItems] = useState<SavedItem[]>([])
+  const [sources, setSources] = useState<ClipSourceRow[]>([])
+  const [selection, setSelection] = useState<ClipSelection>({ kind: 'all' })
+  const [items, setItems] = useState<ClipItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -111,7 +111,7 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved', side
       if (reset) setLoading(true)
       else setLoadingMore(true)
       try {
-        const resp: SavedListResponse = await getSaved({
+        const resp: ClipListResponse = await getClip({
           ...params,
           limit: PAGE_SIZE,
           offset: off,
@@ -139,13 +139,13 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved', side
   }, [loadPage])
 
   // Refresh the source list whenever we look at an unfiltered set, so the
-  // sidebar reflects the user's full saved-source taxonomy. We also load
+  // sidebar reflects the user's full clip-source taxonomy. We also load
   // a wider page (100) here because the page-size of 20 would otherwise
   // hide many distinct sources behind pagination.
   useEffect(() => {
     if (selection.kind !== 'all' && selection.kind !== 'untagged') return
     let cancelled = false
-    getSaved({
+    getClip({
       ...(selection.kind === 'untagged' ? { untagged: true } : {}),
       // In 网摘 embed mode, scope the aggregation to the same feed so the
       // sidebar lists only sources actually present under this feed.
@@ -155,7 +155,7 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved', side
     })
       .then(resp => {
         if (cancelled) return
-        const counts = new Map<string, SavedSourceRow>()
+        const counts = new Map<string, ClipSourceRow>()
         for (const it of resp.items || []) {
           const es = it.effective_source
           if (!es?.key) continue
@@ -198,7 +198,7 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved', side
     navigate(`/articles/${id}`, { state: { from: entryPath } })
   }
 
-  const handleSelect = (sel: SavedSelection) => {
+  const handleSelect = (sel: ClipSelection) => {
     setSelection(sel)
   }
 
@@ -262,7 +262,7 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved', side
   if (bp === 'phone') {
     return (
       <div>
-        <SavedTagChipBar
+        <ClipTagChipBar
           tags={tags}
           sources={sources}
           selection={selection}
@@ -287,7 +287,7 @@ export default function SavedPage({ restrictToFeedId, entryPath = '/saved', side
       }}
     >
       {(sidebarOpen ?? true) && (
-        <SavedTagSidebar
+        <ClipTagSidebar
           tags={tags}
           sources={sources}
           selection={selection}

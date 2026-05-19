@@ -1,19 +1,19 @@
 import { UserTag } from '../api/client'
 
-// Source row aggregated from /api/saved items by EffectiveSource.key.
+// Source row aggregated from /api/clip items by EffectiveSource.key.
 // `key` is what we pass to the API as the `source` filter; `title` is what
-// we render. We can't precompute these from the feeds list because saved
+// we render. We can't precompute these from the feeds list because clip
 // articles share one feed but split across many hosts.
-export interface SavedSourceRow {
+export interface ClipSourceRow {
   key: string
   title: string
   count: number
 }
 
-// Saved page sidebar selection state. Tags are single-select: clicking a
+// Clip page sidebar selection state. Tags are single-select: clicking a
 // tag switches to it; clicking another swaps. There is no multi-select or
 // AND/OR mode.
-export type SavedSelection =
+export type ClipSelection =
   | { kind: 'all' }
   | { kind: 'untagged' }
   | { kind: 'tag'; id: number }
@@ -21,16 +21,16 @@ export type SavedSelection =
 
 interface Props {
   tags: UserTag[]
-  sources: SavedSourceRow[]
-  selection: SavedSelection
-  onSelect: (sel: SavedSelection) => void
+  sources: ClipSourceRow[]
+  selection: ClipSelection
+  onSelect: (sel: ClipSelection) => void
 }
 
-function isSourceActive(sel: SavedSelection, key: string): boolean {
+function isSourceActive(sel: ClipSelection, key: string): boolean {
   return sel.kind === 'source' && sel.key === key
 }
 
-export default function SavedTagSidebar({
+export default function ClipTagSidebar({
   tags,
   sources,
   selection,
