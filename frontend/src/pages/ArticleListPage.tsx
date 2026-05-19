@@ -4,7 +4,7 @@ import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAl
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
 import GroupedArticleView from '../components/GroupedArticleView'
-import SavedPage from './SavedPage'
+import ClipPage from './ClipPage'
 import TagSidebar, { TagFilter } from '../components/TagSidebar'
 import SidebarToggleButton from '../components/SidebarToggleButton'
 import { usePlayer } from '../player/PlayerContext'
@@ -201,7 +201,7 @@ export default function ArticleListPage() {
   // back to other feeds, but unread/saved checkboxes, search, and
   // mark-all-read are hidden because /api/saved doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
-  const isClippingMode = selectedFeedObj?.feed_type === 'saved'
+  const isClippingMode = selectedFeedObj?.feed_type === 'clip'
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen(o => {
@@ -230,7 +230,7 @@ export default function ArticleListPage() {
   }, [])
 
   useEffect(() => {
-    // SavedPage component owns its own data fetching when in clipping
+    // ClipPage component owns its own data fetching when in clipping
     // mode, so skip the regular /api/articles call to avoid a wasted
     // request and to keep the flicker out.
     if (isClippingMode) return
@@ -596,7 +596,7 @@ export default function ArticleListPage() {
       </div>
 
       {isClippingMode && selectedFeed != null && (
-        <SavedPage
+        <ClipPage
           restrictToFeedId={selectedFeed}
           entryPath="/articles"
           sidebarOpen={sidebarOpen}
