@@ -31,7 +31,6 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	templateRepo := repository.NewTemplateRepository(db)
 	shareRepo := repository.NewShareRepository(db)
-	recommendedRepo := repository.NewRecommendedFeedRepository(db)
 	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
 	eventRepo := repository.NewEventRepository(db)
 	feedHealthRepo := repository.NewFeedHealthRepository(db)
@@ -61,7 +60,6 @@ func main() {
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
 	userInsightsRepo := repository.NewUserInsightRepository(db)
 	insightsHandler := api.NewInsightsHandler(prefRepo, articleRepo, templateRepo, userInsightsRepo, summarizer, cfg)
-	recommendedHandler := api.NewRecommendedHandler(recommendedRepo, feedRepo)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).WithBackupRunner(backupRunner)
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
@@ -190,10 +188,6 @@ func main() {
 		// Insights
 		apiGroup.GET("/insights/latest", insightsHandler.Latest)
 		apiGroup.POST("/insights/generate", insightsHandler.Generate)
-
-		// Recommended feeds (catalog)
-		apiGroup.GET("/recommended-feeds", recommendedHandler.List)
-		apiGroup.POST("/recommended-feeds/:id/subscribe", recommendedHandler.Subscribe)
 
 		// Weekly digest
 		apiGroup.GET("/weekly-digest", weeklyHandler.Get)
