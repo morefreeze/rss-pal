@@ -305,12 +305,26 @@ export const searchArticles = (q: string, limit?: number) =>
 export const getUnreadCount = () =>
   api.get<{ count: number }>('/articles/unread-count').then(res => res.data.count)
 
-export const markAllRead = (filters?: { feedId?: number | null; unread?: boolean; saved?: boolean }) =>
+export const markAllRead = (filters?: {
+  feedId?: number | null
+  unread?: boolean
+  saved?: boolean
+  // Clip-mode filters mirror /api/clip so 网摘 view can mark-all-read
+  // exactly what the user currently sees under the active tag/source.
+  tagIds?: number[]
+  mode?: 'and' | 'or'
+  untagged?: boolean
+  source?: string
+}) =>
   api.post('/articles/mark-all-read', null, {
     params: {
       feed_id: filters?.feedId ?? undefined,
       unread: filters?.unread ? 'true' : undefined,
       saved: filters?.saved ? 'true' : undefined,
+      untagged: filters?.untagged ? 'true' : undefined,
+      tag_ids: filters?.tagIds && filters.tagIds.length > 0 ? filters.tagIds.join(',') : undefined,
+      mode: filters?.tagIds && filters.tagIds.length > 1 ? filters.mode : undefined,
+      source: filters?.source || undefined,
     },
   }).then(res => res.data)
 
@@ -791,6 +805,10 @@ export interface GetClipParams {
   source?: string // EffectiveSource.key, e.g. "feed:8" or "host:github.com"
   limit?: number
   offset?: number
+  sort?: ArticleSort
+  order?: ArticleOrder
+  unread?: boolean
+  saved?: boolean
 }
 
 export const getClip = (params: GetClipParams = {}) => {
@@ -806,5 +824,9 @@ export const getClip = (params: GetClipParams = {}) => {
   if (params.source) query.source = params.source
   if (params.limit !== undefined) query.limit = params.limit
   if (params.offset !== undefined) query.offset = params.offset
+  if (params.sort) query.sort = params.sort
+  if (params.order) query.order = params.order
+  if (params.unread) query.unread = 'true'
+  if (params.saved) query.saved = 'true'
   return api.get<ClipListResponse>('/clip', { params: query }).then(r => r.data)
 }
