@@ -5,6 +5,7 @@ import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
 import GroupedArticleView from '../components/GroupedArticleView'
 import ClipPage from './ClipPage'
+import type { ClipSelection } from '../components/ClipTagSidebar'
 import TagSidebar, { TagFilter } from '../components/TagSidebar'
 import SidebarToggleButton from '../components/SidebarToggleButton'
 import { usePlayer } from '../player/PlayerContext'
@@ -154,10 +155,20 @@ export default function ArticleListPage() {
   const [selectedFeed, setSelectedFeed] = useState<number | null>(() => {
     try { return JSON.parse(sessionStorage.getItem('selectedFeed') || 'null') } catch { return null }
   })
+  // ?saved=1 (set by the /saved legacy redirect) force-ticks the saved
+  // checkbox at mount time so the very first fetch already carries the
+  // filter — avoids a transient unfiltered render that would race the
+  // refetch.
+  const savedRedirect = (() => {
+    try { return new URLSearchParams(window.location.search).get('saved') === '1' }
+    catch { return false }
+  })()
   const [unreadOnly, setUnreadOnly] = useState(() => {
+    if (savedRedirect) return false
     try { return sessionStorage.getItem('unreadOnly') === 'true' } catch { return false }
   })
   const [savedOnly, setSavedOnly] = useState(() => {
+    if (savedRedirect) return true
     try { return sessionStorage.getItem('savedOnly') === 'true' } catch { return false }
   })
   const [sortField, setSortField] = useState<ArticleSort>(() => {
@@ -203,6 +214,11 @@ export default function ArticleListPage() {
   const [tagSidebarData, setTagSidebarData] = useState<TagSidebarData | null>(null)
   const [focusedIdx, setFocusedIdx] = useState<number>(-1)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Mirrors the embedded ClipPage's tag/source selection so the toolbar
+  // (mark-all-read in particular) acts on the same subset the user sees.
+  const [clipSelection, setClipSelection] = useState<ClipSelection>({ kind: 'all' })
+  // Bumped after mark-all-read in clip mode to force ClipPage to refetch.
+  const [clipRefreshKey, setClipRefreshKey] = useState(0)
 
   // 网摘 (clip) mode: when the selected feed is the user's clip bin,
   // swap the regular article list for the tag-sidebar layout that used
@@ -237,6 +253,21 @@ export default function ArticleListPage() {
     window.addEventListener('refresh-unread', onRefreshUnread)
     return () => window.removeEventListener('refresh-unread', onRefreshUnread)
   }, [])
+
+  // /saved (legacy bookmark) redirects here as /articles?saved=1. The
+  // savedOnly state is already initialized to true by the lazy init above;
+  // here we just persist that choice and strip the param so a reload
+  // doesn't re-tick if the user clears the box.
+  useEffect(() => {
+    if (searchParams.get('saved') !== '1') return
+    try {
+      sessionStorage.setItem('savedOnly', 'true')
+      sessionStorage.setItem('unreadOnly', 'false')
+    } catch {}
+    const next = new URLSearchParams(searchParams)
+    next.delete('saved')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   // Reconcile the ?view=clip URL param with the dropdown selection.
   // - view=clip + non-clip selection → switch to the clip feed
@@ -357,21 +388,43 @@ export default function ArticleListPage() {
   const handleMarkAllRead = async () => {
     setMarkingAllRead(true)
     try {
-      await markAllRead({ feedId: selectedFeed, unread: unreadOnly, saved: savedOnly })
-      // Mirror the per-article session tracking so the list still reflects the
-      // change before the next fetch, without clobbering reads from other filters.
-      const markedIds = articles.map(a => a.id)
-      try {
-        const stored: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
-        const merged = Array.from(new Set([...stored, ...markedIds]))
-        sessionStorage.setItem('readArticles', JSON.stringify(merged))
-        setSessionReadIds(new Set(merged))
-      } catch {}
-      if (unreadOnly) {
-        setArticles([])
-        setHasMore(false)
+      if (isClippingMode) {
+        // 网摘 mode: forward the same tag/source filters the user sees so the
+        // mark-read scope matches the visible list. The clip feed itself is
+        // already implied via feedId, but we also pass it as the source when
+        // no narrower source is selected — matches ClipPage.params.
+        const sourceOverride =
+          clipSelection.kind === 'source'
+            ? clipSelection.key
+            : selectedFeed != null
+              ? `feed:${selectedFeed}`
+              : undefined
+        await markAllRead({
+          feedId: selectedFeed,
+          unread: unreadOnly,
+          saved: savedOnly,
+          tagIds: clipSelection.kind === 'tag' ? [clipSelection.id] : undefined,
+          untagged: clipSelection.kind === 'untagged',
+          source: sourceOverride,
+        })
+        setClipRefreshKey(k => k + 1)
       } else {
-        setArticles(prev => prev.map(a => ({ ...a, is_read: true })))
+        await markAllRead({ feedId: selectedFeed, unread: unreadOnly, saved: savedOnly })
+        // Mirror the per-article session tracking so the list still reflects the
+        // change before the next fetch, without clobbering reads from other filters.
+        const markedIds = articles.map(a => a.id)
+        try {
+          const stored: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
+          const merged = Array.from(new Set([...stored, ...markedIds]))
+          sessionStorage.setItem('readArticles', JSON.stringify(merged))
+          setSessionReadIds(new Set(merged))
+        } catch {}
+        if (unreadOnly) {
+          setArticles([])
+          setHasMore(false)
+        } else {
+          setArticles(prev => prev.map(a => ({ ...a, is_read: true })))
+        }
       }
       window.dispatchEvent(new Event('refresh-unread'))
     } catch {
@@ -529,7 +582,7 @@ export default function ArticleListPage() {
       <div style={{ flex: 1, minWidth: 0 }}>
       <div className="flex-between mb-2">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />
+          {!isClippingMode && <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />}
           <h2 style={{ margin: 0 }}>{isClippingMode ? '网摘' : '文章列表'}</h2>
         </div>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
@@ -565,37 +618,33 @@ export default function ArticleListPage() {
               <option key={f.id} value={f.id}>{f.title || f.url}{f.unread_count > 0 ? ` (${f.unread_count})` : ''}</option>
             ))}
           </select>
-          {!isClippingMode && (
-            <label className="toolbar-checkbox">
-              <input
-                type="checkbox"
-                checked={unreadOnly}
-                onChange={e => {
-                  setUnreadOnly(e.target.checked)
-                  if (e.target.checked) setSavedOnly(false)
-                  try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
-                }}
-                disabled={!!searchQuery}
-              />
-              仅未读
-            </label>
-          )}
-          {!isClippingMode && (
-            <label className="toolbar-checkbox">
-              <input
-                type="checkbox"
-                checked={savedOnly}
-                onChange={e => {
-                  setSavedOnly(e.target.checked)
-                  if (e.target.checked) setUnreadOnly(false)
-                  try { sessionStorage.setItem('savedOnly', String(e.target.checked)) } catch {}
-                }}
-                disabled={!!searchQuery}
-              />
-              已保存
-            </label>
-          )}
-          {!isClippingMode && !searchQuery && !grouped && (() => {
+          <label className="toolbar-checkbox">
+            <input
+              type="checkbox"
+              checked={unreadOnly}
+              onChange={e => {
+                setUnreadOnly(e.target.checked)
+                if (e.target.checked) setSavedOnly(false)
+                try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
+              }}
+              disabled={!!searchQuery}
+            />
+            仅未读
+          </label>
+          <label className="toolbar-checkbox">
+            <input
+              type="checkbox"
+              checked={savedOnly}
+              onChange={e => {
+                setSavedOnly(e.target.checked)
+                if (e.target.checked) setUnreadOnly(false)
+                try { sessionStorage.setItem('savedOnly', String(e.target.checked)) } catch {}
+              }}
+              disabled={!!searchQuery}
+            />
+            已保存
+          </label>
+          {!searchQuery && !grouped && (() => {
             const pick = (field: ArticleSort) => {
               if (field === sortField) {
                 const next: ArticleOrder = sortDir === 'desc' ? 'asc' : 'desc'
@@ -646,7 +695,7 @@ export default function ArticleListPage() {
               📚 分组
             </button>
           )}
-          {!isClippingMode && !searchQuery && articles.length > 0 && (
+          {!searchQuery && (isClippingMode || articles.length > 0) && (
             <button
               className="btn-ghost"
               onClick={handleMarkAllRead}
@@ -666,9 +715,15 @@ export default function ArticleListPage() {
 
       {isClippingMode && selectedFeed != null && (
         <ClipPage
+          key={clipRefreshKey}
           restrictToFeedId={selectedFeed}
           entryPath="/articles"
-          sidebarOpen={sidebarOpen}
+          sidebarOpen={true}
+          sortField={sortField}
+          sortDir={sortDir}
+          unreadOnly={unreadOnly}
+          savedOnly={savedOnly}
+          onSelectionChange={setClipSelection}
         />
       )}
 

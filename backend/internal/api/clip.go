@@ -60,6 +60,19 @@ func (h *ClipHandler) List(c *gin.Context) {
 		}
 	}
 
+	if c.Query("sort") == "captured" {
+		q.Sort = repository.SortCaptured
+	}
+	if c.Query("order") == "asc" {
+		q.Dir = repository.SortAsc
+	}
+	if c.Query("unread") == "true" {
+		q.UnreadOnly = true
+	}
+	if c.Query("saved") == "true" {
+		q.SavedOnly = true
+	}
+
 	rows, total, err := h.clip.ListClipped(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
