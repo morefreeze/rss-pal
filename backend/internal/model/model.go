@@ -35,6 +35,7 @@ type Article struct {
 	WordCount            int        `json:"word_count" db:"word_count"`
 	ReadingMinutes       int        `json:"reading_minutes" db:"reading_minutes"`
 	IsRead               bool       `json:"is_read" db:"is_read"`
+	IsClip               bool       `json:"is_clip,omitempty"`
 	LinksExtendable      *bool      `json:"links_extendable,omitempty" db:"links_extendable"`
 	LinkSetSuggested     *bool      `json:"link_set_suggested,omitempty" db:"link_set_suggested"`
 	ParentArticleID      *int       `json:"parent_article_id,omitempty" db:"parent_article_id"`
