@@ -136,10 +136,10 @@ export default function Toaster() {
                 {t.action.label}
               </button>
             )}
-            {/* Countdown bar — anchored right edge so the visual shrinkage
-                reads right-to-left. Hover snaps it back to full and pauses;
-                mouse-leave remounts (via runKey) so the animation starts
-                fresh at 100%. */}
+            {/* Countdown bar — transform-origin: left so the right edge
+                recedes toward the left as time passes (流动从右往左).
+                Hover snaps the bar back to full and pauses; mouse-leave
+                remounts (via runKey) so the animation starts fresh at 100%. */}
             <div
               key={t.runKey}
               style={{
@@ -149,7 +149,7 @@ export default function Toaster() {
                 bottom: 0,
                 height: 3,
                 background: 'rgba(255,255,255,0.5)',
-                transformOrigin: 'right center',
+                transformOrigin: 'left center',
                 transform: 'scaleX(1)',
                 animation: t.hovered ? 'none' : `toast-progress ${t.durationMs}ms linear forwards`,
               }}
