@@ -234,7 +234,23 @@ const (
 	SortCaptured
 )
 
-func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool, sort SortMode) ([]model.Article, error) {
+// SortDir selects ascending vs descending for the chosen SortMode. Defaults
+// to SortDesc; SortAsc is exposed so the UI can flip per field independently.
+type SortDir int
+
+const (
+	SortDesc SortDir = iota
+	SortAsc
+)
+
+func (d SortDir) sql() string {
+	if d == SortAsc {
+		return "ASC"
+	}
+	return "DESC"
+}
+
+func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool, sort SortMode, dir SortDir) ([]model.Article, error) {
 	filter := ArticleFilter{
 		UserID:     userID,
 		FeedID:     feedID,
@@ -264,13 +280,14 @@ JOIN feeds ON articles.feed_id = feeds.id` + joins
 	case SortCaptured:
 		// Strict capture-time order: a freshly bookmarked tweet always
 		// appears at the top, even if its published_at is months old.
-		query += fmt.Sprintf(" ORDER BY articles.fetched_at DESC LIMIT $%d OFFSET $%d", nextArg, nextArg+1)
+		query += fmt.Sprintf(" ORDER BY articles.fetched_at %s LIMIT $%d OFFSET $%d", dir.sql(), nextArg, nextArg+1)
 	default:
 		// Sort by GREATEST(published_at, fetched_at): typical articles
 		// (published ≤ fetched) keep chronological feel, but backfilled articles
 		// from newly-added feeds (old published_at, recent fetched_at) bubble up
 		// briefly so the new subscription is visible on /articles page 1.
-		query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) DESC, COALESCE(articles.published_at, articles.fetched_at) DESC LIMIT $%d OFFSET $%d", nextArg, nextArg+1)
+		d := dir.sql()
+		query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) %s, COALESCE(articles.published_at, articles.fetched_at) %s LIMIT $%d OFFSET $%d", d, d, nextArg, nextArg+1)
 	}
 	args = append(args, limit, offset)
 
@@ -329,7 +346,7 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 }
 
 // GetByIDWithFeedType returns the article alongside its feed's feed_type
-// (e.g., "rss" / "saved" / "youtube"). Used by the article handler to derive
+// (e.g., "rss" / "clip" / "youtube"). Used by the article handler to derive
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
@@ -383,7 +400,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 }
 
 func (r *ArticleRepository) Create(article *model.Article) error {
-	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, parent_article_id, processing_state, prerank_score, editor_note) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id, fetched_at`
+	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, parent_article_id, processing_state, prerank_score, editor_note, is_clip) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id, fetched_at`
 	mediaURL := nullableString(article.MediaURL)
 	mediaType := nullableString(article.MediaType)
 	mediaDuration := nullableInt(article.MediaDurationSeconds)
@@ -399,7 +416,7 @@ func (r *ArticleRepository) Create(article *model.Article) error {
 	if state == "" {
 		state = "ready"
 	}
-	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration, parentArticleID, state, prerankScore, article.EditorNote).Scan(&article.ID, &article.FetchedAt)
+	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration, parentArticleID, state, prerankScore, article.EditorNote, article.IsClip).Scan(&article.ID, &article.FetchedAt)
 }
 
 // nullableString returns a sql.NullString that's NULL when s is empty.
@@ -452,6 +469,7 @@ func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*mo
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE (f.owner_id IS NULL OR f.owner_id = $1) AND a.url = $2
+		ORDER BY a.fetched_at DESC
 		LIMIT 1
 	`
 	var a model.Article
@@ -1496,7 +1514,7 @@ func (r *ArticleRepository) FindArticlesNeedingLinkCheck(limit int) ([]model.Art
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.links_extendable IS NULL
 		  AND a.parent_article_id IS NULL
-		  AND f.feed_type IN ('link_set', 'saved')
+		  AND f.feed_type IN ('link_set', 'clip')
 		ORDER BY a.fetched_at DESC
 		LIMIT $1
 	`

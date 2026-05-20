@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleSort, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
 import GroupedArticleView from '../components/GroupedArticleView'
-import SavedPage from './SavedPage'
+import ClipPage from './ClipPage'
 import TagSidebar, { TagFilter } from '../components/TagSidebar'
 import SidebarToggleButton from '../components/SidebarToggleButton'
 import { usePlayer } from '../player/PlayerContext'
@@ -142,6 +142,8 @@ function SearchArticleRow({
 
 export default function ArticleListPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const wantsClip = searchParams.get('view') === 'clip'
   const player = usePlayer()
   const [articles, setArticles] = useState<Article[]>([])
   const [recommended, setRecommended] = useState<Article[]>([])
@@ -158,8 +160,15 @@ export default function ArticleListPage() {
   const [savedOnly, setSavedOnly] = useState(() => {
     try { return sessionStorage.getItem('savedOnly') === 'true' } catch { return false }
   })
-  const [sortMode, setSortMode] = useState<ArticleSort>(() => {
-    try { return (sessionStorage.getItem('articlesSort') as ArticleSort) === 'captured' ? 'captured' : 'published' } catch { return 'published' }
+  const [sortField, setSortField] = useState<ArticleSort>(() => {
+    try {
+      const v = sessionStorage.getItem('articlesSortField')
+        ?? sessionStorage.getItem('articlesSort') // legacy fallback
+      return v === 'captured' ? 'captured' : 'published'
+    } catch { return 'published' }
+  })
+  const [sortDir, setSortDir] = useState<ArticleOrder>(() => {
+    try { return sessionStorage.getItem('articlesSortDir') === 'asc' ? 'asc' : 'desc' } catch { return 'desc' }
   })
   const [showRecommended, setShowRecommended] = useState(() => {
     try { return localStorage.getItem('showRecommended') === 'true' } catch { return false }
@@ -195,13 +204,13 @@ export default function ArticleListPage() {
   const [focusedIdx, setFocusedIdx] = useState<number>(-1)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // 网摘 (clipping) mode: when the selected feed is the user's saved-clip
-  // bin, swap the regular article list for the tag-sidebar layout that
-  // used to live at /saved. The dropdown stays so the user can switch
-  // back to other feeds, but unread/saved checkboxes, search, and
-  // mark-all-read are hidden because /api/saved doesn't support them.
+  // 网摘 (clip) mode: when the selected feed is the user's clip bin,
+  // swap the regular article list for the tag-sidebar layout that used
+  // to live at /saved. The dropdown stays so the user can switch back
+  // to other feeds, but unread/saved checkboxes, search, and
+  // mark-all-read are hidden because /api/clip doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
-  const isClippingMode = selectedFeedObj?.feed_type === 'saved'
+  const isClippingMode = selectedFeedObj?.feed_type === 'clip'
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen(o => {
@@ -229,8 +238,32 @@ export default function ArticleListPage() {
     return () => window.removeEventListener('refresh-unread', onRefreshUnread)
   }, [])
 
+  // Reconcile the ?view=clip URL param with the dropdown selection.
+  // - view=clip + non-clip selection → switch to the clip feed
+  // - view=clip + no clip feed exists → leave selection null and show hint
+  // - no view param + currently on clip feed → clear selection back to "all"
   useEffect(() => {
-    // SavedPage component owns its own data fetching when in clipping
+    if (feeds.length === 0) return
+    const clipFeed = feeds.find(f => f.feed_type === 'clip')
+    const selectedIsClip = feeds.find(f => f.id === selectedFeed)?.feed_type === 'clip'
+    if (wantsClip) {
+      if (clipFeed && selectedFeed !== clipFeed.id) {
+        setSelectedFeed(clipFeed.id)
+        try { sessionStorage.setItem('selectedFeed', JSON.stringify(clipFeed.id)) } catch {}
+      } else if (!clipFeed && selectedFeed !== null) {
+        setSelectedFeed(null)
+        try { sessionStorage.setItem('selectedFeed', 'null') } catch {}
+      }
+    } else {
+      if (selectedIsClip) {
+        setSelectedFeed(null)
+        try { sessionStorage.setItem('selectedFeed', 'null') } catch {}
+      }
+    }
+  }, [feeds, wantsClip])
+
+  useEffect(() => {
+    // ClipPage component owns its own data fetching when in clipping
     // mode, so skip the regular /api/articles call to avoid a wasted
     // request and to keep the flicker out.
     if (isClippingMode) return
@@ -250,7 +283,7 @@ export default function ArticleListPage() {
     setHasMore(true)
     setFocusedIdx(-1)
     loadArticles(0, true)
-  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, sortMode, tagFilter])
+  }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, sortField, sortDir, tagFilter])
 
   useEffect(() => {
     if (!sidebarOpen || isClippingMode) return
@@ -279,7 +312,8 @@ export default function ArticleListPage() {
         untagged: tagFilter.kind === 'untagged' || undefined,
         limit: PAGE_SIZE,
         offset: off,
-        sort: sortMode,
+        sort: sortField,
+        order: sortDir,
       })
       const data = raw || []
       if (reset) {
@@ -301,7 +335,7 @@ export default function ArticleListPage() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedFeed, unreadOnly, savedOnly, sortMode, tagFilter])
+  }, [selectedFeed, unreadOnly, savedOnly, sortField, sortDir, tagFilter])
 
   const loadMore = useCallback(() => {
     if (!loadingMore && hasMore) {
@@ -516,6 +550,12 @@ export default function ArticleListPage() {
               const val = e.target.value ? Number(e.target.value) : null
               setSelectedFeed(val)
               try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
+              const pickedClip = val != null && feeds.find(f => f.id === val)?.feed_type === 'clip'
+              if (pickedClip && !wantsClip) {
+                setSearchParams({ view: 'clip' })
+              } else if (!pickedClip && wantsClip) {
+                setSearchParams({})
+              }
             }}
             className="toolbar-control"
             disabled={!!searchQuery}
@@ -555,20 +595,43 @@ export default function ArticleListPage() {
               已保存
             </label>
           )}
-          {!isClippingMode && !searchQuery && !grouped && (
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => {
-                const next: ArticleSort = sortMode === 'captured' ? 'published' : 'captured'
-                setSortMode(next)
-                try { sessionStorage.setItem('articlesSort', next) } catch {}
-              }}
-              title={sortMode === 'captured' ? '当前按抓取时间排序,点击切换为发布时间' : '当前按发布时间排序,点击切换为抓取时间'}
-            >
-              ⏱ {sortMode === 'captured' ? '抓取时间' : '发布时间'}
-            </button>
-          )}
+          {!isClippingMode && !searchQuery && !grouped && (() => {
+            const pick = (field: ArticleSort) => {
+              if (field === sortField) {
+                const next: ArticleOrder = sortDir === 'desc' ? 'asc' : 'desc'
+                setSortDir(next)
+                try { sessionStorage.setItem('articlesSortDir', next) } catch {}
+              } else {
+                setSortField(field)
+                try { sessionStorage.setItem('articlesSortField', field) } catch {}
+              }
+            }
+            const arrow = sortDir === 'asc' ? '↑' : '↓'
+            const btn = (field: ArticleSort, label: string) => {
+              const active = sortField === field
+              return (
+                <button
+                  type="button"
+                  className={active ? '' : 'btn-ghost'}
+                  onClick={() => pick(field)}
+                  style={{ padding: '4px 8px', minWidth: 0 }}
+                  title={
+                    active
+                      ? '再点切换升序/降序'
+                      : `点击按${label}排序`
+                  }
+                >
+                  {label}{active ? ` ${arrow}` : ''}
+                </button>
+              )
+            }
+            return (
+              <div style={{ display: 'inline-flex', gap: 4 }}>
+                {btn('published', '发布')}
+                {btn('captured', '抓取')}
+              </div>
+            )
+          })()}
           {!isClippingMode && !searchQuery && tagFilter.kind === 'all' && (
             <button
               type="button"
@@ -595,8 +658,14 @@ export default function ArticleListPage() {
         </div>
       </div>
 
+      {wantsClip && !isClippingMode && !feeds.find(f => f.feed_type === 'clip') && (
+        <div className="text-muted" style={{ padding: 24, textAlign: 'center' }}>
+          还没有网摘 — 安装浏览器扩展或书签后再来收藏文章。
+        </div>
+      )}
+
       {isClippingMode && selectedFeed != null && (
-        <SavedPage
+        <ClipPage
           restrictToFeedId={selectedFeed}
           entryPath="/articles"
           sidebarOpen={sidebarOpen}
@@ -751,6 +820,7 @@ export default function ArticleListPage() {
               stripMarkdown={stripMarkdown}
               onOpen={openArticle}
               onFocus={setFocusedIdx}
+              dateField={sortField === 'captured' ? 'captured' : 'published'}
             />
           ))}
           {hasMore ? (

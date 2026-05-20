@@ -1,14 +1,14 @@
 import { UserTag } from '../api/client'
-import { SavedSelection, SavedSourceRow } from './SavedTagSidebar'
+import { ClipSelection, ClipSourceRow } from './ClipTagSidebar'
 
 interface Props {
   tags: UserTag[]
-  sources: SavedSourceRow[]
-  selection: SavedSelection
-  onSelect: (sel: SavedSelection) => void
+  sources: ClipSourceRow[]
+  selection: ClipSelection
+  onSelect: (sel: ClipSelection) => void
 }
 
-function isActive(sel: SavedSelection, target: SavedSelection): boolean {
+function isActive(sel: ClipSelection, target: ClipSelection): boolean {
   if (sel.kind !== target.kind) return false
   if (sel.kind === 'all' || sel.kind === 'untagged') return true
   if (sel.kind === 'tag' && target.kind === 'tag') return sel.id === target.id
@@ -16,7 +16,7 @@ function isActive(sel: SavedSelection, target: SavedSelection): boolean {
   return false
 }
 
-export default function SavedTagChipBar({ tags, sources, selection, onSelect }: Props) {
+export default function ClipTagChipBar({ tags, sources, selection, onSelect }: Props) {
   return (
     <div
       style={{

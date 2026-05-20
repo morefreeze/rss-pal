@@ -101,10 +101,11 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, captureMaxBodyBytes)
 	var req struct {
-		URL   string `json:"url"`
-		Title string `json:"title"`
-		HTML  string `json:"html"`
-		Force bool   `json:"force"`
+		URL      string `json:"url"`
+		Title    string `json:"title"`
+		HTML     string `json:"html"`
+		Force    bool   `json:"force"`
+		ForceNew bool   `json:"force_new"`
 	}
 	dec := json.NewDecoder(c.Request.Body)
 	if err := dec.Decode(&req); err != nil {
@@ -121,7 +122,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		return
 	}
 
-	normalized := util.NormalizeURL(req.URL)
+	normalized := util.NormalizeURLKeepFragment(req.URL)
 
 	var (
 		content     string
@@ -158,11 +159,15 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		title = normalized
 	}
 
-	existing, err := h.articleRepo.FindByOwnerAndURL(user.ID, normalized)
-	if err != nil {
-		log.Printf("bookmarklet: lookup failed for user=%d url=%s: %v", user.ID, normalized, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询文章失败"})
-		return
+	var existing *model.Article
+	if !req.ForceNew {
+		var err error
+		existing, err = h.articleRepo.FindByOwnerAndURL(user.ID, normalized)
+		if err != nil {
+			log.Printf("bookmarklet: lookup failed for user=%d url=%s: %v", user.ID, normalized, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询文章失败"})
+			return
+		}
 	}
 
 	if existing != nil {
@@ -212,9 +217,9 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		return
 	}
 
-	feed, err := h.feedRepo.GetOrCreateSavedFeed(user.ID)
+	feed, err := h.feedRepo.GetOrCreateClipFeed(user.ID)
 	if err != nil {
-		log.Printf("bookmarklet: GetOrCreateSavedFeed failed for user=%d: %v", user.ID, err)
+		log.Printf("bookmarklet: GetOrCreateClipFeed failed for user=%d: %v", user.ID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建网摘 feed 失败"})
 		return
 	}
@@ -225,6 +230,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		URL:         normalized,
 		Content:     content,
 		PublishedAt: publishedAt, // tweet's original time for Twitter captures, nil otherwise
+		IsClip:      true,
 	}
 	article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 	if err := h.articleRepo.Create(article); err != nil {

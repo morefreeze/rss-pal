@@ -13,6 +13,7 @@
   const duplicatePrompt = $('duplicatePrompt');
   const dupMessage = $('dupMessage');
   const overwriteBtn = $('overwriteBtn');
+  const newBtn = $('newBtn');
   const cancelBtn = $('cancelBtn');
   const settingsLink = $('settingsLink');
   const goSettings = $('goSettings');
@@ -220,14 +221,14 @@
     return clone.outerHTML;
   }
 
-  async function sendToServer(url, title, html, serverUrl, token, force) {
+  async function sendToServer(url, title, html, serverUrl, token, force, forceNew) {
     const resp = await fetch(serverUrl.replace(/\/+$/, '') + '/api/bookmarklet/capture', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + token,
       },
-      body: JSON.stringify({ url, title, html, force: !!force }),
+      body: JSON.stringify({ url, title, html, force: !!force, force_new: !!forceNew }),
     });
 
     if (!resp.ok) {
@@ -302,6 +303,24 @@
       showStatus('error', '❌ ' + escapeHtml(err.message));
     } finally {
       setLoading(overwriteBtn, false);
+    }
+  });
+
+  newBtn.addEventListener('click', async () => {
+    if (!lastCapture) return;
+    hideDuplicate();
+    setLoading(newBtn, true);
+    try {
+      const result = await sendToServer(
+        lastCapture.url, lastCapture.title, lastCapture.html,
+        lastCapture.serverUrl, lastCapture.token, false, true
+      );
+      const link = buildArticleLink(lastCapture.serverUrl, result.article_id);
+      showStatus('success', '✅ ' + escapeHtml(result.message || '已加入网摘') + link);
+    } catch (err) {
+      showStatus('error', '❌ ' + escapeHtml(err.message));
+    } finally {
+      setLoading(newBtn, false);
     }
   });
 

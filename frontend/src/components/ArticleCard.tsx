@@ -66,6 +66,10 @@ interface Props {
   // here so bookmarklet articles show their real host instead of the
   // shared "⭐ 网摘" bin name.
   sourceLabel?: string
+  // Which timestamp the card shows. Defaults to 'published'. When the list
+  // is sorted by capture time, callers pass 'captured' so the user sees the
+  // dimension the sort is driven by.
+  dateField?: 'published' | 'captured'
 }
 
 // ArticleCard renders a single article row in the main list. It owns the
@@ -86,6 +90,7 @@ export default function ArticleCard({
   onFocus,
   showSourceTag = true,
   sourceLabel,
+  dateField = 'published',
 }: Props) {
   const exposureRef = useExposureTracking(article.id)
   const effectiveSourceLabel = sourceLabel ?? article.feed_title
@@ -142,7 +147,9 @@ export default function ArticleCard({
           ) : null}
           <div className="flex-between mt-1">
             <div className="flex gap-2" style={{ alignItems: 'center' }}>
-              <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+              <span className="text-muted text-sm">
+                {dateField === 'captured' ? `抓 ${formatDate(article.fetched_at)}` : formatDate(article.published_at)}
+              </span>
               <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
             </div>
           </div>
