@@ -68,6 +68,10 @@ function App() {
           <Route path="articles" element={<ArticleListPage />} />
           <Route path="articles/:id" element={<ArticlePage />} />
           <Route path="clip" element={<ClipPage />} />
+          {/* Back-compat: bookmarks of the old /saved view land on /articles
+              with the 已保存 checkbox pre-ticked. ArticleListPage handles the
+              query param and strips it from the URL. */}
+          <Route path="saved" element={<Navigate to="/articles?saved=1" replace />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="stats" element={<StatsPage />} />
           <Route path="settings" element={<SettingsPage user={user} />} />
