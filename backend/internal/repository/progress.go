@@ -3,9 +3,11 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/lib/pq"
 )
 
 type ProgressRepository struct {
@@ -74,11 +76,23 @@ func (r *ProgressRepository) UpdateTimestamp(articleID int, t time.Time) error {
 	return err
 }
 
+// MarkAllReadClipFilter narrows mark-all-read to the same subset that the
+// /api/clip list shows when the user is in 网摘 mode with a tag/source
+// filter active. Zero value applies no clip-specific filtering.
+type MarkAllReadClipFilter struct {
+	TagIDs      []int
+	Mode        string // "and" | "or"; only honored when len(TagIDs)>1
+	Untagged    bool
+	SourceKind  string // "" | "feed" | "host"
+	SourceValue string
+}
+
 // MarkAllRead marks every article visible under the given filters as read.
 // Filters mirror ArticleRepository.GetAll so the affected set matches what
 // the user currently sees in the list. Pass feedID=nil / unreadOnly=false /
-// savedOnly=false to apply across the whole library.
-func (r *ProgressRepository) MarkAllRead(userID int, feedID *int, unreadOnly, savedOnly bool) error {
+// savedOnly=false to apply across the whole library. clip carries the
+// extra tag/source filters used by 网摘 mode.
+func (r *ProgressRepository) MarkAllRead(userID int, feedID *int, unreadOnly, savedOnly bool, clip MarkAllReadClipFilter) error {
 	args := []interface{}{userID}
 	argIdx := 2
 	joins := ""
@@ -98,6 +112,50 @@ func (r *ProgressRepository) MarkAllRead(userID int, feedID *int, unreadOnly, sa
 		conditions = append(conditions, fmt.Sprintf("up_save.signal_value = $%d", argIdx))
 		args = append(args, 1.0)
 		argIdx++
+	}
+
+	// Mirror ClipRepository.ListClipped's tag/source predicates so a
+	// user-visible filter on /articles?view=clip stays in effect for
+	// mark-all-read.
+	if clip.Untagged {
+		conditions = append(conditions, `NOT EXISTS (
+			SELECT 1 FROM article_user_tags aut
+			WHERE aut.article_id = a.id AND aut.user_id = $1
+		)`)
+	} else if len(clip.TagIDs) > 0 {
+		args = append(args, pq.Array(clip.TagIDs))
+		idsParam := "$" + strconv.Itoa(argIdx)
+		argIdx++
+		if clip.Mode == "and" && len(clip.TagIDs) > 1 {
+			args = append(args, len(clip.TagIDs))
+			countParam := "$" + strconv.Itoa(argIdx)
+			argIdx++
+			conditions = append(conditions, `(
+				SELECT COUNT(DISTINCT aut.tag_id) FROM article_user_tags aut
+				WHERE aut.article_id = a.id AND aut.user_id = $1
+				  AND aut.tag_id = ANY(`+idsParam+`::int[])
+			) = `+countParam)
+		} else {
+			conditions = append(conditions, `EXISTS (
+				SELECT 1 FROM article_user_tags aut
+				WHERE aut.article_id = a.id AND aut.user_id = $1
+				  AND aut.tag_id = ANY(`+idsParam+`::int[])
+			)`)
+		}
+	}
+	switch clip.SourceKind {
+	case "feed":
+		if clip.SourceValue != "" {
+			args = append(args, clip.SourceValue)
+			conditions = append(conditions, "a.feed_id::text = $"+strconv.Itoa(argIdx))
+			argIdx++
+		}
+	case "host":
+		if clip.SourceValue != "" {
+			args = append(args, clip.SourceValue)
+			conditions = append(conditions, `lower(regexp_replace(a.url, '^https?://(?:www\.)?([^/]+).*$', '\1')) = lower($`+strconv.Itoa(argIdx)+`)`)
+			argIdx++
+		}
 	}
 
 	where := conditions[0]

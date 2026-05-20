@@ -47,7 +47,32 @@ func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
 	unreadOnly := c.Query("unread") == "true"
 	savedOnly := c.Query("saved") == "true"
 
-	if err := h.progressRepo.MarkAllRead(getUserID(c), feedID, unreadOnly, savedOnly); err != nil {
+	// 网摘 mode forwards the same tag/source filters used by /api/clip
+	// so the user's current selection is the unit of work.
+	clip := repository.MarkAllReadClipFilter{
+		Mode: strings.ToLower(c.DefaultQuery("mode", "and")),
+	}
+	if c.Query("untagged") == "true" {
+		clip.Untagged = true
+	} else if v := c.Query("tag_ids"); v != "" {
+		for _, s := range strings.Split(v, ",") {
+			if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n > 0 {
+				clip.TagIDs = append(clip.TagIDs, n)
+			}
+		}
+	}
+	if v := c.Query("source"); v != "" {
+		if i := strings.Index(v, ":"); i > 0 {
+			kind := v[:i]
+			value := v[i+1:]
+			if kind == "feed" || kind == "host" {
+				clip.SourceKind = kind
+				clip.SourceValue = value
+			}
+		}
+	}
+
+	if err := h.progressRepo.MarkAllRead(getUserID(c), feedID, unreadOnly, savedOnly, clip); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
