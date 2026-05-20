@@ -38,6 +38,7 @@ func main() {
 	articleUserTagRepo := repository.NewArticleUserTagRepository(db)
 	tagSuggestRepo := repository.NewTagSuggestionRepository(db)
 	clipRepo := repository.NewClipRepository(db)
+	hiddenRepo := repository.NewHiddenArticleRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
 	summarizerService := service.NewSummarizerService(summarizer)
@@ -49,7 +50,7 @@ func main() {
 	authHandler := api.NewAuthHandler(cfg, userRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(db, backupRunner, cfg)
-	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, summarizerService, contentFetcher)
+	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, hiddenRepo, summarizerService, contentFetcher)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo, eventRepo)
@@ -158,6 +159,8 @@ func main() {
 		apiGroup.GET("/articles/:id/candidates", articleHandler.GetCandidates)
 		apiGroup.POST("/articles/:id/batch_fetch", articleHandler.BatchFetch)
 		apiGroup.POST("/articles/:id/confirm_link_set", articleHandler.ConfirmLinkSetSuggestion)
+		apiGroup.POST("/articles/:id/hide", articleHandler.Hide)
+		apiGroup.DELETE("/articles/:id/hide", articleHandler.Unhide)
 
 		// Clip articles (filtered by tags / source / untagged)
 		apiGroup.GET("/clip", clipHandler.List)

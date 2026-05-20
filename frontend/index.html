@@ -5,9 +5,22 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>RSS Pal</title>
+    <style>
+      /* Pre-React skeleton: visible during the JS download/parse window so
+         the page never reads as a "header-hidden" reading-mode flash. React's
+         first render replaces #root's children. */
+      .preboot {
+        font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+        padding: 16px 24px;
+        font-size: 22px;
+        font-weight: 700;
+        color: #444;
+        opacity: 0.6;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="preboot">RSS Pal</div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

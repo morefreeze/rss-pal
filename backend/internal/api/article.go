@@ -22,6 +22,7 @@ type ArticleHandler struct {
 	bindRepo       *repository.ArticleUserTagRepository
 	progressRepo   *repository.ProgressRepository
 	prefRepo       *repository.PreferenceRepository
+	hiddenRepo     *repository.HiddenArticleRepository
 	summarizer     *service.SummarizerService
 	templateRepo   *repository.TemplateRepository
 	cfg            *config.Config
@@ -79,12 +80,13 @@ func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "已全部标记为已读"})
 }
 
-func NewArticleHandler(articleRepo *repository.ArticleRepository, bindRepo *repository.ArticleUserTagRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, summarizer *service.SummarizerService, contentFetcher *rss.ContentFetcher) *ArticleHandler {
+func NewArticleHandler(articleRepo *repository.ArticleRepository, bindRepo *repository.ArticleUserTagRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, hiddenRepo *repository.HiddenArticleRepository, summarizer *service.SummarizerService, contentFetcher *rss.ContentFetcher) *ArticleHandler {
 	return &ArticleHandler{
 		articleRepo:    articleRepo,
 		bindRepo:       bindRepo,
 		progressRepo:   progressRepo,
 		prefRepo:       prefRepo,
+		hiddenRepo:     hiddenRepo,
 		summarizer:     summarizer,
 		contentFetcher: contentFetcher,
 	}
@@ -232,15 +234,17 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 
 	progress, _ := h.progressRepo.GetByArticleAndUser(id, userID)
 	signals, _ := h.prefRepo.GetUserSignals(userID, id)
+	hidden, _, _ := h.hiddenRepo.IsHidden(userID, id)
 
 	response := gin.H{
 		"article":          article,
 		"progress":         progress,
 		"signals":          signals,
 		"from_bookmarklet": feedType == "clip",
+		"hidden":           hidden,
 	}
 	if article.LinksExtendable != nil && *article.LinksExtendable {
-		children, err := h.articleRepo.GetChildren(article.ID)
+		children, err := h.articleRepo.GetVisibleChildren(article.ID, userID)
 		if err == nil {
 			response["children"] = children
 		} else {
@@ -248,6 +252,50 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+// Hide POST /api/articles/:id/hide — soft-delete an article for the current user.
+// Idempotent: a second call returns the original hidden_at.
+func (h *ArticleHandler) Hide(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	userID := getUserID(c)
+	// Existence + tenancy check via GetByID (which already filters by feed
+	// visibility). Hidden articles are still reachable here on purpose —
+	// the hide is idempotent.
+	if _, err := h.articleRepo.GetByID(id, userID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+	ts, err := h.hiddenRepo.Hide(userID, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hidden": true, "hidden_at": ts})
+}
+
+// Unhide DELETE /api/articles/:id/hide — restore a previously hidden article.
+// Idempotent: no error when the row never existed.
+func (h *ArticleHandler) Unhide(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	userID := getUserID(c)
+	if _, err := h.articleRepo.GetByID(id, userID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return
+	}
+	if err := h.hiddenRepo.Unhide(userID, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hidden": false})
 }
 
 func (h *ArticleHandler) GetRecommended(c *gin.Context) {
