@@ -32,6 +32,16 @@ type ClipQuery struct {
 	SourceValue string
 	Limit       int
 	Offset      int
+	// Sort + Dir mirror ArticleRepository.GetAll so the /articles?view=clip
+	// list reuses the same sort UI semantics. Zero values give the legacy
+	// behavior (published, desc).
+	Sort SortMode
+	Dir  SortDir
+	// Filter checkboxes — mirror /api/articles. UnreadOnly excludes
+	// clipped articles marked as read; SavedOnly keeps only clips that
+	// also carry the star save signal.
+	UnreadOnly bool
+	SavedOnly  bool
 }
 
 // ClipRow pairs an Article with the EffectiveSource the UI should render.
@@ -87,12 +97,26 @@ func (r *ClipRepository) ListClipped(q ClipQuery) ([]ClipRow, int, error) {
 		}
 	}
 
+	// Filter checkbox joins. The data SELECT below already includes the
+	// reading_progress LEFT JOIN for the is_read column; we still emit it
+	// here so the COUNT(*) query and the WHERE predicate share the same
+	// alias scope.
+	extraJoins := ""
+	if q.UnreadOnly {
+		where = append(where, "COALESCE(rp_filter.is_completed, false) = false")
+		extraJoins += " LEFT JOIN reading_progress rp_filter ON rp_filter.article_id = a.id AND rp_filter.user_id = $1"
+	}
+	if q.SavedOnly {
+		where = append(where, "up_save.signal_value = 1.0")
+		extraJoins += " LEFT JOIN user_preferences up_save ON up_save.article_id = a.id AND up_save.user_id = $1 AND up_save.signal_type = 'save'"
+	}
+
 	whereSQL := strings.Join(where, " AND ")
 
 	var total int
 	if err := r.db.QueryRow(`
 		SELECT COUNT(*) FROM articles a
-		JOIN feeds f ON f.id = a.feed_id
+		JOIN feeds f ON f.id = a.feed_id`+extraJoins+`
 		WHERE `+whereSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -100,6 +124,19 @@ func (r *ClipRepository) ListClipped(q ClipQuery) ([]ClipRow, int, error) {
 	args = append(args, q.Limit, q.Offset)
 	limitParam := "$" + strconv.Itoa(len(args)-1)
 	offsetParam := "$" + strconv.Itoa(len(args))
+
+	var orderBy string
+	d := q.Dir.sql()
+	switch q.Sort {
+	case SortCaptured:
+		orderBy = "a.fetched_at " + d + ", a.id " + d
+	default:
+		// Mirror ArticleRepository.GetAll's published sort so the /articles
+		// list and the embedded clip view feel identical to the user.
+		orderBy = "DATE_TRUNC('day', GREATEST(COALESCE(a.published_at, a.fetched_at), a.fetched_at - INTERVAL '7 days')) " + d +
+			", COALESCE(a.published_at, a.fetched_at) " + d + ", a.id " + d
+	}
+
 	rows, err := r.db.Query(`
 		SELECT a.id, a.feed_id, f.title AS feed_title, COALESCE(f.feed_type, 'rss') AS feed_type,
 		       a.title, a.url,
@@ -109,9 +146,9 @@ func (r *ClipRepository) ListClipped(q ClipQuery) ([]ClipRow, int, error) {
 		       COALESCE(rp.is_completed, false) AS is_read
 		FROM articles a
 		JOIN feeds f ON f.id = a.feed_id
-		LEFT JOIN reading_progress rp ON rp.article_id = a.id AND rp.user_id = $1
+		LEFT JOIN reading_progress rp ON rp.article_id = a.id AND rp.user_id = $1`+extraJoins+`
 		WHERE `+whereSQL+`
-		ORDER BY a.published_at DESC NULLS LAST, a.id DESC
+		ORDER BY `+orderBy+`
 		LIMIT `+limitParam+` OFFSET `+offsetParam, args...)
 	if err != nil {
 		return nil, 0, err
