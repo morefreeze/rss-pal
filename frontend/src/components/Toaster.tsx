@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 interface ToastItem {
   id: number
   msg: string
   type: 'success' | 'error' | 'info'
+  durationMs: number
   action?: { label: string; onClick: () => void }
 }
 
@@ -11,42 +12,72 @@ let _id = 0
 
 export default function Toaster() {
   const [toasts, setToasts] = useState<ToastItem[]>([])
+  // One pending dismissal timer per toast id. Hover clears it, mouse-leave
+  // re-arms it with the full duration ("重新计时"), matching the user's spec.
+  const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+
+  const clearTimer = (id: number) => {
+    const t = timers.current.get(id)
+    if (t) {
+      clearTimeout(t)
+      timers.current.delete(id)
+    }
+  }
+
+  const scheduleDismiss = (id: number, ms: number) => {
+    clearTimer(id)
+    timers.current.set(id, setTimeout(() => {
+      timers.current.delete(id)
+      setToasts(prev => prev.filter(x => x.id !== id))
+    }, ms))
+  }
 
   useEffect(() => {
     const handler = (e: Event) => {
       const { msg, type, action, durationMs } = (e as CustomEvent).detail
       const id = ++_id
-      setToasts(prev => [...prev, { id, msg, type, action }])
       const defaultMs = action ? 5000 : (type === 'error' ? 5000 : 3000)
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id))
-      }, durationMs ?? defaultMs)
+      const ms = durationMs ?? defaultMs
+      setToasts(prev => [...prev, { id, msg, type, durationMs: ms, action }])
+      scheduleDismiss(id, ms)
     }
     window.addEventListener('show-toast', handler)
-    return () => window.removeEventListener('show-toast', handler)
+    return () => {
+      window.removeEventListener('show-toast', handler)
+      timers.current.forEach(t => clearTimeout(t))
+      timers.current.clear()
+    }
   }, [])
 
   if (toasts.length === 0) return null
 
-  const dismiss = (id: number) =>
+  const dismiss = (id: number) => {
+    clearTimer(id)
     setToasts(prev => prev.filter(x => x.id !== id))
+  }
 
   return (
     <div style={{
       position: 'fixed',
-      bottom: 20,
-      right: 20,
+      top: 16,
+      left: '50%',
+      transform: 'translateX(-50%)',
       zIndex: 9999,
       display: 'flex',
       flexDirection: 'column',
       gap: 8,
-      maxWidth: 360,
+      maxWidth: 'min(420px, 90vw)',
+      width: 'max-content',
+      pointerEvents: 'none',
     }}>
       {toasts.map(t => (
         <div
           key={t.id}
           onClick={t.action ? undefined : () => dismiss(t.id)}
+          onMouseEnter={() => clearTimer(t.id)}
+          onMouseLeave={() => scheduleDismiss(t.id, t.durationMs)}
           style={{
+            pointerEvents: 'auto',
             padding: '10px 16px',
             borderRadius: 8,
             boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
