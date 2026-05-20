@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { logout, getUnreadCount } from '../api/client'
 import Toaster from './Toaster'
 import { PlayerProvider, usePlayer } from '../player/PlayerContext'
@@ -12,17 +12,21 @@ interface LayoutProps {
   onLogout: () => void
 }
 
-type NavItem = { to: string; icon: string; label: string }
+// matchClip flips the active predicate so the 网摘 tab matches when
+// /articles?view=clip is in the URL, and the regular 文章 tab does NOT
+// match in that case. Without this, both share pathname /articles and
+// React Router's default isActive would light up both.
+type NavItem = { to: string; icon: string; label: string; matchClip?: boolean }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/articles',    icon: '📰', label: '文章' },
-  { to: '/saved',       icon: '⭐', label: '网摘' },
-  { to: '/feeds',       icon: '📡', label: '订阅' },
-  { to: '/weekly',      icon: '📅', label: '周刊' },
-  { to: '/recommended', icon: '✨', label: '推荐' },
-  { to: '/insights',    icon: '💡', label: '洞察' },
-  { to: '/stats',       icon: '📊', label: '统计' },
-  { to: '/settings',    icon: '⚙️', label: '设置' },
+  { to: '/articles',           icon: '📰', label: '文章' },
+  { to: '/articles?view=clip', icon: '⭐', label: '网摘', matchClip: true },
+  { to: '/feeds',              icon: '📡', label: '订阅' },
+  { to: '/weekly',             icon: '📅', label: '周刊' },
+  { to: '/recommended',        icon: '✨', label: '推荐' },
+  { to: '/insights',           icon: '💡', label: '洞察' },
+  { to: '/stats',              icon: '📊', label: '统计' },
+  { to: '/settings',           icon: '⚙️', label: '设置' },
 ]
 
 function UserMenu({ username, onLogout }: { username: string; onLogout: () => void }) {
@@ -141,9 +145,6 @@ export default function Layout({ user, onLogout }: LayoutProps) {
     onLogout()
   }
 
-  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    isActive ? 'nav-link active' : 'nav-link'
-
   const renderNavLabel = (item: NavItem) => {
     if (item.to !== '/articles' || unreadCount === 0) {
       return <>{item.icon} {item.label}</>
@@ -165,7 +166,6 @@ export default function Layout({ user, onLogout }: LayoutProps) {
         unreadCount={unreadCount}
         onLogout={handleLogout}
         renderNavLabel={renderNavLabel}
-        navLinkClass={navLinkClass}
         menuOpen={menuOpen}
         setMenuOpen={setMenuOpen}
       />
@@ -178,16 +178,32 @@ interface LayoutInnerProps {
   unreadCount: number
   onLogout: () => void
   renderNavLabel: (item: NavItem) => React.ReactNode
-  navLinkClass: (s: { isActive: boolean }) => string
   menuOpen: boolean
   setMenuOpen: (v: boolean) => void
 }
 
 function LayoutInner({
-  user, unreadCount, onLogout, renderNavLabel, navLinkClass, menuOpen, setMenuOpen,
+  user, unreadCount, onLogout, renderNavLabel, menuOpen, setMenuOpen,
 }: LayoutInnerProps) {
   const bp = useBreakpoint()
   const player = usePlayer()
+  const location = useLocation()
+
+  // /articles?view=clip is the 网摘 view embedded inside the article page.
+  // Two desktop tabs share pathname /articles, so React Router's default
+  // active predicate can't distinguish them — we derive activeness from
+  // (pathname + search) instead.
+  const isClipView =
+    location.pathname === '/articles' &&
+    new URLSearchParams(location.search).get('view') === 'clip'
+
+  const itemIsActive = (item: NavItem): boolean => {
+    if (item.to === '/articles') return location.pathname === '/articles' && !isClipView
+    if (item.matchClip) return isClipView
+    return location.pathname === item.to || location.pathname.startsWith(item.to + '/')
+  }
+
+  const navLinkClass = (item: NavItem) => (itemIsActive(item) ? 'nav-link active' : 'nav-link')
 
   // --bottom-chrome = tab-bar height (if shown) + mini-player height (if active)
   // + safe-area-inset-bottom + 16px gutter. Reads on <body> so any deep main
@@ -210,9 +226,9 @@ function LayoutInner({
 
           <nav className="flex gap-2 desktop-nav" style={{ alignItems: 'center' }}>
             {NAV_ITEMS.map(item => (
-              <NavLink key={item.to} to={item.to} className={navLinkClass}>
+              <Link key={item.to} to={item.to} className={navLinkClass(item)}>
                 {renderNavLabel(item)}
-              </NavLink>
+              </Link>
             ))}
             {user && <UserMenu username={user.username} onLogout={onLogout} />}
           </nav>
@@ -235,15 +251,15 @@ function LayoutInner({
             borderRadius: 8,
           }}>
             {NAV_ITEMS.map(item => (
-              <NavLink
+              <Link
                 key={item.to}
                 to={item.to}
-                className={navLinkClass}
+                className={navLinkClass(item)}
                 onClick={() => setMenuOpen(false)}
                 style={{ display: 'block', padding: '10px 16px', borderBottom: '1px solid var(--border)', borderRadius: 0 }}
               >
                 {renderNavLabel(item)}
-              </NavLink>
+              </Link>
             ))}
             <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="text-muted text-sm">👤 {user?.username}</span>

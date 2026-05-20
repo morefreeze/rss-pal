@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  ArticleOrder,
+  ArticleSort,
   GetClipParams,
   ClipItem,
   ClipListResponse,
@@ -68,9 +70,29 @@ interface ClipPageProps {
   // When undefined (standalone /clip route), sidebar is always shown.
   // When provided by ArticleListPage in clipping mode, follows the parent toggle.
   sidebarOpen?: boolean
+  // Sort controls. Optional — when omitted, the server picks a default.
+  // The /articles embed forwards the user's sort UI selection here.
+  sortField?: ArticleSort
+  sortDir?: ArticleOrder
+  // Checkbox filters mirrored from /articles. Optional; when undefined
+  // the standalone /clip route runs without them.
+  unreadOnly?: boolean
+  savedOnly?: boolean
+  // Surfaces the internal tag/source selection so the embedding page can
+  // wire features like mark-all-read to the same filter the user sees.
+  onSelectionChange?: (sel: ClipSelection) => void
 }
 
-export default function ClipPage({ restrictToFeedId, entryPath = '/clip', sidebarOpen }: ClipPageProps = {}) {
+export default function ClipPage({
+  restrictToFeedId,
+  entryPath = '/clip',
+  sidebarOpen,
+  sortField,
+  sortDir,
+  unreadOnly,
+  savedOnly,
+  onSelectionChange,
+}: ClipPageProps = {}) {
   const navigate = useNavigate()
   const bp = useBreakpoint()
   const player = usePlayer()
@@ -99,11 +121,16 @@ export default function ClipPage({ restrictToFeedId, entryPath = '/clip', sideba
     // filter to that feed unless the user has explicitly clicked a more
     // granular source row (host:...). The parent dropdown owns the
     // feed-scope, so we never want to broaden beyond it.
+    let out: GetClipParams = base
     if (restrictToFeedId != null && selection.kind !== 'source') {
-      return { ...base, source: `feed:${restrictToFeedId}` }
+      out = { ...base, source: `feed:${restrictToFeedId}` }
     }
-    return base
-  }, [selection, restrictToFeedId])
+    if (sortField) out = { ...out, sort: sortField }
+    if (sortDir) out = { ...out, order: sortDir }
+    if (unreadOnly) out = { ...out, unread: true }
+    if (savedOnly) out = { ...out, saved: true }
+    return out
+  }, [selection, restrictToFeedId, sortField, sortDir, unreadOnly, savedOnly])
   const paramsKey = JSON.stringify(params)
 
   const loadPage = useCallback(
@@ -201,6 +228,10 @@ export default function ClipPage({ restrictToFeedId, entryPath = '/clip', sideba
   const handleSelect = (sel: ClipSelection) => {
     setSelection(sel)
   }
+
+  useEffect(() => {
+    onSelectionChange?.(selection)
+  }, [selection, onSelectionChange])
 
   const headerLabel = (() => {
     switch (selection.kind) {
