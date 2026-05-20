@@ -58,6 +58,8 @@ func (r *ClipRepository) ListClipped(q ClipQuery) ([]ClipRow, int, error) {
 	where := []string{`f.feed_type = 'clip' AND f.owner_id = $1`}
 	// Tenancy guard kept for symmetry with other queries in this codebase.
 	where = append(where, `(f.owner_id IS NULL OR f.owner_id = $1)`)
+	// Per-user hide overlay.
+	where = append(where, `NOT EXISTS (SELECT 1 FROM hidden_articles ha WHERE ha.article_id = a.id AND ha.user_id = $1)`)
 
 	if q.Untagged {
 		where = append(where, `NOT EXISTS (

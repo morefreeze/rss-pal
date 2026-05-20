@@ -5,7 +5,7 @@ import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
-  confirmLinkSetSuggestion,
+  confirmLinkSetSuggestion, hideArticle, unhideArticle,
   Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
@@ -23,6 +23,7 @@ import ArticlePlayerCard from '../components/ArticlePlayerCard'
 import TagBar from '../components/TagBar'
 import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
+import ArticleActionsMenu from '../components/ArticleActionsMenu'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
@@ -83,6 +84,10 @@ export default function ArticlePage() {
   // Bookmarklet state
   const [fromBookmarklet, setFromBookmarklet] = useState(false)
 
+  // Soft-delete state: true when the article is hidden for this user. Surface
+  // is a banner that offers 恢复 — the article itself still renders normally.
+  const [hidden, setHidden] = useState(false)
+
   // LinkSet children
   const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(null)
 
@@ -102,6 +107,7 @@ export default function ArticlePage() {
       // requires scrollPosition > maxScrollRef.current to write).
       maxScrollRef.current = Math.min(1, data.progress?.scroll_position ?? 0)
       setFromBookmarklet(Boolean(data.from_bookmarklet))
+      setHidden(Boolean(data.hidden))
       setLinkSetChildren(data.children ?? null)
       if (data.signals) {
         setLiked((data.signals['like'] ?? 0) > 0)
@@ -567,6 +573,65 @@ export default function ArticlePage() {
     }
   }
 
+  const handleDelete = async () => {
+    if (!article) return
+    const targetId = article.id
+    // Capture nav before the hide, in case the navList changes shape later.
+    const goAfter = nextId
+      ? () => navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })
+      : handleBack
+    try {
+      await hideArticle(targetId)
+    } catch {
+      toast.error('删除失败，请稍后重试')
+      return
+    }
+    // Local hint so list pages can hide the row immediately on remount.
+    try {
+      const arr: number[] = JSON.parse(sessionStorage.getItem('hiddenArticles') || '[]')
+      if (!arr.includes(targetId)) {
+        arr.push(targetId)
+        sessionStorage.setItem('hiddenArticles', JSON.stringify(arr))
+      }
+    } catch {}
+    window.dispatchEvent(new Event('refresh-unread'))
+    toast.info('已删除', {
+      action: {
+        label: '撤销',
+        onClick: async () => {
+          try {
+            await unhideArticle(targetId)
+            try {
+              const arr: number[] = JSON.parse(sessionStorage.getItem('hiddenArticles') || '[]')
+              sessionStorage.setItem('hiddenArticles', JSON.stringify(arr.filter(i => i !== targetId)))
+            } catch {}
+            window.dispatchEvent(new Event('refresh-unread'))
+            navigate(`/articles/${targetId}`, { replace: true, state: { from: entryPath } })
+          } catch {
+            toast.error('撤销失败')
+          }
+        },
+      },
+    })
+    goAfter()
+  }
+
+  const handleRestore = async () => {
+    if (!article) return
+    try {
+      await unhideArticle(article.id)
+      setHidden(false)
+      try {
+        const arr: number[] = JSON.parse(sessionStorage.getItem('hiddenArticles') || '[]')
+        sessionStorage.setItem('hiddenArticles', JSON.stringify(arr.filter(i => i !== article.id)))
+      } catch {}
+      window.dispatchEvent(new Event('refresh-unread'))
+      toast.success('已恢复')
+    } catch {
+      toast.error('恢复失败')
+    }
+  }
+
   const handleMarkRead = async () => {
     if (!article) return
     const newProgress = await updateProgress(article.id, 1.0, true)
@@ -732,6 +797,23 @@ export default function ArticlePage() {
         )}
       </div>
 
+      {hidden && (
+        <div
+          className="p-3 rounded-md mb-4 text-sm flex items-center gap-3"
+          style={{ border: '1px solid #fca5a5', background: '#fef2f2', color: '#991b1b' }}
+        >
+          <span>🗑 这篇文章已删除 · 仍可查看</span>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleRestore}
+            style={{ fontSize: 13, padding: '2px 10px', marginLeft: 'auto' }}
+          >
+            恢复
+          </button>
+        </div>
+      )}
+
       <div className="card">
         <div className="flex-between mb-2">
           <div className="flex gap-1">
@@ -824,6 +906,7 @@ export default function ArticlePage() {
           >
             📖 阅读模式
           </button>
+          <ArticleActionsMenu onDelete={handleDelete} />
         </div>
       </div>
 

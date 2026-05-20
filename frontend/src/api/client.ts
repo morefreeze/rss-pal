@@ -244,6 +244,7 @@ export interface ArticleDetailResponse {
   progress?: any
   signals?: any
   from_bookmarklet?: boolean
+  hidden?: boolean
   children?: Article[]
 }
 
@@ -367,6 +368,14 @@ export const saveArticle = (articleId: number) =>
 
 export const unsaveArticle = (articleId: number) =>
   api.delete('/preferences/save', { data: { article_id: articleId } })
+
+// Per-user soft delete ("hide"). The article row stays in the DB; the user
+// just stops seeing it in their own lists. Reversed by unhideArticle.
+export const hideArticle = (articleId: number) =>
+  api.post<{ hidden: true; hidden_at: string }>(`/articles/${articleId}/hide`).then(res => res.data)
+
+export const unhideArticle = (articleId: number) =>
+  api.delete<{ hidden: false }>(`/articles/${articleId}/hide`).then(res => res.data)
 
 export const recordReadDuration = (articleId: number, durationSeconds: number) =>
   api.post('/preferences/read-duration', { article_id: articleId, duration_seconds: durationSeconds })

@@ -42,6 +42,14 @@ LEFT JOIN reading_progress rp ON %s.id = rp.article_id AND rp.user_id = $%d`, al
 	args = append(args, f.UserID)
 	nextArg++
 
+	// Per-user hide overlay: hidden articles are filtered from every list
+	// surface that goes through this helper.
+	joinSQL += fmt.Sprintf(`
+LEFT JOIN hidden_articles ha ON %s.id = ha.article_id AND ha.user_id = $%d`, alias, nextArg)
+	args = append(args, f.UserID)
+	nextArg++
+	whereFragments = append(whereFragments, "ha.id IS NULL")
+
 	if f.FeedID != nil {
 		whereFragments = append(whereFragments, fmt.Sprintf("%s.feed_id = $%d", alias, nextArg))
 		args = append(args, *f.FeedID)
@@ -624,8 +632,10 @@ func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Artic
 			GROUP BY article_id
 		) p ON a.id = p.article_id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $2
+		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $2
 		WHERE p.score IS NOT NULL AND p.score > 0
 		AND COALESCE(rp.is_completed, false) = false
+		AND ha.id IS NULL
 		ORDER BY p.score DESC, a.published_at DESC NULLS LAST
 		LIMIT $1
 	`
@@ -703,8 +713,10 @@ func (r *ArticleRepository) GetUnreadCount(userID int) (int, error) {
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $1
 		WHERE (f.owner_id IS NULL OR f.owner_id = $1)
 		AND COALESCE(rp.is_completed, false) = false
+		AND ha.id IS NULL
 	`
 	var count int
 	err := r.db.QueryRow(query, userID).Scan(&count)
@@ -719,7 +731,9 @@ func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Art
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $2
+		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $2
 		WHERE (f.owner_id IS NULL OR f.owner_id = $2)
+		  AND ha.id IS NULL
 		  AND (a.title ILIKE $1 OR a.summary_brief ILIKE $1 OR a.content ILIKE $1)
 		ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(a.published_at, a.fetched_at), a.fetched_at - INTERVAL '7 days')) DESC,
 		         COALESCE(a.published_at, a.fetched_at) DESC
@@ -822,8 +836,8 @@ func (r *ArticleRepository) GetGroupedByCategory(userID int, feedID *int, unread
 	// fragment plus positional args we'll re-thread into each of the two
 	// queries below. $1 is always userID.
 	args := []interface{}{userID}
-	conditions := []string{"(f.owner_id IS NULL OR f.owner_id = $1)"}
-	joins := ""
+	conditions := []string{"(f.owner_id IS NULL OR f.owner_id = $1)", "ha.id IS NULL"}
+	joins := " LEFT JOIN hidden_articles ha ON ha.article_id = a.id AND ha.user_id = $1"
 	argIdx := 2
 	if feedID != nil {
 		conditions = append(conditions, fmt.Sprintf("a.feed_id = $%d", argIdx))
@@ -1184,6 +1198,10 @@ func (r *ArticleRepository) FindParentsNeedingExpansion(limit int) ([]model.Arti
 // GetChildren returns children of a parent ordered by prerank_score DESC, id ASC.
 // scanArticleNoFeedTitle already populates all link_set fields, so no supplemental
 // query is needed.
+//
+// This variant is hidden-unaware and is used by internal dedup paths (e.g.,
+// candidate listing needs to see hidden children so we don't re-create them).
+// User-facing reads should use GetVisibleChildren instead.
 func (r *ArticleRepository) GetChildren(parentID int) ([]model.Article, error) {
 	query := `
 		SELECT id, feed_id, title, url, content, published_at,
@@ -1195,6 +1213,28 @@ func (r *ArticleRepository) GetChildren(parentID int) ([]model.Article, error) {
 		ORDER BY prerank_score DESC NULLS LAST, id ASC
 	`
 	rows, err := r.db.Query(query, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
+
+// GetVisibleChildren is GetChildren minus articles the user has hidden.
+// Used when rendering the link-set children section on the article page.
+func (r *ArticleRepository) GetVisibleChildren(parentID, userID int) ([]model.Article, error) {
+	query := `
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
+		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
+		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
+		       a.links_extendable, a.parent_article_id, a.processing_state, a.prerank_score, a.editor_note
+		FROM articles a
+		LEFT JOIN hidden_articles ha ON ha.article_id = a.id AND ha.user_id = $2
+		WHERE a.parent_article_id = $1
+		  AND ha.id IS NULL
+		ORDER BY a.prerank_score DESC NULLS LAST, a.id ASC
+	`
+	rows, err := r.db.Query(query, parentID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1300,11 +1340,13 @@ func (r *ArticleRepository) queryLinkSetPrimary(userID, days, limit int) ([]mode
 			GROUP BY article_id
 		) p ON a.id = p.article_id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $1
 		WHERE a.processing_state = 'ready'
 		  AND a.parent_article_id IS NOT NULL
 		  AND parent.fetched_at > NOW() - ($2 || ' days')::INTERVAL
 		  AND (f.owner_id IS NULL OR f.owner_id = $1)
 		  AND COALESCE(rp.is_completed, false) = false
+		  AND ha.id IS NULL
 		ORDER BY COALESCE(p.pref_score, 0) + COALESCE(a.prerank_score, 0) DESC,
 		         a.published_at DESC NULLS LAST
 		LIMIT $3
@@ -1334,10 +1376,12 @@ func (r *ArticleRepository) queryLinkSetFallback(userID, days, limit int, exclud
 		FROM articles a
 		JOIN articles parent ON a.parent_article_id = parent.id
 		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $1
 		WHERE a.processing_state = 'ready'
 		  AND a.parent_article_id IS NOT NULL
 		  AND parent.fetched_at > NOW() - ($2 || ' days')::INTERVAL
 		  AND (f.owner_id IS NULL OR f.owner_id = $1)
+		  AND ha.id IS NULL
 		  AND a.word_count >= 500
 		  AND a.summary_brief IS NOT NULL
 		  AND a.summary_brief <> ''

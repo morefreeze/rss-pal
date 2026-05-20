@@ -552,8 +552,12 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 
 /* === Toast === */
 @keyframes slideIn {
-  from { opacity: 0; transform: translateX(20px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-progress {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
 }
 
 /* === Reading layout (inherits global theme) === */

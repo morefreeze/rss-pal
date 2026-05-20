@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
 
 // useReadingChrome owns the "chrome visible" state in reading mode.
 // Adds `reading-mode-active` to body on enable; toggles
@@ -19,6 +19,17 @@ export function useReadingChrome(enabled: boolean): {
   const [chromeVisible, setChromeVisible] = useState(false)
   const lastY = useRef(0)
   const accum = useRef(0)
+
+  // Synchronous pre-paint guard: when this hook is mounted with enabled=false
+  // (the default ArticlePage state), make sure body never carries the reading
+  // class for even one frame. Stops the article page from briefly flashing
+  // into reading mode on refresh.
+  useLayoutEffect(() => {
+    if (!enabled) {
+      document.body.classList.remove('reading-mode-active')
+      document.body.classList.remove('reading-chrome-visible')
+    }
+  }, [enabled])
 
   useEffect(() => {
     if (!enabled) {
