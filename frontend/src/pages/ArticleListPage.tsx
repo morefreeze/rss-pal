@@ -4,6 +4,7 @@ import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAl
 import { writeNav, type NavContext } from '../utils/articleNav'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
+import BackToTopButton from '../components/BackToTopButton'
 import GroupedArticleView from '../components/GroupedArticleView'
 import ClipPage from './ClipPage'
 import type { ClipSelection } from '../components/ClipTagSidebar'
@@ -967,6 +968,7 @@ export default function ArticleListPage() {
         )
       })() : null}
       </div>
+      <BackToTopButton />
     </div>
   )
 }
