@@ -761,6 +761,9 @@ export default function ArticlePage() {
         onFontFamily={reader.setFontFamily}
         onCodeWrap={reader.setCodeWrap}
         onTapBody={toggleReadingChrome}
+        onPrev={prevId ? () => navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } }) : undefined}
+        onNext={nextId ? () => navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } }) : undefined}
+        onBack={handleBack}
       />
     )
   }

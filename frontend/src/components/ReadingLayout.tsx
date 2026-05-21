@@ -26,10 +26,14 @@ type Props = {
   onFontFamily: (f: ReaderFontFamily) => void
   onCodeWrap: (v: boolean) => void
   onTapBody?: () => void
+  // Bottom-of-page navigation. Pass undefined to disable a direction.
+  onPrev?: () => void
+  onNext?: () => void
+  onBack?: () => void
 }
 
 export default function ReadingLayout(props: Props) {
-  const { article, fontSize, fontFamily, codeWrap, onExit, onTapBody } = props
+  const { article, fontSize, fontFamily, codeWrap, onExit, onTapBody, onPrev, onNext, onBack } = props
 
   const [summaryOpen, setSummaryOpen] = useState(false)
 
@@ -94,6 +98,38 @@ export default function ReadingLayout(props: Props) {
           )
           : <div className="text-muted">暂无内容</div>
         }
+
+        {(onPrev || onNext || onBack) && (
+          <div className="reading-nav">
+            <button
+              type="button"
+              className="reading-nav-btn"
+              onClick={onPrev}
+              disabled={!onPrev}
+              title="上一篇"
+            >
+              ‹ 上一篇
+            </button>
+            <button
+              type="button"
+              className="reading-nav-btn"
+              onClick={onBack}
+              disabled={!onBack}
+              title="返回列表"
+            >
+              返回
+            </button>
+            <button
+              type="button"
+              className="reading-nav-btn"
+              onClick={onNext}
+              disabled={!onNext}
+              title="下一篇"
+            >
+              下一篇 ›
+            </button>
+          </div>
+        )}
       </article>
 
       <ReaderSettingsPanel
