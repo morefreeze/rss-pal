@@ -8,8 +8,10 @@ import ClipPage from './ClipPage'
 import type { ClipSelection } from '../components/ClipTagSidebar'
 import TagSidebar, { TagFilter } from '../components/TagSidebar'
 import SidebarToggleButton from '../components/SidebarToggleButton'
+import OverflowMenu from '../components/OverflowMenu'
 import { usePlayer } from '../player/PlayerContext'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
+import { useBreakpoint } from '../hooks/useBreakpoint'
 
 const PAGE_SIZE = 20
 
@@ -146,6 +148,10 @@ export default function ArticleListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const wantsClip = searchParams.get('view') === 'clip'
   const player = usePlayer()
+  const breakpoint = useBreakpoint()
+  // On phone the toolbar tucks non-priority controls (search, feed select,
+  // sort, 分组) under a ⋯ menu so the row only carries 仅未读 / 已保存 / 全部已读.
+  const compactToolbar = breakpoint === 'phone'
   const [articles, setArticles] = useState<Article[]>([])
   const [recommended, setRecommended] = useState<Article[]>([])
   const [boostedIds, setBoostedIds] = useState<Set<number>>(new Set())
@@ -585,8 +591,8 @@ export default function ArticleListPage() {
           {!isClippingMode && <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />}
           <h2 style={{ margin: 0 }}>{isClippingMode ? '网摘' : '文章列表'}</h2>
         </div>
-        <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-          {!isClippingMode && (
+        {(() => {
+          const searchEl = !isClippingMode && (
             <input
               ref={searchRef}
               type="search"
@@ -594,57 +600,34 @@ export default function ArticleListPage() {
               value={searchQuery}
               onChange={handleSearchChange}
               className="toolbar-control"
-              style={{ width: 200 }}
+              style={{ width: compactToolbar ? '100%' : 200 }}
             />
-          )}
-          <select
-            value={selectedFeed || ''}
-            onChange={e => {
-              const val = e.target.value ? Number(e.target.value) : null
-              setSelectedFeed(val)
-              try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
-              const pickedClip = val != null && feeds.find(f => f.id === val)?.feed_type === 'clip'
-              if (pickedClip && !wantsClip) {
-                setSearchParams({ view: 'clip' })
-              } else if (!pickedClip && wantsClip) {
-                setSearchParams({})
-              }
-            }}
-            className="toolbar-control"
-            disabled={!!searchQuery}
-          >
-            <option value="">全部订阅</option>
-            {feeds.map(f => (
-              <option key={f.id} value={f.id}>{f.title || f.url}{f.unread_count > 0 ? ` (${f.unread_count})` : ''}</option>
-            ))}
-          </select>
-          <label className="toolbar-checkbox">
-            <input
-              type="checkbox"
-              checked={unreadOnly}
+          )
+          const feedSelectEl = (
+            <select
+              value={selectedFeed || ''}
               onChange={e => {
-                setUnreadOnly(e.target.checked)
-                if (e.target.checked) setSavedOnly(false)
-                try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
+                const val = e.target.value ? Number(e.target.value) : null
+                setSelectedFeed(val)
+                try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
+                const pickedClip = val != null && feeds.find(f => f.id === val)?.feed_type === 'clip'
+                if (pickedClip && !wantsClip) {
+                  setSearchParams({ view: 'clip' })
+                } else if (!pickedClip && wantsClip) {
+                  setSearchParams({})
+                }
               }}
+              className="toolbar-control"
               disabled={!!searchQuery}
-            />
-            仅未读
-          </label>
-          <label className="toolbar-checkbox">
-            <input
-              type="checkbox"
-              checked={savedOnly}
-              onChange={e => {
-                setSavedOnly(e.target.checked)
-                if (e.target.checked) setUnreadOnly(false)
-                try { sessionStorage.setItem('savedOnly', String(e.target.checked)) } catch {}
-              }}
-              disabled={!!searchQuery}
-            />
-            已保存
-          </label>
-          {!searchQuery && !grouped && (() => {
+              style={compactToolbar ? { width: '100%' } : undefined}
+            >
+              <option value="">全部订阅</option>
+              {feeds.map(f => (
+                <option key={f.id} value={f.id}>{f.title || f.url}{f.unread_count > 0 ? ` (${f.unread_count})` : ''}</option>
+              ))}
+            </select>
+          )
+          const sortEl = !searchQuery && !grouped && (() => {
             const pick = (field: ArticleSort) => {
               if (field === sortField) {
                 const next: ArticleOrder = sortDir === 'desc' ? 'asc' : 'desc'
@@ -680,8 +663,8 @@ export default function ArticleListPage() {
                 {btn('captured', '抓取')}
               </div>
             )
-          })()}
-          {!isClippingMode && !searchQuery && tagFilter.kind === 'all' && (
+          })()
+          const groupEl = !isClippingMode && !searchQuery && tagFilter.kind === 'all' && (
             <button
               type="button"
               className={grouped ? '' : 'btn-ghost'}
@@ -694,8 +677,38 @@ export default function ArticleListPage() {
             >
               📚 分组
             </button>
-          )}
-          {!searchQuery && (isClippingMode || articles.length > 0) && (
+          )
+          const unreadEl = (
+            <label className="toolbar-checkbox">
+              <input
+                type="checkbox"
+                checked={unreadOnly}
+                onChange={e => {
+                  setUnreadOnly(e.target.checked)
+                  if (e.target.checked) setSavedOnly(false)
+                  try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
+                }}
+                disabled={!!searchQuery}
+              />
+              仅未读
+            </label>
+          )
+          const savedEl = (
+            <label className="toolbar-checkbox">
+              <input
+                type="checkbox"
+                checked={savedOnly}
+                onChange={e => {
+                  setSavedOnly(e.target.checked)
+                  if (e.target.checked) setUnreadOnly(false)
+                  try { sessionStorage.setItem('savedOnly', String(e.target.checked)) } catch {}
+                }}
+                disabled={!!searchQuery}
+              />
+              已保存
+            </label>
+          )
+          const markAllReadEl = !searchQuery && (isClippingMode || articles.length > 0) && (
             <button
               className="btn-ghost"
               onClick={handleMarkAllRead}
@@ -703,8 +716,31 @@ export default function ArticleListPage() {
             >
               {markingAllRead ? '处理中...' : '全部已读'}
             </button>
-          )}
-        </div>
+          )
+          // On phone, the overflow only renders when there's at least one
+          // hidden control. Tag-filtered / search-active states naturally
+          // shed sort and 分组, so the menu can be skipped.
+          const hasOverflow = !!(searchEl || feedSelectEl || sortEl || groupEl)
+          return (
+            <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+              {!compactToolbar && searchEl}
+              {!compactToolbar && feedSelectEl}
+              {unreadEl}
+              {savedEl}
+              {!compactToolbar && sortEl}
+              {!compactToolbar && groupEl}
+              {markAllReadEl}
+              {compactToolbar && hasOverflow && (
+                <OverflowMenu>
+                  {searchEl}
+                  {feedSelectEl}
+                  {sortEl}
+                  {groupEl}
+                </OverflowMenu>
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       {wantsClip && !isClippingMode && !feeds.find(f => f.feed_type === 'clip') && (
