@@ -384,7 +384,12 @@ export default function ArticleListPage() {
     }
   }, [loadingMore, hasMore, offset, loadArticles])
 
-  // Infinite scroll via IntersectionObserver
+  // Infinite scroll via IntersectionObserver.
+  // articles.length is in the deps so the effect re-runs after the first
+  // fetch mounts the prefetch-trigger card (without it, the effect runs once
+  // on mount when loadMoreRef.current is still null and never re-attaches).
+  // PREFETCH_OFFSET means the observer hops to a new card each time the list
+  // grows, so we tear the old one down on every re-run.
   useEffect(() => {
     if (!loadMoreRef.current) return
     const observer = new IntersectionObserver(
@@ -393,7 +398,7 @@ export default function ArticleListPage() {
     )
     observer.observe(loadMoreRef.current)
     return () => observer.disconnect()
-  }, [loadMore])
+  }, [loadMore, articles.length])
 
   const handleMarkAllRead = async () => {
     setMarkingAllRead(true)
