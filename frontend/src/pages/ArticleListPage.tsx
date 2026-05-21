@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
+import { writeNav, type NavContext } from '../utils/articleNav'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
+import BackToTopButton from '../components/BackToTopButton'
 import GroupedArticleView from '../components/GroupedArticleView'
 import ClipPage from './ClipPage'
 import type { ClipSelection } from '../components/ClipTagSidebar'
@@ -108,7 +110,10 @@ function SearchArticleRow({
       onClick={() => {
         onFocus(idx)
         reportClick(article.id)
-        try { sessionStorage.setItem('articleNavList', JSON.stringify(navList)) } catch {}
+        // Search results are one-shot — clear any paginated load-more context
+        // so the article page doesn't try to fetch the next page of /articles
+        // for a list that the user reached via search.
+        writeNav(navList, null)
         onNavigate(article.id)
       }}
     >
@@ -380,7 +385,12 @@ export default function ArticleListPage() {
     }
   }, [loadingMore, hasMore, offset, loadArticles])
 
-  // Infinite scroll via IntersectionObserver
+  // Infinite scroll via IntersectionObserver.
+  // articles.length is in the deps so the effect re-runs after the first
+  // fetch mounts the prefetch-trigger card (without it, the effect runs once
+  // on mount when loadMoreRef.current is still null and never re-attaches).
+  // PREFETCH_OFFSET means the observer hops to a new card each time the list
+  // grows, so we tear the old one down on every re-run.
   useEffect(() => {
     if (!loadMoreRef.current) return
     const observer = new IntersectionObserver(
@@ -389,7 +399,7 @@ export default function ArticleListPage() {
     )
     observer.observe(loadMoreRef.current)
     return () => observer.disconnect()
-  }, [loadMore])
+  }, [loadMore, articles.length])
 
   const handleMarkAllRead = async () => {
     setMarkingAllRead(true)
@@ -558,7 +568,27 @@ export default function ArticleListPage() {
       const i = ids.indexOf(id)
       const start = Math.max(0, i - 50)
       const end = Math.min(ids.length, i + 51)
-      sessionStorage.setItem('articleNavList', JSON.stringify(ids.slice(start, end)))
+      // Only attach a load-more context when the clicked article actually
+      // belongs to the paginated list and there's more to fetch. Grouped /
+      // search / unknown ids fall through with no context so the article page
+      // simply disables Next at the end of the saved window.
+      const context: NavContext | null = i >= 0 && hasMore
+        ? {
+            kind: 'articles',
+            params: {
+              feed_id: selectedFeed || undefined,
+              unread: unreadOnly || undefined,
+              saved: savedOnly || undefined,
+              tag_id: tagFilter.kind === 'tag' ? tagFilter.id : undefined,
+              untagged: tagFilter.kind === 'untagged' || undefined,
+              sort: sortField,
+              order: sortDir,
+            },
+            nextOffset: offset + PAGE_SIZE,
+            pageSize: PAGE_SIZE,
+          }
+        : null
+      writeNav(ids.slice(start, end), context)
       sessionStorage.setItem('articleListScroll', String(window.scrollY))
       sessionStorage.setItem('articleEntryPath', '/articles')
     } catch {}
@@ -938,6 +968,7 @@ export default function ArticleListPage() {
         )
       })() : null}
       </div>
+      <BackToTopButton />
     </div>
   )
 }

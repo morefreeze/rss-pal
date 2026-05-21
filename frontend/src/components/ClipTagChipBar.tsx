@@ -32,6 +32,18 @@ export default function ClipTagChipBar({ tags, sources, selection, onSelect }: P
       }}
     >
       <div style={{ display: 'flex', gap: 8, flexWrap: 'nowrap', minWidth: 'min-content' }}>
+        {sources.map(s => (
+          <Chip
+            key={`src-${s.key}`}
+            active={isActive(selection, { kind: 'source', key: s.key, title: s.title })}
+            onClick={() => onSelect({ kind: 'source', key: s.key, title: s.title })}
+            title={s.title}
+          >
+            {s.title}
+            <span style={{ opacity: 0.6, marginLeft: 4, fontSize: 11 }}>{s.count}</span>
+          </Chip>
+        ))}
+        {sources.length > 0 && <Divider />}
         <Chip active={isActive(selection, { kind: 'all' })} onClick={() => onSelect({ kind: 'all' })}>
           全部
         </Chip>
@@ -47,18 +59,6 @@ export default function ClipTagChipBar({ tags, sources, selection, onSelect }: P
           >
             {t.name}
             <span style={{ opacity: 0.6, marginLeft: 4, fontSize: 11 }}>{t.article_count}</span>
-          </Chip>
-        ))}
-        {sources.length > 0 && <Divider />}
-        {sources.map(s => (
-          <Chip
-            key={`src-${s.key}`}
-            active={isActive(selection, { kind: 'source', key: s.key, title: s.title })}
-            onClick={() => onSelect({ kind: 'source', key: s.key, title: s.title })}
-            title={s.title}
-          >
-            {s.title}
-            <span style={{ opacity: 0.6, marginLeft: 4, fontSize: 11 }}>{s.count}</span>
           </Chip>
         ))}
       </div>

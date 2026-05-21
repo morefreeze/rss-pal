@@ -24,6 +24,7 @@ import TagBar from '../components/TagBar'
 import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
+import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
@@ -41,13 +42,83 @@ export default function ArticlePage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
-  // Compute prev/next from session nav list
-  const navList: number[] = (() => {
-    try { return JSON.parse(sessionStorage.getItem('articleNavList') || '[]') } catch { return [] }
-  })()
+  // Prev/next nav. The list page snapshots visible article IDs into
+  // sessionStorage; optionally it also stores a fetch context so we can
+  // extend the snapshot on demand when the user hits Next at the end of a
+  // paginated list that still has more articles server-side.
+  const [navList, setNavList] = useState<number[]>(readNavList)
+  const [navContext, setNavContext] = useState(readNavContext)
+  const [loadingNext, setLoadingNext] = useState(false)
+  // Single in-flight extend fetch — shared by both the silent prefetch effect
+  // and a click on Next, so a click during prefetch awaits the same request
+  // instead of starting a second.
+  const pendingExtendRef = useRef<Promise<number | null> | null>(null)
   const currentIdx = id ? navList.indexOf(Number(id)) : -1
   const prevId = currentIdx > 0 ? navList[currentIdx - 1] : null
-  const nextId = currentIdx >= 0 && currentIdx < navList.length - 1 ? navList[currentIdx + 1] : null
+  const directNextId = currentIdx >= 0 && currentIdx < navList.length - 1 ? navList[currentIdx + 1] : null
+  const atEndOfList = currentIdx >= 0 && currentIdx === navList.length - 1
+  // Next is available either directly from the snapshot or via on-demand
+  // fetch when we're at the end of the snapshot but more pages exist.
+  const hasNext = !!directNextId || (atEndOfList && !!navContext)
+
+  const goToArticle = useCallback((nextArticleId: number) => {
+    navigate(`/articles/${nextArticleId}`, { replace: true, state: { from: entryPath } })
+  }, [navigate, entryPath])
+
+  // Fetch the next page, extend navList + persist, return the first new id.
+  // Returns null when the server has nothing more (also drops the context so
+  // future renders compute hasNext=false).
+  const extendNavList = useCallback(async (): Promise<number | null> => {
+    if (!navContext) return null
+    const { ids, stillMore } = await fetchMoreIds(navContext)
+    if (ids.length === 0) {
+      writeNav(navList, null)
+      setNavContext(null)
+      return null
+    }
+    const extended = [...navList, ...ids]
+    const nextCtx = stillMore
+      ? { ...navContext, nextOffset: navContext.nextOffset + navContext.pageSize }
+      : null
+    writeNav(extended, nextCtx)
+    setNavList(extended)
+    setNavContext(nextCtx)
+    return ids[0]
+  }, [navContext, navList])
+
+  // Background prefetch: when the user lands on the last article of the
+  // snapshot and a fetch context exists, silently load the next page so
+  // clicking Next is instant. Mirrors the list page's scroll prefetch.
+  useEffect(() => {
+    if (!atEndOfList || !navContext || pendingExtendRef.current) return
+    const p = extendNavList().catch(() => null)
+    pendingExtendRef.current = p
+    p.finally(() => {
+      if (pendingExtendRef.current === p) pendingExtendRef.current = null
+    })
+  }, [atEndOfList, navContext, extendNavList])
+
+  const goNext = useCallback(async () => {
+    if (directNextId) {
+      goToArticle(directNextId)
+      return
+    }
+    if (!atEndOfList) return
+    setLoadingNext(true)
+    try {
+      // Reuse the in-flight prefetch if any; otherwise kick a fresh fetch.
+      const firstNewId = await (pendingExtendRef.current ?? extendNavList())
+      if (firstNewId != null) goToArticle(firstNewId)
+    } catch {
+      // Network failure: leave state alone so the user can retry.
+    } finally {
+      setLoadingNext(false)
+    }
+  }, [directNextId, atEndOfList, extendNavList, goToArticle])
+
+  const goPrev = useCallback(() => {
+    if (prevId) goToArticle(prevId)
+  }, [prevId, goToArticle])
   const [fetchingContent, setFetchingContent] = useState(false)
   const [liked, setLiked] = useState(false)
   const [disliked, setDisliked] = useState(false)
@@ -250,9 +321,9 @@ export default function ArticlePage() {
       // Skip if focused in an input/textarea
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
       if (e.key === 'n' || e.key === 'j') {
-        if (nextId) navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })
+        if (hasNext) goNext()
       } else if (e.key === 'p' || e.key === 'k') {
-        if (prevId) navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })
+        goPrev()
       } else if (e.key === 'Escape' || e.key === 'Backspace') {
         handleBack()
       } else if (e.key === 'm') {
@@ -266,7 +337,7 @@ export default function ArticlePage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [nextId, prevId, article, progress, navigate, reader, entryPath, handleBack])
+  }, [hasNext, goNext, goPrev, article, progress, reader, handleBack])
 
   // Load templates on mount
   useEffect(() => {
@@ -577,9 +648,7 @@ export default function ArticlePage() {
     if (!article) return
     const targetId = article.id
     // Capture nav before the hide, in case the navList changes shape later.
-    const goAfter = nextId
-      ? () => navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })
-      : handleBack
+    const goAfter = hasNext ? goNext : handleBack
     try {
       await hideArticle(targetId)
     } catch {
@@ -761,8 +830,8 @@ export default function ArticlePage() {
         onFontFamily={reader.setFontFamily}
         onCodeWrap={reader.setCodeWrap}
         onTapBody={toggleReadingChrome}
-        onPrev={prevId ? () => navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } }) : undefined}
-        onNext={nextId ? () => navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } }) : undefined}
+        onPrev={prevId ? goPrev : undefined}
+        onNext={hasNext && !loadingNext ? goNext : undefined}
         onBack={handleBack}
       />
     )
@@ -830,7 +899,7 @@ export default function ArticlePage() {
             <button
               className="secondary"
               disabled={!prevId}
-              onClick={() => prevId && navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
+              onClick={goPrev}
               style={{ fontSize: 13, padding: '4px 10px' }}
               title="上一篇"
             >
@@ -838,12 +907,12 @@ export default function ArticlePage() {
             </button>
             <button
               className="secondary"
-              disabled={!nextId}
-              onClick={() => nextId && navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
+              disabled={!hasNext || loadingNext}
+              onClick={goNext}
               style={{ fontSize: 13, padding: '4px 10px' }}
               title="下一篇"
             >
-              下一篇 ›
+              {loadingNext ? '加载中…' : '下一篇 ›'}
             </button>
           </div>
           {article.feed_title && (
@@ -1151,18 +1220,18 @@ export default function ArticlePage() {
         <button
           className="secondary"
           disabled={!prevId}
-          onClick={() => prevId && navigate(`/articles/${prevId}`, { replace: true, state: { from: entryPath } })}
+          onClick={goPrev}
           style={{ fontSize: 13, padding: '6px 14px' }}
         >
           ‹ 上一篇
         </button>
         <button
           className="secondary"
-          disabled={!nextId}
-          onClick={() => nextId && navigate(`/articles/${nextId}`, { replace: true, state: { from: entryPath } })}
+          disabled={!hasNext || loadingNext}
+          onClick={goNext}
           style={{ fontSize: 13, padding: '6px 14px' }}
         >
-          下一篇 ›
+          {loadingNext ? '加载中…' : '下一篇 ›'}
         </button>
       </div>
       <BackFab onClick={handleBack} />
