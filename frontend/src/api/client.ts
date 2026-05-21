@@ -60,6 +60,7 @@ export const logout = () => {
   // Clear session-local state so a new login gets a clean slate
   sessionStorage.removeItem('readArticles')
   sessionStorage.removeItem('articleNavList')
+  sessionStorage.removeItem('articleNavContext')
   sessionStorage.removeItem('articleListScroll')
   sessionStorage.removeItem('selectedFeed')
   sessionStorage.removeItem('unreadOnly')
