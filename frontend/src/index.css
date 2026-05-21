@@ -597,6 +597,34 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 
 .reading-article .markdown-body img { max-width: 100%; height: auto; border-radius: 4px; }
 
+/* Bottom-of-article nav inside reading mode: 上一篇 / 返回 / 下一篇.
+   Matches .reading-exit styling so it doesn't feel like a different surface. */
+.reading-nav {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.reading-nav-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  height: 36px;
+  font-weight: 500;
+  cursor: pointer;
+  flex: 1 1 0;
+  min-width: 80px;
+  text-align: center;
+}
+.reading-nav-btn:hover:not(:disabled) { background: var(--surface-hover); }
+.reading-nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* === Reading mode chrome === */
 /* Header + bottom tab slide off when chrome hidden. */
 #root > div > header,
