@@ -38,17 +38,6 @@ export default function ClipTagChipBar({ tags, sources, selection, onSelect }: P
         <Chip active={isActive(selection, { kind: 'untagged' })} onClick={() => onSelect({ kind: 'untagged' })}>
           无 tag
         </Chip>
-        {tags.length > 0 && <Divider />}
-        {tags.map(t => (
-          <Chip
-            key={`tag-${t.id}`}
-            active={isActive(selection, { kind: 'tag', id: t.id })}
-            onClick={() => onSelect({ kind: 'tag', id: t.id })}
-          >
-            {t.name}
-            <span style={{ opacity: 0.6, marginLeft: 4, fontSize: 11 }}>{t.article_count}</span>
-          </Chip>
-        ))}
         {sources.length > 0 && <Divider />}
         {sources.map(s => (
           <Chip
@@ -59,6 +48,17 @@ export default function ClipTagChipBar({ tags, sources, selection, onSelect }: P
           >
             {s.title}
             <span style={{ opacity: 0.6, marginLeft: 4, fontSize: 11 }}>{s.count}</span>
+          </Chip>
+        ))}
+        {tags.length > 0 && <Divider />}
+        {tags.map(t => (
+          <Chip
+            key={`tag-${t.id}`}
+            active={isActive(selection, { kind: 'tag', id: t.id })}
+            onClick={() => onSelect({ kind: 'tag', id: t.id })}
+          >
+            {t.name}
+            <span style={{ opacity: 0.6, marginLeft: 4, fontSize: 11 }}>{t.article_count}</span>
           </Chip>
         ))}
       </div>

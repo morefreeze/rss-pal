@@ -64,6 +64,28 @@ export default function ClipTagSidebar({
       </div>
 
       <div style={{ marginTop: 12 }}>
+        <div className="saved-section-title">Sources</div>
+        {sources.length === 0 ? (
+          <div className="text-muted text-sm" style={{ padding: '4px 8px' }}>
+            暂无来源
+          </div>
+        ) : (
+          sources.map(s => (
+            <button
+              key={s.key}
+              type="button"
+              className={'saved-row' + (isSourceActive(selection, s.key) ? ' active' : '')}
+              onClick={() => onSelect({ kind: 'source', key: s.key, title: s.title })}
+              title={s.title}
+            >
+              <span className="saved-row-label">{s.title}</span>
+              <span className="saved-row-count">{s.count}</span>
+            </button>
+          ))
+        )}
+      </div>
+
+      <div style={{ marginTop: 12 }}>
         <div className="saved-section-title">Tags</div>
         {tags.length === 0 ? (
           <div className="text-muted text-sm" style={{ padding: '4px 8px' }}>
@@ -84,28 +106,6 @@ export default function ClipTagSidebar({
               </button>
             )
           })
-        )}
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <div className="saved-section-title">Sources</div>
-        {sources.length === 0 ? (
-          <div className="text-muted text-sm" style={{ padding: '4px 8px' }}>
-            暂无来源
-          </div>
-        ) : (
-          sources.map(s => (
-            <button
-              key={s.key}
-              type="button"
-              className={'saved-row' + (isSourceActive(selection, s.key) ? ' active' : '')}
-              onClick={() => onSelect({ kind: 'source', key: s.key, title: s.title })}
-              title={s.title}
-            >
-              <span className="saved-row-label">{s.title}</span>
-              <span className="saved-row-count">{s.count}</span>
-            </button>
-          ))
         )}
       </div>
     </aside>
