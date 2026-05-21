@@ -49,6 +49,10 @@ export default function ArticlePage() {
   const [navList, setNavList] = useState<number[]>(readNavList)
   const [navContext, setNavContext] = useState(readNavContext)
   const [loadingNext, setLoadingNext] = useState(false)
+  // Single in-flight extend fetch — shared by both the silent prefetch effect
+  // and a click on Next, so a click during prefetch awaits the same request
+  // instead of starting a second.
+  const pendingExtendRef = useRef<Promise<number | null> | null>(null)
   const currentIdx = id ? navList.indexOf(Number(id)) : -1
   const prevId = currentIdx > 0 ? navList[currentIdx - 1] : null
   const directNextId = currentIdx >= 0 && currentIdx < navList.length - 1 ? navList[currentIdx + 1] : null
@@ -61,35 +65,56 @@ export default function ArticlePage() {
     navigate(`/articles/${nextArticleId}`, { replace: true, state: { from: entryPath } })
   }, [navigate, entryPath])
 
+  // Fetch the next page, extend navList + persist, return the first new id.
+  // Returns null when the server has nothing more (also drops the context so
+  // future renders compute hasNext=false).
+  const extendNavList = useCallback(async (): Promise<number | null> => {
+    if (!navContext) return null
+    const { ids, stillMore } = await fetchMoreIds(navContext)
+    if (ids.length === 0) {
+      writeNav(navList, null)
+      setNavContext(null)
+      return null
+    }
+    const extended = [...navList, ...ids]
+    const nextCtx = stillMore
+      ? { ...navContext, nextOffset: navContext.nextOffset + navContext.pageSize }
+      : null
+    writeNav(extended, nextCtx)
+    setNavList(extended)
+    setNavContext(nextCtx)
+    return ids[0]
+  }, [navContext, navList])
+
+  // Background prefetch: when the user lands on the last article of the
+  // snapshot and a fetch context exists, silently load the next page so
+  // clicking Next is instant. Mirrors the list page's scroll prefetch.
+  useEffect(() => {
+    if (!atEndOfList || !navContext || pendingExtendRef.current) return
+    const p = extendNavList().catch(() => null)
+    pendingExtendRef.current = p
+    p.finally(() => {
+      if (pendingExtendRef.current === p) pendingExtendRef.current = null
+    })
+  }, [atEndOfList, navContext, extendNavList])
+
   const goNext = useCallback(async () => {
     if (directNextId) {
       goToArticle(directNextId)
       return
     }
-    if (!atEndOfList || !navContext || loadingNext) return
+    if (!atEndOfList) return
     setLoadingNext(true)
     try {
-      const { ids, stillMore } = await fetchMoreIds(navContext)
-      if (ids.length === 0) {
-        // Server ran out — drop the context so Next disables next time.
-        writeNav(navList, null)
-        setNavContext(null)
-        return
-      }
-      const extended = [...navList, ...ids]
-      const nextCtx = stillMore
-        ? { ...navContext, nextOffset: navContext.nextOffset + navContext.pageSize }
-        : null
-      writeNav(extended, nextCtx)
-      setNavList(extended)
-      setNavContext(nextCtx)
-      goToArticle(ids[0])
+      // Reuse the in-flight prefetch if any; otherwise kick a fresh fetch.
+      const firstNewId = await (pendingExtendRef.current ?? extendNavList())
+      if (firstNewId != null) goToArticle(firstNewId)
     } catch {
       // Network failure: leave state alone so the user can retry.
     } finally {
       setLoadingNext(false)
     }
-  }, [directNextId, atEndOfList, navContext, loadingNext, navList, goToArticle])
+  }, [directNextId, atEndOfList, extendNavList, goToArticle])
 
   const goPrev = useCallback(() => {
     if (prevId) goToArticle(prevId)
