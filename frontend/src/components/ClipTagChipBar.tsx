@@ -32,13 +32,6 @@ export default function ClipTagChipBar({ tags, sources, selection, onSelect }: P
       }}
     >
       <div style={{ display: 'flex', gap: 8, flexWrap: 'nowrap', minWidth: 'min-content' }}>
-        <Chip active={isActive(selection, { kind: 'all' })} onClick={() => onSelect({ kind: 'all' })}>
-          全部
-        </Chip>
-        <Chip active={isActive(selection, { kind: 'untagged' })} onClick={() => onSelect({ kind: 'untagged' })}>
-          无 tag
-        </Chip>
-        {sources.length > 0 && <Divider />}
         {sources.map(s => (
           <Chip
             key={`src-${s.key}`}
@@ -50,6 +43,13 @@ export default function ClipTagChipBar({ tags, sources, selection, onSelect }: P
             <span style={{ opacity: 0.6, marginLeft: 4, fontSize: 11 }}>{s.count}</span>
           </Chip>
         ))}
+        {sources.length > 0 && <Divider />}
+        <Chip active={isActive(selection, { kind: 'all' })} onClick={() => onSelect({ kind: 'all' })}>
+          全部
+        </Chip>
+        <Chip active={isActive(selection, { kind: 'untagged' })} onClick={() => onSelect({ kind: 'untagged' })}>
+          无 tag
+        </Chip>
         {tags.length > 0 && <Divider />}
         {tags.map(t => (
           <Chip

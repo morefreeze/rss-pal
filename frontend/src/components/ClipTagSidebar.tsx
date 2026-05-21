@@ -47,23 +47,6 @@ export default function ClipTagSidebar({
       }}
     >
       <div>
-        <button
-          type="button"
-          className={'saved-row' + (selection.kind === 'all' ? ' active' : '')}
-          onClick={() => onSelect({ kind: 'all' })}
-        >
-          <span className="saved-row-label">全部</span>
-        </button>
-        <button
-          type="button"
-          className={'saved-row' + (selection.kind === 'untagged' ? ' active' : '')}
-          onClick={() => onSelect({ kind: 'untagged' })}
-        >
-          <span className="saved-row-label">(无 tag)</span>
-        </button>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
         <div className="saved-section-title">Sources</div>
         {sources.length === 0 ? (
           <div className="text-muted text-sm" style={{ padding: '4px 8px' }}>
@@ -83,6 +66,23 @@ export default function ClipTagSidebar({
             </button>
           ))
         )}
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <button
+          type="button"
+          className={'saved-row' + (selection.kind === 'all' ? ' active' : '')}
+          onClick={() => onSelect({ kind: 'all' })}
+        >
+          <span className="saved-row-label">全部</span>
+        </button>
+        <button
+          type="button"
+          className={'saved-row' + (selection.kind === 'untagged' ? ' active' : '')}
+          onClick={() => onSelect({ kind: 'untagged' })}
+        >
+          <span className="saved-row-label">(无 tag)</span>
+        </button>
       </div>
 
       <div style={{ marginTop: 12 }}>
