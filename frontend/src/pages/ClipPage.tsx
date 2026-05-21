@@ -19,6 +19,7 @@ import ClipTagChipBar from '../components/ClipTagChipBar'
 import { usePlayer } from '../player/PlayerContext'
 import { reportClick } from '../hooks/useExposureTracking'
 import { useBreakpoint } from '../hooks/useBreakpoint'
+import { writeNav, type NavContext } from '../utils/articleNav'
 
 const PAGE_SIZE = 20
 
@@ -216,7 +217,17 @@ export default function ClipPage({
       const i = ids.indexOf(id)
       const start = Math.max(0, i - 50)
       const end = Math.min(ids.length, i + 51)
-      sessionStorage.setItem('articleNavList', JSON.stringify(ids.slice(start, end)))
+      // Attach the load-more context so ArticlePage can extend the nav list
+      // when the user hits Next at the end of what's currently loaded.
+      const context: NavContext | null = i >= 0 && hasMore
+        ? {
+            kind: 'clip',
+            params,
+            nextOffset: offset + PAGE_SIZE,
+            pageSize: PAGE_SIZE,
+          }
+        : null
+      writeNav(ids.slice(start, end), context)
       sessionStorage.setItem('articleListScroll', String(window.scrollY))
       sessionStorage.setItem('articleEntryPath', entryPath)
     } catch {
