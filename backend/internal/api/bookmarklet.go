@@ -90,6 +90,7 @@ type bookmarkletArticleRepo interface {
 	CreatePDFStub(a *model.Article) error
 	UpdateContentAndMarkReady(id int, content string, wordCount, readingMinutes int) error
 	MarkPDFFailed(id int, msg string) error
+	ResetPDFToProcessing(id int) error
 }
 
 type BookmarkletHandler struct {

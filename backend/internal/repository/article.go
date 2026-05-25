@@ -1717,6 +1717,20 @@ func (r *ArticleRepository) MarkPDFFailed(id int, msg string) error {
 	return err
 }
 
+// ResetPDFToProcessing transitions a PDF clip article back into the
+// 'processing' state so the OCR worker re-picks it up. Used when the
+// user re-captures a scanned PDF that's already been stubbed or
+// previously failed.
+func (r *ArticleRepository) ResetPDFToProcessing(id int) error {
+	_, err := r.db.Exec(`
+		UPDATE articles
+		SET processing_state = 'processing',
+		    processing_error = ''
+		WHERE id = $1
+	`, id)
+	return err
+}
+
 // GetPDFOCRPending returns clip articles awaiting OCR (processing_state
 // = 'processing' AND is_clip = true AND parent_article_id IS NULL).
 // The parent_article_id filter prevents collision with link_set's own

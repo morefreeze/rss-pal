@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -101,12 +102,13 @@ func (h *BookmarkletHandler) processPDFCapture(
 	if queueForOCR {
 		if existing != nil {
 			// Bookmarklet re-capture of an already-queued (or previously
-			// failed) PDF — flag it as failed so the user/worker can pick
-			// it back up (current behaviour: the worker re-OCRs on next
-			// pass via its retry policy). Surfaces "processing" to the
-			// user so they know we accepted the retry.
-			if err := h.articleRepo.MarkPDFFailed(existing.ID, ""); err != nil {
-				log.Printf("pdf: reset existing %d before re-queue: %v", existing.ID, err)
+			// failed) PDF — flip the article back to 'processing' so the
+			// worker's GetPDFOCRPending picks it up on the next tick.
+			// (MarkPDFFailed leaves it in 'failed' which the worker
+			// explicitly skips — that was the previous bug here.) Surfaces
+			// "processing" to the user so they know we accepted the retry.
+			if err := h.articleRepo.ResetPDFToProcessing(existing.ID); err != nil {
+				log.Printf("pdf: reset existing %d to processing (re-queue): %v", existing.ID, err)
 			}
 			return pdfCaptureResult{
 				Status:    "processing",
@@ -264,7 +266,7 @@ func (h *BookmarkletHandler) CapturePDF(c *gin.Context) {
 	res, err := h.processPDFCapture(c.Request.Context(), user, rawURL, browserTitle, pdfBytes, h.imageBaseDir)
 	if err != nil {
 		log.Printf("CapturePDF user=%d url=%s: %v", user.ID, rawURL, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "处理 PDF 失败"})
 		return
 	}
 	if h.backup != nil {
@@ -298,7 +300,34 @@ func (h *BookmarkletHandler) CapturePDFURL(c *gin.Context) {
 		return
 	}
 
-	client := &http.Client{Timeout: pdfFetchTimeout}
+	// SSRF mitigation: only allow http/https. Rejects file://, gopher://,
+	// data:, and other exotic schemes that net/http would otherwise honour.
+	// NOTE: this does NOT block private-IP targets (10/8, 127/8, 169.254/16,
+	// link-local v6, etc.). Adding a DNS-resolve + IP-range check is the
+	// natural next step but requires either resolving twice (TOCTOU) or a
+	// custom Dialer — left as a follow-up.
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "仅支持 http/https 的 PDF 链接"})
+		return
+	}
+
+	client := &http.Client{
+		Timeout: pdfFetchTimeout,
+		// Defense in depth: re-validate each redirect target so a clever
+		// upstream can't redirect us to file:// or loop indefinitely. The
+		// stdlib default already caps at 10 redirects but we restate it
+		// here next to the scheme check so the policy is in one place.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to disallowed scheme: %s", req.URL.Scheme)
+			}
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
 	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, req.URL, nil)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url 无效"})
@@ -307,12 +336,14 @@ func (h *BookmarkletHandler) CapturePDFURL(c *gin.Context) {
 	httpReq.Header.Set("User-Agent", "RSS-Pal-PDF-Fetch/1.0")
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "下载失败：" + err.Error()})
+		log.Printf("CapturePDFURL fetch failed user=%d url=%s: %v", user.ID, req.URL, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "下载 PDF 失败"})
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("下载失败：HTTP %d", resp.StatusCode)})
+		log.Printf("CapturePDFURL upstream status user=%d url=%s status=%d", user.ID, req.URL, resp.StatusCode)
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("下载 PDF 失败：HTTP %d", resp.StatusCode)})
 		return
 	}
 	// Accept either an honest application/pdf Content-Type or a URL that
@@ -339,7 +370,7 @@ func (h *BookmarkletHandler) CapturePDFURL(c *gin.Context) {
 	res, err := h.processPDFCapture(c.Request.Context(), user, req.URL, "", pdfBytes, h.imageBaseDir)
 	if err != nil {
 		log.Printf("CapturePDFURL user=%d url=%s: %v", user.ID, req.URL, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "处理 PDF 失败"})
 		return
 	}
 	if h.backup != nil {
