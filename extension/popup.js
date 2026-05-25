@@ -74,6 +74,12 @@
     chrome.runtime.openOptionsPage();
   }
 
+  function isPDFTab(tab) {
+    if (!tab || !tab.url) return false;
+    const u = tab.url.split('?')[0].split('#')[0].toLowerCase();
+    return u.endsWith('.pdf');
+  }
+
   // --- Init ---
 
   async function init() {
@@ -101,6 +107,13 @@
       currentPage.title = tab.title || '';
       pageTitle.textContent = currentPage.title || '(无标题)';
       pageUrl.textContent = currentPage.url;
+
+      if (isPDFTab(tab)) {
+        captureBtn.textContent = '⭐ 网摘此 PDF';
+        captureBtn.dataset.mode = 'pdf';
+      } else {
+        captureBtn.dataset.mode = 'html';
+      }
     }
   }
 
@@ -243,6 +256,56 @@
     return await resp.json();
   }
 
+  async function doCaptureHTML(tab, serverUrl, token, force) {
+    const html = await captureHtml(tab.id);
+
+    lastCapture = { url: currentPage.url, title: currentPage.title, html, serverUrl, token };
+
+    const result = await sendToServer(currentPage.url, currentPage.title, html, serverUrl, token, force);
+
+    if (result.status === 'duplicate' && !force) {
+      hideStatus();
+      const link = buildArticleLink(serverUrl, result.article_id);
+      dupMessage.innerHTML = escapeHtml(result.message || '该文章已存在，是否覆盖？') + link;
+      duplicatePrompt.style.display = 'block';
+    } else {
+      const link = buildArticleLink(serverUrl, result.article_id);
+      showStatus('success', '✅ ' + escapeHtml(result.message || '发送成功') + link);
+    }
+  }
+
+  async function doCapturePDF(tab, serverUrl, token) {
+    const resp = await fetch(tab.url);
+    if (!resp.ok) throw new Error('下载 PDF 失败：HTTP ' + resp.status);
+    const blob = await resp.blob();
+
+    const fd = new FormData();
+    fd.append('url', tab.url);
+    fd.append('title', tab.title || '');
+    fd.append('file', blob, 'capture.pdf');
+
+    const send = await fetch(serverUrl.replace(/\/+$/, '') + '/api/bookmarklet/capture-pdf', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token },
+      body: fd,
+    });
+    if (!send.ok) {
+      let msg = 'HTTP ' + send.status;
+      try {
+        const j = await send.json();
+        msg = j.message || j.error || msg;
+      } catch (_) {}
+      throw new Error(msg);
+    }
+    const result = await send.json();
+    const link = buildArticleLink(serverUrl, result.article_id);
+    if (result.status === 'processing') {
+      showStatus('info', '⏳ ' + escapeHtml(result.message || 'PDF 已入库，OCR 处理中') + link);
+    } else {
+      showStatus('success', '✅ ' + escapeHtml(result.message || 'PDF 已加入网摘') + link);
+    }
+  }
+
   async function doCapture(force) {
     hideStatus();
     hideDuplicate();
@@ -262,20 +325,10 @@
     setLoading(captureBtn, true);
 
     try {
-      const html = await captureHtml(tab.id);
-
-      lastCapture = { url: currentPage.url, title: currentPage.title, html, serverUrl, token };
-
-      const result = await sendToServer(currentPage.url, currentPage.title, html, serverUrl, token, force);
-
-      if (result.status === 'duplicate' && !force) {
-        hideStatus();
-        const link = buildArticleLink(serverUrl, result.article_id);
-        dupMessage.innerHTML = escapeHtml(result.message || '该文章已存在，是否覆盖？') + link;
-        duplicatePrompt.style.display = 'block';
+      if (captureBtn.dataset.mode === 'pdf') {
+        await doCapturePDF(tab, serverUrl, token);
       } else {
-        const link = buildArticleLink(serverUrl, result.article_id);
-        showStatus('success', '✅ ' + escapeHtml(result.message || '发送成功') + link);
+        await doCaptureHTML(tab, serverUrl, token, force);
       }
     } catch (err) {
       showStatus('error', '❌ ' + escapeHtml(err.message));
