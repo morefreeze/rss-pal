@@ -54,3 +54,36 @@ func TestListETagHeaderIsPresent(t *testing.T) {
 		t.Fatalf("etag must not be empty")
 	}
 }
+
+func TestComputeDetailETagStable(t *testing.T) {
+	art := model.Article{
+		ID:              7,
+		FetchedAt:       time.Unix(500, 0),
+		SummaryDetailed: "abc",
+		Content:         "hello world",
+	}
+	a := api.ComputeDetailETag(art)
+	b := api.ComputeDetailETag(art)
+	if a != b {
+		t.Fatalf("detail etag must be stable: %q vs %q", a, b)
+	}
+}
+
+func TestComputeDetailETagChangesOnUpdate(t *testing.T) {
+	art := model.Article{ID: 7, FetchedAt: time.Unix(500, 0), Content: "v1", SummaryDetailed: "s1"}
+	tag1 := api.ComputeDetailETag(art)
+	art.Content = "v2"
+	if tag1 == api.ComputeDetailETag(art) {
+		t.Fatalf("etag must change when content changes")
+	}
+	art.Content = "v1"
+	art.SummaryDetailed = "s2"
+	if tag1 == api.ComputeDetailETag(art) {
+		t.Fatalf("etag must change when summary_detailed changes")
+	}
+	art.SummaryDetailed = "s1"
+	art.FetchedAt = time.Unix(999, 0)
+	if tag1 == api.ComputeDetailETag(art) {
+		t.Fatalf("etag must change when fetched_at changes")
+	}
+}

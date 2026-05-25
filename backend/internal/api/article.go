@@ -236,6 +236,16 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
+
+	c.Header("Cache-Control", "private, max-age=300, stale-while-revalidate=600")
+
+	etag := ComputeDetailETag(*article)
+	c.Header("ETag", etag)
+	if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
 	userID := getUserID(c)
 
 	progress, _ := h.progressRepo.GetByArticleAndUser(id, userID)
