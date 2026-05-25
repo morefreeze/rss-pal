@@ -27,12 +27,13 @@ type PageContent struct {
 // ImageRef describes one image extracted from the PDF. Bytes are loaded
 // into memory; callers persist them via WriteImages.
 type ImageRef struct {
-	Idx    int    // 0-based unique per article
-	Bytes  []byte // Raw image bytes (PNG or JPEG)
-	Format string // "png" | "jpg"
-	SHA256 string // Lowercase hex, for ETag + dedup
-	Width  int    // Pixels; 0 if unknown
-	Height int    // Pixels; 0 if unknown
+	Idx     int    // 0-based unique per article
+	PageNum int    // 1-based PDF page this image was extracted from
+	Bytes   []byte // Raw image bytes (PNG or JPEG)
+	Format  string // "png" | "jpg"
+	SHA256  string // Lowercase hex, for ETag + dedup
+	Width   int    // Pixels; 0 if unknown
+	Height  int    // Pixels; 0 if unknown
 }
 
 // MaxImagesPerPDF caps how many images one article retains after dedup.
