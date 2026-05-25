@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/pdfextract"
 	"github.com/lib/pq"
 )
 
@@ -89,11 +90,31 @@ LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.use
 }
 
 type ArticleRepository struct {
-	db *sql.DB
+	db           *sql.DB
+	imageBaseDir string
 }
 
 func NewArticleRepository(db *sql.DB) *ArticleRepository {
 	return &ArticleRepository{db: db}
+}
+
+// SetImageBaseDir tells the repo where PDF clip images live, so Delete
+// can clean them up. Pass the same value as config.Backup.Dir.
+func (r *ArticleRepository) SetImageBaseDir(path string) {
+	r.imageBaseDir = path
+}
+
+// Delete removes the article row by id. If the repo knows where PDF
+// clip images live (via SetImageBaseDir), the article's image directory
+// is removed too on best-effort basis.
+func (r *ArticleRepository) Delete(id int) error {
+	if _, err := r.db.Exec(`DELETE FROM articles WHERE id = $1`, id); err != nil {
+		return err
+	}
+	if r.imageBaseDir != "" {
+		_ = pdfextract.RemoveImageDir(r.imageBaseDir, id) // best-effort
+	}
+	return nil
 }
 
 func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error) {
