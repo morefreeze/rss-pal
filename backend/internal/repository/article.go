@@ -1616,3 +1616,48 @@ func (r *ArticleRepository) ConfirmLinkSetSuggestion(id int) error {
 	_, err := r.db.Exec(`UPDATE articles SET links_extendable = true WHERE id = $1`, id)
 	return err
 }
+
+// CreatePDFStub inserts a placeholder article for an async-OCR PDF.
+// Fills in article.ID and article.ProcessingState on success.
+func (r *ArticleRepository) CreatePDFStub(a *model.Article) error {
+	a.ProcessingState = "processing"
+	query := `
+		INSERT INTO articles
+			(feed_id, title, url, content, is_clip, processing_state, processing_error)
+		VALUES ($1, $2, $3, '', true, 'processing', '')
+		RETURNING id, fetched_at
+	`
+	return r.db.QueryRow(query, a.FeedID, a.Title, a.URL).
+		Scan(&a.ID, &a.FetchedAt)
+}
+
+// UpdatePDFContent transitions a PDF article from processing → ready,
+// stores the extracted content + recomputed metrics, clears any stale
+// summary so backfillSummaries regenerates it, and clears any prior
+// processing_error string.
+func (r *ArticleRepository) UpdatePDFContent(id int, content string, wordCount, readingMinutes int) error {
+	_, err := r.db.Exec(`
+		UPDATE articles
+		SET content = $1,
+		    word_count = $2,
+		    reading_minutes = $3,
+		    summary_brief = NULL,
+		    summary_detailed = NULL,
+		    processing_state = 'ready',
+		    processing_error = ''
+		WHERE id = $4
+	`, content, wordCount, readingMinutes, id)
+	return err
+}
+
+// MarkPDFFailed transitions a PDF article to failed and stores a human
+// readable error message for the frontend to display.
+func (r *ArticleRepository) MarkPDFFailed(id int, msg string) error {
+	_, err := r.db.Exec(`
+		UPDATE articles
+		SET processing_state = 'failed',
+		    processing_error = $1
+		WHERE id = $2
+	`, msg, id)
+	return err
+}
