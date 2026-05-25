@@ -1,8 +1,17 @@
-import axios from 'axios'
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { clearAllFabCollapsed } from '../components/CollapsibleFab'
+
+// Per-request retry counter so the interceptor never retries more than once.
+interface RetriableConfig extends InternalAxiosRequestConfig {
+  __retryCount?: number
+}
 
 export const api = axios.create({
   baseURL: '/api',
+  // Weak networks can stall single packets for many seconds. 10s is
+  // generous for legitimate slow responses while still letting the
+  // interceptor retry on outright network failure.
+  timeout: 10000,
 })
 
 // JWT interceptor
@@ -16,7 +25,21 @@ api.interceptors.request.use(config => {
 
 api.interceptors.response.use(
   res => res,
-  err => {
+  async (err: AxiosError) => {
+    const config = err.config as RetriableConfig | undefined
+
+    // Retry once on network failure / timeout — GET only. Non-GET
+    // retries could create duplicate side-effects.
+    if (config) {
+      const method = (config.method ?? 'get').toLowerCase()
+      const isNetworkFailure = !err.response || err.code === 'ECONNABORTED' || err.code === 'ERR_NETWORK'
+      if (method === 'get' && isNetworkFailure && !config.__retryCount) {
+        config.__retryCount = 1
+        await new Promise(r => setTimeout(r, 500))
+        return api(config)
+      }
+    }
+
     if (err.response?.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
