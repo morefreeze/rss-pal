@@ -111,7 +111,7 @@ func ExtractFast(ctx context.Context, pdfBytes []byte) (Result, error) {
 // only a pipeline-level failure (e.g. pdftoppm crash) returns a non-nil
 // error.
 func ExtractWithOCR(ctx context.Context, pdfBytes []byte) (Result, error) {
-	return Result{}, errors.New("not implemented")
+	return extractWithOCR(ctx, pdfBytes)
 }
 
 // distributeImages attaches each image to its source page based on
