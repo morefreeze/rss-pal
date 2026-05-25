@@ -248,6 +248,126 @@ func TestCapturePDF_Success(t *testing.T) {
 	}
 }
 
+func TestCapturePDFURL_Unauthenticated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, _ := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture-pdf-url", h.CapturePDFURL)
+
+	req := httptest.NewRequest("POST", "/api/bookmarklet/capture-pdf-url",
+		bytes.NewBufferString(`{"url":"https://example.com/x.pdf"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestCapturePDFURL_MissingURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, _ := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture-pdf-url", h.CapturePDFURL)
+
+	req := httptest.NewRequest("POST", "/api/bookmarklet/capture-pdf-url",
+		bytes.NewBufferString(`{"url":""}`))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+// TestCapturePDFURL_NonPDFContentType verifies the handler rejects URLs
+// whose response is neither application/pdf nor obviously a .pdf file.
+// Without this guard a typo'd URL would happily be fed to pdfextract,
+// which would then waste CPU returning a corrupt-PDF error.
+func TestCapturePDFURL_NonPDFContentType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, _ := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture-pdf-url", h.CapturePDFURL)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html></html>"))
+	}))
+	defer srv.Close()
+
+	body := bytes.NewBufferString(`{"url":"` + srv.URL + `/page.html"}`)
+	req := httptest.NewRequest("POST", "/api/bookmarklet/capture-pdf-url", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCapturePDFURL_FetchAndProcess covers the happy path: server-side
+// fetch of a valid PDF, then full sync extraction into a stub repo.
+func TestCapturePDFURL_FetchAndProcess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	pdfBytes, err := os.ReadFile(filepath.Join("..", "pdfextract", "testdata", "digital.pdf"))
+	if err != nil {
+		t.Skipf("fixture not available: %v", err)
+	}
+	if !pdfextractToolingAvailable() {
+		t.Skip("pdfextract tooling (poppler-utils) not on PATH; skipping integration")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write(pdfBytes)
+	}))
+	defer srv.Close()
+
+	h, repo := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture-pdf-url", h.CapturePDFURL)
+
+	body := bytes.NewBufferString(`{"url":"` + srv.URL + `/foo.pdf"}`)
+	req := httptest.NewRequest("POST", "/api/bookmarklet/capture-pdf-url", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(repo.created) != 1 {
+		t.Fatalf("expected 1 created article, got %d", len(repo.created))
+	}
+}
+
+// TestCapturePDFURL_FetchError covers the bad-gateway path: upstream
+// returns a non-200, handler should surface 502 rather than 500.
+func TestCapturePDFURL_FetchError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	h, _ := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture-pdf-url", h.CapturePDFURL)
+
+	body := bytes.NewBufferString(`{"url":"` + srv.URL + `/missing.pdf"}`)
+	req := httptest.NewRequest("POST", "/api/bookmarklet/capture-pdf-url", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestPdfStatusToHTTP(t *testing.T) {
 	cases := []struct {
 		status string

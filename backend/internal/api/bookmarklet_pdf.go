@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/pdfextract"
@@ -22,6 +24,12 @@ import (
 // research paper is a real use case while still small enough to keep one
 // request from blocking the worker for too long.
 const captureMaxPDFBytes = 32 << 20
+
+// pdfFetchTimeout caps the upstream fetch in capture-pdf-url. 30 s is
+// long enough for a slow CDN serving a 30 MB PDF on a flaky line but
+// short enough that the user gets a clear failure rather than a hung
+// request.
+const pdfFetchTimeout = 30 * time.Second
 
 // pdfCaptureResult is the JSON envelope both PDF capture endpoints return.
 // Status discriminates the three outcomes: "created" (new article, fully
@@ -256,6 +264,81 @@ func (h *BookmarkletHandler) CapturePDF(c *gin.Context) {
 	res, err := h.processPDFCapture(c.Request.Context(), user, rawURL, browserTitle, pdfBytes, h.imageBaseDir)
 	if err != nil {
 		log.Printf("CapturePDF user=%d url=%s: %v", user.ID, rawURL, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if h.backup != nil {
+		h.backup.TriggerAsync()
+	}
+	c.JSON(pdfStatusToHTTP(res.Status), res)
+}
+
+// CapturePDFURL is POST /api/bookmarklet/capture-pdf-url. Body:
+// {"url": "..."}. The server fetches the PDF itself (30 s timeout,
+// 32 MiB cap), so the bookmarklet doesn't have to ship binary bytes
+// from the user's browser — useful when the original tab can't grab
+// the PDF buffer (CORS, file://, etc.).
+func (h *BookmarkletHandler) CapturePDFURL(c *gin.Context) {
+	user, err := h.authenticate(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的 bookmarklet token"})
+		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误"})
+		return
+	}
+	req.URL = strings.TrimSpace(req.URL)
+	if req.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url 必填"})
+		return
+	}
+
+	client := &http.Client{Timeout: pdfFetchTimeout}
+	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, req.URL, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url 无效"})
+		return
+	}
+	httpReq.Header.Set("User-Agent", "RSS-Pal-PDF-Fetch/1.0")
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "下载失败：" + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("下载失败：HTTP %d", resp.StatusCode)})
+		return
+	}
+	// Accept either an honest application/pdf Content-Type or a URL that
+	// ends in .pdf — some CDNs serve octet-stream for PDF objects.
+	ct := resp.Header.Get("Content-Type")
+	lowerPath := strings.SplitN(strings.ToLower(req.URL), "?", 2)[0]
+	if !strings.HasPrefix(ct, "application/pdf") && !strings.HasSuffix(lowerPath, ".pdf") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "目标不是 PDF：Content-Type=" + ct})
+		return
+	}
+	// Read at most captureMaxPDFBytes+1 so we can distinguish "exactly at
+	// the cap" from "over the cap" without buffering the whole rest of
+	// the response.
+	pdfBytes, err := io.ReadAll(io.LimitReader(resp.Body, captureMaxPDFBytes+1))
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "读取响应失败"})
+		return
+	}
+	if int64(len(pdfBytes)) > captureMaxPDFBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "PDF 过大"})
+		return
+	}
+
+	res, err := h.processPDFCapture(c.Request.Context(), user, req.URL, "", pdfBytes, h.imageBaseDir)
+	if err != nil {
+		log.Printf("CapturePDFURL user=%d url=%s: %v", user.ID, req.URL, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
