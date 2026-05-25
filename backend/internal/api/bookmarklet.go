@@ -63,11 +63,41 @@ func shouldPromptDuplicate(newLen, oldLen, newImages, oldImages int, force bool)
 	return float64(newLen) < duplicateOverwriteRatio*float64(oldLen)
 }
 
+// bookmarkletUserRepo is the subset of *repository.UserRepository the
+// bookmarklet handlers need. Defined as an interface so tests can swap in
+// a stub without standing up a real database. Concrete repository pointers
+// satisfy it via Go's structural typing.
+type bookmarkletUserRepo interface {
+	GetByBookmarkletToken(token string) (*model.User, error)
+}
+
+// bookmarkletFeedRepo is the subset of *repository.FeedRepository the
+// bookmarklet handlers need.
+type bookmarkletFeedRepo interface {
+	GetOrCreateClipFeed(ownerID int) (*model.Feed, error)
+}
+
+// bookmarkletArticleRepo is the subset of *repository.ArticleRepository
+// the bookmarklet handlers need. Covers both the existing HTML capture
+// flow and the new PDF capture flow.
+type bookmarkletArticleRepo interface {
+	FindByOwnerAndURL(ownerID int, exactURL string) (*model.Article, error)
+	Create(article *model.Article) error
+	UpdateContent(id int, content string, wordCount, readingMinutes int) error
+	UpdateTitle(id int, title string) error
+	UpdateSummary(id int, summaryBrief, summaryDetailed string) error
+	// PDF-specific (added for capture-pdf / capture-pdf-url):
+	CreatePDFStub(a *model.Article) error
+	UpdateContentAndMarkReady(id int, content string, wordCount, readingMinutes int) error
+	MarkPDFFailed(id int, msg string) error
+}
+
 type BookmarkletHandler struct {
-	userRepo    *repository.UserRepository
-	feedRepo    *repository.FeedRepository
-	articleRepo *repository.ArticleRepository
-	backup      *backup.Runner // nil when backup is disabled
+	userRepo     bookmarkletUserRepo
+	feedRepo     bookmarkletFeedRepo
+	articleRepo  bookmarkletArticleRepo
+	backup       *backup.Runner // nil when backup is disabled
+	imageBaseDir string         // root for pdfextract image storage; "" until WithImageBaseDir
 }
 
 func NewBookmarkletHandler(
@@ -86,6 +116,14 @@ func NewBookmarkletHandler(
 // debounced snapshot. Pass nil to disable.
 func (h *BookmarkletHandler) WithBackupRunner(r *backup.Runner) *BookmarkletHandler {
 	h.backup = r
+	return h
+}
+
+// WithImageBaseDir sets the root directory under which PDF clip image
+// assets are stored (one subdir per article). Falls back to a no-op image
+// storage path when unset (writes still happen but the dir is "").
+func (h *BookmarkletHandler) WithImageBaseDir(path string) *BookmarkletHandler {
+	h.imageBaseDir = path
 	return h
 }
 
