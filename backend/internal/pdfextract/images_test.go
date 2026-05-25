@@ -1,6 +1,7 @@
 package pdfextract
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -12,7 +13,7 @@ func TestExtractImages_DedupAndCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	imgs, totalOriginal, err := extractImages(pdf)
+	imgs, totalOriginal, err := extractImages(context.Background(), pdf)
 	if err != nil {
 		t.Fatalf("extractImages: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestExtractImages_PerImagePageNum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	imgs, _, err := extractImages(pdf)
+	imgs, _, err := extractImages(context.Background(), pdf)
 	if err != nil {
 		t.Fatalf("extractImages: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestExtractImages_Digital_HasFew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	imgs, _, err := extractImages(pdf)
+	imgs, _, err := extractImages(context.Background(), pdf)
 	if err != nil {
 		t.Fatalf("extractImages: %v", err)
 	}

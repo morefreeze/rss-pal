@@ -1,6 +1,7 @@
 package pdfextract
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ func TestExtractTextPages_Digital(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	pages, err := extractTextPages(pdf)
+	pages, err := extractTextPages(context.Background(), pdf)
 	if err != nil {
 		t.Fatalf("extractTextPages: %v", err)
 	}
@@ -33,7 +34,7 @@ func TestExtractTextPages_MultiplePages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	pages, err := extractTextPages(pdf)
+	pages, err := extractTextPages(context.Background(), pdf)
 	if err != nil {
 		t.Fatalf("extractTextPages: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestExtractTextPages_Scanned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	pages, err := extractTextPages(pdf)
+	pages, err := extractTextPages(context.Background(), pdf)
 	if err != nil {
 		t.Fatalf("extractTextPages: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestExtractTextPages_Corrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	if _, err := extractTextPages(pdf); err == nil {
+	if _, err := extractTextPages(context.Background(), pdf); err == nil {
 		t.Fatal("expected error from corrupt PDF, got nil")
 	}
 }

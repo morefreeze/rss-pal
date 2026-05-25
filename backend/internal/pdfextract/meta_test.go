@@ -1,6 +1,7 @@
 package pdfextract
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -10,7 +11,7 @@ func TestExtractTitle_FromPDFMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	title, err := extractTitle(pdf)
+	title, err := extractTitle(context.Background(), pdf)
 	if err != nil {
 		t.Fatalf("extractTitle: %v", err)
 	}
@@ -25,7 +26,7 @@ func TestExtractTitle_NoMetadata(t *testing.T) {
 		t.Fatalf("read fixture: %v", err)
 	}
 	// digital.pdf has no /Title — extractTitle should return "" without error
-	title, err := extractTitle(pdf)
+	title, err := extractTitle(context.Background(), pdf)
 	if err != nil {
 		t.Fatalf("extractTitle: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestExtractTitle_Corrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	if _, err := extractTitle(pdf); err == nil {
+	if _, err := extractTitle(context.Background(), pdf); err == nil {
 		t.Fatal("expected error from corrupt PDF, got nil")
 	}
 }

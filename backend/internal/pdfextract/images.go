@@ -2,6 +2,7 @@ package pdfextract
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	_ "image/png"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -27,17 +27,12 @@ import (
 // same order — both walk the page tree DFS with one counter as of
 // poppler 24.x. If a future version diverges, PageNum will silently
 // default to 0.
-func listImagePages(pdfPath string) ([]int, error) {
-	// TODO(phase-1d): switch to exec.CommandContext when the package-level
-	// exec helper lands in Phase 1D.
-	cmd := exec.Command("pdfimages", "-list", pdfPath)
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("pdfimages -list: %w (stderr: %s)", err, strings.TrimSpace(errBuf.String()))
+func listImagePages(ctx context.Context, pdfPath string) ([]int, error) {
+	out, err := runCmd(ctx, "pdfimages", []string{"-list", pdfPath}, nil)
+	if err != nil {
+		return nil, err
 	}
-	lines := strings.Split(out.String(), "\n")
+	lines := strings.Split(string(out), "\n")
 	if len(lines) < 2 {
 		return nil, nil
 	}
@@ -70,7 +65,7 @@ func listImagePages(pdfPath string) ([]int, error) {
 // We invoke pdfimages twice (-list then -all) for clarity; combining
 // via `pdfimages -all -list` is possible (poppler ≥ 0.32) but couples
 // parsing to extraction. Phase-1D perf review can revisit.
-func extractImages(pdfBytes []byte) ([]ImageRef, int, error) {
+func extractImages(ctx context.Context, pdfBytes []byte) ([]ImageRef, int, error) {
 	tmpDir, err := os.MkdirTemp("", "pdfextract-images-")
 	if err != nil {
 		return nil, 0, fmt.Errorf("mkdir tmp: %w", err)
@@ -85,19 +80,14 @@ func extractImages(pdfBytes []byte) ([]ImageRef, int, error) {
 	// Capture per-image page numbers before emitting files so we can
 	// stamp each ImageRef.PageNum. pagePerEmit is indexed by pdfimages
 	// emission order (pre-dedup), NOT by the kept ImageRef.Idx.
-	pagePerEmit, err := listImagePages(pdfPath)
+	pagePerEmit, err := listImagePages(ctx, pdfPath)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	prefix := filepath.Join(tmpDir, "img")
-	// TODO(phase-1d): switch to exec.CommandContext when the package-level
-	// exec helper lands in Phase 1D.
-	cmd := exec.Command("pdfimages", "-all", pdfPath, prefix)
-	var errBuf bytes.Buffer
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return nil, 0, fmt.Errorf("pdfimages: %w (stderr: %s)", err, strings.TrimSpace(errBuf.String()))
+	if _, err := runCmd(ctx, "pdfimages", []string{"-all", pdfPath, prefix}, nil); err != nil {
+		return nil, 0, err
 	}
 
 	entries, err := os.ReadDir(tmpDir)

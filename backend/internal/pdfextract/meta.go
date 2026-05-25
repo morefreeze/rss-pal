@@ -3,23 +3,19 @@ package pdfextract
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
 // extractTitle returns the PDF's /Title metadata, or "" if none. Returns
 // a non-nil error when pdfinfo fails (corrupt PDF, missing binary).
-func extractTitle(pdfBytes []byte) (string, error) {
-	cmd := exec.Command("pdfinfo", "-")
-	cmd.Stdin = bytes.NewReader(pdfBytes)
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("pdfinfo: %w (stderr: %s)", err, strings.TrimSpace(errBuf.String()))
+func extractTitle(ctx context.Context, pdfBytes []byte) (string, error) {
+	out, err := runCmd(ctx, "pdfinfo", []string{"-"}, pdfBytes)
+	if err != nil {
+		return "", err
 	}
-	scanner := bufio.NewScanner(&out)
+	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "Title:") {
