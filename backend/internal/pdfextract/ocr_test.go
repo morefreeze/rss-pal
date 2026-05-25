@@ -30,7 +30,7 @@ func TestExtractWithOCR_Scanned(t *testing.T) {
 	if total == 0 {
 		t.Fatal("OCR produced zero characters")
 	}
-	t.Logf("OCR produced %d total chars across %d pages with langs=%s", total, len(r.Pages), chooseOCRLangs())
+	t.Logf("OCR produced %d total chars across %d pages with langs=%s", total, len(r.Pages), chooseOCRLangs(context.Background()))
 }
 
 func TestExtractWithOCR_Corrupt(t *testing.T) {

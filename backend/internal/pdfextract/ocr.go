@@ -4,34 +4,51 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+)
+
+var (
+	ocrLangsOnce sync.Once
+	ocrLangs     string
 )
 
 // chooseOCRLangs returns the preferred Tesseract -l value based on
 // what's installed locally. Falls back to "eng" alone if chi_sim is
 // unavailable (host dev environments often don't have it). Production
 // Docker images install both chi_sim + eng.
-func chooseOCRLangs() string {
-	out, err := exec.Command("tesseract", "--list-langs").Output()
-	if err != nil {
-		return "eng"
-	}
-	langs := string(out)
-	hasChi := strings.Contains(langs, "chi_sim")
-	hasEng := strings.Contains(langs, "eng")
-	switch {
-	case hasChi && hasEng:
-		return "chi_sim+eng"
-	case hasEng:
-		return "eng"
-	case hasChi:
-		return "chi_sim"
-	default:
-		return "eng" // last resort; tesseract will likely fail loudly
-	}
+//
+// chooseOCRLangs is cached: tesseract's installed language data doesn't
+// change without a process restart, and on a multi-page OCR job we'd
+// otherwise fork tesseract once per page just to probe.
+func chooseOCRLangs(ctx context.Context) string {
+	ocrLangsOnce.Do(func() {
+		// tesseract --list-langs writes to stderr on some versions, stdout
+		// on others; CombinedOutput-style would be safer, but runCmd
+		// captures stderr-on-error. Try runCmd first; if it fails, fall
+		// back to "eng" to keep the call infallible by contract.
+		out, err := runCmd(ctx, "tesseract", []string{"--list-langs"}, nil)
+		if err != nil {
+			ocrLangs = "eng"
+			return
+		}
+		s := string(out)
+		hasChi := strings.Contains(s, "chi_sim")
+		hasEng := strings.Contains(s, "eng")
+		switch {
+		case hasChi && hasEng:
+			ocrLangs = "chi_sim+eng"
+		case hasEng:
+			ocrLangs = "eng"
+		case hasChi:
+			ocrLangs = "chi_sim"
+		default:
+			ocrLangs = "eng"
+		}
+	})
+	return ocrLangs
 }
 
 // extractWithOCR renders each page of the PDF to a 300 dpi PNG via
@@ -80,7 +97,7 @@ func extractWithOCR(ctx context.Context, pdfBytes []byte) (Result, error) {
 	}
 	sort.Strings(pngs)
 
-	langs := chooseOCRLangs()
+	langs := chooseOCRLangs(ctx)
 
 	pages := make([]PageContent, 0, len(pngs))
 	for i, name := range pngs {
@@ -88,10 +105,13 @@ func extractWithOCR(ctx context.Context, pdfBytes []byte) (Result, error) {
 		imgPath := filepath.Join(tmpDir, name)
 		stdout, err := runCmd(ctx, "tesseract", []string{imgPath, "-", "-l", langs}, nil)
 		if err != nil {
+			msg := strings.NewReplacer("\n", " ", "\r", " ").Replace(strings.TrimSpace(err.Error()))
+			if len(msg) > 200 {
+				msg = msg[:200] + "…"
+			}
 			pages = append(pages, PageContent{
 				PageNum: pageNum,
-				Text: fmt.Sprintf("> [第 %d 页 OCR 失败：%s]",
-					pageNum, strings.TrimSpace(err.Error())),
+				Text:    fmt.Sprintf("> [第 %d 页 OCR 失败：%s]", pageNum, msg),
 			})
 			continue
 		}
