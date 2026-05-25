@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -186,17 +187,22 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	type item struct {
-		model.Article
-		ManualTags []model.UserTag `json:"manual_tags"`
-	}
-	out := make([]item, len(articles))
+	out := make([]ArticleListItem, len(articles))
 	for i, a := range articles {
-		out[i] = item{Article: a, ManualTags: tagMap[a.ID]}
-		if out[i].ManualTags == nil {
-			out[i].ManualTags = []model.UserTag{}
-		}
+		out[i] = articleToListItem(a, tagMap[a.ID])
 	}
+
+	c.Header("Cache-Control", "private, no-cache")
+
+	signature := fmt.Sprintf("u=%d|f=%v|unread=%v|saved=%v|tag=%v|untagged=%v|sort=%v|dir=%v|limit=%d|offset=%d",
+		userID, derefIntPtr(feedID), unreadOnly, savedOnly, derefIntPtr(tagID), untagged, sort, dir, limit, offset)
+	etag := ComputeListETag(signature, out)
+	c.Header("ETag", etag)
+	if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
 	c.JSON(http.StatusOK, out)
 }
 
@@ -215,7 +221,14 @@ func (h *ArticleHandler) Search(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, articles)
+	// Project to the lean DTO so search results carry the same weak-network
+	// budget as GET /api/articles. Search results don't ship manual tags
+	// today, so pass nil and let articleToListItem normalize to [].
+	out := make([]ArticleListItem, len(articles))
+	for i, a := range articles {
+		out[i] = articleToListItem(a, nil)
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (h *ArticleHandler) GetByID(c *gin.Context) {
@@ -230,6 +243,16 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
+
+	c.Header("Cache-Control", "private, max-age=300, stale-while-revalidate=600")
+
+	etag := ComputeDetailETag(*article)
+	c.Header("ETag", etag)
+	if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
 	userID := getUserID(c)
 
 	progress, _ := h.progressRepo.GetByArticleAndUser(id, userID)
@@ -702,4 +725,11 @@ func (h *ArticleHandler) ConfirmLinkSetSuggestion(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"confirmed": true})
+}
+
+func derefIntPtr(p *int) any {
+	if p == nil {
+		return "nil"
+	}
+	return *p
 }

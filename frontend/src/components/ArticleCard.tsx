@@ -1,5 +1,11 @@
 import React from 'react'
-import { Article, UserTag } from '../api/client'
+import { Article, ArticleListItem, UserTag } from '../api/client'
+
+// ArticleCardItem is what the card renders: anything with the lean
+// list-item shape. Both the full Article (detail page) and the
+// trimmed ArticleListItem (list endpoint) satisfy it, so the card is
+// callable from either context.
+type ArticleCardItem = Article | ArticleListItem
 import ReadingMeta from './ReadingMeta'
 import TagChip from './TagChip'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
@@ -10,7 +16,7 @@ import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 // article page where the embed lives). Rendered as siblings rather than
 // either/or so an article that ever has both kinds of media displays
 // both icons.
-function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Article) => void }) {
+function MediaIndicator({ article, onPlay }: { article: ArticleCardItem; onPlay: (a: ArticleCardItem) => void }) {
   if (!article.media_url) return null
   const t = article.media_type ?? ''
   const isVideo = t.startsWith('video/')
@@ -50,13 +56,13 @@ function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Art
 }
 
 interface Props {
-  article: Article
+  article: ArticleCardItem
   manualTags?: UserTag[]
   isRead: boolean
   isFocused: boolean
   idx: number
   prefetchRef?: React.RefObject<HTMLDivElement>
-  onPlay: (a: Article) => void
+  onPlay: (a: ArticleCardItem) => void
   formatDate: (d: string | null) => string
   stripMarkdown: (t: string) => string
   onOpen: (id: number) => void
