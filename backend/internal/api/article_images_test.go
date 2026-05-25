@@ -158,6 +158,7 @@ func TestArticleImageHandler_400OnMalformedIdx(t *testing.T) {
 		"/api/articles/42/images/bad",      // no dot
 		"/api/articles/42/images/.png",     // empty index (dot at 0)
 		"/api/articles/42/images/abc.png",  // index not numeric
+		"/api/articles/42/images/5.",       // trailing dot (empty extension)
 	}
 	for _, path := range cases {
 		req := httptest.NewRequest("GET", path, nil)
