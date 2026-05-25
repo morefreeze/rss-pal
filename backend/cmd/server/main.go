@@ -10,6 +10,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
+	gingzip "github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
 
@@ -70,6 +71,15 @@ func main() {
 	clipHandler := api.NewClipHandler(clipRepo, articleUserTagRepo)
 
 	router := gin.Default()
+	// Compress JSON/text responses for clients that opt in. Defensive
+	// when the API is reached directly (no nginx); skip already-compressed
+	// content types and the streaming summary endpoint that controls its
+	// own framing.
+	router.Use(gingzip.Gzip(
+		gingzip.DefaultCompression,
+		gingzip.WithExcludedExtensions([]string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mp3", ".woff", ".woff2"}),
+		gingzip.WithExcludedPathsRegexs([]string{"/api/articles/.*/summary/stream"}),
+	))
 	// Trust only requests from localhost/private networks (running behind nginx)
 	router.SetTrustedProxies([]string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
 
