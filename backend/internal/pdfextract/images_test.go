@@ -37,6 +37,28 @@ func TestExtractImages_DedupAndCap(t *testing.T) {
 		if im.Format != "png" && im.Format != "jpg" {
 			t.Fatalf("unexpected format: %q", im.Format)
 		}
+		if im.Width <= 0 || im.Height <= 0 {
+			t.Errorf("img idx=%d missing dims: %dx%d", im.Idx, im.Width, im.Height)
+		}
+	}
+	if len(imgs) > 0 {
+		t.Logf("sample image idx=%d format=%s dims=%dx%d", imgs[0].Idx, imgs[0].Format, imgs[0].Width, imgs[0].Height)
+	}
+}
+
+func TestExtractImages_PerImagePageNum(t *testing.T) {
+	pdf, err := os.ReadFile("testdata/image_heavy.pdf")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	imgs, _, err := extractImages(pdf)
+	if err != nil {
+		t.Fatalf("extractImages: %v", err)
+	}
+	for _, im := range imgs {
+		if im.PageNum < 1 {
+			t.Fatalf("img idx=%d has bad PageNum=%d", im.Idx, im.PageNum)
+		}
 	}
 }
 
