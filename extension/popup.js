@@ -275,7 +275,18 @@
   }
 
   async function doCapturePDF(tab, serverUrl, token) {
-    const resp = await fetch(tab.url);
+    let resp;
+    try {
+      resp = await fetch(tab.url);
+    } catch (e) {
+      // file:// fetch errors are otherwise opaque ("Failed to fetch"). The
+      // user almost certainly hasn't enabled "allow file URLs" for the
+      // extension — surface that hint directly instead of the raw error.
+      if (tab.url && tab.url.startsWith('file://')) {
+        throw new Error('无法读取本地 PDF：请到 chrome://extensions 找到 RSS Pal，点击「详情」开启「允许访问文件 URL」');
+      }
+      throw e;
+    }
     if (!resp.ok) throw new Error('下载 PDF 失败：HTTP ' + resp.status);
     const blob = await resp.blob();
 
