@@ -6,7 +6,12 @@
 // and avoid running many concurrent extractions on one machine.
 package pdfextract
 
-import "errors"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"unicode/utf8"
+)
 
 // Result is the full output of one extraction.
 type Result struct {
@@ -52,15 +57,76 @@ var ErrNoText = errors.New("pdfextract: fewer than MinTextForDigital runes extra
 // ExtractFast runs pdftotext + pdfimages + pdfinfo (no OCR). Returns
 // ErrNoText (alongside a partial Result) when text is too sparse — caller
 // should treat this as "queue for OCR" rather than a hard error.
-func ExtractFast(pdfBytes []byte) (Result, error) {
-	return Result{}, errors.New("not implemented")
+//
+// The returned Result.Markdown is intentionally empty — the caller calls
+// BuildMarkdown(result, articleID) after it has an article ID. This keeps
+// the pure function testable.
+func ExtractFast(ctx context.Context, pdfBytes []byte) (Result, error) {
+	var r Result
+
+	// Title is best-effort. If pdfinfo fails the PDF is likely corrupt;
+	// surface that as a hard error rather than silently continuing.
+	title, err := extractTitle(ctx, pdfBytes)
+	if err != nil {
+		return r, fmt.Errorf("title: %w", err)
+	}
+	r.Title = title
+
+	textPages, err := extractTextPages(ctx, pdfBytes)
+	if err != nil {
+		return r, fmt.Errorf("text: %w", err)
+	}
+
+	imgs, totalOriginal, err := extractImages(ctx, pdfBytes)
+	if err != nil {
+		// Image extraction failure is non-fatal — keep going with text-only.
+		// We don't want a single bad image to block the whole article.
+		imgs = nil
+		totalOriginal = 0
+	}
+	r.TotalImagesOriginal = totalOriginal
+	r.TotalImagesKept = len(imgs)
+
+	r.Pages = make([]PageContent, len(textPages))
+	for i, tp := range textPages {
+		r.Pages[i] = PageContent{PageNum: i + 1, Text: tp}
+	}
+	r.Pages = distributeImages(r.Pages, imgs)
+
+	// Decide digital-vs-scanned threshold.
+	var totalRunes int
+	for _, p := range r.Pages {
+		totalRunes += utf8.RuneCountInString(p.Text)
+	}
+	if totalRunes < MinTextForDigital {
+		return r, ErrNoText
+	}
+	return r, nil
 }
 
 // ExtractWithOCR is the slow path: renders pages with pdftoppm at 300 dpi
-// then OCRs each with Tesseract (chi_sim+eng). Page-level failures are
-// recorded inline in the page text as "> [第 N 页 OCR 失败：<err>]" but
-// do not fail the whole extraction; only a pipeline-level failure (e.g.
-// pdftoppm crash) returns a non-nil error.
-func ExtractWithOCR(pdfBytes []byte) (Result, error) {
+// then OCRs each with Tesseract (chi_sim+eng when available, falling back
+// to eng-only). Page-level failures are recorded inline in the page text
+// as "> [第 N 页 OCR 失败：<err>]" but do not fail the whole extraction;
+// only a pipeline-level failure (e.g. pdftoppm crash) returns a non-nil
+// error.
+func ExtractWithOCR(ctx context.Context, pdfBytes []byte) (Result, error) {
 	return Result{}, errors.New("not implemented")
+}
+
+// distributeImages attaches each image to its source page based on
+// ImageRef.PageNum (1-based). Images with PageNum < 1 or > len(pages)
+// fall back to page 1.
+func distributeImages(pages []PageContent, imgs []ImageRef) []PageContent {
+	if len(pages) == 0 {
+		return pages
+	}
+	for i := range imgs {
+		pn := imgs[i].PageNum
+		if pn < 1 || pn > len(pages) {
+			pn = 1
+		}
+		pages[pn-1].Images = append(pages[pn-1].Images, imgs[i])
+	}
+	return pages
 }
