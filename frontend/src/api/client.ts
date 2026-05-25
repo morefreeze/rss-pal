@@ -180,6 +180,7 @@ export interface Article {
   parent_title?: string  // populated only by GET /articles/recommended/link_set
   is_fallback?: boolean  // true = surfaced by quality-fallback (may be already-read)
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
+  processing_error?: string
   prerank_score?: number | null
   editor_note?: string
   manual_tags: UserTag[]
@@ -315,6 +316,40 @@ export const previewFeed = (url: string) =>
 
 export const addFeed = (url: string, feedType?: string, expandLinks: boolean = false) =>
   api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss', expand_links: expandLinks }).then(res => res.data)
+
+// PDF capture — server-side fetch of a PDF URL routed through the
+// bookmarklet capture pipeline. Auth is the bookmarklet token (NOT a
+// JWT), passed explicitly so the existing JWT interceptor doesn't
+// override it. Response status maps directly to the worker state:
+//   created    — brand new article, fast extract succeeded
+//   updated    — existing article re-extracted
+//   processing — sync extract found no text, OCR queued
+export interface PDFCaptureResponse {
+  status: 'created' | 'updated' | 'processing'
+  article_id: number
+  message: string
+}
+
+export async function capturePDFURL(url: string, bookmarkletToken: string): Promise<PDFCaptureResponse> {
+  const { data } = await api.post<PDFCaptureResponse>(
+    '/bookmarklet/capture-pdf-url',
+    { url },
+    { headers: { Authorization: `Bearer ${bookmarkletToken}` } },
+  )
+  return data
+}
+
+// getMyBookmarkletToken returns the current user's bookmarklet token or
+// throws if the user hasn't generated one. Thin wrapper over the
+// existing getBookmarkletToken helper that turns the "no token yet"
+// null into a thrown error so the caller can surface a friendly hint.
+export async function getMyBookmarkletToken(): Promise<string> {
+  const token = await getBookmarkletToken()
+  if (!token) {
+    throw new Error('请先在「设置 → 一键收藏书签」处生成 bookmarklet token')
+  }
+  return token
+}
 
 export const deleteFeed = (id: number) =>
   api.delete(`/feeds/${id}`)
