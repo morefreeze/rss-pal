@@ -40,6 +40,7 @@ type Article struct {
 	LinkSetSuggested     *bool      `json:"link_set_suggested,omitempty" db:"link_set_suggested"`
 	ParentArticleID      *int       `json:"parent_article_id,omitempty" db:"parent_article_id"`
 	ProcessingState      string     `json:"processing_state" db:"processing_state"`
+	ProcessingError      string     `json:"processing_error,omitempty" db:"processing_error"`
 	PrerankScore         *float64   `json:"prerank_score,omitempty" db:"prerank_score"`
 	EditorNote           string     `json:"editor_note,omitempty" db:"editor_note"`
 	MediaURL             string     `json:"media_url,omitempty" db:"media_url"`
