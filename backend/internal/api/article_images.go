@@ -3,6 +3,9 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -84,6 +87,13 @@ func (h *ArticleImageHandler) Serve(c *gin.Context) {
 	path := pdfextract.ImagePath(h.baseDir, articleID, idx, ext)
 	body, err := os.ReadFile(path)
 	if err != nil {
+		// "File missing" is the common, expected case (image truly absent
+		// or wrong idx) and gets a silent 404. Permission/I-O errors are
+		// operational red flags worth a log line so the next pair of eyes
+		// can spot misconfigured BACKUP_DIR or disk problems.
+		if !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("article-image: read %s: %v", path, err)
+		}
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
