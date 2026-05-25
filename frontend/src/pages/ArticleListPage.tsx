@@ -4,6 +4,7 @@ import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAl
 import { writeNav, type NavContext } from '../utils/articleNav'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
+import { ArticleListSkeleton } from '../components/ArticleListSkeleton'
 import BackToTopButton from '../components/BackToTopButton'
 import GroupedArticleView from '../components/GroupedArticleView'
 import ClipPage from './ClipPage'
@@ -905,8 +906,8 @@ export default function ArticleListPage() {
         ) : (
           <div className="card text-muted">加载失败</div>
         )
-      ) : !isClippingMode && !searchQuery && loading ? (
-        <div className="card">Loading...</div>
+      ) : !isClippingMode && !searchQuery && loading && articles.length === 0 ? (
+        <ArticleListSkeleton rows={8} />
       ) : !isClippingMode && !searchQuery && articles.length === 0 && feeds.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📰</div>
