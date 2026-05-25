@@ -51,6 +51,7 @@ func (s *stubFeedRepo) GetOrCreateClipFeed(ownerID int) (*model.Feed, error) {
 type stubArticleRepo struct {
 	nextID         int32 // atomic so concurrent writes are safe
 	byOwnerAndURL  map[string]*model.Article
+	byID           map[int]*model.Article
 	created        []*model.Article
 	contentUpdates map[int]string
 	titleUpdates   map[int]string
@@ -58,11 +59,13 @@ type stubArticleRepo struct {
 	pdfStubs       []int
 	failedReasons  map[int]string
 	readyContents  map[int]string
+	resetCalls     []int
 }
 
 func newStubArticleRepo() *stubArticleRepo {
 	return &stubArticleRepo{
 		byOwnerAndURL:  map[string]*model.Article{},
+		byID:           map[int]*model.Article{},
 		contentUpdates: map[int]string{},
 		titleUpdates:   map[int]string{},
 		summaryClears:  map[int]bool{},
@@ -117,6 +120,15 @@ func (s *stubArticleRepo) UpdateContentAndMarkReady(id int, content string, word
 
 func (s *stubArticleRepo) MarkPDFFailed(id int, msg string) error {
 	s.failedReasons[id] = msg
+	return nil
+}
+
+func (s *stubArticleRepo) ResetPDFToProcessing(id int) error {
+	s.resetCalls = append(s.resetCalls, id)
+	if a, ok := s.byID[id]; ok {
+		a.ProcessingState = "processing"
+		a.ProcessingError = ""
+	}
 	return nil
 }
 
@@ -365,6 +377,100 @@ func TestCapturePDFURL_FetchError(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestProcessPDFCapture_ReQueueExisting covers the scanned-PDF re-capture
+// path: when the user re-bookmarks a PDF whose article already exists,
+// the handler must flip processing_state back to 'processing' so the OCR
+// worker re-picks it up. Previously this called MarkPDFFailed which left
+// the row in 'failed' and silently dropped the retry.
+func TestProcessPDFCapture_ReQueueExisting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	pdfBytes, err := os.ReadFile(filepath.Join("..", "pdfextract", "testdata", "scanned.pdf"))
+	if err != nil {
+		t.Skipf("fixture not available: %v", err)
+	}
+	if !pdfextractToolingAvailable() {
+		t.Skip("pdfextract tooling (poppler-utils) not on PATH; skipping integration")
+	}
+
+	h, repo := newTestBookmarkletHandlerForPDF(t)
+
+	// Pre-populate an existing article for the same normalized URL,
+	// already in 'failed' state with a stale error message (simulating
+	// a prior OCR attempt that timed out).
+	const captureURL = "https://example.com/scanned.pdf"
+	existing := &model.Article{
+		ID:              101,
+		FeedID:          7,
+		Title:           "old title",
+		URL:             captureURL,
+		IsClip:          true,
+		ProcessingState: "failed",
+		ProcessingError: "previous OCR failed",
+	}
+	repo.byOwnerAndURL[fmt.Sprintf("%d|%s", 42, captureURL)] = existing
+	repo.byID[existing.ID] = existing
+
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture-pdf", h.CapturePDF)
+
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+	_ = w.WriteField("url", captureURL)
+	fw, _ := w.CreateFormFile("file", "scanned.pdf")
+	fw.Write(pdfBytes)
+	w.Close()
+
+	req := httptest.NewRequest("POST", "/api/bookmarklet/capture-pdf", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 (processing), got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(repo.resetCalls) != 1 || repo.resetCalls[0] != existing.ID {
+		t.Errorf("expected ResetPDFToProcessing(%d) once, got %v", existing.ID, repo.resetCalls)
+	}
+	if existing.ProcessingState != "processing" {
+		t.Errorf("expected processing_state='processing', got %q", existing.ProcessingState)
+	}
+	if existing.ProcessingError != "" {
+		t.Errorf("expected processing_error='', got %q", existing.ProcessingError)
+	}
+	// Regression guard: must NOT have called MarkPDFFailed on the re-queue path.
+	if _, ok := repo.failedReasons[existing.ID]; ok {
+		t.Errorf("re-queue path must not call MarkPDFFailed; failedReasons=%v", repo.failedReasons)
+	}
+}
+
+// TestCapturePDFURL_RejectsNonHTTPScheme verifies SSRF mitigation: the
+// handler must refuse file://, gopher://, data:, etc. before any HTTP
+// fetch is attempted, returning 400.
+func TestCapturePDFURL_RejectsNonHTTPScheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, _ := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture-pdf-url", h.CapturePDFURL)
+
+	cases := []string{
+		`{"url":"file:///etc/passwd"}`,
+		`{"url":"gopher://internal.svc/x.pdf"}`,
+		`{"url":"ftp://example.com/x.pdf"}`,
+	}
+	for _, body := range cases {
+		req := httptest.NewRequest("POST", "/api/bookmarklet/capture-pdf-url",
+			bytes.NewBufferString(body))
+		req.Header.Set("Authorization", "Bearer test-token")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("body=%s expected 400, got %d body=%s", body, rec.Code, rec.Body.String())
+		}
 	}
 }
 
