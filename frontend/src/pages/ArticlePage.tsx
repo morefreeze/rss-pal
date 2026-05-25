@@ -989,7 +989,9 @@ export default function ArticlePage() {
       </div>
 
       {/* Summary-stage banner — content-stage fetch is shown inline in the
-          原文内容 card below so the prompt sits where the body would be. */}
+          原文内容 card below so the prompt sits where the body would be.
+          For PDF clip articles (state=processing && no content yet), the
+          OCR banner below is more informative and replaces this one. */}
       {(() => {
         const state = article.processing_state
         const hasContent = !!article.content && article.content.length > 0
@@ -1002,6 +1004,32 @@ export default function ArticlePage() {
         }
         return null
       })()}
+      {article.processing_state === 'processing' && !article.content && (
+        <div
+          style={{
+            padding: '12px',
+            background: '#fff3cd',
+            border: '1px solid #ffeaa7',
+            borderRadius: '4px',
+            marginBottom: '16px',
+          }}
+        >
+          ⏳ 这篇 PDF 正在 OCR 处理中（约 1–5 秒/页，多页 PDF 可能需要几分钟）。处理完成后内容会自动出现，刷新页面即可。
+        </div>
+      )}
+      {article.processing_state === 'failed' && article.processing_error && (
+        <div
+          style={{
+            padding: '12px',
+            background: '#f8d7da',
+            border: '1px solid #f5c6cb',
+            borderRadius: '4px',
+            marginBottom: '16px',
+          }}
+        >
+          ❌ PDF 处理失败：{article.processing_error}
+        </div>
+      )}
       {article.processing_state === 'failed' && (
         <div className="p-3 rounded-md mb-4 text-sm flex items-center gap-3" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
           <span style={{ color: 'var(--fg-muted)' }}>抓取失败</span>
