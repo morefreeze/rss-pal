@@ -90,7 +90,10 @@ LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.use
 }
 
 type ArticleRepository struct {
-	db           *sql.DB
+	db *sql.DB
+	// imageBaseDir is the root for PDF clip image storage. Callers that
+	// need Delete() to clean image dirs MUST call SetImageBaseDir at
+	// startup. Forgetting silently turns image cleanup into a no-op.
 	imageBaseDir string
 }
 
@@ -104,9 +107,24 @@ func (r *ArticleRepository) SetImageBaseDir(path string) {
 	r.imageBaseDir = path
 }
 
-// Delete removes the article row by id. If the repo knows where PDF
-// clip images live (via SetImageBaseDir), the article's image directory
-// is removed too on best-effort basis.
+// Delete removes the article row and best-effort cleans up its PDF image
+// directory under imageBaseDir (no-op if SetImageBaseDir was never called).
+//
+// SECURITY: Delete does NOT enforce ownership — callers MUST verify the
+// caller's user owns the article before invoking this. Most other methods
+// in this file enforce it at the SQL level; Delete intentionally does
+// not, to keep the cleanup path single-purpose. See the article handler
+// in internal/api for the ownership check.
+//
+// Image cleanup runs AFTER the DB commit; a concurrent GET on
+// /api/articles/:id/images/:idx may briefly succeed even after the row
+// is gone. Acceptable since no UI references the deleted article.
+//
+// NOTE: child rows cascaded by parent_article_id FK ON DELETE CASCADE do
+// NOT have their image dirs cleaned by this call. Safe today because PDF
+// clip articles are never link_set parents (PDFs don't set
+// links_extendable=true). If that ever changes, expand cleanup to all
+// affected article IDs.
 func (r *ArticleRepository) Delete(id int) error {
 	if _, err := r.db.Exec(`DELETE FROM articles WHERE id = $1`, id); err != nil {
 		return err
@@ -1650,22 +1668,29 @@ func (r *ArticleRepository) ConfirmLinkSetSuggestion(id int) error {
 // CreatePDFStub inserts a placeholder article for an async-OCR PDF.
 // Fills in article.ID and article.ProcessingState on success.
 func (r *ArticleRepository) CreatePDFStub(a *model.Article) error {
-	a.ProcessingState = "processing"
 	query := `
 		INSERT INTO articles
 			(feed_id, title, url, content, is_clip, processing_state, processing_error)
 		VALUES ($1, $2, $3, '', true, 'processing', '')
 		RETURNING id, fetched_at
 	`
-	return r.db.QueryRow(query, a.FeedID, a.Title, a.URL).
-		Scan(&a.ID, &a.FetchedAt)
+	if err := r.db.QueryRow(query, a.FeedID, a.Title, a.URL).Scan(&a.ID, &a.FetchedAt); err != nil {
+		return err
+	}
+	// Round-trip the literals so the caller's local struct matches the row.
+	a.IsClip = true
+	a.Content = ""
+	a.ProcessingState = "processing"
+	a.ProcessingError = ""
+	return nil
 }
 
-// UpdatePDFContent transitions a PDF article from processing → ready,
-// stores the extracted content + recomputed metrics, clears any stale
-// summary so backfillSummaries regenerates it, and clears any prior
-// processing_error string.
-func (r *ArticleRepository) UpdatePDFContent(id int, content string, wordCount, readingMinutes int) error {
+// UpdateContentAndMarkReady stores the extracted content + recomputed
+// metrics, transitions processing_state from 'processing' to 'ready',
+// clears any stale summary (so backfillSummaries regenerates it on the
+// next worker tick), and clears any prior processing_error string.
+// Used by the PDF clip sync fast-path and by the PDF OCR worker.
+func (r *ArticleRepository) UpdateContentAndMarkReady(id int, content string, wordCount, readingMinutes int) error {
 	_, err := r.db.Exec(`
 		UPDATE articles
 		SET content = $1,
