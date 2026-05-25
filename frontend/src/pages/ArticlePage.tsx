@@ -1004,7 +1004,7 @@ export default function ArticlePage() {
         }
         return null
       })()}
-      {article.processing_state === 'processing' && !article.content && (
+      {article.processing_state === 'processing' && (
         <div
           style={{
             padding: '12px',
@@ -1030,7 +1030,7 @@ export default function ArticlePage() {
           ❌ PDF 处理失败：{article.processing_error}
         </div>
       )}
-      {article.processing_state === 'failed' && (
+      {article.processing_state === 'failed' && !article.processing_error && (
         <div className="p-3 rounded-md mb-4 text-sm flex items-center gap-3" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
           <span style={{ color: 'var(--fg-muted)' }}>抓取失败</span>
           <button

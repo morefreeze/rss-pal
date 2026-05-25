@@ -156,7 +156,7 @@ export default function FeedListPage() {
     // PDF URLs skip the RSS-preview round-trip and go straight to the
     // bookmarklet PDF-capture pipeline (server fetches + extracts).
     if (isPDFURL(newUrl)) {
-      handleSubmitPDF(newUrl)
+      await handleSubmitPDF(newUrl)
       return
     }
     doPreview(newUrl)

@@ -16,6 +16,12 @@ export const api = axios.create({
 
 // JWT interceptor
 api.interceptors.request.use(config => {
+  // Don't clobber a per-request Authorization (e.g. bookmarklet-token
+  // calls like capturePDFURL set their own Bearer that the JWT layer
+  // should not override).
+  if (config.headers?.Authorization) {
+    return config
+  }
   const token = localStorage.getItem('token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -41,9 +47,17 @@ api.interceptors.response.use(
     }
 
     if (err.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      window.location.href = '/login'
+      // Bookmarklet-token endpoints authenticate with a per-request
+      // Bearer token, NOT the JWT in localStorage. A 401 from one of
+      // these calls means the bookmarklet token is bad/expired — it
+      // does NOT mean the user's session is invalid, so don't blow
+      // away localStorage or redirect to /login.
+      const url = err.config?.url || ''
+      if (!url.startsWith('/bookmarklet/')) {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(err)
   }
