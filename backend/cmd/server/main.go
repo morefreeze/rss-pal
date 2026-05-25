@@ -25,6 +25,7 @@ func main() {
 
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
+	articleRepo.SetImageBaseDir(cfg.Backup.Dir)
 	prefRepo := repository.NewPreferenceRepository(db)
 	playbackRepo := repository.NewPlaybackProgressRepository(db)
 	progressRepo := repository.NewProgressRepository(db)
