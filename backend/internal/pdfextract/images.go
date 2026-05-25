@@ -8,6 +8,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,14 @@ import (
 // The output begins with a 2-line header (column names + dashes); we
 // skip those and read the first whitespace-delimited field of every
 // remaining non-empty line.
+//
+// We assume pdfimages -list and pdfimages -all emit rows/files in the
+// same order — both walk the page tree DFS with one counter as of
+// poppler 24.x. If a future version diverges, PageNum will silently
+// default to 0.
 func listImagePages(pdfPath string) ([]int, error) {
+	// TODO(phase-1d): switch to exec.CommandContext when the package-level
+	// exec helper lands in Phase 1D.
 	cmd := exec.Command("pdfimages", "-list", pdfPath)
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
@@ -43,7 +51,9 @@ func listImagePages(pdfPath string) ([]int, error) {
 		}
 		n, err := strconv.Atoi(fields[0])
 		if err != nil {
-			return nil, fmt.Errorf("parse page num from %q: %w", line, err)
+			// Non-numeric first field (e.g. an unexpected banner or repeated
+			// header line) — skip rather than fail the whole capture.
+			continue
 		}
 		pages = append(pages, n)
 	}
@@ -56,6 +66,10 @@ func listImagePages(pdfPath string) ([]int, error) {
 // Files are processed in pdfimages emission order (lexical filename
 // sort, which matches page order). Returns the kept images, the
 // pre-dedup count (including duplicates), and any error.
+//
+// We invoke pdfimages twice (-list then -all) for clarity; combining
+// via `pdfimages -all -list` is possible (poppler ≥ 0.32) but couples
+// parsing to extraction. Phase-1D perf review can revisit.
 func extractImages(pdfBytes []byte) ([]ImageRef, int, error) {
 	tmpDir, err := os.MkdirTemp("", "pdfextract-images-")
 	if err != nil {
@@ -77,6 +91,8 @@ func extractImages(pdfBytes []byte) ([]ImageRef, int, error) {
 	}
 
 	prefix := filepath.Join(tmpDir, "img")
+	// TODO(phase-1d): switch to exec.CommandContext when the package-level
+	// exec helper lands in Phase 1D.
 	cmd := exec.Command("pdfimages", "-all", pdfPath, prefix)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
@@ -100,6 +116,10 @@ func extractImages(pdfBytes []byte) ([]ImageRef, int, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+
+	if len(names) != len(pagePerEmit) {
+		log.Printf("pdfextract: pdfimages -list/-all length mismatch: files=%d list=%d (PageNum may be 0 for trailing images)", len(names), len(pagePerEmit))
+	}
 
 	kept := make([]ImageRef, 0, len(names))
 	seen := make(map[string]bool, len(names))
