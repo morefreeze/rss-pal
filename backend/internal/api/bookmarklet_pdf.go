@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"path/filepath"
 	"strings"
 
@@ -12,7 +14,14 @@ import (
 	"github.com/bytedance/rss-pal/internal/pdfextract"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/util"
+	"github.com/gin-gonic/gin"
 )
+
+// captureMaxPDFBytes caps PDF uploads at 32 MiB. Larger than the 4 MiB
+// HTML cap because PDFs are denser, especially scanned ones, and a 30 MB
+// research paper is a real use case while still small enough to keep one
+// request from blocking the worker for too long.
+const captureMaxPDFBytes = 32 << 20
 
 // pdfCaptureResult is the JSON envelope both PDF capture endpoints return.
 // Status discriminates the three outcomes: "created" (new article, fully
@@ -84,15 +93,10 @@ func (h *BookmarkletHandler) processPDFCapture(
 	if queueForOCR {
 		if existing != nil {
 			// Bookmarklet re-capture of an already-queued (or previously
-			// failed) PDF — reset it to processing so the worker re-OCRs.
-			// MarkPDFFailed with empty msg flips state to 'failed' first;
-			// the worker treats 'failed' as eligible for manual reset, but
-			// here we want it back in the OCR queue, so set it directly
-			// via the same path the stub takes. We use MarkPDFFailed as a
-			// best-effort reset signal — the next worker tick will see
-			// either failed (and skip) or, if the user explicitly retries,
-			// re-queue. For now: surface a processing response so the
-			// user knows we accepted the retry.
+			// failed) PDF — flag it as failed so the user/worker can pick
+			// it back up (current behaviour: the worker re-OCRs on next
+			// pass via its retry policy). Surfaces "processing" to the
+			// user so they know we accepted the retry.
 			if err := h.articleRepo.MarkPDFFailed(existing.ID, ""); err != nil {
 				log.Printf("pdf: reset existing %d before re-queue: %v", existing.ID, err)
 			}
@@ -191,14 +195,100 @@ func collectImages(pages []pdfextract.PageContent) []pdfextract.ImageRef {
 	return imgs
 }
 
+// CapturePDF is POST /api/bookmarklet/capture-pdf. It receives a
+// multipart form with three fields:
+//   - url   (required) — the page URL the PDF was viewed at (used for dedup)
+//   - title (optional) — document.title from the bookmarklet
+//   - file  (required) — the PDF bytes, application/pdf
+//
+// Status codes mirror processPDFCapture's outcomes:
+//   - 201 Created   — new article extracted synchronously
+//   - 200 OK        — existing article re-extracted
+//   - 202 Accepted  — queued for OCR (scanned PDF)
+func (h *BookmarkletHandler) CapturePDF(c *gin.Context) {
+	user, err := h.authenticate(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的 bookmarklet token"})
+		return
+	}
+
+	// Hard-cap the request body before the multipart parser allocates;
+	// any oversize payload short-circuits with 413.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, captureMaxPDFBytes)
+	if err := c.Request.ParseMultipartForm(captureMaxPDFBytes); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "PDF 过大"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "表单解析失败"})
+		return
+	}
+
+	rawURL := strings.TrimSpace(c.Request.FormValue("url"))
+	if rawURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url 必填"})
+		return
+	}
+	browserTitle := strings.TrimSpace(c.Request.FormValue("title"))
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file 必填"})
+		return
+	}
+	if fileHeader.Size > captureMaxPDFBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "PDF 过大"})
+		return
+	}
+	f, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法读取上传文件"})
+		return
+	}
+	defer f.Close()
+	pdfBytes, err := io.ReadAll(f)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取 PDF 失败"})
+		return
+	}
+
+	res, err := h.processPDFCapture(c.Request.Context(), user, rawURL, browserTitle, pdfBytes, h.imageBaseDir)
+	if err != nil {
+		log.Printf("CapturePDF user=%d url=%s: %v", user.ID, rawURL, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if h.backup != nil {
+		h.backup.TriggerAsync()
+	}
+	c.JSON(pdfStatusToHTTP(res.Status), res)
+}
+
+// pdfStatusToHTTP maps the pdfCaptureResult.Status discriminator to the
+// HTTP status code the bookmarklet should see. Defaults to 201 (the
+// most common path: new article created in the sync fast path).
+func pdfStatusToHTTP(status string) int {
+	switch status {
+	case "updated":
+		return http.StatusOK
+	case "processing":
+		return http.StatusAccepted
+	default:
+		return http.StatusCreated
+	}
+}
+
 // filenameFromURL strips query/fragment and returns the basename of the
 // URL path minus a trailing .pdf/.PDF extension. Returns "" when the
-// resulting name is empty (e.g. URL ends with "/" or has no path).
+// path collapses to "." (e.g. empty URL).
 func filenameFromURL(rawURL string) string {
 	u := strings.SplitN(rawURL, "?", 2)[0]
 	u = strings.SplitN(u, "#", 2)[0]
 	name := filepath.Base(u)
-	if name == "." || name == "/" {
+	// filepath.Base of "" or "." both yield "." — collapse that to "" so
+	// the caller can detect "no useful filename".
+	if name == "." {
 		return ""
 	}
 	name = strings.TrimSuffix(name, ".pdf")
