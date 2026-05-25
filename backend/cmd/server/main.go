@@ -64,7 +64,9 @@ func main() {
 	userInsightsRepo := repository.NewUserInsightRepository(db)
 	insightsHandler := api.NewInsightsHandler(prefRepo, articleRepo, templateRepo, userInsightsRepo, summarizer, cfg)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
-	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).WithBackupRunner(backupRunner)
+	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).
+		WithBackupRunner(backupRunner).
+		WithImageBaseDir(cfg.Backup.Dir)
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
 	eventHandler := api.NewEventHandler(eventRepo)
 	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
@@ -114,6 +116,11 @@ func main() {
 
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT)
 	router.POST("/api/bookmarklet/capture", bookmarkletHandler.Capture)
+	// PDF capture variants share the same per-user bookmarklet token auth.
+	// capture-pdf takes multipart form-data with the PDF bytes from the
+	// browser; capture-pdf-url asks the server to fetch the PDF itself.
+	router.POST("/api/bookmarklet/capture-pdf", bookmarkletHandler.CapturePDF)
+	router.POST("/api/bookmarklet/capture-pdf-url", bookmarkletHandler.CapturePDFURL)
 
 	// Protected routes
 	apiGroup := router.Group("/api")
@@ -172,6 +179,17 @@ func main() {
 		apiGroup.POST("/articles/:id/confirm_link_set", articleHandler.ConfirmLinkSetSuggestion)
 		apiGroup.POST("/articles/:id/hide", articleHandler.Hide)
 		apiGroup.DELETE("/articles/:id/hide", articleHandler.Unhide)
+
+		// PDF clip images. Served from cfg.Backup.Dir/article_images/<id>/<idx>.<ext>
+		// with year-long immutable Cache-Control + ETag; JWT-protected and
+		// authorized via feeds.owner_id so users can only read their own clips.
+		// userID extraction matches api.getUserID — kept inline because that
+		// helper is package-private.
+		imgAccess := func(c *gin.Context, articleID int) (bool, error) {
+			return articleRepo.UserOwnsArticle(c.GetInt("userID"), articleID)
+		}
+		imgHandler := api.NewArticleImageHandler(cfg.Backup.Dir, imgAccess)
+		apiGroup.GET("/articles/:id/images/:idx", imgHandler.Serve)
 
 		// Clip articles (filtered by tags / source / untagged)
 		apiGroup.GET("/clip", clipHandler.List)

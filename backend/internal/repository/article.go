@@ -1731,6 +1731,28 @@ func (r *ArticleRepository) ResetPDFToProcessing(id int) error {
 	return err
 }
 
+// UserOwnsArticle returns true if userID owns the article via the
+// feed.owner_id link. Used by handlers that authorize per-article
+// resource access (e.g. PDF image serving). A missing article — or
+// a feed whose owner is someone else — both yield (false, nil); only
+// driver-level failures return a non-nil error.
+//
+// Note: this is stricter than the list/detail queries elsewhere in
+// this file, which treat owner_id IS NULL feeds as world-readable.
+// PDF clip feeds are always per-user (owner_id NOT NULL) so this
+// stricter rule is correct for the image-serve endpoint.
+func (r *ArticleRepository) UserOwnsArticle(userID, articleID int) (bool, error) {
+	var owns bool
+	err := r.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM articles a
+			JOIN feeds f ON f.id = a.feed_id
+			WHERE a.id = $1 AND f.owner_id = $2
+		)
+	`, articleID, userID).Scan(&owns)
+	return owns, err
+}
+
 // GetPDFOCRPending returns clip articles awaiting OCR (processing_state
 // = 'processing' AND is_clip = true AND parent_article_id IS NULL).
 // The parent_article_id filter prevents collision with link_set's own
