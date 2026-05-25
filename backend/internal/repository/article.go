@@ -1670,3 +1670,30 @@ func (r *ArticleRepository) MarkPDFFailed(id int, msg string) error {
 	`, msg, id)
 	return err
 }
+
+// GetPDFOCRPending returns clip articles awaiting OCR (processing_state
+// = 'processing' AND is_clip = true AND parent_article_id IS NULL).
+// The parent_article_id filter prevents collision with link_set's own
+// use of processing_state for child fetches.
+func (r *ArticleRepository) GetPDFOCRPending(limit int) ([]model.Article, error) {
+	query := `
+		SELECT id, feed_id, title, url, content, published_at,
+		       summary_brief, summary_detailed, fetched_at, word_count, reading_minutes,
+		       media_url, media_type, media_duration_seconds,
+		       links_extendable, parent_article_id, processing_state,
+		       COALESCE(processing_error, '') as processing_error,
+		       prerank_score, editor_note
+		FROM articles
+		WHERE processing_state = 'processing'
+		  AND is_clip = true
+		  AND parent_article_id IS NULL
+		ORDER BY id ASC
+		LIMIT $1
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArticleNoFeedTitle(rows)
+}
