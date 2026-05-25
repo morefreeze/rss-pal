@@ -164,6 +164,12 @@ body {
   border: 1px solid #ffe58f;
 }
 
+.status-info {
+  background: #e6f4ff;
+  color: #0958d9;
+  border: 1px solid #91caff;
+}
+
 .article-link {
   color: inherit;
   text-decoration: underline;
