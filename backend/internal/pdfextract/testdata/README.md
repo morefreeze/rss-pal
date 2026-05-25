@@ -2,7 +2,7 @@
 
 These PDFs are committed for unit-test reproducibility. Sizes are intentionally small.
 
-- `digital.pdf` — short typed PDF, two pages, mixed English + Chinese paragraphs. Used to verify text extraction + page split.
+- `digital.pdf` — short typed PDF, one page (generated via macOS `cupsfilter`; the CJK paragraph in the source HTML renders as boxes since cupsfilter has no CJK font, so only the English "quick brown fox" sentence round-trips through pdftotext). Used to verify single-page text extraction.
 - `scanned.pdf` — page images of `digital.pdf` with no text layer. Used to verify the ErrNoText threshold.
 - `mixed.pdf` — `digital.pdf` concatenated with `scanned.pdf`. Used to verify partial-page OCR fallback.
 - `image_heavy.pdf` — 150 images including 30 duplicates by SHA. Verifies dedup + 100-cap.
