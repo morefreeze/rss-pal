@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Article, getPlayback, putPlayback } from '../api/client'
+import { Article, ArticleListItem, getPlayback, putPlayback } from '../api/client'
+
+// Player input: any article-shaped object carrying the media metadata
+// the player actually reads (id, title, feed_title, media_url,
+// media_duration_seconds). Both the full Article (detail page) and
+// the lean ArticleListItem (list endpoints) satisfy this.
+export type PlayableArticle = Article | ArticleListItem
 
 type Speed = 1 | 1.25 | 1.5 | 1.75 | 2
 
@@ -17,7 +23,7 @@ interface PlayerState {
 }
 
 interface PlayerActions {
-  playArticle(article: Article): Promise<void>
+  playArticle(article: PlayableArticle): Promise<void>
   toggle(): void
   seek(sec: number): void
   skip(deltaSec: number): void
@@ -119,7 +125,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     pendingResumeListenerRef.current = null
   }, [])
 
-  const playArticle = useCallback(async (article: Article) => {
+  const playArticle = useCallback(async (article: PlayableArticle) => {
     if (!article.media_url) return
     const el = audioRef.current
     if (!el) return

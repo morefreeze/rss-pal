@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
+import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
 import { writeNav, type NavContext } from '../utils/articleNav'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
+import { ArticleListSkeleton } from '../components/ArticleListSkeleton'
 import BackToTopButton from '../components/BackToTopButton'
 import GroupedArticleView from '../components/GroupedArticleView'
 import ClipPage from './ClipPage'
@@ -28,7 +29,10 @@ const PREFETCH_OFFSET = 7
 // article page where the embed lives). Rendered as siblings rather than
 // either/or so an article that ever has both kinds of media displays
 // both icons.
-function MediaIndicator({ article, onPlay }: { article: Article; onPlay: (a: Article) => void }) {
+// MediaIndicator accepts either an Article (detail) or ArticleListItem
+// (list) — both carry the media_url/media_type fields it inspects.
+type MediaIndicatorArticle = Article | ArticleListItem
+function MediaIndicator({ article, onPlay }: { article: MediaIndicatorArticle; onPlay: (a: MediaIndicatorArticle) => void }) {
   if (!article.media_url) return null
   const t = article.media_type ?? ''
   const isVideo = t.startsWith('video/')
@@ -82,11 +86,11 @@ function SearchArticleRow({
   onFocus,
   navList,
 }: {
-  article: Article
+  article: ArticleListItem
   isRead: boolean
   isFocused: boolean
   idx: number
-  onPlay: (a: Article) => void
+  onPlay: (a: ArticleListItem) => void
   formatDate: (d: string | null) => string
   stripMarkdown: (t: string) => string
   onNavigate: (id: number) => void
@@ -157,7 +161,7 @@ export default function ArticleListPage() {
   // On phone the toolbar tucks non-priority controls (search, feed select,
   // sort, 分组) under a ⋯ menu so the row only carries 仅未读 / 已保存 / 全部已读.
   const compactToolbar = breakpoint === 'phone'
-  const [articles, setArticles] = useState<Article[]>([])
+  const [articles, setArticles] = useState<ArticleListItem[]>([])
   const [recommended, setRecommended] = useState<Article[]>([])
   const [boostedIds, setBoostedIds] = useState<Set<number>>(new Set())
   const [feeds, setFeeds] = useState<Feed[]>([])
@@ -203,7 +207,7 @@ export default function ArticleListPage() {
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Article[] | null>(null)
+  const [searchResults, setSearchResults] = useState<ArticleListItem[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [markingAllRead, setMarkingAllRead] = useState(false)
   const loadMoreRef = useRef<HTMLDivElement>(null)
@@ -559,7 +563,7 @@ export default function ArticleListPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [articles, searchResults, searchQuery, unreadOnly, sessionReadIds, focusedIdx, toggleSidebar])
 
-  const isRead = (article: Article) => article.is_read || sessionReadIds.has(article.id)
+  const isRead = (article: ArticleListItem | Article) => article.is_read || sessionReadIds.has(article.id)
 
   const openArticle = (id: number) => {
     reportClick(id)
@@ -902,8 +906,8 @@ export default function ArticleListPage() {
         ) : (
           <div className="card text-muted">加载失败</div>
         )
-      ) : !isClippingMode && !searchQuery && loading ? (
-        <div className="card">Loading...</div>
+      ) : !isClippingMode && !searchQuery && loading && articles.length === 0 ? (
+        <ArticleListSkeleton rows={8} />
       ) : !isClippingMode && !searchQuery && articles.length === 0 && feeds.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📰</div>

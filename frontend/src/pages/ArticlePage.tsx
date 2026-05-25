@@ -16,6 +16,7 @@ import MarkdownArticle from '../components/MarkdownArticle'
 import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
 import BackFab from '../components/BackFab'
+import { ArticleDetailSkeleton } from '../components/ArticleDetailSkeleton'
 import ConfettiBurst from '../components/ConfettiBurst'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
@@ -801,6 +802,11 @@ export default function ArticlePage() {
 
   const progressPercent = progress?.scroll_position ? Math.min(100, Math.round(progress.scroll_position * 100)) : 0
 
+  if (loading && !article) return (
+    <div className="card">
+      <ArticleDetailSkeleton />
+    </div>
+  )
   if (loading) return <div className="card">Loading...</div>
   if (loadError || !article) return (
     <div className="card" style={{ textAlign: 'center' }}>
