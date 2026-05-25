@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/config"
@@ -15,6 +16,13 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 )
+
+// pdfOCRMu serializes processPDFOCR invocations. The ticker fires every
+// 60s but a single multi-page scan can easily exceed that, so without
+// this guard two goroutines would call GetPDFOCRPending in parallel and
+// race on the same rows. TryLock + immediate skip is the pattern used by
+// runFetchCycle in main.go.
+var pdfOCRMu sync.Mutex
 
 const (
 	// maxPDFOCRPerCycle caps how many pending PDFs we touch per worker
@@ -44,6 +52,12 @@ const (
 // each. Best-effort: per-item failures are logged and the article is
 // marked failed; the loop continues.
 func processPDFOCR(ctx context.Context, articleRepo *repository.ArticleRepository, cfg config.Config) {
+	if !pdfOCRMu.TryLock() {
+		log.Println("pdf_ocr: previous cycle still in flight, skipping this tick")
+		return
+	}
+	defer pdfOCRMu.Unlock()
+
 	pending, err := articleRepo.GetPDFOCRPending(maxPDFOCRPerCycle)
 	if err != nil {
 		log.Printf("pdf_ocr: get pending: %v", err)
@@ -100,7 +114,7 @@ func runOnePDFOCR(parentCtx context.Context, articleRepo *repository.ArticleRepo
 	pdfBytes, err := fetchPDFBytes(itemCtx, a.URL)
 	if err != nil {
 		log.Printf("pdf_ocr: refetch id=%d url=%s: %v", a.ID, a.URL, err)
-		if e := articleRepo.MarkPDFFailed(a.ID, "重新下载 PDF 失败："+err.Error()); e != nil {
+		if e := articleRepo.MarkPDFFailed(a.ID, "重新下载 PDF 失败，请稍后重试或重新通过浏览器扩展上传"); e != nil {
 			log.Printf("pdf_ocr: mark failed (refetch) id=%d: %v", a.ID, e)
 		}
 		return
@@ -111,8 +125,8 @@ func runOnePDFOCR(parentCtx context.Context, articleRepo *repository.ArticleRepo
 	//    error here means the pipeline itself (pdftoppm, etc.) blew up.
 	r, err := pdfextract.ExtractWithOCR(itemCtx, pdfBytes)
 	if err != nil {
-		log.Printf("pdf_ocr: extract id=%d: %v", a.ID, err)
-		if e := articleRepo.MarkPDFFailed(a.ID, "OCR 失败："+err.Error()); e != nil {
+		log.Printf("pdf_ocr: OCR pipeline id=%d url=%s: %v", a.ID, a.URL, err)
+		if e := articleRepo.MarkPDFFailed(a.ID, "OCR 处理失败，请重试或检查 PDF 是否可读"); e != nil {
 			log.Printf("pdf_ocr: mark failed (ocr) id=%d: %v", a.ID, e)
 		}
 		return
