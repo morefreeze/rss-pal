@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -190,6 +191,18 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 	for i, a := range articles {
 		out[i] = articleToListItem(a, tagMap[a.ID])
 	}
+
+	c.Header("Cache-Control", "private, no-cache")
+
+	signature := fmt.Sprintf("u=%d|f=%v|unread=%v|saved=%v|tag=%v|untagged=%v|sort=%v|dir=%v|limit=%d|offset=%d",
+		userID, derefIntPtr(feedID), unreadOnly, savedOnly, derefIntPtr(tagID), untagged, sort, dir, limit, offset)
+	etag := ComputeListETag(signature, out)
+	c.Header("ETag", etag)
+	if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
 	c.JSON(http.StatusOK, out)
 }
 
@@ -695,4 +708,11 @@ func (h *ArticleHandler) ConfirmLinkSetSuggestion(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"confirmed": true})
+}
+
+func derefIntPtr(p *int) any {
+	if p == nil {
+		return "nil"
+	}
+	return *p
 }
