@@ -28,7 +28,7 @@ type PageContent struct {
 // into memory; callers persist them via WriteImages.
 type ImageRef struct {
 	Idx     int    // 0-based unique per article
-	PageNum int    // 1-based PDF page this image was extracted from
+	PageNum int    // 1-based PDF page this image was extracted from; 0 means unknown (parse failure or list/file length mismatch — caller should fall back to page 1)
 	Bytes   []byte // Raw image bytes (PNG or JPEG)
 	Format  string // "png" | "jpg"
 	SHA256  string // Lowercase hex, for ETag + dedup
