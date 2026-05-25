@@ -87,6 +87,25 @@ func main() {
 	stopBackup := backupRunner.ScheduleDaily(context.Background())
 	defer stopBackup()
 
+	// Async PDF OCR loop: runs every 60s, drains up to maxPDFOCRPerCycle
+	// scanned-PDF clip articles per tick. Lives in its own goroutine so a
+	// long Tesseract pass on one PDF doesn't delay the main feed-fetch
+	// cycle (and vice versa).
+	pdfOCRCtx, cancelPDFOCR := context.WithCancel(context.Background())
+	defer cancelPDFOCR()
+	go func() {
+		t := time.NewTicker(60 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-pdfOCRCtx.Done():
+				return
+			case <-t.C:
+				processPDFOCR(pdfOCRCtx, articleRepo, *cfg)
+			}
+		}
+	}()
+
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
