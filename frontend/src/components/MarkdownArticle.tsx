@@ -88,8 +88,15 @@ const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
 const COMPONENTS: Components = {
   img: ({ src, alt, ...rest }) => {
     if (isAvatarImg(src, alt)) return null
+    // Same-origin images served by our backend (PDF clip images at
+    // /api/articles/<id>/images/<idx>.<ext>) already pass through nginx +
+    // our auth; double-proxying through /api/proxy/image would fail the
+    // proxy's allow-list (SSRF guard) and add a useless round-trip.
+    const isOwnImage = src?.startsWith('/api/articles/')
     const proxied = src
-      ? `/api/proxy/image?url=${encodeURIComponent(src)}`
+      ? isOwnImage
+        ? src
+        : `/api/proxy/image?url=${encodeURIComponent(src)}`
       : undefined
     return (
       <img
