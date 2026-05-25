@@ -186,16 +186,9 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	type item struct {
-		model.Article
-		ManualTags []model.UserTag `json:"manual_tags"`
-	}
-	out := make([]item, len(articles))
+	out := make([]ArticleListItem, len(articles))
 	for i, a := range articles {
-		out[i] = item{Article: a, ManualTags: tagMap[a.ID]}
-		if out[i].ManualTags == nil {
-			out[i].ManualTags = []model.UserTag{}
-		}
+		out[i] = articleToListItem(a, tagMap[a.ID])
 	}
 	c.JSON(http.StatusOK, out)
 }

@@ -98,6 +98,40 @@ export interface Feed {
   expand_links: boolean
 }
 
+// ArticleListItem is the lean shape returned by GET /api/articles — the
+// list endpoint deliberately drops `content` and `summary_detailed` to
+// keep the wire payload small on weak networks. The detail view fetches
+// the full Article via GET /api/articles/:id when the user opens one.
+export interface ArticleListItem {
+  id: number
+  feed_id: number
+  feed_title?: string
+  title: string
+  url: string
+  published_at: string | null
+  summary_brief: string
+  fetched_at: string
+  word_count?: number
+  reading_minutes?: number
+  is_read?: boolean
+  media_url?: string
+  media_type?: string
+  media_duration_seconds?: number
+  // link_set fields
+  links_extendable?: boolean | null  // tri-state: null = unchecked, true/false = checked
+  link_set_suggested?: boolean | null  // worker thinks article is a link list, awaiting user confirmation
+  parent_article_id?: number | null
+  processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
+  prerank_score?: number | null
+  editor_note?: string
+  manual_tags: UserTag[]
+  // Transient/derived markers that may decorate list items in other
+  // endpoints reusing this shape (e.g. recommended/link_set fallback).
+  parent_title?: string
+  is_fallback?: boolean
+  is_link_set?: boolean
+}
+
 export interface Article {
   id: number
   feed_id: number
@@ -285,7 +319,7 @@ export const getArticles = (params?: {
   offset?: number
   sort?: ArticleSort
   order?: ArticleOrder
-}) => api.get<Article[]>('/articles', { params }).then(res => res.data)
+}) => api.get<ArticleListItem[]>('/articles', { params }).then(res => res.data)
 
 export interface TopicGroup {
   topic: string
@@ -302,7 +336,7 @@ export const getGroupedArticles = (params?: { feed_id?: number; unread?: boolean
   api.get<GroupedArticles>('/articles/grouped', { params }).then(res => res.data)
 
 export const searchArticles = (q: string, limit?: number) =>
-  api.get<Article[]>('/articles/search', { params: { q, limit } }).then(res => res.data)
+  api.get<ArticleListItem[]>('/articles/search', { params: { q, limit } }).then(res => res.data)
 
 export const getUnreadCount = () =>
   api.get<{ count: number }>('/articles/unread-count').then(res => res.data.count)

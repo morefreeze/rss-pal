@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Article, GroupedArticles, TopicGroup } from '../api/client'
+import { Article, ArticleListItem, GroupedArticles, TopicGroup } from '../api/client'
 import ArticleCard from './ArticleCard'
 import { labelFor } from './categoryLabels'
 
@@ -7,11 +7,11 @@ const INITIAL_PER_GROUP = 5
 
 interface Props {
   data: GroupedArticles
-  isRead: (a: Article) => boolean
+  isRead: (a: Article | ArticleListItem) => boolean
   formatDate: (d: string | null) => string
   stripMarkdown: (t: string) => string
   onOpen: (id: number) => void
-  onPlay: (a: Article) => void
+  onPlay: (a: Article | ArticleListItem) => void
 }
 
 function GroupSection({
