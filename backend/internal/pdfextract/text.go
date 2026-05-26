@@ -5,12 +5,21 @@ import (
 	"strings"
 )
 
-// extractTextPages runs `pdftotext -layout` on the supplied PDF bytes and
-// splits the output on form feed (\f), which pdftotext emits between
-// pages by default. The last page may or may not have a trailing \f; we
-// drop a trailing empty page so the slice length matches the page count.
+// extractTextPages runs `pdftotext` (default mode, NOT -layout) on the
+// supplied PDF bytes and splits the output on form feed (\f), which
+// pdftotext emits between pages by default. The last page may or may not
+// have a trailing \f; we drop a trailing empty page so the slice length
+// matches the page count.
+//
+// Default mode uses pdftotext's physical-layout-aware reading-order
+// extraction: for two-column academic papers, column 1 is emitted in
+// full before column 2, with paragraphs intact. -layout used to preserve
+// visual placement with whitespace, but browsers collapse the spaces and
+// the two columns interleave on the same logical line — unreadable in
+// the article view. We lose preservation of monospace tables / code
+// listings (rare in PDF clips) in exchange for readable academic text.
 func extractTextPages(ctx context.Context, pdfBytes []byte) ([]string, error) {
-	out, err := runCmd(ctx, "pdftotext", []string{"-layout", "-", "-"}, pdfBytes)
+	out, err := runCmd(ctx, "pdftotext", []string{"-", "-"}, pdfBytes)
 	if err != nil {
 		return nil, err
 	}
