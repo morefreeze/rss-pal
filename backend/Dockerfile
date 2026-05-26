@@ -15,6 +15,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
 # Runtime stage
 FROM alpine:latest
 
+# KEEP IN SYNC WITH backend/Dockerfile.worker runtime packages.
 RUN apk --no-cache add ca-certificates tzdata \
     poppler-utils \
     tesseract-ocr \

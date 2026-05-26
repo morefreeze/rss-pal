@@ -120,7 +120,20 @@ rss-pal/
 
 处理 pipeline：数字版 PDF 用 `pdftotext` 秒级提取，立即入库；提取不到足够文字（< 200 字符）的 PDF 视为扫描版，标 `processing_state='processing'` 后由 worker 用 `tesseract`（中简 + 英）异步 OCR。图片用 `pdfimages -png` 抽取并按 SHA-256 去重，每篇上限 100 张（按页号取前 100），文末加截断提示。Markdown 按 PDF 页号分节。
 
-依赖：`poppler-utils`（`pdftotext`、`pdfimages`、`pdftoppm`、`pdfinfo`）+ `tesseract-ocr` 含 `chi_sim` / `eng` 语言数据，Dockerfile 已预装。
+依赖：`poppler-utils`（`pdftotext`、`pdfimages`、`pdftoppm`、`pdfinfo`）+ `tesseract-ocr` 含 `chi_sim` / `eng` 语言数据，api 和 worker 镜像都已预装。
+
+#### 升级到 PDF 网摘版的部署清单（首次启用此功能时执行一次）
+
+1. **手动应用 migration 028**——`docker-entrypoint-initdb.d` 只在空 volume 上跑一次，已有数据库要手动：
+   ```bash
+   docker-compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/028_articles_processing_error.sql
+   ```
+2. **重建 api + worker + frontend 镜像**——新增依赖、新增路由、前端组件：
+   ```bash
+   docker-compose up -d --build api worker frontend
+   ```
+3. **重新加载 Chrome 扩展**——`chrome://extensions` → RSS Pal → 刷新；本地 PDF 用户需在「详情」中开启「允许访问文件 URL」。
+4. **存储增长提示**——PDF 抽出的图片落到 `${BACKUP_DIR}/article_images/<article_id>/`，每篇网摘最多 100 张 PNG/JPG（典型 0.5–5 MB）。如果开了大量扫描版 PDF 网摘，注意备份目录磁盘用量。
 
 ### 用户偏好
 - `POST /api/preferences/like` — 标记喜欢
