@@ -1,0 +1,64 @@
+.tweet-card {
+  padding: 12px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+}
+.tweet-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tweet-card-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tweet-card-meta {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.tweet-card-name {
+  font-weight: 600;
+}
+.tweet-card-handle {
+  color: var(--fg-muted, #6b7280);
+}
+.tweet-card-date {
+  color: var(--fg-muted, #6b7280);
+  font-size: 0.9em;
+}
+.tweet-card-body {
+  margin-top: 8px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.tweet-card-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.tweet-card-body p:first-child {
+  margin-top: 0;
+}
+.tweet-card-footer {
+  margin-top: 8px;
+  font-size: 0.85em;
+}
+.tweet-card-compact .tweet-card-body {
+  max-height: 200px;
+  overflow: hidden;
+  position: relative;
+}
+.tweet-card-compact .tweet-card-body::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 32px;
+  background: linear-gradient(to bottom, transparent, var(--bg, #fff));
+  pointer-events: none;
+}
