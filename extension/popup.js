@@ -415,6 +415,89 @@
     }
   });
 
+  // === Sync Source UI ===
+  async function populateSourceSelect() {
+    const select = document.getElementById('sourceSelect');
+    if (!select) return;
+    const known = await chrome.storage.sync.get(['known_sources']);
+    const list = Array.isArray(known.known_sources) ? known.known_sources : [];
+    select.innerHTML = '';
+    if (!list.length) {
+      const opt = document.createElement('option');
+      opt.textContent = '(暂无已发现的 source — 打开一个 x.com list/profile/bookmarks 让它自动出现)';
+      opt.disabled = true;
+      select.appendChild(opt);
+      return;
+    }
+    for (const s of list) {
+      const opt = document.createElement('option');
+      opt.value = s.key;
+      opt.textContent = (s.source_kind || '') + ' · ' + (s.source_name || s.source_id || '');
+      select.appendChild(opt);
+    }
+  }
+
+  const syncSourceBtn = document.getElementById('syncSourceBtn');
+  if (syncSourceBtn) {
+    syncSourceBtn.addEventListener('click', async () => {
+      const select = document.getElementById('sourceSelect');
+      const status = document.getElementById('syncStatus');
+      if (!select || !status) return;
+      const key = select.value;
+      if (!key) {
+        status.textContent = '请选择一个 source';
+        return;
+      }
+      const known = await chrome.storage.sync.get(['known_sources']);
+      const source = (known.known_sources || []).find((s) => s.key === key);
+      if (!source) {
+        status.textContent = '未找到该 source';
+        return;
+      }
+
+      let url;
+      if (source.source_kind === 'twitter:list') {
+        url = 'https://x.com/i/lists/' + source.source_id;
+      } else if (source.source_kind === 'twitter:user') {
+        url = 'https://x.com/' + source.source_id;
+      } else if (source.source_kind === 'twitter:bookmarks') {
+        url = 'https://x.com/i/bookmarks';
+      } else {
+        status.textContent = '不支持的 source 类型：' + source.source_kind;
+        return;
+      }
+
+      syncSourceBtn.disabled = true;
+      status.textContent = '正在打开后台 tab…';
+      let tab;
+      try {
+        tab = await chrome.tabs.create({ url, active: false });
+      } catch (err) {
+        status.textContent = '打开 tab 失败：' + (err && err.message ? err.message : err);
+        syncSourceBtn.disabled = false;
+        return;
+      }
+
+      status.textContent = '等待页面加载与抓取（约 15 秒）…';
+      setTimeout(async () => {
+        try {
+          await chrome.runtime.sendMessage({ action: 'flushQueue' });
+        } catch (_) {
+          // background may be asleep — periodic alarm will retry
+        }
+        try {
+          if (tab && tab.id != null) await chrome.tabs.remove(tab.id);
+        } catch (_) {
+          // tab may already be closed
+        }
+        status.textContent = '同步完成（详情请到 RSS Pal 查看）';
+        syncSourceBtn.disabled = false;
+      }, 15000);
+    });
+  }
+
+  populateSourceSelect();
+
   // Init
   init();
 })();
