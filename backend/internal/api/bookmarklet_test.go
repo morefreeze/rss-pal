@@ -1,8 +1,14 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestExtractContentFromHTMLPreservesImages(t *testing.T) {
@@ -158,6 +164,91 @@ func TestShouldPromptDuplicate(t *testing.T) {
 			if got != tc.expected {
 				t.Errorf("shouldPromptDuplicate(newLen=%d, oldLen=%d, newImg=%d, oldImg=%d, force=%v) = %v, want %v",
 					tc.newLen, tc.oldLen, tc.newImages, tc.oldImages, tc.force, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestArticleKind(t *testing.T) {
+	if got := articleKind(true); got != "tweet" {
+		t.Errorf("articleKind(true) = %q, want tweet", got)
+	}
+	if got := articleKind(false); got != "article" {
+		t.Errorf("articleKind(false) = %q, want article", got)
+	}
+}
+
+// TestCapture_KindSetByURL exercises the bookmarklet Capture handler end-to-end
+// against in-memory stub repos. A twitter status URL must produce an article
+// with Kind="tweet"; any other URL must produce Kind="article". This protects
+// the discriminator wiring (B3) from silent regressions when the handler is
+// refactored later — the model field, the handler branch, and the repo round-
+// trip all have to line up for the assertions below to pass.
+func TestCapture_KindSetByURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Mirrors backend/internal/rss/testdata/twitter/tweet_text_only.html — the
+	// shape ExtractTweet actually parses. statusID 9999999999999999999 must
+	// match the URL below so IsTwitterStatusURL hands it through.
+	twitterHTML := `<!DOCTYPE html>
+<html><head><title>karpathy on X</title></head><body>
+<main>
+  <article role="article" data-testid="tweet" tabindex="-1">
+    <div data-testid="User-Name">
+      <a role="link" href="/karpathy"><span>Andrej Karpathy</span></a>
+      <a role="link" href="/karpathy"><span>@karpathy</span></a>
+    </div>
+    <div data-testid="tweetText">
+      <span>hello from twitter.</span>
+    </div>
+    <a href="/karpathy/status/9999999999999999999" role="link"><time datetime="2026-04-21T09:00:00.000Z">Apr 21</time></a>
+  </article>
+</main>
+</body></html>`
+
+	plainHTML := `<html><body><article>
+		<h1>A normal article title</h1>
+		<p>Body paragraph one with enough characters to pass the 200-char gate easily right here for sure.</p>
+		<p>Body paragraph two with enough characters to pass the 200-char gate easily right here for sure.</p>
+	</article></body></html>`
+
+	cases := []struct {
+		name     string
+		url      string
+		html     string
+		wantKind string
+	}{
+		{"twitter status url → tweet", "https://x.com/karpathy/status/9999999999999999999", twitterHTML, "tweet"},
+		{"regular article url → article", "https://example.com/blog/post-1", plainHTML, "article"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo := newTestBookmarkletHandlerForPDF(t)
+			r := gin.New()
+			r.POST("/api/bookmarklet/capture", h.Capture)
+
+			body, _ := json.Marshal(map[string]any{
+				"url":   tc.url,
+				"title": "ignored — handler reassigns from extractor",
+				"html":  tc.html,
+			})
+			req := httptest.NewRequest("POST", "/api/bookmarklet/capture", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer test-token")
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+			}
+			if len(repo.created) != 1 {
+				t.Fatalf("expected 1 created article, got %d", len(repo.created))
+			}
+			art := repo.created[0]
+			if art.Kind != tc.wantKind {
+				t.Errorf("article.Kind = %q, want %q", art.Kind, tc.wantKind)
 			}
 		})
 	}
