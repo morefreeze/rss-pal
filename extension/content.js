@@ -153,3 +153,67 @@
     }
   });
 })();
+
+// === Adapter dispatch (R4 passive path) ===
+// Runs only on sites where a matching adapter has self-registered via
+// window.__rssPalAdapters.register(...). On mp.weixin.qq.com there is no
+// such adapter, so this IIFE is a no-op there.
+(function () {
+  'use strict';
+  if (!window.__rssPalAdapters) return;  // registry not loaded
+  const adapter = window.__rssPalAdapters.findFor(location);
+  if (!adapter || !adapter.passive) return;
+
+  async function runExtractAndQueue() {
+    try {
+      const result = adapter.extract(document);
+      if (!result || !result.items || !result.items.length) return;
+      const cfg = await chrome.storage.sync.get(['serverUrl', 'token']);
+      if (!cfg.serverUrl || !cfg.token) return;
+      if (!window.__rssPalQueue) return;
+      await window.__rssPalQueue.push({
+        source_kind: adapter.sourceKind,
+        source_id: result.sourceID,
+        source_name: result.sourceName,
+        items: result.items,
+      });
+      // Auto-discover: append to known_sources
+      const known = await chrome.storage.sync.get(['known_sources']);
+      const list = Array.isArray(known.known_sources) ? known.known_sources : [];
+      const key = adapter.sourceKind + '/' + result.sourceID;
+      if (!list.find((s) => s.key === key)) {
+        list.push({
+          key,
+          source_kind: adapter.sourceKind,
+          source_id: result.sourceID,
+          source_name: result.sourceName,
+          discovered_at: Date.now(),
+        });
+        await chrome.storage.sync.set({ known_sources: list });
+      }
+      // Trigger background flush (best effort)
+      try {
+        const p = chrome.runtime.sendMessage({ action: 'flushQueue' });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (_) {
+        // ignore — background may be asleep
+      }
+    } catch (e) {
+      console.warn('[rss-pal adapter]', adapter.name, 'extract failed:', e);
+    }
+  }
+
+  // First extract on document_idle
+  runExtractAndQueue();
+
+  // Re-extract on DOM mutations (debounced)
+  let debTimer = null;
+  const debounce = (fn, ms) => {
+    if (debTimer) clearTimeout(debTimer);
+    debTimer = setTimeout(fn, ms);
+  };
+  if (document.body) {
+    new MutationObserver(() => debounce(runExtractAndQueue, 800))
+      .observe(document.body, { childList: true, subtree: true });
+  }
+})();
