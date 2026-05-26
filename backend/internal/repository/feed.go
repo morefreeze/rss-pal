@@ -355,14 +355,29 @@ func (r *FeedRepository) GetOrCreateByKindAndSource(
 		FeedType:         feedType,
 		ProviderSourceID: &sourceID,
 	}
+	// Race-safe upsert. If a concurrent caller inserted the row between our
+	// SELECT above and now, the INSERT will conflict on the unique partial
+	// index (idx_feeds_owner_type_source, defined in migration 030 with
+	// `WHERE provider_source_id IS NOT NULL`). DO NOTHING returns zero rows
+	// in that case, and we re-read by recursing — the recursive SELECT path
+	// will find the row immediately. The ON CONFLICT predicate must match
+	// the partial index predicate exactly or PostgreSQL won't use the index.
 	insertErr := r.db.QueryRow(
 		`INSERT INTO feeds (url, title, fetch_interval_minutes, is_active, owner_id,
 		                    feed_type, expand_links, provider_source_id)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 ON CONFLICT (owner_id, feed_type, provider_source_id)
+		   WHERE provider_source_id IS NOT NULL
+		   DO NOTHING
 		 RETURNING id, created_at`,
 		newFeed.URL, newFeed.Title, newFeed.FetchIntervalMin, newFeed.IsActive,
 		newFeed.OwnerID, newFeed.FeedType, false, *newFeed.ProviderSourceID,
 	).Scan(&newFeed.ID, &newFeed.CreatedAt)
+	if insertErr == sql.ErrNoRows {
+		// Lost the race; another caller just inserted this row. Re-read it
+		// via the same SELECT path at the top of the function.
+		return r.GetOrCreateByKindAndSource(ownerID, feedType, sourceID, displayName)
+	}
 	if insertErr != nil {
 		return nil, insertErr
 	}
