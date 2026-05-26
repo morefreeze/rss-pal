@@ -18,10 +18,10 @@ func NewFeedRepository(db *sql.DB) *FeedRepository {
 
 func (r *FeedRepository) scanFeed(row *sql.Row) (*model.Feed, error) {
 	var f model.Feed
-	var title, etag, lastModified, feedType, status sql.NullString
+	var title, etag, lastModified, feedType, status, providerSourceID sql.NullString
 	var ownerID sql.NullInt64
 	var expandLinks sql.NullBool
-	err := row.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks)
+	err := row.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +41,10 @@ func (r *FeedRepository) scanFeed(row *sql.Row) (*model.Feed, error) {
 		f.OwnerID = &oid
 	}
 	f.ExpandLinks = expandLinks.Bool
+	if providerSourceID.Valid {
+		v := providerSourceID.String
+		f.ProviderSourceID = &v
+	}
 	return &f, nil
 }
 
@@ -48,10 +52,10 @@ func (r *FeedRepository) scanFeeds(rows *sql.Rows) ([]model.Feed, error) {
 	var feeds []model.Feed
 	for rows.Next() {
 		var f model.Feed
-		var title, etag, lastModified, feedType, status sql.NullString
+		var title, etag, lastModified, feedType, status, providerSourceID sql.NullString
 		var ownerID sql.NullInt64
 		var expandLinks sql.NullBool
-		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks)
+		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID)
 		if err != nil {
 			return nil, err
 		}
@@ -71,13 +75,17 @@ func (r *FeedRepository) scanFeeds(rows *sql.Rows) ([]model.Feed, error) {
 			f.OwnerID = &oid
 		}
 		f.ExpandLinks = expandLinks.Bool
+		if providerSourceID.Valid {
+			v := providerSourceID.String
+			f.ProviderSourceID = &v
+		}
 		feeds = append(feeds, f)
 	}
 	return feeds, nil
 }
 
 func (r *FeedRepository) GetAll() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links FROM feeds ORDER BY created_at DESC`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id FROM feeds ORDER BY created_at DESC`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -88,13 +96,13 @@ func (r *FeedRepository) GetAll() ([]model.Feed, error) {
 }
 
 func (r *FeedRepository) GetByID(id int) (*model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links FROM feeds WHERE id = $1`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id FROM feeds WHERE id = $1`
 	return r.scanFeed(r.db.QueryRow(query, id))
 }
 
 func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 	query := `
-		SELECT f.id, f.url, f.title, f.last_fetched_at, f.fetch_interval_minutes, f.etag, f.last_modified, f.is_active, f.owner_id, f.feed_type, f.status, f.priority_weight, f.created_at, f.expand_links,
+		SELECT f.id, f.url, f.title, f.last_fetched_at, f.fetch_interval_minutes, f.etag, f.last_modified, f.is_active, f.owner_id, f.feed_type, f.status, f.priority_weight, f.created_at, f.expand_links, f.provider_source_id,
 		       COUNT(a.id) AS article_count,
 		       COUNT(CASE WHEN COALESCE(rp.is_completed, false) = false THEN 1 END) AS unread_count
 		FROM feeds f
@@ -113,10 +121,10 @@ func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 	var feeds []model.Feed
 	for rows.Next() {
 		var f model.Feed
-		var title, etag, lastModified, feedType, status sql.NullString
+		var title, etag, lastModified, feedType, status, providerSourceID sql.NullString
 		var ownerID sql.NullInt64
 		var expandLinks sql.NullBool
-		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &f.ArticleCount, &f.UnreadCount)
+		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID, &f.ArticleCount, &f.UnreadCount)
 		if err != nil {
 			return nil, err
 		}
@@ -136,6 +144,10 @@ func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 			f.OwnerID = &oid
 		}
 		f.ExpandLinks = expandLinks.Bool
+		if providerSourceID.Valid {
+			v := providerSourceID.String
+			f.ProviderSourceID = &v
+		}
 		feeds = append(feeds, f)
 	}
 	return feeds, nil
@@ -178,7 +190,7 @@ func (r *FeedRepository) UpdateTitle(id int, title string) error {
 }
 
 func (r *FeedRepository) GetAllActive() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links FROM feeds WHERE status = 'active' AND feed_type IN ('rss', 'html', 'youtube', 'podcast')`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id FROM feeds WHERE status = 'active' AND feed_type IN ('rss', 'html', 'youtube', 'podcast')`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -221,14 +233,14 @@ func (r *FeedRepository) UpdateWeight(id int, weight float64) error {
 // sentinel of `bookmarklet://user/<id>`.
 func (r *FeedRepository) GetOrCreateClipFeed(ownerID int) (*model.Feed, error) {
 	var f model.Feed
-	var title, etag, lastModified, feedType, status sql.NullString
+	var title, etag, lastModified, feedType, status, providerSourceID sql.NullString
 	var dbOwnerID sql.NullInt64
 	var expandLinks sql.NullBool
 	err := r.db.QueryRow(
-		`SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links
+		`SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id
 		 FROM feeds WHERE owner_id = $1 AND feed_type = 'clip'`,
 		ownerID,
-	).Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &dbOwnerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks)
+	).Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &dbOwnerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID)
 	if err == nil {
 		f.Title = title.String
 		f.ETag = etag.String
@@ -243,6 +255,10 @@ func (r *FeedRepository) GetOrCreateClipFeed(ownerID int) (*model.Feed, error) {
 			f.OwnerID = &oid
 		}
 		f.ExpandLinks = expandLinks.Bool
+		if providerSourceID.Valid {
+			v := providerSourceID.String
+			f.ProviderSourceID = &v
+		}
 		return &f, nil
 	}
 	if err != sql.ErrNoRows {
@@ -262,6 +278,90 @@ func (r *FeedRepository) GetOrCreateClipFeed(ownerID int) (*model.Feed, error) {
 		`INSERT INTO feeds (url, title, fetch_interval_minutes, is_active, owner_id, feed_type, expand_links)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
 		newFeed.URL, newFeed.Title, newFeed.FetchIntervalMin, newFeed.IsActive, newFeed.OwnerID, newFeed.FeedType, false,
+	).Scan(&newFeed.ID, &newFeed.CreatedAt)
+	if insertErr != nil {
+		return nil, insertErr
+	}
+	return newFeed, nil
+}
+
+// GetOrCreateByKindAndSource returns the feed identified by
+// (owner, feed_type, provider_source_id), creating it if absent.
+// Used by the extension ingest path for sources like twitter:list,
+// twitter:user, twitter:bookmarks where provider_source_id is the
+// list id, lowercased handle, or 'self' respectively.
+//
+// displayName is used only when creating the row.
+func (r *FeedRepository) GetOrCreateByKindAndSource(
+	ownerID int, feedType, sourceID, displayName string,
+) (*model.Feed, error) {
+	if sourceID == "" {
+		return nil, fmt.Errorf("GetOrCreateByKindAndSource: sourceID required")
+	}
+
+	var f model.Feed
+	var title, etag, lastModified, dbFeedType, status sql.NullString
+	var dbOwnerID sql.NullInt64
+	var expandLinks sql.NullBool
+	var providerSourceID sql.NullString
+
+	err := r.db.QueryRow(
+		`SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag,
+		        last_modified, is_active, owner_id, feed_type, status,
+		        priority_weight, created_at, expand_links, provider_source_id
+		 FROM feeds
+		 WHERE owner_id = $1 AND feed_type = $2 AND provider_source_id = $3`,
+		ownerID, feedType, sourceID,
+	).Scan(
+		&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag,
+		&lastModified, &f.IsActive, &dbOwnerID, &dbFeedType, &status,
+		&f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID,
+	)
+	if err == nil {
+		f.Title = title.String
+		f.ETag = etag.String
+		f.LastModified = lastModified.String
+		f.FeedType = dbFeedType.String
+		f.Status = status.String
+		if f.Status == "" {
+			f.Status = "active"
+		}
+		if dbOwnerID.Valid {
+			oid := int(dbOwnerID.Int64)
+			f.OwnerID = &oid
+		}
+		f.ExpandLinks = expandLinks.Bool
+		if providerSourceID.Valid {
+			v := providerSourceID.String
+			f.ProviderSourceID = &v
+		}
+		return &f, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	owner := ownerID
+	name := displayName
+	if name == "" {
+		name = fmt.Sprintf("%s · %s", feedType, sourceID)
+	}
+	newFeed := &model.Feed{
+		URL:              fmt.Sprintf("extension://%s/%d/%s", feedType, ownerID, sourceID),
+		Title:            name,
+		FetchIntervalMin: 60,
+		IsActive:         true,
+		OwnerID:          &owner,
+		FeedType:         feedType,
+		ProviderSourceID: &sourceID,
+	}
+	insertErr := r.db.QueryRow(
+		`INSERT INTO feeds (url, title, fetch_interval_minutes, is_active, owner_id,
+		                    feed_type, expand_links, provider_source_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id, created_at`,
+		newFeed.URL, newFeed.Title, newFeed.FetchIntervalMin, newFeed.IsActive,
+		newFeed.OwnerID, newFeed.FeedType, false, *newFeed.ProviderSourceID,
 	).Scan(&newFeed.ID, &newFeed.CreatedAt)
 	if insertErr != nil {
 		return nil, insertErr
