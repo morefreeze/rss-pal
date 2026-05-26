@@ -19,6 +19,7 @@ type Feed struct {
 	ArticleCount     int        `json:"article_count" db:"article_count"`
 	UnreadCount      int        `json:"unread_count" db:"unread_count"`
 	ExpandLinks      bool       `json:"expand_links" db:"expand_links"`
+	ProviderSourceID *string    `json:"provider_source_id,omitempty" db:"provider_source_id"`
 }
 
 type Article struct {
@@ -36,6 +37,7 @@ type Article struct {
 	ReadingMinutes       int        `json:"reading_minutes" db:"reading_minutes"`
 	IsRead               bool       `json:"is_read" db:"is_read"`
 	IsClip               bool       `json:"is_clip,omitempty"`
+	Kind                 string     `json:"kind,omitempty" db:"kind"`
 	LinksExtendable      *bool      `json:"links_extendable,omitempty" db:"links_extendable"`
 	LinkSetSuggested     *bool      `json:"link_set_suggested,omitempty" db:"link_set_suggested"`
 	ParentArticleID      *int       `json:"parent_article_id,omitempty" db:"parent_article_id"`
