@@ -7,7 +7,8 @@ import (
 
 // assembleMarkdown stitches per-page text + image refs into the final
 // article body. articleID is needed for image URLs. totalOriginal and
-// totalKept drive the optional footer when the 100-image cap fired.
+// totalKept drive the optional footer when images were filtered (page
+// scans, duplicates, 100-image cap).
 //
 // Page-level invariants:
 //   - A page with no text AND no images is skipped (no heading)
@@ -35,8 +36,11 @@ func assembleMarkdown(pages []PageContent, articleID, totalImagesOriginal, total
 	}
 	if totalImagesOriginal > totalImagesKept {
 		dropped := totalImagesOriginal - totalImagesKept
+		// We intentionally don't break down WHY images were dropped
+		// (dedup vs full-page-scan filter vs 100-cap) — the user just
+		// needs to know how many were left out.
 		fmt.Fprintf(&b,
-			"\n> 注：原 PDF 共 %d 张图（去重后 %d 张），超出 %d 张限制，已省略后 %d 张。\n",
+			"\n> 注：原 PDF 共 %d 张图，已保留 %d 张（去重 + 全页扫描过滤 + 上限 %d），省略了 %d 张。\n",
 			totalImagesOriginal, totalImagesKept, MaxImagesPerPDF, dropped)
 	}
 	return b.String()

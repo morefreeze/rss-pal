@@ -59,7 +59,7 @@ func TestAssembleMarkdown_PerPageSections(t *testing.T) {
 func TestAssembleMarkdown_TruncationFooter(t *testing.T) {
 	pages := []PageContent{{PageNum: 1, Text: "body", Images: []ImageRef{{Idx: 0, Format: "png"}}}}
 	md := assembleMarkdown(pages, 1, 150 /* original */, 100 /* kept */)
-	if !strings.Contains(md, "注：原 PDF 共 150 张图（去重后 100 张），超出 100 张限制，已省略后 50 张。") {
+	if !strings.Contains(md, "注：原 PDF 共 150 张图，已保留 100 张（去重 + 全页扫描过滤 + 上限 100），省略了 50 张。") {
 		t.Errorf("missing truncation footer:\n%s", md)
 	}
 }
