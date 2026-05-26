@@ -20,11 +20,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// captureMaxPDFBytes caps PDF uploads at 32 MiB. Larger than the 4 MiB
-// HTML cap because PDFs are denser, especially scanned ones, and a 30 MB
-// research paper is a real use case while still small enough to keep one
-// request from blocking the worker for too long.
-const captureMaxPDFBytes = 32 << 20
+// captureMaxPDFBytes caps PDF uploads at 64 MiB. Larger than the 4 MiB
+// HTML cap because PDFs are denser, especially scanned ones / image-heavy
+// zines (e.g. PagedOut), while still small enough to keep one request
+// from blocking the worker for too long. Previously 32 MiB but real-
+// world long-form PDFs routinely brushed that ceiling.
+const captureMaxPDFBytes = 64 << 20
 
 // pdfFetchTimeout caps the upstream fetch in capture-pdf-url. 30 s is
 // long enough for a slow CDN serving a 30 MB PDF on a flaky line but
