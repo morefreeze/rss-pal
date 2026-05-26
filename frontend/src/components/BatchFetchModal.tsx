@@ -301,8 +301,13 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
                       disabled={disabled}
                       readOnly
                       onChange={() => {}}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ marginTop: 3 }}
+                      // No onClick — let the click bubble up to <li> so
+                      // handleRowClick toggles selected. We intentionally
+                      // don't drive selection via the checkbox's own
+                      // onChange because handleRowClick supports shift-
+                      // click range selection (e.stopPropagation here
+                      // used to swallow checkbox clicks entirely).
+                      style={{ marginTop: 3, cursor: disabled ? 'not-allowed' : 'pointer' }}
                     />
                     <div style={{ minWidth: 0, overflow: 'hidden' }}>
                       <div style={{
