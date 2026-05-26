@@ -45,6 +45,7 @@ func main() {
 
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
+	articleRepo.SetImageBaseDir(cfg.Backup.Dir)
 	prefRepo := repository.NewPreferenceRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	templateRepo := repository.NewTemplateRepository(db)
@@ -86,17 +87,36 @@ func main() {
 	stopBackup := backupRunner.ScheduleDaily(context.Background())
 	defer stopBackup()
 
+	// Async PDF OCR loop: runs every 60s, drains up to maxPDFOCRPerCycle
+	// scanned-PDF clip articles per tick. Lives in its own goroutine so a
+	// long Tesseract pass on one PDF doesn't delay the main feed-fetch
+	// cycle (and vice versa).
+	pdfOCRCtx, cancelPDFOCR := context.WithCancel(context.Background())
+	defer cancelPDFOCR()
+	go func() {
+		t := time.NewTicker(60 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-pdfOCRCtx.Done():
+				return
+			case <-t.C:
+				processPDFOCR(pdfOCRCtx, articleRepo, *cfg)
+			}
+		}
+	}()
+
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher)
+	runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
 
 	for range ticker.C {
-		runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher)
+		runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
 	}
 }
 
-func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher) {
+func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string) {
 	if !cycleMu.TryLock() {
 		log.Println("Previous fetch cycle still running, skipping")
 		return
@@ -106,7 +126,7 @@ func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, art
 	fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
 	detectLinkSetCandidates(ctx, articleRepo, contentFetcher)
 	detectLinkSetSuggestions(ctx, articleRepo, contentFetcher)
-	processQueuedChildren(ctx, articleRepo, contentFetcher)
+	processQueuedChildren(ctx, articleRepo, contentFetcher, imageBaseDir)
 	refetchShortContent(ctx, articleRepo, contentFetcher, summarizer)
 	if transcriptFetcher != nil {
 		backfillTranscripts(ctx, articleRepo, transcriptFetcher)

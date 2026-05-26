@@ -12,9 +12,11 @@ import (
 // ComputeListETag builds a weak ETag for an article-list response.
 // Inputs combine a per-request query signature (so different filter
 // combinations get distinct ETags) with content fingerprints — count,
-// first/last id, and the max fetched_at across items. Cheap (no extra
-// DB round trip) and changes whenever the worker writes new articles
-// matching the query.
+// first/last id, max fetched_at, and a hash of every item's
+// processing_state. The state hash is required: when an article
+// transitions processing→ready (or →failed) the row's fetched_at does
+// NOT change, but the UI's badge does. Without it the list would
+// continue serving 304s with stale 处理中 badges forever.
 //
 // Format: W/"<hex sha256 prefix>"
 func ComputeListETag(querySignature string, items []ArticleListItem) string {
@@ -27,8 +29,13 @@ func ComputeListETag(querySignature string, items []ArticleListItem) string {
 				maxFetched = it.FetchedAt
 			}
 		}
-		fmt.Fprintf(h, "first=%d|last=%d|max_fetched=%d",
+		fmt.Fprintf(h, "first=%d|last=%d|max_fetched=%d|",
 			items[0].ID, items[len(items)-1].ID, maxFetched.UnixNano())
+		// Per-item state digest — cheap (single string per row) and
+		// catches every processing_state transition in the cached set.
+		for _, it := range items {
+			fmt.Fprintf(h, "%d=%s;", it.ID, it.ProcessingState)
+		}
 	}
 	return `W/"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
 }

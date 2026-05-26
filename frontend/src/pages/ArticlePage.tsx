@@ -27,6 +27,16 @@ import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 
+// isPDFClipArticle returns true for clipped PDF articles, driving the
+// two-column reading layout. Anchored on the "## 第 N 页" page-section
+// heading that ONLY pdfextract emits — robust signal that doesn't rely
+// on the `is_clip` field (which the article-detail endpoint silently
+// omits because the SELECT path doesn't pull is_clip from the DB).
+function isPDFClipArticle(article: { content?: string }): boolean {
+  if (!article.content) return false
+  return /^## 第 \d+ 页/m.test(article.content)
+}
+
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -212,59 +222,83 @@ export default function ArticlePage() {
     }
   }, [id])
 
-  // Restore scroll to the saved reading position, once per article load.
-  // Waits for images currently in the DOM to finish loading so scrollHeight
-  // is stable before scrolling; caps the wait at 5s. Skips restoration when
-  // saved progress is > 0.9 — at that point the user has effectively finished
-  // the article, so reopening it should start from the top.
+  // Restore scroll to the saved reading position. The previous version set
+  // scrollRestoredForRef before actually scrolling, which silently no-op'd
+  // when contentRef.current wasn't mounted yet (or scrollHeight was 0
+  // because markdown was still being parsed). After that the effect would
+  // refuse to retry because the ref said "already restored." This rewrite
+  // only marks restoration complete after a SUCCESSFUL scroll, and re-runs
+  // when the rendered content actually changes height. Also handles
+  // late-loading images: re-measures every 200ms for up to 6s, taking the
+  // first stable measurement that places the saved fraction within the
+  // scrollable range.
   useEffect(() => {
     if (!article) return
     if (scrollRestoredForRef.current === article.id) return
     const saved = progress?.scroll_position ?? 0
-    scrollRestoredForRef.current = article.id
-    if (saved <= 0 || saved > 0.9) return
-
-    let done = false
-
-    const performScroll = () => {
-      if (done) return
-      done = true
-      if (window.scrollY > 50) return
-      const max = (contentRef.current?.scrollHeight ?? 0) - window.innerHeight
-      if (max > 0) window.scrollTo(0, max * saved)
-    }
-
-    const root = contentRef.current
-    const pending = root
-      ? Array.from(root.querySelectorAll('img')).filter(img => !img.complete)
-      : []
-
-    if (pending.length === 0) {
-      requestAnimationFrame(performScroll)
+    // Skip only when: no saved position, OR user already explicitly
+    // marked the article completed. The previous heuristic skipped when
+    // saved > 0.9 too, but with the new bottom-scroll auto-complete
+    // (handleScroll sets is_completed when scroll > 0.95) a saved
+    // position close to 1 with is_completed=false means the user got
+    // most of the way through but didn't finish — that's exactly the
+    // case where they DO want to be restored.
+    if (saved <= 0 || progress?.is_completed) {
+      scrollRestoredForRef.current = article.id
       return
     }
 
-    let remaining = pending.length
-    const onOne = () => {
-      remaining -= 1
-      if (remaining <= 0) performScroll()
-    }
-    pending.forEach(img => {
-      img.addEventListener('load', onOne, { once: true })
-      img.addEventListener('error', onOne, { once: true })
-    })
+    let cancelled = false
+    let lastHeight = 0
+    let stableCount = 0
+    let attempts = 0
+    const maxAttempts = 30 // 30 * 200ms = 6s
 
-    const timer = setTimeout(performScroll, 5000)
+    const attempt = () => {
+      if (cancelled) return
+      // If the user has already started reading, stop trying to yank them
+      // back to the saved position.
+      if (window.scrollY > 50) {
+        scrollRestoredForRef.current = article.id
+        return
+      }
+      const root = contentRef.current
+      const height = root?.scrollHeight ?? 0
+      const max = height - window.innerHeight
+      if (max <= 0) {
+        attempts += 1
+        if (attempts < maxAttempts) setTimeout(attempt, 200)
+        return
+      }
+      // Wait for two consecutive equal-height samples (≈400ms of
+      // layout stability) so we don't scroll mid-image-load. After
+      // maxAttempts give up waiting and just scroll wherever we are.
+      if (height === lastHeight) {
+        stableCount += 1
+      } else {
+        lastHeight = height
+        stableCount = 0
+      }
+      attempts += 1
+      const stable = stableCount >= 1
+      const lastChance = attempts >= maxAttempts
+      if (!stable && !lastChance) {
+        setTimeout(attempt, 200)
+        return
+      }
+      window.scrollTo(0, max * saved)
+      scrollRestoredForRef.current = article.id
+      toast.info(`已恢复上次阅读位置（${Math.round(saved * 100)}%）`)
+    }
+
+    requestAnimationFrame(attempt)
 
     return () => {
-      done = true
-      clearTimeout(timer)
-      pending.forEach(img => {
-        img.removeEventListener('load', onOne)
-        img.removeEventListener('error', onOne)
-      })
+      cancelled = true
     }
-  }, [article?.id, progress?.scroll_position])
+    // Re-run on content change (markdown body length is the cheapest stable
+    // proxy that catches both initial load and worker-triggered updates).
+  }, [article?.id, progress?.scroll_position, article?.content?.length])
 
   // Auto-expand stub link_set children and poll until ready/failed
   useEffect(() => {
@@ -372,7 +406,28 @@ export default function ArticlePage() {
     if (progressTimerRef.current) clearTimeout(progressTimerRef.current)
     progressTimerRef.current = setTimeout(() => {
       flushProgress()
-    }, 1500)
+    }, 500) // was 1500ms — too long; fast scroll → unmount lost the save
+  }, [flushProgress])
+
+  // Flush pending progress on page hide / tab switch / component unmount so a
+  // fast scroll then immediate navigation away still persists the new position.
+  // visibilitychange covers iOS Safari and mobile-tab-switch where beforeunload
+  // doesn't fire; pagehide is the modern unload-equivalent for SPAs.
+  useEffect(() => {
+    const onHide = () => {
+      if (pendingProgressRef.current) flushProgress()
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') onHide()
+    })
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onHide)
+      // Component-unmount flush: covers in-app navigation (router replaces
+      // ArticlePage with another page), where pagehide does NOT fire.
+      if (pendingProgressRef.current) flushProgress()
+    }
   }, [flushProgress])
 
   // Counts active seconds and acts as the completion backstop. handleScroll
@@ -425,7 +480,13 @@ export default function ArticlePage() {
 
     const readMin = article?.reading_minutes || 1
     const minSeconds = Math.min(15, Math.floor(readMin * 30))
-    const isCompleted = scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds
+    // Two completion paths:
+    //   1. Slow read: > 0.9 scroll AND past the time gate (default anti-spam)
+    //   2. Bottom-scroll: > 0.95 explicitly mark complete (user clearly
+    //      reached the end intentionally; don't punish fast readers /
+    //      re-visits of familiar content)
+    const isCompleted = scrollPosition > 0.95 ||
+      (scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds)
     const wasCompleted = progress?.is_completed
 
     setProgress(prev => prev
@@ -989,7 +1050,9 @@ export default function ArticlePage() {
       </div>
 
       {/* Summary-stage banner — content-stage fetch is shown inline in the
-          原文内容 card below so the prompt sits where the body would be. */}
+          原文内容 card below so the prompt sits where the body would be.
+          For PDF clip articles (state=processing && no content yet), the
+          OCR banner below is more informative and replaces this one. */}
       {(() => {
         const state = article.processing_state
         const hasContent = !!article.content && article.content.length > 0
@@ -1002,7 +1065,33 @@ export default function ArticlePage() {
         }
         return null
       })()}
-      {article.processing_state === 'failed' && (
+      {article.processing_state === 'processing' && (
+        <div
+          style={{
+            padding: '12px',
+            background: '#fff3cd',
+            border: '1px solid #ffeaa7',
+            borderRadius: '4px',
+            marginBottom: '16px',
+          }}
+        >
+          ⏳ 这篇 PDF 正在 OCR 处理中（约 1–5 秒/页，多页 PDF 可能需要几分钟）。处理完成后内容会自动出现，刷新页面即可。
+        </div>
+      )}
+      {article.processing_state === 'failed' && article.processing_error && (
+        <div
+          style={{
+            padding: '12px',
+            background: '#f8d7da',
+            border: '1px solid #f5c6cb',
+            borderRadius: '4px',
+            marginBottom: '16px',
+          }}
+        >
+          ❌ PDF 处理失败：{article.processing_error}
+        </div>
+      )}
+      {article.processing_state === 'failed' && !article.processing_error && (
         <div className="p-3 rounded-md mb-4 text-sm flex items-center gap-3" style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
           <span style={{ color: 'var(--fg-muted)' }}>抓取失败</span>
           <button
@@ -1117,7 +1206,10 @@ export default function ArticlePage() {
               ))}
             </div>
             {article.content ? (
-              <div style={{ lineHeight: 1.8, fontSize: 15 }}>
+              <div
+                className={isPDFClipArticle(article) ? 'pdf-clip-columns' : undefined}
+                style={{ lineHeight: 1.8, fontSize: 15 }}
+              >
                 <CodeWrapContext.Provider value={reader.codeWrap}>
                   <MarkdownArticle source={article.content} />
                 </CodeWrapContext.Provider>

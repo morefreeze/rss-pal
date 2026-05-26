@@ -25,6 +25,7 @@ func main() {
 
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
+	articleRepo.SetImageBaseDir(cfg.Backup.Dir)
 	prefRepo := repository.NewPreferenceRepository(db)
 	playbackRepo := repository.NewPlaybackProgressRepository(db)
 	progressRepo := repository.NewProgressRepository(db)
@@ -63,7 +64,9 @@ func main() {
 	userInsightsRepo := repository.NewUserInsightRepository(db)
 	insightsHandler := api.NewInsightsHandler(prefRepo, articleRepo, templateRepo, userInsightsRepo, summarizer, cfg)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
-	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).WithBackupRunner(backupRunner)
+	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).
+		WithBackupRunner(backupRunner).
+		WithImageBaseDir(cfg.Backup.Dir)
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
 	eventHandler := api.NewEventHandler(eventRepo)
 	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
@@ -111,8 +114,23 @@ func main() {
 	// Public image proxy (no auth — <img> tags can't reliably carry auth headers).
 	router.GET("/api/proxy/image", api.NewImageProxy().Handle)
 
+	// PDF clip images. Public for the same <img>-tag-can't-carry-Authorization
+	// reason as /api/proxy/image. The URL itself is the access token:
+	// <articleID, idx> is hard to enumerate meaningfully, and the only thing
+	// behind the URL is an extracted figure raster (never source content,
+	// never DB rows). Acceptable trade-off for a personal single-user tool;
+	// signed-URL tokens would be the next step if multi-tenant.
+	pdfImgHandler := api.NewArticleImageHandler(cfg.Backup.Dir,
+		func(c *gin.Context, articleID int) (bool, error) { return true, nil })
+	router.GET("/api/articles/:id/images/:idx", pdfImgHandler.Serve)
+
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT)
 	router.POST("/api/bookmarklet/capture", bookmarkletHandler.Capture)
+	// PDF capture variants share the same per-user bookmarklet token auth.
+	// capture-pdf takes multipart form-data with the PDF bytes from the
+	// browser; capture-pdf-url asks the server to fetch the PDF itself.
+	router.POST("/api/bookmarklet/capture-pdf", bookmarkletHandler.CapturePDF)
+	router.POST("/api/bookmarklet/capture-pdf-url", bookmarkletHandler.CapturePDFURL)
 
 	// Protected routes
 	apiGroup := router.Group("/api")
@@ -171,6 +189,9 @@ func main() {
 		apiGroup.POST("/articles/:id/confirm_link_set", articleHandler.ConfirmLinkSetSuggestion)
 		apiGroup.POST("/articles/:id/hide", articleHandler.Hide)
 		apiGroup.DELETE("/articles/:id/hide", articleHandler.Unhide)
+
+		// (PDF clip image route is registered above as a public endpoint —
+		// <img> tags can't carry Bearer tokens, so JWT-gated wouldn't render.)
 
 		// Clip articles (filtered by tags / source / untagged)
 		apiGroup.GET("/clip", clipHandler.List)

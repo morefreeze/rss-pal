@@ -15,7 +15,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates tzdata
+# KEEP IN SYNC WITH backend/Dockerfile.worker runtime packages.
+RUN apk --no-cache add ca-certificates tzdata \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-data-eng \
+    tesseract-ocr-data-chi_sim
 
 WORKDIR /app
 
