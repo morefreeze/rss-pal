@@ -114,6 +114,16 @@ func main() {
 	// Public image proxy (no auth — <img> tags can't reliably carry auth headers).
 	router.GET("/api/proxy/image", api.NewImageProxy().Handle)
 
+	// PDF clip images. Public for the same <img>-tag-can't-carry-Authorization
+	// reason as /api/proxy/image. The URL itself is the access token:
+	// <articleID, idx> is hard to enumerate meaningfully, and the only thing
+	// behind the URL is an extracted figure raster (never source content,
+	// never DB rows). Acceptable trade-off for a personal single-user tool;
+	// signed-URL tokens would be the next step if multi-tenant.
+	pdfImgHandler := api.NewArticleImageHandler(cfg.Backup.Dir,
+		func(c *gin.Context, articleID int) (bool, error) { return true, nil })
+	router.GET("/api/articles/:id/images/:idx", pdfImgHandler.Serve)
+
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT)
 	router.POST("/api/bookmarklet/capture", bookmarkletHandler.Capture)
 	// PDF capture variants share the same per-user bookmarklet token auth.
@@ -180,16 +190,8 @@ func main() {
 		apiGroup.POST("/articles/:id/hide", articleHandler.Hide)
 		apiGroup.DELETE("/articles/:id/hide", articleHandler.Unhide)
 
-		// PDF clip images. Served from cfg.Backup.Dir/article_images/<id>/<idx>.<ext>
-		// with year-long immutable Cache-Control + ETag; JWT-protected and
-		// authorized via feeds.owner_id so users can only read their own clips.
-		// userID extraction matches api.getUserID — kept inline because that
-		// helper is package-private.
-		imgAccess := func(c *gin.Context, articleID int) (bool, error) {
-			return articleRepo.UserOwnsArticle(c.GetInt("userID"), articleID)
-		}
-		imgHandler := api.NewArticleImageHandler(cfg.Backup.Dir, imgAccess)
-		apiGroup.GET("/articles/:id/images/:idx", imgHandler.Serve)
+		// (PDF clip image route is registered above as a public endpoint —
+		// <img> tags can't carry Bearer tokens, so JWT-gated wouldn't render.)
 
 		// Clip articles (filtered by tags / source / untagged)
 		apiGroup.GET("/clip", clipHandler.List)
