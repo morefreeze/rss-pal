@@ -41,9 +41,10 @@ const (
 	// Tesseract on a pathological scan can hang forever otherwise.
 	pdfOCRItemTimeout = 5 * time.Minute
 
-	// pdfOCRMaxBytes mirrors the HTTP layer's 32 MiB cap so a malicious
-	// URL change between capture and OCR can't blow up worker memory.
-	pdfOCRMaxBytes = 32 << 20
+	// pdfOCRMaxBytes mirrors the HTTP layer's 64 MiB cap (see
+	// captureMaxPDFBytes in api/bookmarklet_pdf.go) so a URL that fits
+	// at capture time also fits at OCR time. KEEP IN SYNC.
+	pdfOCRMaxBytes = 64 << 20
 )
 
 // processPDFOCR is the per-cycle entry point for the async OCR queue.
