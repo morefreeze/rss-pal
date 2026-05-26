@@ -6,6 +6,7 @@
 
 - **智能订阅抓取** — 支持 RSS/Atom 订阅，也支持任意网页（自动识别文章链接），添加前预览内容
 - **AI 驱动总结** — 每篇文章自动生成要点摘要 + 详细分析，支持自定义模板
+- **PDF 网摘** — 三种入口（Chrome 内置 viewer / 本地 file:// / 直接粘 URL）抓取 PDF，数字版秒级入库，扫描版自动走 OCR（中简+英）；图片按页穿插，每篇上限 100 张去重图
 - **个性化推荐** — 基于点赞/收藏/阅读时长学习兴趣，生成个性化文章推荐
 - **阅读进度追踪** — 记录滚动位置，下次打开自动恢复
 - **多用户支持** — 邀请码注册，最多 10 名测试用户
@@ -108,6 +109,18 @@ rss-pal/
 - `POST /api/articles/:id/content` — 重新抓取原文
 - `GET /api/articles/:id/export/md` — 导出 Markdown
 - `POST /api/articles/:id/share` — 生成分享链接
+- `GET /api/articles/:id/images/:idx` — PDF 网摘抽出的图片（强缓存 + ETag）
+
+### PDF 网摘
+
+三种入口：
+- **Chrome 扩展**（`extension/` 目录）打开 PDF 后点击图标——浏览器内置 viewer + 本地 `file://` 都支持；前者直接可用，后者需要在 `chrome://extensions` 该扩展详情页开启「允许访问文件 URL」
+- **前端添加 feed** 时输入末尾是 `.pdf` 的 URL，会自动识别为 PDF 单篇网摘
+- **直接调 API** `POST /api/bookmarklet/capture-pdf-url`（body `{url}`、bookmarklet token 鉴权）
+
+处理 pipeline：数字版 PDF 用 `pdftotext` 秒级提取，立即入库；提取不到足够文字（< 200 字符）的 PDF 视为扫描版，标 `processing_state='processing'` 后由 worker 用 `tesseract`（中简 + 英）异步 OCR。图片用 `pdfimages -png` 抽取并按 SHA-256 去重，每篇上限 100 张（按页号取前 100），文末加截断提示。Markdown 按 PDF 页号分节。
+
+依赖：`poppler-utils`（`pdftotext`、`pdfimages`、`pdftoppm`、`pdfinfo`）+ `tesseract-ocr` 含 `chi_sim` / `eng` 语言数据，Dockerfile 已预装。
 
 ### 用户偏好
 - `POST /api/preferences/like` — 标记喜欢
