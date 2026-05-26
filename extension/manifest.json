@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "RSS Pal",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "将网页内容捕获并发送到 RSS Pal",
-  "permissions": ["activeTab", "storage", "scripting", "alarms"],
+  "permissions": ["activeTab", "storage", "scripting", "alarms", "tabs", "notifications"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
@@ -31,6 +31,18 @@
     {
       "matches": ["*://*/extension-config"],
       "js": ["config-receiver.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://x.com/*"],
+      "js": [
+        "adapters/registry.js",
+        "queue.js",
+        "adapters/twitter/list-tweets.js",
+        "adapters/twitter/tweets.js",
+        "adapters/twitter/bookmarks.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
