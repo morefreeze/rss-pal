@@ -159,6 +159,7 @@ export interface ArticleListItem {
   link_set_suggested?: boolean | null  // worker thinks article is a link list, awaiting user confirmation
   parent_article_id?: number | null
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
+  processing_error?: string
   prerank_score?: number | null
   editor_note?: string
   manual_tags: UserTag[]
