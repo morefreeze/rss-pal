@@ -222,59 +222,77 @@ export default function ArticlePage() {
     }
   }, [id])
 
-  // Restore scroll to the saved reading position, once per article load.
-  // Waits for images currently in the DOM to finish loading so scrollHeight
-  // is stable before scrolling; caps the wait at 5s. Skips restoration when
-  // saved progress is > 0.9 — at that point the user has effectively finished
-  // the article, so reopening it should start from the top.
+  // Restore scroll to the saved reading position. The previous version set
+  // scrollRestoredForRef before actually scrolling, which silently no-op'd
+  // when contentRef.current wasn't mounted yet (or scrollHeight was 0
+  // because markdown was still being parsed). After that the effect would
+  // refuse to retry because the ref said "already restored." This rewrite
+  // only marks restoration complete after a SUCCESSFUL scroll, and re-runs
+  // when the rendered content actually changes height. Also handles
+  // late-loading images: re-measures every 200ms for up to 6s, taking the
+  // first stable measurement that places the saved fraction within the
+  // scrollable range.
   useEffect(() => {
     if (!article) return
     if (scrollRestoredForRef.current === article.id) return
     const saved = progress?.scroll_position ?? 0
-    scrollRestoredForRef.current = article.id
-    if (saved <= 0 || saved > 0.9) return
-
-    let done = false
-
-    const performScroll = () => {
-      if (done) return
-      done = true
-      if (window.scrollY > 50) return
-      const max = (contentRef.current?.scrollHeight ?? 0) - window.innerHeight
-      if (max > 0) window.scrollTo(0, max * saved)
-    }
-
-    const root = contentRef.current
-    const pending = root
-      ? Array.from(root.querySelectorAll('img')).filter(img => !img.complete)
-      : []
-
-    if (pending.length === 0) {
-      requestAnimationFrame(performScroll)
+    if (saved <= 0 || saved > 0.9) {
+      // Either no saved position or article was already finished — claim
+      // "done" so we don't keep retrying on every render.
+      scrollRestoredForRef.current = article.id
       return
     }
 
-    let remaining = pending.length
-    const onOne = () => {
-      remaining -= 1
-      if (remaining <= 0) performScroll()
-    }
-    pending.forEach(img => {
-      img.addEventListener('load', onOne, { once: true })
-      img.addEventListener('error', onOne, { once: true })
-    })
+    let cancelled = false
+    let lastHeight = 0
+    let stableCount = 0
+    let attempts = 0
+    const maxAttempts = 30 // 30 * 200ms = 6s
 
-    const timer = setTimeout(performScroll, 5000)
+    const attempt = () => {
+      if (cancelled) return
+      // If the user has already started reading, stop trying to yank them
+      // back to the saved position.
+      if (window.scrollY > 50) {
+        scrollRestoredForRef.current = article.id
+        return
+      }
+      const root = contentRef.current
+      const height = root?.scrollHeight ?? 0
+      const max = height - window.innerHeight
+      if (max <= 0) {
+        attempts += 1
+        if (attempts < maxAttempts) setTimeout(attempt, 200)
+        return
+      }
+      // Wait for two consecutive equal-height samples (≈400ms of
+      // layout stability) so we don't scroll mid-image-load. After
+      // maxAttempts give up waiting and just scroll wherever we are.
+      if (height === lastHeight) {
+        stableCount += 1
+      } else {
+        lastHeight = height
+        stableCount = 0
+      }
+      attempts += 1
+      const stable = stableCount >= 1
+      const lastChance = attempts >= maxAttempts
+      if (!stable && !lastChance) {
+        setTimeout(attempt, 200)
+        return
+      }
+      window.scrollTo(0, max * saved)
+      scrollRestoredForRef.current = article.id
+    }
+
+    requestAnimationFrame(attempt)
 
     return () => {
-      done = true
-      clearTimeout(timer)
-      pending.forEach(img => {
-        img.removeEventListener('load', onOne)
-        img.removeEventListener('error', onOne)
-      })
+      cancelled = true
     }
-  }, [article?.id, progress?.scroll_position])
+    // Re-run on content change (markdown body length is the cheapest stable
+    // proxy that catches both initial load and worker-triggered updates).
+  }, [article?.id, progress?.scroll_position, article?.content?.length])
 
   // Auto-expand stub link_set children and poll until ready/failed
   useEffect(() => {
@@ -382,7 +400,28 @@ export default function ArticlePage() {
     if (progressTimerRef.current) clearTimeout(progressTimerRef.current)
     progressTimerRef.current = setTimeout(() => {
       flushProgress()
-    }, 1500)
+    }, 500) // was 1500ms — too long; fast scroll → unmount lost the save
+  }, [flushProgress])
+
+  // Flush pending progress on page hide / tab switch / component unmount so a
+  // fast scroll then immediate navigation away still persists the new position.
+  // visibilitychange covers iOS Safari and mobile-tab-switch where beforeunload
+  // doesn't fire; pagehide is the modern unload-equivalent for SPAs.
+  useEffect(() => {
+    const onHide = () => {
+      if (pendingProgressRef.current) flushProgress()
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') onHide()
+    })
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onHide)
+      // Component-unmount flush: covers in-app navigation (router replaces
+      // ArticlePage with another page), where pagehide does NOT fire.
+      if (pendingProgressRef.current) flushProgress()
+    }
   }, [flushProgress])
 
   // Counts active seconds and acts as the completion backstop. handleScroll
@@ -435,7 +474,13 @@ export default function ArticlePage() {
 
     const readMin = article?.reading_minutes || 1
     const minSeconds = Math.min(15, Math.floor(readMin * 30))
-    const isCompleted = scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds
+    // Two completion paths:
+    //   1. Slow read: > 0.9 scroll AND past the time gate (default anti-spam)
+    //   2. Bottom-scroll: > 0.95 explicitly mark complete (user clearly
+    //      reached the end intentionally; don't punish fast readers /
+    //      re-visits of familiar content)
+    const isCompleted = scrollPosition > 0.95 ||
+      (scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds)
     const wasCompleted = progress?.is_completed
 
     setProgress(prev => prev
