@@ -1,18 +1,26 @@
 // extension/adapters/twitter/bookmarks.js
 //
-// Portions of this file derive from OpenCLI (https://github.com/jackwener/opencli)
-//   commit c730a02, file clis/twitter/bookmarks.js,
-//   licensed under Apache-2.0. See extension/adapters/THIRD_PARTY_NOTICES.md.
-// Last reviewed: 2026-05-26
+// Independent DOM scraper for x.com's /i/bookmarks page. Reads rendered DOM
+// in the user's logged-in Chrome tab and emits TweetItem records matching
+// the shape produced by OpenCLI's GraphQL-based adapter
+// (https://github.com/jackwener/opencli, clis/twitter/bookmarks.js).
 //
-// Note: OpenCLI's twitter/bookmarks.js is a `Strategy.COOKIE` adapter that
-// calls `/i/api/graphql/<queryId>/Bookmarks`. We can't replicate that pattern
-// from an MV3 content script without a Bearer-token interception layer, so
-// rss-pal R4 DOM-scrapes the rendered /i/bookmarks page. We emit the same
-// TweetItem shape OpenCLI does (id, author, text, created_at, url, ...) so
-// downstream backend normalization stays uniform across twitter sources.
+// OpenCLI's adapter calls Twitter's /i/api/graphql/<queryId>/Bookmarks
+// directly with an authenticated ct0 cookie + Bearer token (`Strategy.COOKIE`).
+// That approach doesn't translate to MV3 content scripts, which can read the
+// rendered DOM but cannot recover the Bearer token without main-world script
+// injection. So this adapter independently extracts the same TweetItem
+// fields (id, author, text, created_at, url, ...) from rendered article
+// elements instead, keeping downstream backend normalization uniform across
+// twitter sources.
 //
-// When OpenCLI updates this file, see docs/extension-adapters/upstream-map.md.
+// We follow OpenCLI's adapter directory layout (extension/adapters/<site>/<command>.js),
+// registry pattern, and output schema for compatibility with their docs and
+// the future possibility of contributing back a DOM-mode variant upstream.
+//
+// Last reviewed: 2026-05-26.
+// When OpenCLI's adapter commits churn (signal of x.com DOM changes), revisit
+// our selectors. See docs/extension-adapters/upstream-map.md.
 
 (function () {
   'use strict';

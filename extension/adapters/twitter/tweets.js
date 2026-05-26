@@ -1,19 +1,26 @@
 // extension/adapters/twitter/tweets.js
 //
-// Portions of this file derive from OpenCLI (https://github.com/jackwener/opencli)
-//   commit c730a02, file clis/twitter/tweets.js,
-//   licensed under Apache-2.0. See extension/adapters/THIRD_PARTY_NOTICES.md.
-// Last reviewed: 2026-05-26
+// Independent DOM scraper for x.com's profile timeline. Reads rendered DOM in
+// the user's logged-in Chrome tab and emits TweetItem records matching the
+// shape produced by OpenCLI's GraphQL-based adapter
+// (https://github.com/jackwener/opencli, clis/twitter/tweets.js).
 //
-// Note: OpenCLI's twitter/tweets.js is a `Strategy.COOKIE` adapter that calls
-// `/i/api/graphql/<queryId>/UserTweets` (and UserByScreenName to resolve the
-// numeric user id). That path isn't reachable from an MV3 content script
-// without designing a Bearer-token interceptor, so for rss-pal R4 we DOM-scrape
-// the rendered profile timeline. TweetItem fields (id, author lowercased,
+// OpenCLI's adapter calls Twitter's /i/api/graphql/<queryId>/UserTweets (and
+// UserByScreenName to resolve the numeric user id) with an authenticated ct0
+// cookie + Bearer token (`Strategy.COOKIE`). That approach doesn't translate
+// to MV3 content scripts, which can read the rendered DOM but cannot recover
+// the Bearer token without main-world script injection. So this adapter
+// independently extracts the same TweetItem fields (id, author lowercased,
 // display_name, text, created_at, url, media_urls, quoted_url, likes,
-// retweets, replies, views) follow OpenCLI's extractTweet() / TWEETS COLUMNS.
+// retweets, replies, views) from rendered article elements instead.
 //
-// When OpenCLI updates this file, see docs/extension-adapters/upstream-map.md.
+// We follow OpenCLI's adapter directory layout (extension/adapters/<site>/<command>.js),
+// registry pattern, and output schema for compatibility with their docs and
+// the future possibility of contributing back a DOM-mode variant upstream.
+//
+// Last reviewed: 2026-05-26.
+// When OpenCLI's adapter commits churn (signal of x.com DOM changes), revisit
+// our selectors. See docs/extension-adapters/upstream-map.md.
 
 (function () {
   'use strict';
