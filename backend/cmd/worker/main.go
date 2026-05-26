@@ -109,14 +109,14 @@ func main() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher)
+	runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
 
 	for range ticker.C {
-		runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher)
+		runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
 	}
 }
 
-func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher) {
+func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string) {
 	if !cycleMu.TryLock() {
 		log.Println("Previous fetch cycle still running, skipping")
 		return
@@ -126,7 +126,7 @@ func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, art
 	fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
 	detectLinkSetCandidates(ctx, articleRepo, contentFetcher)
 	detectLinkSetSuggestions(ctx, articleRepo, contentFetcher)
-	processQueuedChildren(ctx, articleRepo, contentFetcher)
+	processQueuedChildren(ctx, articleRepo, contentFetcher, imageBaseDir)
 	refetchShortContent(ctx, articleRepo, contentFetcher, summarizer)
 	if transcriptFetcher != nil {
 		backfillTranscripts(ctx, articleRepo, transcriptFetcher)
