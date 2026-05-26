@@ -236,9 +236,14 @@ export default function ArticlePage() {
     if (!article) return
     if (scrollRestoredForRef.current === article.id) return
     const saved = progress?.scroll_position ?? 0
-    if (saved <= 0 || saved > 0.9) {
-      // Either no saved position or article was already finished — claim
-      // "done" so we don't keep retrying on every render.
+    // Skip only when: no saved position, OR user already explicitly
+    // marked the article completed. The previous heuristic skipped when
+    // saved > 0.9 too, but with the new bottom-scroll auto-complete
+    // (handleScroll sets is_completed when scroll > 0.95) a saved
+    // position close to 1 with is_completed=false means the user got
+    // most of the way through but didn't finish — that's exactly the
+    // case where they DO want to be restored.
+    if (saved <= 0 || progress?.is_completed) {
       scrollRestoredForRef.current = article.id
       return
     }
@@ -283,6 +288,7 @@ export default function ArticlePage() {
       }
       window.scrollTo(0, max * saved)
       scrollRestoredForRef.current = article.id
+      toast.info(`已恢复上次阅读位置（${Math.round(saved * 100)}%）`)
     }
 
     requestAnimationFrame(attempt)
