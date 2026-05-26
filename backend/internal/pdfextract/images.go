@@ -86,7 +86,12 @@ func extractImages(ctx context.Context, pdfBytes []byte) ([]ImageRef, int, error
 	}
 
 	prefix := filepath.Join(tmpDir, "img")
-	if _, err := runCmd(ctx, "pdfimages", []string{"-all", pdfPath, prefix}, nil); err != nil {
+	// -png (vs -all) forces non-JPEG raster output to PNG. -all preserves
+	// the source codec — fine for PNG/JPEG but academic PDFs frequently
+	// embed JBIG2 (monochrome scans) or JPX (JPEG 2000), neither of which
+	// browsers render. -png converts JBIG2/JPX/PPM → PNG while leaving
+	// embedded JPEG untouched, so the on-disk set is always {png, jpg}.
+	if _, err := runCmd(ctx, "pdfimages", []string{"-png", pdfPath, prefix}, nil); err != nil {
 		return nil, 0, err
 	}
 
