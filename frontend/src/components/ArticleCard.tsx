@@ -1,5 +1,6 @@
 import React from 'react'
 import { Article, ArticleListItem, UserTag } from '../api/client'
+import TweetCard from './TweetCard'
 
 // ArticleCardItem is what the card renders: anything with the lean
 // list-item shape. Both the full Article (detail page) and the
@@ -109,6 +110,36 @@ export default function ArticleCard({
     }
   }
 
+  const handleCardClick = () => {
+    onFocus(idx)
+    reportClick(article.id)
+    onOpen(article.id)
+  }
+
+  // Tweets render as TweetCard. We still need the surrounding card chrome
+  // for exposure tracking, focus outline, read-state opacity, and the
+  // click-to-open handler — TweetCard renders inside that chrome with its
+  // own header/body/footer layout instead of the title + summary row.
+  if (article.kind === 'tweet') {
+    return (
+      <div
+        ref={mergedRef}
+        className="card"
+        data-article-card
+        style={{
+          display: 'block',
+          opacity: isRead ? 0.6 : 1,
+          cursor: 'pointer',
+          outline: isFocused ? '2px solid var(--accent)' : 'none',
+          outlineOffset: -2,
+        }}
+        onClick={handleCardClick}
+      >
+        <TweetCard article={article} compact />
+      </div>
+    )
+  }
+
   return (
     <div
       ref={mergedRef}
@@ -121,11 +152,7 @@ export default function ArticleCard({
         outline: isFocused ? '2px solid var(--accent)' : 'none',
         outlineOffset: -2,
       }}
-      onClick={() => {
-        onFocus(idx)
-        reportClick(article.id)
-        onOpen(article.id)
-      }}
+      onClick={handleCardClick}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         {!isRead && (
