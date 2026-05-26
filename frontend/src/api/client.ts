@@ -168,6 +168,7 @@ export interface ArticleListItem {
   parent_title?: string
   is_fallback?: boolean
   is_link_set?: boolean
+  kind?: 'article' | 'tweet' | 'tweet_thread'
 }
 
 export interface Article {
@@ -199,6 +200,7 @@ export interface Article {
   prerank_score?: number | null
   editor_note?: string
   manual_tags: UserTag[]
+  kind?: 'article' | 'tweet' | 'tweet_thread'
 }
 
 export interface CandidateView {
