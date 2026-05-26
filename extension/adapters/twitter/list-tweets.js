@@ -1,20 +1,24 @@
 // extension/adapters/twitter/list-tweets.js
 //
-// Portions of this file derive from OpenCLI (https://github.com/jackwener/opencli)
-//   commit c730a02, file clis/twitter/list-tweets.js,
-//   licensed under Apache-2.0. See extension/adapters/THIRD_PARTY_NOTICES.md.
-// Last reviewed: 2026-05-26
+// Independent DOM scraper for x.com's list timeline. Reads rendered DOM in
+// the user's logged-in Chrome tab and emits TweetItem records matching the
+// shape produced by OpenCLI's GraphQL-based adapter
+// (https://github.com/jackwener/opencli, clis/twitter/list-tweets.js).
 //
-// Note: OpenCLI's twitter/list-tweets.js is a `Strategy.COOKIE` adapter that
-// fetches `/i/api/graphql/<queryId>/ListLatestTweetsTimeline` and parses the
-// GraphQL JSON response. That pattern is infeasible in an MV3 content script
-// (we don't have the Bearer token, and intercepting page fetches requires
-// design we haven't done yet). For rss-pal R4 we DOM-scrape the rendered
-// timeline instead. The TweetItem schema we emit, the per-tweet fields we
-// care about, and the engagement-counter conventions are taken from OpenCLI's
-// extractTimelineTweet().
+// OpenCLI's adapter calls Twitter's /i/api/graphql/<queryId>/ListLatestTweetsTimeline
+// directly with an authenticated ct0 cookie + Bearer token (`Strategy.COOKIE`).
+// That approach doesn't translate to MV3 content scripts, which can read the
+// rendered DOM but cannot recover the Bearer token without main-world script
+// injection. So this adapter independently extracts the same TweetItem
+// fields from rendered article elements instead.
 //
-// When OpenCLI updates this file, see docs/extension-adapters/upstream-map.md.
+// We follow OpenCLI's adapter directory layout (extension/adapters/<site>/<command>.js),
+// registry pattern, and output schema for compatibility with their docs and
+// the future possibility of contributing back a DOM-mode variant upstream.
+//
+// Last reviewed: 2026-05-26.
+// When OpenCLI's adapter commits churn (signal of x.com DOM changes), revisit
+// our selectors. See docs/extension-adapters/upstream-map.md.
 
 (function () {
   'use strict';
