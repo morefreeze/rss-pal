@@ -164,8 +164,29 @@
   const adapter = window.__rssPalAdapters.findFor(location);
   if (!adapter || !adapter.passive) return;
 
+  // Map adapter.sourceKind → options toggle key. Defaults: list/user/bookmarks ON.
+  // Note: twitter:home has no adapter yet; the twHomeEnabled toggle is inert
+  // until a home adapter registers itself (it'll wire up automatically).
+  const TOGGLE_KEY_BY_KIND = {
+    'twitter:list': 'twListEnabled',
+    'twitter:user': 'twUserEnabled',
+    'twitter:bookmarks': 'twBookmarksEnabled',
+    'twitter:home': 'twHomeEnabled',
+  };
+
   async function runExtractAndQueue() {
     try {
+      // Honor per-source auto-extract toggle from options page.
+      const toggleKey = TOGGLE_KEY_BY_KIND[adapter.sourceKind];
+      if (toggleKey) {
+        const data = await chrome.storage.sync.get([toggleKey]);
+        // Home defaults OFF; everything else defaults ON.
+        if (toggleKey === 'twHomeEnabled') {
+          if (!data[toggleKey]) return;
+        } else {
+          if (data[toggleKey] === false) return;
+        }
+      }
       const result = adapter.extract(document);
       if (!result || !result.items || !result.items.length) return;
       const cfg = await chrome.storage.sync.get(['serverUrl', 'token']);

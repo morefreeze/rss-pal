@@ -37,6 +37,30 @@
     if (data.token) tokenInput.value = data.token;
   }
 
+  // Per-source auto-extract toggles. Defaults: list/user/bookmarks ON, home OFF.
+  const TOGGLE_KEYS = ['twListEnabled', 'twUserEnabled', 'twBookmarksEnabled', 'twHomeEnabled'];
+
+  async function loadToggles() {
+    const data = await chrome.storage.sync.get(TOGGLE_KEYS);
+    for (const k of TOGGLE_KEYS) {
+      const cb = document.getElementById(k);
+      if (!cb) continue;
+      // default true for list/user/bookmarks; default false for home
+      if (k === 'twHomeEnabled') {
+        cb.checked = !!data[k];
+      } else {
+        cb.checked = data[k] !== false;
+      }
+      cb.addEventListener('change', async () => {
+        try {
+          await chrome.storage.sync.set({ [k]: cb.checked });
+        } catch (err) {
+          showStatus('error', '❌ 保存失败：' + err.message);
+        }
+      });
+    }
+  }
+
   // Save settings
   saveBtn.addEventListener('click', async () => {
     hideStatus();
@@ -99,4 +123,5 @@
   });
 
   loadSettings();
+  loadToggles();
 })();
