@@ -296,7 +296,11 @@ func processPDFChild(
 		content = content[:50000] + "..."
 	}
 	wc, rm := rss.ComputeMetrics(content)
-	if err := articleRepo.UpdateContent(c.ID, content, wc, rm); err != nil {
+	// UpdateContentAndMarkReady transitions processing_state to 'ready'
+	// atomically with the content write so the user doesn't see the
+	// 处理中 banner while waiting for backfillSummaries to flip the state
+	// (which is what plain UpdateContent would force).
+	if err := articleRepo.UpdateContentAndMarkReady(c.ID, content, wc, rm); err != nil {
 		return fmt.Errorf("update content: %w", err)
 	}
 	if r.Title != "" && r.Title != c.Title {
