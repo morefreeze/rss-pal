@@ -132,9 +132,25 @@ export default function ArticleCard({
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />
         )}
         <div style={{ flex: 1 }}>
-          <div className={isRead ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
+          <div className={isRead ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
             <span>{article.title}</span>
+            {article.processing_state === 'processing' && (
+              <span
+                style={{ marginLeft: 8, fontSize: '0.85em', color: 'var(--fg-muted)' }}
+                title="PDF OCR 处理中"
+              >
+                ⏳ 处理中
+              </span>
+            )}
+            {article.processing_state === 'failed' && (
+              <span
+                style={{ marginLeft: 8, fontSize: '0.85em', color: '#c33' }}
+                title={article.processing_error || 'PDF 处理失败'}
+              >
+                ❌ 处理失败
+              </span>
+            )}
           </div>
           {article.summary_brief && (
             <div className="text-muted text-sm mt-1">

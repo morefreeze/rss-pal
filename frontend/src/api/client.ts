@@ -16,6 +16,12 @@ export const api = axios.create({
 
 // JWT interceptor
 api.interceptors.request.use(config => {
+  // Don't clobber a per-request Authorization (e.g. bookmarklet-token
+  // calls like capturePDFURL set their own Bearer that the JWT layer
+  // should not override).
+  if (config.headers?.Authorization) {
+    return config
+  }
   const token = localStorage.getItem('token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -41,9 +47,17 @@ api.interceptors.response.use(
     }
 
     if (err.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      window.location.href = '/login'
+      // Bookmarklet-token endpoints authenticate with a per-request
+      // Bearer token, NOT the JWT in localStorage. A 401 from one of
+      // these calls means the bookmarklet token is bad/expired — it
+      // does NOT mean the user's session is invalid, so don't blow
+      // away localStorage or redirect to /login.
+      const url = err.config?.url || ''
+      if (!url.startsWith('/bookmarklet/')) {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(err)
   }
@@ -145,6 +159,7 @@ export interface ArticleListItem {
   link_set_suggested?: boolean | null  // worker thinks article is a link list, awaiting user confirmation
   parent_article_id?: number | null
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
+  processing_error?: string
   prerank_score?: number | null
   editor_note?: string
   manual_tags: UserTag[]
@@ -180,6 +195,7 @@ export interface Article {
   parent_title?: string  // populated only by GET /articles/recommended/link_set
   is_fallback?: boolean  // true = surfaced by quality-fallback (may be already-read)
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
+  processing_error?: string
   prerank_score?: number | null
   editor_note?: string
   manual_tags: UserTag[]
@@ -315,6 +331,40 @@ export const previewFeed = (url: string) =>
 
 export const addFeed = (url: string, feedType?: string, expandLinks: boolean = false) =>
   api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss', expand_links: expandLinks }).then(res => res.data)
+
+// PDF capture — server-side fetch of a PDF URL routed through the
+// bookmarklet capture pipeline. Auth is the bookmarklet token (NOT a
+// JWT), passed explicitly so the existing JWT interceptor doesn't
+// override it. Response status maps directly to the worker state:
+//   created    — brand new article, fast extract succeeded
+//   updated    — existing article re-extracted
+//   processing — sync extract found no text, OCR queued
+export interface PDFCaptureResponse {
+  status: 'created' | 'updated' | 'processing'
+  article_id: number
+  message: string
+}
+
+export async function capturePDFURL(url: string, bookmarkletToken: string): Promise<PDFCaptureResponse> {
+  const { data } = await api.post<PDFCaptureResponse>(
+    '/bookmarklet/capture-pdf-url',
+    { url },
+    { headers: { Authorization: `Bearer ${bookmarkletToken}` } },
+  )
+  return data
+}
+
+// getMyBookmarkletToken returns the current user's bookmarklet token or
+// throws if the user hasn't generated one. Thin wrapper over the
+// existing getBookmarkletToken helper that turns the "no token yet"
+// null into a thrown error so the caller can surface a friendly hint.
+export async function getMyBookmarkletToken(): Promise<string> {
+  const token = await getBookmarkletToken()
+  if (!token) {
+    throw new Error('请先在「设置 → 一键收藏书签」处生成 bookmarklet token')
+  }
+  return token
+}
 
 export const deleteFeed = (id: number) =>
   api.delete(`/feeds/${id}`)

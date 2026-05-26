@@ -15,7 +15,15 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o worker ./cmd/worker
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates tzdata
+# KEEP IN SYNC WITH backend/Dockerfile runtime packages.
+# poppler-utils + tesseract are required by cmd/worker/pdf_ocr.go for
+# scanned-PDF OCR; without them every queued OCR article fails with
+# "exec: pdftoppm: not found" and gets stranded in 'failed' state.
+RUN apk --no-cache add ca-certificates tzdata \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-data-eng \
+    tesseract-ocr-data-chi_sim
 
 WORKDIR /app
 

@@ -1,7 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, Feed, FeedPreview } from '../api/client'
+import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
+
+// isPDFURL returns true when the user-supplied URL looks like a PDF.
+// Detection is intentionally URL-only (no HEAD probe) — the backend
+// validates the content type after fetching.
+function isPDFURL(u: string): boolean {
+  const cleaned = u.trim().split('?')[0].split('#')[0].toLowerCase()
+  return cleaned.endsWith('.pdf')
+}
 
 const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; url: string; desc: string }[] }[] = [
   {
@@ -120,8 +128,37 @@ export default function FeedListPage() {
     }
   }
 
+  const handleSubmitPDF = async (rawUrl: string) => {
+    const actualUrl = normalizeURL(rawUrl)
+    if (!actualUrl) return
+    setAdding(true)
+    setAddSuccess('')
+    try {
+      const token = await getMyBookmarkletToken()
+      const res = await capturePDFURL(actualUrl, token)
+      if (res.status === 'processing') {
+        toast.info(`⏳ 已入库，OCR 处理中（article ${res.article_id}）`)
+      } else {
+        toast.success(`✅ ${res.message}`)
+      }
+      setNewUrl('')
+      setPreview(null)
+      setPreviewError('')
+    } catch (e: any) {
+      toast.error(`❌ ${e?.response?.data?.error || e?.message || '抓取失败'}`)
+    } finally {
+      setAdding(false)
+    }
+  }
+
   const handlePreview = async (e: React.FormEvent) => {
     e.preventDefault()
+    // PDF URLs skip the RSS-preview round-trip and go straight to the
+    // bookmarklet PDF-capture pipeline (server fetches + extracts).
+    if (isPDFURL(newUrl)) {
+      await handleSubmitPDF(newUrl)
+      return
+    }
     doPreview(newUrl)
   }
 
@@ -274,16 +311,35 @@ export default function FeedListPage() {
         <form onSubmit={handlePreview} className="flex gap-2 mb-2">
           <input
             type="text"
-            placeholder="输入 RSS 地址或网站 URL"
+            placeholder="输入 RSS 地址、网站 URL 或 PDF 链接"
             value={newUrl}
             onChange={e => { setNewUrl(e.target.value); setPreview(null); setPreviewError('') }}
             style={{ flex: 1 }}
             disabled={previewing || adding}
           />
           <button type="submit" disabled={previewing || adding || !newUrl.trim()}>
-            {previewing ? previewStatus || '获取中...' : '预览'}
+            {isPDFURL(newUrl)
+              ? (adding ? '抓取中...' : '抓取 PDF')
+              : (previewing ? previewStatus || '获取中...' : '预览')}
           </button>
         </form>
+
+        {/* PDF detection hint — shown instead of preview/error for .pdf URLs */}
+        {isPDFURL(newUrl) && !adding && (
+          <div
+            style={{
+              border: '1px solid #fde68a',
+              background: '#fffbeb',
+              borderRadius: 6,
+              padding: '8px 12px',
+              fontSize: 14,
+              color: '#92400e',
+              marginBottom: 8,
+            }}
+          >
+            📄 检测到 PDF 链接 — 提交后将抓取为单篇网摘（无需预览）
+          </div>
+        )}
 
         {/* Preview error */}
         {previewError && (
