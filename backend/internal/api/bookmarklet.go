@@ -42,6 +42,17 @@ func countMarkdownImages(s string) int {
 	return len(markdownImageRe.FindAllStringIndex(s, -1))
 }
 
+// articleKind returns the model.Article.Kind value to set on a freshly
+// captured article. Twitter / X captures get "tweet" so the frontend can
+// render them with the TweetCard component; everything else gets the
+// default "article".
+func articleKind(wasTwitter bool) string {
+	if wasTwitter {
+		return "tweet"
+	}
+	return "article"
+}
+
 // shouldPromptDuplicate returns true when a bookmarklet capture for an
 // existing URL should pause and ask the user (rather than auto-overwriting).
 // Pure function so it can be unit-tested without a DB. Triggers a prompt on:
@@ -270,6 +281,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		Content:     content,
 		PublishedAt: publishedAt, // tweet's original time for Twitter captures, nil otherwise
 		IsClip:      true,
+		Kind:        articleKind(wasTwitter),
 	}
 	article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 	if err := h.articleRepo.Create(article); err != nil {
