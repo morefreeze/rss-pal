@@ -98,5 +98,22 @@ services:
     depends_on:
       - api
 
+  status-monitor:
+    build:
+      context: ./status-monitor
+      dockerfile: Dockerfile
+    environment:
+      MONITOR_DOMAIN: https://freezemacbook-pro.tailf22f5.ts.net
+      LOCAL_URL: http://frontend:80
+      CHECK_INTERVAL: 60
+      MONITOR_PORT: 8090
+    ports:
+      - "8090:8090"
+    volumes:
+      - status_data:/data
+      - ./scripts/domain-checks.db:/data/domain.db
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  status_data:
