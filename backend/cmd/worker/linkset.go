@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/pdfextract"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 )
@@ -144,10 +148,16 @@ func detectLinkSetSuggestions(
 // processQueuedChildren handles processing_state='processing' children:
 // fetches content. The existing backfillSummaries pass then picks them up
 // and transitions to 'ready' via UpdateSummary.
+//
+// imageBaseDir is the same cfg.Backup.Dir used by the PDF capture flow —
+// when a child URL is a PDF we route it through pdfextract instead of
+// the HTML scraper, writing image rasters to the same article_images
+// path layout so the image-serve endpoint finds them.
 func processQueuedChildren(
 	ctx context.Context,
 	articleRepo *repository.ArticleRepository,
 	contentFetcher *rss.ContentFetcher,
+	imageBaseDir string,
 ) {
 	children, err := articleRepo.GetProcessingChildren(maxLinkSetChildrenPerCycle)
 	if err != nil {
@@ -173,6 +183,27 @@ func processQueuedChildren(
 
 			cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
+
+			// PDF children: route through pdfextract instead of goquery.
+			// Same code path the bookmarklet PDF capture uses, minus the
+			// async OCR queue — for scanned PDFs we mark failed with a
+			// nudge to use the PDF entry directly (where the worker can
+			// pick it up via GetPDFOCRPending).
+			if looksLikePDFURL(c.URL) {
+				if err := processPDFChild(cctx, articleRepo, c, imageBaseDir); err != nil {
+					log.Printf("link_set: child %d (%s) PDF process failed: %v", c.ID, c.URL, err)
+					if e := articleRepo.IncrementRefetchAttempts(c.ID); e != nil {
+						log.Printf("link_set: increment refetch_attempts %d: %v", c.ID, e)
+					}
+					if e := articleRepo.MarkFailedAfterRetries(c.ID, 3); e != nil {
+						log.Printf("link_set: mark failed %d: %v", c.ID, e)
+					}
+					atomic.AddInt64(&failed, 1)
+					return
+				}
+				atomic.AddInt64(&success, 1)
+				return
+			}
 
 			content, ferr := contentFetcher.FetchContent(cctx, c.URL)
 			if ferr != nil || content == "" {
@@ -216,4 +247,62 @@ func processQueuedChildren(
 	}
 	wg.Wait()
 	log.Printf("link_set: queued children pass done — %d ok, %d failed", success, failed)
+}
+
+// looksLikePDFURL returns true when the URL path ends in .pdf (case-
+// insensitive, ignoring query/fragment). Conservative — we'd rather
+// miss a Content-Type-only PDF and fall through to FetchContent than
+// route an HTML article through pdfextract.
+func looksLikePDFURL(u string) bool {
+	if u == "" {
+		return false
+	}
+	p := strings.ToLower(strings.SplitN(strings.SplitN(u, "?", 2)[0], "#", 2)[0])
+	return strings.HasSuffix(p, ".pdf")
+}
+
+// processPDFChild handles a link_set child whose URL is a PDF.
+// Mirrors the sync fast-path of processPDFCapture: fetch, ExtractFast,
+// write images, BuildMarkdown, UpdateContent. Returns an error on any
+// step; caller increments refetch + marks failed after retries.
+//
+// Scanned PDFs (ErrNoText) intentionally fail here rather than being
+// queued for OCR — the link_set worker isn't the right place to manage
+// the OCR pipeline. The user can re-clip the URL via the PDF entry to
+// get it into GetPDFOCRPending.
+func processPDFChild(
+	ctx context.Context,
+	articleRepo *repository.ArticleRepository,
+	c *model.Article,
+	imageBaseDir string,
+) error {
+	pdfBytes, err := fetchPDFBytes(ctx, c.URL)
+	if err != nil {
+		return fmt.Errorf("download pdf: %w", err)
+	}
+	r, err := pdfextract.ExtractFast(ctx, pdfBytes)
+	if err != nil {
+		if errors.Is(err, pdfextract.ErrNoText) {
+			return errors.New("PDF appears to be a scan with no text layer; re-clip the URL via the PDF entry to run OCR")
+		}
+		return fmt.Errorf("extract: %w", err)
+	}
+	if err := pdfextract.WriteImages(imageBaseDir, c.ID, collectImagesFromPages(r.Pages)); err != nil {
+		log.Printf("link_set: pdf child %d write images: %v", c.ID, err)
+	}
+	pdfextract.BuildMarkdown(&r, c.ID)
+	content := r.Markdown
+	if len(content) > 50000 {
+		content = content[:50000] + "..."
+	}
+	wc, rm := rss.ComputeMetrics(content)
+	if err := articleRepo.UpdateContent(c.ID, content, wc, rm); err != nil {
+		return fmt.Errorf("update content: %w", err)
+	}
+	if r.Title != "" && r.Title != c.Title {
+		if err := articleRepo.UpdateTitle(c.ID, r.Title); err != nil {
+			log.Printf("link_set: pdf child %d update title: %v", c.ID, err)
+		}
+	}
+	return nil
 }
