@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -185,9 +186,29 @@ func processQueuedChildren(
 				atomic.AddInt64(&failed, 1)
 				return
 			}
+			// PDFs and other binaries can ship as the "content" of a URL
+			// (link_set's ContentFetcher doesn't enforce text/html). NUL
+			// bytes inside violate Postgres TEXT encoding and make
+			// UpdateContent fail forever. Strip NULs so the write
+			// succeeds; if the result is still mostly binary that's a
+			// pre-existing scrape-quality issue, not a hard failure.
+			if strings.ContainsRune(content, '\x00') {
+				content = strings.ReplaceAll(content, "\x00", "")
+			}
 			wc, rm := rss.ComputeMetrics(content)
 			if e := articleRepo.UpdateContent(c.ID, content, wc, rm); e != nil {
 				log.Printf("link_set: save content %d: %v", c.ID, e)
+				// Treat persist failure the same as fetch failure so the
+				// worker doesn't loop forever on a stuck row. Previously
+				// this branch only logged and returned, keeping the row
+				// in processing_state='processing' indefinitely.
+				if ie := articleRepo.IncrementRefetchAttempts(c.ID); ie != nil {
+					log.Printf("link_set: increment refetch_attempts %d: %v", c.ID, ie)
+				}
+				if me := articleRepo.MarkFailedAfterRetries(c.ID, 3); me != nil {
+					log.Printf("link_set: mark failed %d: %v", c.ID, me)
+				}
+				atomic.AddInt64(&failed, 1)
 				return
 			}
 			atomic.AddInt64(&success, 1)
