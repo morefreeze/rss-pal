@@ -884,3 +884,34 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
   .reading-article { padding: 8px 16px 96px; }
   .reading-toolbar { padding: 12px 16px; }
 }
+
+/* PDF-clip 2-column rendering. Activated by ArticlePage when the
+   article URL ends with .pdf and is_clip=true. Images and the
+   "## 第 N 页" page-section headings span both columns so the visual
+   flow matches the source paper; everything else (paragraphs, lists,
+   math, code blocks) flows within the active column.
+   Trade-offs: narrow columns occasionally clip wide tables / very
+   long inline-math; on mobile we collapse to single column. */
+.pdf-clip-columns {
+  column-count: 2;
+  column-gap: 2rem;
+  column-rule: 1px solid var(--border, #e5e7eb);
+}
+.pdf-clip-columns h2,
+.pdf-clip-columns img,
+.pdf-clip-columns figure,
+.pdf-clip-columns pre,
+.pdf-clip-columns table {
+  column-span: all;
+  break-inside: avoid;
+}
+.pdf-clip-columns p,
+.pdf-clip-columns blockquote,
+.pdf-clip-columns ul,
+.pdf-clip-columns ol {
+  break-inside: avoid-column;
+}
+
+@media (max-width: 900px) {
+  .pdf-clip-columns { column-count: 1; column-rule: none; }
+}

@@ -27,6 +27,16 @@ import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 
+// isPDFClipArticle returns true for clipped PDF articles (any of the three
+// PDF capture entry points), driving the two-column reading layout. Anchored
+// to URL suffix because pdfextract URLs always end in .pdf (server-side
+// fetched, multipart-uploaded with original URL, or file://path/foo.pdf).
+function isPDFClipArticle(article: { is_clip?: boolean; url?: string }): boolean {
+  if (!article.is_clip || !article.url) return false
+  const u = article.url.split('?')[0].split('#')[0].toLowerCase()
+  return u.endsWith('.pdf')
+}
+
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -1145,7 +1155,10 @@ export default function ArticlePage() {
               ))}
             </div>
             {article.content ? (
-              <div style={{ lineHeight: 1.8, fontSize: 15 }}>
+              <div
+                className={isPDFClipArticle(article) ? 'pdf-clip-columns' : undefined}
+                style={{ lineHeight: 1.8, fontSize: 15 }}
+              >
                 <CodeWrapContext.Provider value={reader.codeWrap}>
                   <MarkdownArticle source={article.content} />
                 </CodeWrapContext.Provider>
