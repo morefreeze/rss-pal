@@ -72,6 +72,7 @@ func main() {
 	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
 	userTagHandler := api.NewUserTagHandler(userTagRepo, articleUserTagRepo, tagSuggestRepo)
 	clipHandler := api.NewClipHandler(clipRepo, articleUserTagRepo)
+	extensionIngestHandler := api.NewExtensionIngestHandler(feedRepo, articleRepo)
 
 	router := gin.Default()
 	// Compress JSON/text responses for clients that opt in. Defensive
@@ -238,6 +239,10 @@ func main() {
 		apiGroup.POST("/settings/polish-prompt", settingsHandler.PolishPrompt)
 		apiGroup.GET("/settings/bookmarklet-token", settingsHandler.GetBookmarkletToken)
 		apiGroup.POST("/settings/bookmarklet-token/regenerate", settingsHandler.RegenerateBookmarkletToken)
+
+		// Browser extension ingest (JWT-protected; batched per-source items
+		// from adapters like twitter:list / twitter:user / twitter:bookmarks).
+		apiGroup.POST("/extension/ingest", extensionIngestHandler.Ingest)
 
 		// Admin: subscription backup + restore (host-mounted /backups dir)
 		apiGroup.GET("/admin/backups", adminHandler.ListBackups)
