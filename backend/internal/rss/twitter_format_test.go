@@ -228,3 +228,83 @@ func TestBuildTweetTitle_ImageOnlyDisplayNameFallback(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestBuildTweetTitle_TextOnly(t *testing.T) {
+	cap := &TweetCapture{
+		TextMarkdown: "Hello world from a tweet",
+	}
+	got := BuildTweetTitle(cap)
+	want := "Hello world from a tweet"
+	if got != want {
+		t.Errorf("BuildTweetTitle = %q, want %q", got, want)
+	}
+}
+
+func TestBuildTweetTitle_Truncates60Runes(t *testing.T) {
+	cap := &TweetCapture{
+		TextMarkdown: strings.Repeat("a", 100),
+	}
+	got := BuildTweetTitle(cap)
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("expected trailing ellipsis, got %q", got)
+	}
+	// 60 'a' runes + '…' = 61 runes
+	if got != strings.Repeat("a", 60)+"…" {
+		t.Errorf("BuildTweetTitle = %q (len=%d)", got, len([]rune(got)))
+	}
+}
+
+func TestBuildTweetTitle_NewlinesCollapsed(t *testing.T) {
+	cap := &TweetCapture{
+		TextMarkdown: "line one\nline two\n\nline four",
+	}
+	got := BuildTweetTitle(cap)
+	if strings.Contains(got, "\n") {
+		t.Errorf("BuildTweetTitle should not contain newlines: %q", got)
+	}
+}
+
+func TestBuildTweetTitle_ImageOnlyFallsBackToHandle(t *testing.T) {
+	cap := &TweetCapture{
+		Author:    "karpathy",
+		ImageURLs: []string{"https://pbs.twimg.com/media/abc.jpg"},
+	}
+	got := BuildTweetTitle(cap)
+	if !strings.Contains(got, "karpathy") {
+		t.Errorf("BuildTweetTitle = %q, expected to contain handle", got)
+	}
+}
+
+func TestBuildTweetContent_HasByline(t *testing.T) {
+	publishedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	cap := &TweetCapture{
+		Author:       "karpathy",
+		DisplayName:  "Andrej Karpathy",
+		PublishedAt:  publishedAt,
+		TextMarkdown: "hello",
+	}
+	got := BuildTweetContent(cap)
+	firstLine := strings.SplitN(got, "\n", 2)[0]
+	if !strings.HasPrefix(firstLine, "> ") {
+		t.Errorf("first line should be a markdown blockquote, got %q", firstLine)
+	}
+	if !strings.Contains(firstLine, "@karpathy") {
+		t.Errorf("byline missing handle: %q", firstLine)
+	}
+}
+
+func TestBuildTweetContent_IncludesImagesAndQuote(t *testing.T) {
+	cap := &TweetCapture{
+		Author:       "x",
+		TextMarkdown: "body",
+		ImageURLs:    []string{"https://pbs.twimg.com/media/a.jpg"},
+		Quote:        &Quote{URL: "https://x.com/y/status/123"},
+	}
+	got := BuildTweetContent(cap)
+	if !strings.Contains(got, "![](https://pbs.twimg.com/media/a.jpg)") {
+		t.Errorf("missing image markdown in: %s", got)
+	}
+	if !strings.Contains(got, "https://x.com/y/status/123") {
+		t.Errorf("missing quote URL in: %s", got)
+	}
+}
