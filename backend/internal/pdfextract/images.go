@@ -144,6 +144,15 @@ func extractImages(ctx context.Context, pdfBytes []byte) ([]ImageRef, int, error
 			pageNum = pagePerEmit[emit]
 		}
 		width, height := decodeDimensions(data)
+		if isLikelyPageScan(width, height) {
+			// Scanned-PDF style: every page is a 2475x3300+ raster
+			// "background" with the OCR text laid over it. pdfimages
+			// extracts these as full-page images that are not figures
+			// the user wants in the article body. Drop them but DO
+			// count them toward totalOriginal so the truncation
+			// footer reports the real source-image count.
+			continue
+		}
 		kept = append(kept, ImageRef{
 			Idx:     len(kept),
 			PageNum: pageNum,
@@ -156,6 +165,21 @@ func extractImages(ctx context.Context, pdfBytes []byte) ([]ImageRef, int, error
 	}
 
 	return kept, totalOriginal, nil
+}
+
+// isLikelyPageScan flags images that are almost certainly full-page
+// background scans (common in OCR'd PDFs from gwern.net etc.) rather
+// than real figures. Heuristic: ≥ 4 MP total pixel area AND both
+// dimensions ≥ 1500 px. Typical 300 dpi letter/A4 page scans land at
+// 2475×3300 ≈ 8 MP; the largest legitimate embedded figures in
+// academic PDFs are rarely > 4 MP with both dims that large.
+func isLikelyPageScan(width, height int) bool {
+	const minDim = 1500
+	const minArea = 4_000_000
+	if width < minDim || height < minDim {
+		return false
+	}
+	return width*height >= minArea
 }
 
 // decodeDimensions returns width/height from the image header. Returns
