@@ -369,7 +369,16 @@ func extractPublishedAt(focal *goquery.Selection) time.Time {
 // Each URL has its `name=...` query parameter rewritten to `name=large` to
 // pull the highest-quality variant Twitter serves anonymously.
 func extractTweetImages(focal *goquery.Selection) []string {
+	seen := map[string]bool{}
 	var urls []string
+	add := func(src string) {
+		if src == "" || seen[src] {
+			return
+		}
+		seen[src] = true
+		urls = append(urls, src)
+	}
+
 	focal.Find(`[data-testid="tweetPhoto"] img[src]`).Each(func(_ int, img *goquery.Selection) {
 		if hasAncestor(img, focal, `div[role="link"]`) {
 			return
@@ -377,10 +386,17 @@ func extractTweetImages(focal *goquery.Selection) []string {
 		if hasAncestor(img, focal, `[data-testid="longformRichTextComponent"]`) {
 			return
 		}
-		if src := normalizeFocalImageSrc(img); src != "" {
-			urls = append(urls, src)
-		}
+		add(normalizeFocalImageSrc(img))
 	})
+
+	// X Article (longform) cover image. Rendered inside a div[role="link"]
+	// because the whole card is the "tap to open article" entry, so the
+	// focal-photo rule above excludes it. We still want it — it's media
+	// the focal tweet's author posted, not a quoted-tweet thumbnail.
+	focal.Find(`[data-testid="article-cover-image"] img[src]`).Each(func(_ int, img *goquery.Selection) {
+		add(normalizeFocalImageSrc(img))
+	})
+
 	return urls
 }
 
