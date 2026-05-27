@@ -54,14 +54,28 @@ function articleContent(a: Article | ArticleListItem): string {
   return a.summary_brief || ''
 }
 
+// initialAvatar generates a deterministic CSS-only circular avatar
+// (first character of handle/displayName + a stable HSL background derived
+// from the handle hash). No network calls, no external service to flake.
+function initialAvatar(handle: string, displayName: string): { char: string; bg: string } {
+  const source = (displayName || handle || '?').trim()
+  const char = Array.from(source)[0]?.toUpperCase() || '?'
+  // djb2-ish hash on the handle so each user gets a stable color
+  let h = 5381
+  const seed = handle || displayName || ''
+  for (let i = 0; i < seed.length; i++) h = ((h << 5) + h + seed.charCodeAt(i)) | 0
+  const hue = Math.abs(h) % 360
+  return { char, bg: `hsl(${hue}, 55%, 45%)` }
+}
+
 export default function TweetCard({ article, compact = false }: Props) {
   const { handle, displayName, date, body } = parseByline(articleContent(article))
-  const avatarUrl = handle ? `https://unavatar.io/twitter/${encodeURIComponent(handle)}` : ''
+  const avatar = initialAvatar(handle, displayName)
 
   return (
     <div className={`tweet-card${compact ? ' tweet-card-compact' : ''}`}>
       <header className="tweet-card-header">
-        {avatarUrl && <img src={avatarUrl} alt="" className="tweet-card-avatar" />}
+        <div className="tweet-card-avatar" style={{ background: avatar.bg }}>{avatar.char}</div>
         <div className="tweet-card-meta">
           {displayName && <span className="tweet-card-name">{displayName}</span>}
           {handle && <span className="tweet-card-handle">@{handle}</span>}
