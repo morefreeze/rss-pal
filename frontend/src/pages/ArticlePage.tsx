@@ -1,16 +1,19 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
-  confirmLinkSetSuggestion, hideArticle, unhideArticle,
-  Article, ReadingProgress, SummaryTemplate
+  confirmLinkSetSuggestion, hideArticle, unhideArticle, getArticleCandidates,
+  Article, ReadingProgress, SummaryTemplate, CandidateView
 } from '../api/client'
 import { toast } from '../utils/toast'
 import { LinkSetChildren } from '../components/LinkSetChildren'
-import { BatchFetchModal } from '../components/BatchFetchModal'
+import { BatchFetchConfirmDialog } from '../components/BatchFetchConfirmDialog'
+import { LinkSetContext, type LinkSetContextValue } from '../components/LinkSetContext'
+import { normalizeURL } from '../utils/url'
+import { loadSavedURLs, saveSelectedURLs } from '../utils/linkSetSelection'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
 import TweetCard from '../components/TweetCard'
@@ -174,8 +177,93 @@ export default function ArticlePage() {
   // LinkSet children
   const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(null)
 
-  // Batch fetch modal
-  const [batchModalOpen, setBatchModalOpen] = useState(false)
+  // Link_set inline marking flow
+  const [candidates, setCandidates] = useState<CandidateView[] | null>(null)
+  const [markedURLs, setMarkedURLs] = useState<Set<string>>(new Set())
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const articleURL = article?.url
+  const normalize = useCallback(
+    (href: string) => normalizeURL(href, articleURL),
+    [articleURL],
+  )
+
+  const candidateURLSet = useMemo(() => {
+    const s = new Set<string>()
+    for (const c of candidates ?? []) s.add(normalize(c.url))
+    return s
+  }, [candidates, normalize])
+
+  const alreadyFetchedURLSet = useMemo(() => {
+    const s = new Set<string>()
+    for (const c of candidates ?? []) {
+      if (c.already_fetched) s.add(normalize(c.url))
+    }
+    return s
+  }, [candidates, normalize])
+
+  const toggleMark = useCallback((url: string) => {
+    setMarkedURLs((prev) => {
+      const next = new Set(prev)
+      if (next.has(url)) next.delete(url)
+      else next.add(url)
+      return next
+    })
+  }, [])
+
+  const linkSetCtxValue = useMemo<LinkSetContextValue | null>(() => {
+    if (!article?.links_extendable || !candidates) return null
+    return {
+      candidateURLs: candidateURLSet,
+      markedURLs,
+      alreadyFetchedURLs: alreadyFetchedURLSet,
+      normalize,
+      onToggleMark: toggleMark,
+    }
+  }, [article?.links_extendable, candidates, candidateURLSet, markedURLs, alreadyFetchedURLSet, normalize, toggleMark])
+
+  // Fetch candidate list whenever the article enters link_set mode.
+  useEffect(() => {
+    if (!article?.id || !article?.links_extendable) {
+      setCandidates(null)
+      setMarkedURLs(new Set())
+      return
+    }
+    let cancelled = false
+    const articleId = article.id
+    const baseURL = article.url
+    getArticleCandidates(articleId)
+      .then((cands) => {
+        if (cancelled) return
+        setCandidates(cands)
+        // Restore inline marks from localStorage. Normalize both sides so a
+        // relative-href mark from a previous session still matches the
+        // absolute candidate URL.
+        const saved = loadSavedURLs(articleId)
+        if (saved.length === 0) {
+          setMarkedURLs(new Set())
+          return
+        }
+        const candSet = new Set<string>()
+        for (const c of cands) candSet.add(normalizeURL(c.url, baseURL))
+        const restored = new Set<string>()
+        for (const u of saved) {
+          const n = normalizeURL(u, baseURL)
+          if (candSet.has(n)) restored.add(n)
+        }
+        setMarkedURLs(restored)
+      })
+      .catch((e) => {
+        console.warn('getArticleCandidates failed', e)
+      })
+    return () => { cancelled = true }
+  }, [article?.id, article?.links_extendable, article?.url])
+
+  // Persist marks to localStorage on every change.
+  useEffect(() => {
+    if (!article?.id) return
+    saveSelectedURLs(article.id, Array.from(markedURLs))
+  }, [markedURLs, article?.id])
 
   const loadArticle = async () => {
     if (!id) return
@@ -1215,7 +1303,9 @@ export default function ArticlePage() {
                   style={{ lineHeight: 1.8, fontSize: 15 }}
                 >
                   <CodeWrapContext.Provider value={reader.codeWrap}>
-                    <MarkdownArticle source={article.content} />
+                    <LinkSetContext.Provider value={linkSetCtxValue}>
+                      <MarkdownArticle source={article.content} />
+                    </LinkSetContext.Provider>
                   </CodeWrapContext.Provider>
                 </div>
               )
@@ -1271,7 +1361,7 @@ export default function ArticlePage() {
           label="批量抓取"
           variant="primary"
           title="检测到多个可抓取链接"
-          onActivate={() => setBatchModalOpen(true)}
+          onActivate={() => setConfirmOpen(true)}
         />
       )}
       {article.links_extendable !== true && article.link_set_suggested === true && (
@@ -1287,7 +1377,7 @@ export default function ArticlePage() {
               const data = await getArticle(article.id)
               setArticle(data.article)
               setLinkSetChildren(data.children ?? null)
-              setBatchModalOpen(true)
+              // candidate fetch + inline icons kick in via the effect above
             } catch (e) {
               console.warn('confirm link_set failed', e)
               toast.error('转换失败，请稍后重试')
@@ -1295,16 +1385,27 @@ export default function ArticlePage() {
           }}
         />
       )}
-      <BatchFetchModal
-        open={batchModalOpen}
+      <BatchFetchConfirmDialog
+        open={confirmOpen}
         articleId={article.id}
-        onClose={() => setBatchModalOpen(false)}
+        candidates={candidates ?? []}
+        markedURLs={markedURLs}
+        normalize={normalize}
+        onUnmark={(url) => toggleMark(url)}
+        onClose={() => setConfirmOpen(false)}
         onFetched={async (_n) => {
-          // Refresh the article to pick up new children
+          setMarkedURLs(new Set())
+          // Re-fetch candidates so already_fetched flags refresh, then re-fetch
+          // article for new children. Order matters: candidates first so the
+          // marks-clear effect doesn't race with a stale candidate list.
           try {
-            const data = await getArticle(article.id)
-            setArticle(data.article)
-            setLinkSetChildren(data.children ?? null)
+            if (article?.id) {
+              const cands = await getArticleCandidates(article.id)
+              setCandidates(cands)
+              const data = await getArticle(article.id)
+              setArticle(data.article)
+              setLinkSetChildren(data.children ?? null)
+            }
           } catch (e) {
             console.warn('refresh after batch_fetch failed', e)
           }
