@@ -13,6 +13,13 @@
   height: 32px;
   border-radius: 50%;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  user-select: none;
 }
 .tweet-card-meta {
   display: flex;
