@@ -234,15 +234,26 @@ body {
 .sync-source-row {
   display: flex;
   gap: 6px;
-  align-items: center;
+  align-items: stretch;
   margin-bottom: 6px;
 }
+/* Both .btn and .sync-source-select have width:100% in their base rules,
+   which fights flex layout. Reset width + lock flex behavior so the select
+   takes the row and the icon button shrinks to its content. */
 .sync-source-row .sync-source-select {
-  flex: 1;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
   margin-bottom: 0;
 }
-.btn-icon {
+.sync-source-row .btn-icon {
   flex: 0 0 auto;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-icon {
   padding: 6px 10px;
   background: transparent;
   border: 1px solid var(--border);
