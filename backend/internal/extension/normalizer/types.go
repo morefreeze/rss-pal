@@ -26,6 +26,8 @@ type IngestResponse struct {
 	Accepted int      `json:"accepted"` // newly created articles
 	Skipped  int      `json:"skipped"`  // duplicates (already had this URL)
 	Errors   []string `json:"errors"`   // per-item error strings (truncated)
+	FeedID   int      `json:"feed_id,omitempty"`   // newly-created or existing feed id for this source
+	FeedName string   `json:"feed_name,omitempty"` // human-readable feed title (for popup display)
 }
 
 // Normalizer turns one adapter-emitted item into an Article.

@@ -91,7 +91,10 @@ func (h *ExtensionIngestHandler) Ingest(c *gin.Context) {
 		return
 	}
 
-	resp := normalizer.IngestResponse{}
+	resp := normalizer.IngestResponse{
+		FeedID:   feed.ID,
+		FeedName: feed.Title,
+	}
 	for i, raw := range req.Items {
 		art, err := norm.Normalize(raw, feed)
 		if err != nil {
