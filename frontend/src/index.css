@@ -594,6 +594,14 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .reading-summary-toggle:hover { background: transparent; opacity: 0.8; }
 .reading-summary-body { margin-top: 8px; color: var(--fg); }
 .reading-summary-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+/* Global `* { padding: 0 }` reset (top of file) zeros browser-default ol/ul
+   padding. Without an explicit rule here, list-style-position:outside places
+   markers to the LEFT of the ol's left edge, where they overlap (or punch
+   through) the .reading-summary dashed border. Mirrors the .tweet-card-body
+   list scoping. */
+.reading-summary-body ul, .reading-summary-body ol { padding-left: 1.6em; margin: 0.5em 0; }
+.reading-summary-body li { margin: 0.15em 0; }
+.reading-summary-body li > p { margin: 0; }
 
 .reading-article .markdown-body img { max-width: 100%; height: auto; border-radius: 4px; }
 
