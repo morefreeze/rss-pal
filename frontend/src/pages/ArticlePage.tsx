@@ -517,6 +517,43 @@ export default function ArticlePage() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
 
+  // Rescale maxScrollRef + displayed scroll_position when the article's
+  // scrollable height changes (lazy-loaded images settling, late markdown
+  // re-parse, etc.). Without this, an early handleScroll computed against a
+  // tiny scrollHeight locks in an inflated ratio; subsequent scrolls hit the
+  // monotonic guard until the user crosses that ratio in the new (much
+  // larger) layout — at which point progress visibly "jumps" (e.g. 20→50%
+  // on image-only articles). Rescaling preserves the pixel-position the
+  // user actually reached.
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    let lastHeight = el.scrollHeight
+    const ro = new ResizeObserver(() => {
+      const newHeight = el.scrollHeight
+      if (newHeight <= 0 || newHeight === lastHeight) return
+      const vh = window.innerHeight
+      const lastDenom = lastHeight - vh
+      const newDenom = newHeight - vh
+      // Skip when either side isn't really scrollable; nothing meaningful to
+      // rescale and we'd divide by zero / negative.
+      if (lastDenom < 1 || newDenom < 1) {
+        lastHeight = newHeight
+        return
+      }
+      const factor = lastDenom / newDenom
+      maxScrollRef.current = Math.min(1, Math.max(0, maxScrollRef.current * factor))
+      setProgress((prev) =>
+        prev
+          ? { ...prev, scroll_position: Math.min(1, Math.max(0, prev.scroll_position * factor)) }
+          : prev,
+      )
+      lastHeight = newHeight
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [article?.id])
+
   // Reset confetti state when navigating between articles.
   useEffect(() => {
     setConfettiFired(false)
