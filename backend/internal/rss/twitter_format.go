@@ -1,8 +1,37 @@
 package rss
 
 import (
+	"regexp"
 	"strings"
 )
+
+// orderedListLineRe matches "N. " at line start. Used to insert a blank
+// line before list items that follow non-list content, otherwise CommonMark
+// parsers treat them as continuation text and skip the <ol> rendering.
+var orderedListLineRe = regexp.MustCompile(`^\d+\.\s`)
+
+// normalizeOrderedListBreaks inserts a blank line before any ordered-list
+// item that's preceded by a non-empty, non-list line. Tweet writers rarely
+// add the blank line themselves; without it react-markdown + remark-gfm
+// merge the "1. ..." into the prior paragraph instead of rendering an <ol>
+// (no list indent, no marker spacing — looks misaligned in the reader).
+func normalizeOrderedListBreaks(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines)+4)
+	for i, line := range lines {
+		if orderedListLineRe.MatchString(line) && i > 0 {
+			prev := strings.TrimSpace(lines[i-1])
+			if prev != "" && !orderedListLineRe.MatchString(prev) {
+				out = append(out, "")
+			}
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
 
 // BuildTweetContent renders a TweetCapture as the article body. The first
 // line is a markdown blockquote that carries the author byline and date,
@@ -23,7 +52,7 @@ func BuildTweetContent(cap *TweetCapture) string {
 		sections = append(sections, "# "+cap.ArticleTitle)
 	}
 	if cap.TextMarkdown != "" {
-		sections = append(sections, cap.TextMarkdown)
+		sections = append(sections, normalizeOrderedListBreaks(cap.TextMarkdown))
 	}
 	for _, img := range cap.ImageURLs {
 		sections = append(sections, "![]("+img+")")
