@@ -58,6 +58,159 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })();
     return true;  // async response
   }
+  if (msg && msg.action === 'startSync') {
+    // Run asynchronously in the service worker (persistent across popup
+    // lifecycle, unlike popup-context setTimeout). Reply immediately so the
+    // popup unblocks and can be closed by the user without dropping the work.
+    runSync(msg.payload).catch((e) => console.error('[rss-pal] runSync failed:', e));
+    sendResponse({ status: 'started' });
+    return false;  // sync response, no need to keep channel open
+  }
 });
+
+// --- startSync workflow ---
+//
+// The popup just delegates: open the target tab, wait for the content script
+// to scrape + enqueue, flush queued items for THAT source only, close the tab,
+// and stash the result in chrome.storage.local.lastSyncResult so the popup can
+// render it on next open (popup may have been closed mid-flight).
+
+async function runSync({ url, source, serverUrl, token }) {
+  const startedAt = Date.now();
+  let tabId = null;
+  const result = {
+    source,                       // { source_kind, source_id, source_name } from popup
+    status: 'running',
+    started_at: startedAt,
+    completed_at: null,
+    accepted: 0,
+    skipped: 0,
+    feed_id: null,
+    feed_name: null,
+    server_url: serverUrl,
+    error: null,
+  };
+  await chrome.storage.local.set({ lastSyncResult: result });
+
+  try {
+    const tab = await chrome.tabs.create({ url, active: false });
+    tabId = tab.id;
+
+    const completed = await waitForTabComplete(tabId, 30000);
+    if (!completed) {
+      result.status = 'failed';
+      result.error = 'tab load timeout';
+    } else {
+      // Grace period for MutationObserver + scroll-triggered extracts on
+      // lazy-loaded sites (x.com). 8s is empirically enough for visible tweets.
+      await sleep(8000);
+
+      const flushed = await flushQueueAndCapture(serverUrl, token, source);
+      result.accepted = flushed.accepted;
+      result.skipped = flushed.skipped;
+      result.feed_id = flushed.feed_id;
+      result.feed_name = flushed.feed_name;
+      result.status = 'done';
+    }
+  } catch (e) {
+    result.status = 'failed';
+    result.error = String(e && e.message || e);
+  } finally {
+    if (tabId != null) {
+      try { await chrome.tabs.remove(tabId); } catch (_) {}
+    }
+    result.completed_at = Date.now();
+    await chrome.storage.local.set({ lastSyncResult: result });
+    // Brief badge cue so the user notices completion even with popup closed.
+    try {
+      if (result.status === 'done') {
+        chrome.action.setBadgeText({ text: '✓' });
+        chrome.action.setBadgeBackgroundColor({ color: '#16a34a' });
+        setTimeout(() => {
+          try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
+        }, 5000);
+      }
+    } catch (_) {}
+  }
+}
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function waitForTabComplete(tabId, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      try { chrome.tabs.onUpdated.removeListener(listener); } catch (_) {}
+      clearTimeout(t);
+      resolve(ok);
+    };
+    const t = setTimeout(() => finish(false), timeoutMs);
+    function listener(updatedId, info) {
+      if (updatedId === tabId && info.status === 'complete') finish(true);
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+    // Race condition guard: tab may already be 'complete' before we attached.
+    chrome.tabs.get(tabId).then((t2) => {
+      if (t2 && t2.status === 'complete') finish(true);
+    }).catch(() => {});
+  });
+}
+
+// flushQueueAndCapture is a sync-scoped flush: it only POSTs queued batches
+// matching targetSource (so other queued sources don't get assigned to this
+// sync's feed_id by accident) and captures feed_id / feed_name from the
+// server response for the popup deep-link.
+async function flushQueueAndCapture(serverUrl, token, targetSource) {
+  const q = await loadIngestQueue();
+  let totalAccepted = 0;
+  let totalSkipped = 0;
+  let feedId = null;
+  let feedName = null;
+  const remaining = [];
+  for (const batch of q) {
+    const matches = batch.source_kind === targetSource.source_kind &&
+                    batch.source_id === targetSource.source_id;
+    if (!matches) {
+      remaining.push(batch);
+      continue;
+    }
+    try {
+      const resp = await fetch(serverUrl.replace(/\/+$/, '') + '/api/extension/ingest', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + token,
+        },
+        body: JSON.stringify({
+          source_kind: batch.source_kind,
+          source_id: batch.source_id,
+          source_name: batch.source_name,
+          items: batch.items,
+        }),
+      });
+      if (!resp.ok) {
+        // Leave in queue for the next alarm-driven flush to retry.
+        remaining.push(batch);
+        continue;
+      }
+      const body = await resp.json();
+      totalAccepted += body.accepted || 0;
+      totalSkipped += body.skipped || 0;
+      if (body.feed_id) feedId = body.feed_id;
+      if (body.feed_name) feedName = body.feed_name;
+    } catch (_e) {
+      remaining.push(batch);
+    }
+  }
+  await chrome.storage.local.set({ ingestQueue: remaining });
+  return { accepted: totalAccepted, skipped: totalSkipped, feed_id: feedId, feed_name: feedName };
+}
+
+async function loadIngestQueue() {
+  const data = await chrome.storage.local.get(['ingestQueue']);
+  return Array.isArray(data.ingestQueue) ? data.ingestQueue : [];
+}
 
 scheduleAlarms();
