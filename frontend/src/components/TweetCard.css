@@ -48,7 +48,7 @@
   font-size: 0.85em;
 }
 .tweet-card-compact .tweet-card-body {
-  max-height: 200px;
+  max-height: 420px;
   overflow: hidden;
   position: relative;
 }
