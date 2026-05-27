@@ -117,8 +117,26 @@ func (s *stubExtArticleRepo) Create(a *model.Article) error {
 	return nil
 }
 
+// stubExtUserRepo resolves a single fixed bookmarklet token to a user. Tests
+// set the token to testBookmarkletToken and send "Authorization: Bearer ..."
+// to exercise the production auth path.
+type stubExtUserRepo struct {
+	token string
+	user  *model.User
+}
+
+func (s *stubExtUserRepo) GetByBookmarkletToken(token string) (*model.User, error) {
+	if token != s.token {
+		return nil, nil
+	}
+	return s.user, nil
+}
+
+const testBookmarkletToken = "test-bookmarklet-token-fixture"
+
 // newExtensionIngestTestHandler wires the handler with stub repos and a
-// gin engine that injects userID=userID into the context (skipping JWT).
+// gin engine. Auth is exercised end-to-end by sending the bookmarklet token
+// in the Authorization header.
 func newExtensionIngestTestHandler(t *testing.T, userID int) (
 	*gin.Engine, *ExtensionIngestHandler, *stubExtFeedRepo, *stubExtArticleRepo,
 ) {
@@ -127,22 +145,21 @@ func newExtensionIngestTestHandler(t *testing.T, userID int) (
 
 	feedRepo := newStubExtFeedRepo()
 	articleRepo := newStubExtArticleRepo(feedRepo)
+	userRepo := &stubExtUserRepo{
+		token: testBookmarkletToken,
+		user:  &model.User{ID: userID},
+	}
 
 	h := &ExtensionIngestHandler{
 		feedRepo:    feedRepo,
 		articleRepo: articleRepo,
+		userRepo:    userRepo,
 		normalizers: []normalizer.Normalizer{
 			normalizer.NewTwitterNormalizer(),
 		},
 	}
 
 	r := gin.New()
-	// Stand-in for authHandler.AuthMiddleware: just stamp userID onto the
-	// context so getUserID returns it. The JWT itself isn't under test here.
-	r.Use(func(c *gin.Context) {
-		c.Set("userID", userID)
-		c.Next()
-	})
 	r.POST("/api/extension/ingest", h.Ingest)
 	return r, h, feedRepo, articleRepo
 }
@@ -157,6 +174,7 @@ func doIngest(t *testing.T, r *gin.Engine, body normalizer.IngestRequest) (norma
 	}
 	req := httptest.NewRequest("POST", "/api/extension/ingest", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testBookmarkletToken)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	var resp normalizer.IngestResponse
@@ -325,3 +343,4 @@ func mapKeys[V any](m map[string]V) []string {
 // handler depends on. Catches drift if the interfaces gain methods.
 var _ extensionFeedRepo = (*stubExtFeedRepo)(nil)
 var _ extensionArticleRepo = (*stubExtArticleRepo)(nil)
+var _ extensionUserRepo = (*stubExtUserRepo)(nil)
