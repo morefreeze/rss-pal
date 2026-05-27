@@ -37,7 +37,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 // Content scripts ask us to flush after pushing new items.
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.action === 'flushQueue') {
     (async () => {
       try {
@@ -65,6 +65,30 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     runSync(msg.payload).catch((e) => console.error('[rss-pal] runSync failed:', e));
     sendResponse({ status: 'started' });
     return false;  // sync response, no need to keep channel open
+  }
+  if (msg && msg.action === 'updateBadge') {
+    // Per-tab live badge showing how many items the active adapter sees on
+    // this tab right now. Per-tab badges are scoped by Chrome — they vanish
+    // when the user switches tabs, and don't clobber the global 401 red '!'
+    // or the post-sync green '✓' (those are global; per-tab overrides only on
+    // the matching tab).
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (tabId != null) {
+      const n = (typeof msg.count === 'number') ? msg.count : -1;
+      try {
+        if (n >= 0) {
+          chrome.action.setBadgeText({ text: String(n), tabId });
+          chrome.action.setBadgeBackgroundColor({
+            color: n > 0 ? '#2563eb' : '#9ca3af',  // blue=found, grey=zero
+            tabId,
+          });
+        } else {
+          chrome.action.setBadgeText({ text: '', tabId });
+        }
+      } catch (_) {}
+    }
+    sendResponse({ ok: true });
+    return false;
   }
 });
 

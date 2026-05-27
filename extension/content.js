@@ -175,6 +175,7 @@
   };
 
   async function runExtractAndQueue() {
+    let count = -1;  // -1 = "didn't run / unknown"; >=0 = real extract count
     try {
       // Honor per-source auto-extract toggle from options page.
       const toggleKey = TOGGLE_KEY_BY_KIND[adapter.sourceKind];
@@ -188,7 +189,8 @@
         }
       }
       const result = adapter.extract(document);
-      if (!result || !result.items || !result.items.length) return;
+      count = (result && Array.isArray(result.items)) ? result.items.length : 0;
+      if (!result || !count) return;
       const cfg = await chrome.storage.sync.get(['serverUrl', 'token']);
       if (!cfg.serverUrl || !cfg.token) return;
       if (!window.__rssPalQueue) return;
@@ -221,6 +223,17 @@
       }
     } catch (e) {
       console.warn('[rss-pal adapter]', adapter.name, 'extract failed:', e);
+    } finally {
+      // Always update the per-tab badge so the user can see live whether the
+      // adapter found anything on this tab (0 is useful info too — "we see
+      // this page, we just don't see any items yet"). Background sets it
+      // scoped to sender.tab.id, so it won't clobber other tabs.
+      if (count >= 0) {
+        try {
+          const p = chrome.runtime.sendMessage({ action: 'updateBadge', count });
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (_) {}
+      }
     }
   }
 
