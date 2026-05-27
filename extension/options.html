@@ -34,6 +34,17 @@
     </div>
 
     <div class="options-status" id="status"></div>
+
+    <section class="options-section">
+      <h3>Twitter 自动抓取</h3>
+      <div class="hint" style="margin-bottom:8px;">
+        在 x.com 上打开匹配页面时，是否自动抓取其中的推文并发送到 RSS Pal。
+      </div>
+      <label class="toggle-row"><input type="checkbox" id="twListEnabled" checked /> 自动抓取 list 时间线</label>
+      <label class="toggle-row"><input type="checkbox" id="twUserEnabled" checked /> 自动抓取我打开的用户主页</label>
+      <label class="toggle-row"><input type="checkbox" id="twBookmarksEnabled" checked /> 自动抓取我的 Bookmarks 页</label>
+      <label class="toggle-row toggle-row-future"><input type="checkbox" id="twHomeEnabled" disabled /> 自动抓取 Home Timeline（未开放，噪音多）</label>
+    </section>
   </div>
 
   <script src="options.js"></script>

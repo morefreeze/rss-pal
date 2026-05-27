@@ -168,6 +168,18 @@ export default function ArticleListPage() {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selectedFeed, setSelectedFeed] = useState<number | null>(() => {
+    // URL ?feed_id=<n> wins on initial mount (deep link from extension popup, etc.)
+    try {
+      const urlFeedId = new URLSearchParams(window.location.search).get('feed_id')
+      if (urlFeedId) {
+        const n = parseInt(urlFeedId, 10)
+        if (Number.isFinite(n) && n > 0) {
+          // mirror to sessionStorage so refreshing keeps the selection
+          try { sessionStorage.setItem('selectedFeed', JSON.stringify(n)) } catch {}
+          return n
+        }
+      }
+    } catch {}
     try { return JSON.parse(sessionStorage.getItem('selectedFeed') || 'null') } catch { return null }
   })
   // ?saved=1 (set by the /saved legacy redirect) force-ticks the saved

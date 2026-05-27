@@ -153,3 +153,138 @@
     }
   });
 })();
+
+// === Adapter dispatch (R4 passive path) ===
+// Runs only on sites where a matching adapter has self-registered via
+// window.__rssPalAdapters.register(...). On mp.weixin.qq.com there is no
+// such adapter, so this IIFE is a no-op there.
+(function () {
+  'use strict';
+  if (!window.__rssPalAdapters) return;  // registry not loaded
+
+  // On-demand extract for popup's "⚡ 抓取本页" button. Registered globally
+  // so it works regardless of whether a passive adapter is also active on
+  // this page (popup probes via this message before showing the button).
+  chrome.runtime.onMessage.addListener(function (msg, _sender, sendResponse) {
+    if (!msg || msg.action !== 'getCurrentExtract') return;
+    try {
+      const ad = window.__rssPalAdapters.findFor(location);
+      if (!ad) { sendResponse({ matched: false }); return; }
+      const result = ad.extract(document) || {};
+      sendResponse({
+        matched: true,
+        site: ad.site,
+        name: ad.name,
+        sourceKind: ad.sourceKind,
+        sourceID: result.sourceID || '',
+        sourceName: result.sourceName || '',
+        items: Array.isArray(result.items) ? result.items : [],
+      });
+    } catch (e) {
+      sendResponse({ matched: false, error: String(e && e.message || e) });
+    }
+    return false; // synchronous response
+  });
+
+  const adapter = window.__rssPalAdapters.findFor(location);
+  if (!adapter || !adapter.passive) return;
+
+  // Map adapter.sourceKind → options toggle key. Defaults: list/user/bookmarks ON.
+  // Note: twitter:home has no adapter yet; the twHomeEnabled toggle is inert
+  // until a home adapter registers itself (it'll wire up automatically).
+  const TOGGLE_KEY_BY_KIND = {
+    'twitter:list': 'twListEnabled',
+    'twitter:user': 'twUserEnabled',
+    'twitter:bookmarks': 'twBookmarksEnabled',
+    'twitter:home': 'twHomeEnabled',
+  };
+
+  async function runExtractAndQueue() {
+    let count = -1;  // -1 = "didn't run / unknown"; >=0 = real extract count
+    try {
+      // Honor per-source auto-extract toggle from options page.
+      const toggleKey = TOGGLE_KEY_BY_KIND[adapter.sourceKind];
+      if (toggleKey) {
+        const data = await chrome.storage.sync.get([toggleKey]);
+        // Home defaults OFF; everything else defaults ON.
+        if (toggleKey === 'twHomeEnabled') {
+          if (!data[toggleKey]) return;
+        } else {
+          if (data[toggleKey] === false) return;
+        }
+      }
+      const result = adapter.extract(document);
+      count = (result && Array.isArray(result.items)) ? result.items.length : 0;
+      if (!result || !count) return;
+      const cfg = await chrome.storage.sync.get(['serverUrl', 'token']);
+      if (!cfg.serverUrl || !cfg.token) return;
+      if (!window.__rssPalQueue) return;
+      await window.__rssPalQueue.push({
+        source_kind: adapter.sourceKind,
+        source_id: result.sourceID,
+        source_name: result.sourceName,
+        items: result.items,
+      });
+      // Auto-discover: upsert into known_sources, refreshing last_seen so the
+      // popup dropdown can sort most-recently-visited first. Cap the list at
+      // KNOWN_SOURCES_MAX so it doesn't grow unbounded — evict the oldest by
+      // last_seen when full.
+      const KNOWN_SOURCES_MAX = 30;
+      const known = await chrome.storage.sync.get(['known_sources']);
+      const list = Array.isArray(known.known_sources) ? known.known_sources : [];
+      const key = adapter.sourceKind + '/' + result.sourceID;
+      const now = Date.now();
+      const existing = list.find((s) => s.key === key);
+      if (existing) {
+        existing.last_seen = now;
+        if (result.sourceName) existing.source_name = result.sourceName;
+      } else {
+        list.push({
+          key,
+          source_kind: adapter.sourceKind,
+          source_id: result.sourceID,
+          source_name: result.sourceName,
+          discovered_at: now,
+          last_seen: now,
+        });
+      }
+      list.sort((a, b) => (b.last_seen || b.discovered_at || 0) - (a.last_seen || a.discovered_at || 0));
+      if (list.length > KNOWN_SOURCES_MAX) list.length = KNOWN_SOURCES_MAX;
+      await chrome.storage.sync.set({ known_sources: list });
+      // Trigger background flush (best effort)
+      try {
+        const p = chrome.runtime.sendMessage({ action: 'flushQueue' });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (_) {
+        // ignore — background may be asleep
+      }
+    } catch (e) {
+      console.warn('[rss-pal adapter]', adapter.name, 'extract failed:', e);
+    } finally {
+      // Always update the per-tab badge so the user can see live whether the
+      // adapter found anything on this tab (0 is useful info too — "we see
+      // this page, we just don't see any items yet"). Background sets it
+      // scoped to sender.tab.id, so it won't clobber other tabs.
+      if (count >= 0) {
+        try {
+          const p = chrome.runtime.sendMessage({ action: 'updateBadge', count });
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (_) {}
+      }
+    }
+  }
+
+  // First extract on document_idle
+  runExtractAndQueue();
+
+  // Re-extract on DOM mutations (debounced)
+  let debTimer = null;
+  const debounce = (fn, ms) => {
+    if (debTimer) clearTimeout(debTimer);
+    debTimer = setTimeout(fn, ms);
+  };
+  if (document.body) {
+    new MutationObserver(() => debounce(runExtractAndQueue, 800))
+      .observe(document.body, { childList: true, subtree: true });
+  }
+})();

@@ -1,0 +1,11 @@
+{
+  "name": "rss-pal-extension",
+  "version": "1.8.2",
+  "private": true,
+  "scripts": {
+    "smoke": "node adapters/twitter/smoke-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}

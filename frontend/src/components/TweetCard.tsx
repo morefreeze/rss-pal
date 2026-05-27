@@ -1,0 +1,109 @@
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import type { Article, ArticleListItem } from '../api/client'
+import './TweetCard.css'
+
+interface Props {
+  article: Article | ArticleListItem
+  compact?: boolean
+}
+
+interface ParsedByline {
+  handle: string
+  displayName: string
+  date: string
+  body: string
+}
+
+// parseByline pulls the first-line byline produced by Go's
+// rss.BuildTweetByline out of the article content. The expected shape is:
+//   > @handle (DisplayName) · YYYY-MM-DD
+// with DisplayName and the date each optional (BuildTweetByline degrades
+// gracefully when either is missing). Returns the rest of the content
+// as `body` with leading blank lines stripped so the markdown body
+// starts cleanly. When the first line doesn't match (e.g. the article
+// was somehow stored without a byline) we return empty author fields
+// and pass the entire content through as the body.
+function parseByline(content: string): ParsedByline {
+  const lines = content.split('\n')
+  const first = lines[0] || ''
+  const m = first.match(/^>\s*@(\S+)(?:\s*\(([^)]+)\))?(?:\s*·\s*(.+?))?\s*$/)
+  if (!m) return { handle: '', displayName: '', date: '', body: content }
+  const body = lines.slice(1).join('\n').replace(/^\n+/, '')
+  return {
+    handle: m[1] || '',
+    displayName: m[2] || '',
+    date: m[3] || '',
+    body,
+  }
+}
+
+// TweetCard renders a tweet-shaped article. The byline is parsed out of
+// `article.content` (rss.BuildTweetByline writes it as the first line
+// when the worker stores tweets). Avatar uses unavatar.io as a free
+// resolver — no API key needed, but it's an external dependency we
+// don't control. In MVP this is the simplest path; a future iteration
+// could store the avatar URL on the article model instead.
+// articleContent reads `content` when the caller passed the full
+// Article; ArticleListItem (the lean shape from the list endpoint)
+// has no content field. In that case we fall back to summary_brief so
+// the list still renders something useful — the user will see the
+// full body when they open the detail page.
+function articleContent(a: Article | ArticleListItem): string {
+  if ('content' in a && typeof a.content === 'string') return a.content
+  return a.summary_brief || ''
+}
+
+// initialAvatar generates a deterministic CSS-only circular avatar
+// (first character of handle/displayName + a stable HSL background derived
+// from the handle hash). No network calls, no external service to flake.
+function initialAvatar(handle: string, displayName: string): { char: string; bg: string } {
+  const source = (displayName || handle || '?').trim()
+  const char = Array.from(source)[0]?.toUpperCase() || '?'
+  // djb2-ish hash on the handle so each user gets a stable color
+  let h = 5381
+  const seed = handle || displayName || ''
+  for (let i = 0; i < seed.length; i++) h = ((h << 5) + h + seed.charCodeAt(i)) | 0
+  const hue = Math.abs(h) % 360
+  return { char, bg: `hsl(${hue}, 55%, 45%)` }
+}
+
+export default function TweetCard({ article, compact = false }: Props) {
+  const { handle, displayName, date, body } = parseByline(articleContent(article))
+  const avatar = initialAvatar(handle, displayName)
+
+  return (
+    <div className={`tweet-card${compact ? ' tweet-card-compact' : ''}`}>
+      <header className="tweet-card-header">
+        <div className="tweet-card-avatar" style={{ background: avatar.bg }}>{avatar.char}</div>
+        <div className="tweet-card-meta">
+          {displayName && <span className="tweet-card-name">{displayName}</span>}
+          {handle && <span className="tweet-card-handle">@{handle}</span>}
+          {date && <span className="tweet-card-date"> · {date}</span>}
+        </div>
+      </header>
+      <div className="tweet-card-body">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: ({ href, children, ...rest }) => {
+              // Tweet text often contains links to other x.com paths as
+              // root-relative URLs like /handle/status/id. Without a host,
+              // the browser treats them as same-origin and the SPA router
+              // sends the user back to the article list. Absolutise to x.com.
+              const finalHref = href && href.startsWith('/') ? `https://x.com${href}` : href
+              return (
+                <a href={finalHref} target="_blank" rel="noopener noreferrer" {...rest}>
+                  {children}
+                </a>
+              )
+            },
+          }}
+        >{body}</ReactMarkdown>
+      </div>
+      <footer className="tweet-card-footer">
+        <a href={article.url} target="_blank" rel="noopener noreferrer">在 X 打开 ↗</a>
+      </footer>
+    </div>
+  )
+}

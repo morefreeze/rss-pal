@@ -27,9 +27,27 @@
         <div class="page-url" id="pageUrl"></div>
       </div>
 
+      <!-- Adapter-aware "capture current page" button. Visible only when the
+           current tab matches a registered adapter (e.g. x.com/i/lists/...). -->
+      <div id="captureAdapterSection" style="display:none;">
+        <button class="btn btn-primary" id="captureAdapterBtn">⚡ 抓取本页到 RSS Pal</button>
+        <div class="status" id="captureAdapterStatus"></div>
+      </div>
+
       <button class="btn btn-primary" id="captureBtn">⭐ 发送到 RSS Pal</button>
 
       <div class="status" id="status"></div>
+
+      <details id="syncSourceSection" class="sync-source-section">
+        <summary class="sync-source-summary">同步其他 source（后台 tab 刷新）</summary>
+        <div class="sync-source-row">
+          <select id="sourceSelect" class="sync-source-select"></select>
+          <button class="btn btn-icon" id="sourceDeleteBtn" title="从列表移除">✕</button>
+        </div>
+        <button class="btn btn-secondary" id="syncSourceBtn">立即同步</button>
+        <p id="syncStatus" class="sync-status"></p>
+        <div id="lastSyncResult"></div>
+      </details>
 
       <!-- Duplicate overwrite prompt -->
       <div id="duplicatePrompt" style="display:none;">

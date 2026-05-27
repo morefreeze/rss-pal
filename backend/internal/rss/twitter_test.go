@@ -220,7 +220,7 @@ func TestExtractTweet_XArticle(t *testing.T) {
 	}
 
 	// Cover image lives outside longform — should still be in ImageURLs and
-	// rendered after the body in buildTweetContent.
+	// rendered after the body in BuildTweetContent.
 	if len(cap.ImageURLs) != 1 || !strings.Contains(cap.ImageURLs[0], "COVER") {
 		t.Errorf("expected single cover image in ImageURLs, got %v", cap.ImageURLs)
 	}

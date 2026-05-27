@@ -13,6 +13,7 @@ import { LinkSetChildren } from '../components/LinkSetChildren'
 import { BatchFetchModal } from '../components/BatchFetchModal'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
+import TweetCard from '../components/TweetCard'
 import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
 import BackFab from '../components/BackFab'
@@ -1206,14 +1207,18 @@ export default function ArticlePage() {
               ))}
             </div>
             {article.content ? (
-              <div
-                className={isPDFClipArticle(article) ? 'pdf-clip-columns' : undefined}
-                style={{ lineHeight: 1.8, fontSize: 15 }}
-              >
-                <CodeWrapContext.Provider value={reader.codeWrap}>
-                  <MarkdownArticle source={article.content} />
-                </CodeWrapContext.Provider>
-              </div>
+              article.kind === 'tweet' ? (
+                <TweetCard article={article} />
+              ) : (
+                <div
+                  className={isPDFClipArticle(article) ? 'pdf-clip-columns' : undefined}
+                  style={{ lineHeight: 1.8, fontSize: 15 }}
+                >
+                  <CodeWrapContext.Provider value={reader.codeWrap}>
+                    <MarkdownArticle source={article.content} />
+                  </CodeWrapContext.Provider>
+                </div>
+              )
             ) : workerFetching ? (
               <div className="text-muted">正在抓取...</div>
             ) : (

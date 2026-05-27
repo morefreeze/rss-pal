@@ -139,14 +139,14 @@ func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error)
 	var articles []model.Article
 	for rows.Next() {
 		var a model.Article
-		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType, kind sql.NullString
 		var mediaDuration sql.NullInt64
 		var isRead sql.NullBool
 		var linksExtendable sql.NullBool
 		var parentArticleID sql.NullInt64
 		var processingState, processingError, editorNote sql.NullString
 		var prerankScore sql.NullFloat64
-		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &isRead, &linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote)
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &isRead, &linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind)
 		if err != nil {
 			return nil, err
 		}
@@ -155,6 +155,7 @@ func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error)
 		a.SummaryDetailed = summaryDetailed.String
 		a.FeedTitle = feedTitle.String
 		a.IsRead = isRead.Bool
+		a.Kind = kind.String
 		if linksExtendable.Valid {
 			v := linksExtendable.Bool
 			a.LinksExtendable = &v
@@ -182,19 +183,20 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 	var articles []model.Article
 	for rows.Next() {
 		var a model.Article
-		var content, summaryBrief, summaryDetailed, mediaURL, mediaType sql.NullString
+		var content, summaryBrief, summaryDetailed, mediaURL, mediaType, kind sql.NullString
 		var mediaDuration sql.NullInt64
 		var linksExtendable sql.NullBool
 		var parentArticleID sql.NullInt64
 		var processingState, processingError, editorNote sql.NullString
 		var prerankScore sql.NullFloat64
-		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote)
+		err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind)
 		if err != nil {
 			return nil, err
 		}
 		a.Content = content.String
 		a.SummaryBrief = summaryBrief.String
 		a.SummaryDetailed = summaryDetailed.String
+		a.Kind = kind.String
 		if linksExtendable.Valid {
 			v := linksExtendable.Bool
 			a.LinksExtendable = &v
@@ -225,7 +227,7 @@ func (r *ArticleRepository) scanArticleWithParentTitle(rows *sql.Rows) ([]model.
 	var articles []model.Article
 	for rows.Next() {
 		var a model.Article
-		var content, summaryBrief, summaryDetailed, mediaURL, mediaType, parentTitle sql.NullString
+		var content, summaryBrief, summaryDetailed, mediaURL, mediaType, parentTitle, kind sql.NullString
 		var mediaDuration sql.NullInt64
 		var linksExtendable sql.NullBool
 		var parentArticleID sql.NullInt64
@@ -236,7 +238,7 @@ func (r *ArticleRepository) scanArticleWithParentTitle(rows *sql.Rows) ([]model.
 			&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount,
 			&a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration,
 			&linksExtendable, &parentArticleID, &processingState, &processingError,
-			&prerankScore, &editorNote, &parentTitle,
+			&prerankScore, &editorNote, &kind, &parentTitle,
 		)
 		if err != nil {
 			return nil, err
@@ -244,6 +246,7 @@ func (r *ArticleRepository) scanArticleWithParentTitle(rows *sql.Rows) ([]model.
 		a.Content = content.String
 		a.SummaryBrief = summaryBrief.String
 		a.SummaryDetailed = summaryDetailed.String
+		a.Kind = kind.String
 		if linksExtendable.Valid {
 			v := linksExtendable.Bool
 			a.LinksExtendable = &v
@@ -312,7 +315,7 @@ func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bo
 	joins, whereFrags, args, nextArg := buildArticleFilterSQL(filter, "articles", 1)
 
 
-	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, articles.word_count, articles.reading_minutes, articles.media_url, articles.media_type, articles.media_duration_seconds, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read, articles.links_extendable, articles.parent_article_id, articles.processing_state, COALESCE(articles.processing_error, '') as processing_error, articles.prerank_score, articles.editor_note
+	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, articles.word_count, articles.reading_minutes, articles.media_url, articles.media_type, articles.media_duration_seconds, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read, articles.links_extendable, articles.parent_article_id, articles.processing_state, COALESCE(articles.processing_error, '') as processing_error, articles.prerank_score, articles.editor_note, articles.kind
 FROM articles
 JOIN feeds ON articles.feed_id = feeds.id` + joins
 
@@ -352,18 +355,18 @@ JOIN feeds ON articles.feed_id = feeds.id` + joins
 
 func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
 	var a model.Article
-	var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+	var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType, kind sql.NullString
 	var mediaDuration sql.NullInt64
 	var linksExtendable, linkSetSuggested sql.NullBool
 	var parentArticleID sql.NullInt64
 	var processingState, processingError, editorNote sql.NullString
 	var prerankScore sql.NullFloat64
-	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote)
+	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +374,7 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	a.SummaryBrief = summaryBrief.String
 	a.SummaryDetailed = summaryDetailed.String
 	a.FeedTitle = feedTitle.String
+	a.Kind = kind.String
 	if linksExtendable.Valid {
 		v := linksExtendable.Bool
 		a.LinksExtendable = &v
@@ -401,12 +405,12 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
 	var a model.Article
-	var content, summaryBrief, summaryDetailed, feedTitle, feedType, mediaURL, mediaType sql.NullString
+	var content, summaryBrief, summaryDetailed, feedTitle, feedType, mediaURL, mediaType, kind sql.NullString
 	var mediaDuration sql.NullInt64
 	var linksExtendable, linkSetSuggested sql.NullBool
 	var parentArticleID sql.NullInt64
@@ -417,7 +421,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 		&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
 		&mediaURL, &mediaType, &mediaDuration,
 		&feedTitle, &feedType,
-		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote,
+		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind,
 	)
 	if err != nil {
 		return nil, "", err
@@ -426,6 +430,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	a.SummaryBrief = summaryBrief.String
 	a.SummaryDetailed = summaryDetailed.String
 	a.FeedTitle = feedTitle.String
+	a.Kind = kind.String
 	if linksExtendable.Valid {
 		v := linksExtendable.Bool
 		a.LinksExtendable = &v
@@ -452,7 +457,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 }
 
 func (r *ArticleRepository) Create(article *model.Article) error {
-	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, parent_article_id, processing_state, prerank_score, editor_note, is_clip) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id, fetched_at`
+	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, parent_article_id, processing_state, prerank_score, editor_note, is_clip, kind) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id, fetched_at`
 	mediaURL := nullableString(article.MediaURL)
 	mediaType := nullableString(article.MediaType)
 	mediaDuration := nullableInt(article.MediaDurationSeconds)
@@ -468,7 +473,11 @@ func (r *ArticleRepository) Create(article *model.Article) error {
 	if state == "" {
 		state = "ready"
 	}
-	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration, parentArticleID, state, prerankScore, article.EditorNote, article.IsClip).Scan(&article.ID, &article.FetchedAt)
+	kind := article.Kind
+	if kind == "" {
+		kind = "article"
+	}
+	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration, parentArticleID, state, prerankScore, article.EditorNote, article.IsClip, kind).Scan(&article.ID, &article.FetchedAt)
 }
 
 // nullableString returns a sql.NullString that's NULL when s is empty.
@@ -517,7 +526,7 @@ func (r *ArticleRepository) Exists(feedID int, url string) (bool, error) {
 // for passing a normalized URL (see util.NormalizeURL).
 func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE (f.owner_id IS NULL OR f.owner_id = $1) AND a.url = $2
@@ -525,7 +534,7 @@ func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*mo
 		LIMIT 1
 	`
 	var a model.Article
-	var content, summaryBrief, summaryDetailed sql.NullString
+	var content, summaryBrief, summaryDetailed, kind sql.NullString
 	var linksExtendable sql.NullBool
 	var parentArticleID sql.NullInt64
 	var processingState, processingError, editorNote sql.NullString
@@ -533,7 +542,7 @@ func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*mo
 	err := r.db.QueryRow(query, ownerID, exactURL).Scan(
 		&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
 		&summaryBrief, &summaryDetailed, &a.FetchedAt,
-		&linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote,
+		&linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -559,6 +568,7 @@ func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*mo
 		a.PrerankScore = &v
 	}
 	a.EditorNote = editorNote.String
+	a.Kind = kind.String
 	return &a, nil
 }
 
@@ -605,7 +615,7 @@ func (r *ArticleRepository) IncrementRefetchAttempts(id int) error {
 // articles that have not yet had a transcript fetch attempt.
 func (r *ArticleRepository) GetMediaArticlesWithoutTranscript(limit int) ([]model.Article, error) {
 	query := `
-		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note
+		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note, kind
 		FROM articles
 		WHERE transcript_fetched_at IS NULL
 		  AND media_type IS NOT NULL
@@ -658,7 +668,7 @@ func (r *ArticleRepository) UpdatePublishedAtIfNull(feedID int, url string, publ
 
 func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		LEFT JOIN (
 			SELECT article_id, SUM(
@@ -695,7 +705,7 @@ func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Artic
 
 func (r *ArticleRepository) GetArticlesForTopicExtraction(limit int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN user_preferences p ON a.id = p.article_id
 		WHERE p.signal_type IN ('like', 'save', 'completed_listen')
@@ -714,7 +724,7 @@ func (r *ArticleRepository) GetArticlesForTopicExtraction(limit int) ([]model.Ar
 
 func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Article, error) {
 	query := `
-		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note
+		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note, kind
 		FROM articles
 		WHERE (summary_brief IS NULL OR summary_brief = '')
 		AND LENGTH(content) > 100
@@ -731,7 +741,7 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 
 func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.url != '' AND a.refetch_attempts < 5
@@ -772,7 +782,7 @@ func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Art
 	q := "%" + strings.ReplaceAll(query, "%", "\\%") + "%"
 	sqlStr := `
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title,
-		       COALESCE(rp.is_completed, false) as is_read, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		       COALESCE(rp.is_completed, false) as is_read, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $2
@@ -804,7 +814,7 @@ func (r *ArticleRepository) GetByIDsForUser(userID int, ids []int) ([]model.Arti
 		int64s[i] = int64(id)
 	}
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
@@ -825,7 +835,7 @@ func (r *ArticleRepository) GetByIDsForUser(userID int, ids []int) ([]model.Arti
 // back to recency for users with no preference signals.
 func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Time, limit int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, COALESCE(rp.is_completed, false) as is_read, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
@@ -909,7 +919,7 @@ WITH visible AS (
            a.category,
            f.title AS feed_title,
            COALESCE(rp.is_completed, false) AS is_read,
-           a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+           a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
     FROM articles a
     JOIN feeds f ON a.feed_id = f.id
     LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1` + joins + `
@@ -960,7 +970,7 @@ SELECT cs.category, cs.article_count, cs.weight,
        r.word_count, r.reading_minutes,
        r.media_url, r.media_type, r.media_duration_seconds,
        r.feed_title, r.is_read,
-       r.links_extendable, r.parent_article_id, r.processing_state, r.processing_error, r.prerank_score, r.editor_note,
+       r.links_extendable, r.parent_article_id, r.processing_state, r.processing_error, r.prerank_score, r.editor_note, r.kind,
        r.rn
 FROM cat_stats cs
 JOIN ranked r ON r.category = cs.category AND r.rn <= %d
@@ -990,7 +1000,7 @@ SELECT u.id, u.feed_id, u.title, u.url, u.content, u.published_at,
        u.word_count, u.reading_minutes,
        u.media_url, u.media_type, u.media_duration_seconds,
        u.feed_title, u.is_read,
-       u.links_extendable, u.parent_article_id, u.processing_state, u.processing_error, u.prerank_score, u.editor_note
+       u.links_extendable, u.parent_article_id, u.processing_state, u.processing_error, u.prerank_score, u.editor_note, u.kind
 FROM unclassified u
 LEFT JOIN score s ON u.id = s.article_id
 ORDER BY COALESCE(s.s, 0) DESC, u.published_at DESC NULLS LAST, u.id DESC
@@ -1027,7 +1037,7 @@ func (r *ArticleRepository) scanTopicGroups(query string, args []interface{}) ([
 		var weight float64
 		var rn int
 		var a model.Article
-		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType, kind sql.NullString
 		var mediaDuration sql.NullInt64
 		var isRead sql.NullBool
 		var linksExtendable sql.NullBool
@@ -1041,7 +1051,7 @@ func (r *ArticleRepository) scanTopicGroups(query string, args []interface{}) ([
 			&a.WordCount, &a.ReadingMinutes,
 			&mediaURL, &mediaType, &mediaDuration,
 			&feedTitle, &isRead,
-			&linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote,
+			&linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind,
 			&rn,
 		); err != nil {
 			return nil, err
@@ -1066,6 +1076,7 @@ func (r *ArticleRepository) scanTopicGroups(query string, args []interface{}) ([
 			a.PrerankScore = &v
 		}
 		a.EditorNote = editorNote.String
+		a.Kind = kind.String
 		a.MediaURL = mediaURL.String
 		a.MediaType = mediaType.String
 		a.MediaDurationSeconds = int(mediaDuration.Int64)
@@ -1097,7 +1108,7 @@ func (r *ArticleRepository) scanFlatGroup(query string, args []interface{}, tota
 	group := model.TopicGroup{Topic: "", TotalCount: totalCount, Articles: []model.Article{}}
 	for rows.Next() {
 		var a model.Article
-		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+		var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType, kind sql.NullString
 		var mediaDuration sql.NullInt64
 		var isRead sql.NullBool
 		var linksExtendable sql.NullBool
@@ -1110,7 +1121,7 @@ func (r *ArticleRepository) scanFlatGroup(query string, args []interface{}, tota
 			&a.WordCount, &a.ReadingMinutes,
 			&mediaURL, &mediaType, &mediaDuration,
 			&feedTitle, &isRead,
-			&linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote,
+			&linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind,
 		); err != nil {
 			return model.TopicGroup{}, err
 		}
@@ -1134,6 +1145,7 @@ func (r *ArticleRepository) scanFlatGroup(query string, args []interface{}, tota
 			a.PrerankScore = &v
 		}
 		a.EditorNote = editorNote.String
+		a.Kind = kind.String
 		a.MediaURL = mediaURL.String
 		a.MediaType = mediaType.String
 		a.MediaDurationSeconds = int(mediaDuration.Int64)
@@ -1150,7 +1162,7 @@ func (r *ArticleRepository) scanFlatGroup(query string, args []interface{}, tota
 // through here and get a second pass from the same prompt, which is fine.
 func (r *ArticleRepository) FindArticlesNeedingClassification(limit int) ([]model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		WHERE a.category IS NULL
 		  AND a.content IS NOT NULL AND a.content <> ''
@@ -1227,7 +1239,7 @@ func (r *ArticleRepository) FindParentsNeedingExpansion(limit int) ([]model.Arti
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
 		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
 		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
-		       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		WHERE a.links_extendable = true
 		  AND NOT EXISTS (SELECT 1 FROM articles c WHERE c.parent_article_id = a.id)
@@ -1254,7 +1266,7 @@ func (r *ArticleRepository) GetChildren(parentID int) ([]model.Article, error) {
 		SELECT id, feed_id, title, url, content, published_at,
 		       summary_brief, summary_detailed, fetched_at, word_count,
 		       reading_minutes, media_url, media_type, media_duration_seconds,
-		       links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note
+		       links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note, kind
 		FROM articles
 		WHERE parent_article_id = $1
 		ORDER BY prerank_score DESC NULLS LAST, id ASC
@@ -1274,7 +1286,7 @@ func (r *ArticleRepository) GetVisibleChildren(parentID, userID int) ([]model.Ar
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
 		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
 		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
-		       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+		       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		LEFT JOIN hidden_articles ha ON ha.article_id = a.id AND ha.user_id = $2
 		WHERE a.parent_article_id = $1
@@ -1306,7 +1318,7 @@ func (r *ArticleRepository) GetProcessingChildren(limit int) ([]model.Article, e
 		SELECT id, feed_id, title, url, content, published_at,
 		       summary_brief, summary_detailed, fetched_at, word_count, reading_minutes,
 		       media_url, media_type, media_duration_seconds,
-		       links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note
+		       links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note, kind
 		FROM articles
 		WHERE processing_state = 'processing'
 		  AND parent_article_id IS NOT NULL
@@ -1367,7 +1379,7 @@ func (r *ArticleRepository) queryLinkSetPrimary(userID, days, limit int) ([]mode
 		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
 		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
 		       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error,
-		       a.prerank_score, a.editor_note, parent.title AS parent_title
+		       a.prerank_score, a.editor_note, a.kind, parent.title AS parent_title
 		FROM articles a
 		JOIN articles parent ON a.parent_article_id = parent.id
 		JOIN feeds f ON a.feed_id = f.id
@@ -1419,7 +1431,7 @@ func (r *ArticleRepository) queryLinkSetFallback(userID, days, limit int, exclud
 		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
 		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
 		       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error,
-		       a.prerank_score, a.editor_note, parent.title AS parent_title
+		       a.prerank_score, a.editor_note, a.kind, parent.title AS parent_title
 		FROM articles a
 		JOIN articles parent ON a.parent_article_id = parent.id
 		JOIN feeds f ON a.feed_id = f.id
@@ -1464,7 +1476,7 @@ SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
        a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
        a.media_url, a.media_type, a.media_duration_seconds,
        f.title AS feed_title,
-       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 FROM articles a
 JOIN feeds f ON a.feed_id = f.id
 LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
@@ -1493,7 +1505,7 @@ SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
        a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
        a.media_url, a.media_type, a.media_duration_seconds,
        f.title AS feed_title,
-       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note
+       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 FROM articles a
 JOIN feeds f ON a.feed_id = f.id
 JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
@@ -1522,7 +1534,7 @@ LIMIT $2
 		defer rows.Close()
 		for rows.Next() {
 			var a model.Article
-			var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType sql.NullString
+			var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType, kind sql.NullString
 			var mediaDuration sql.NullInt64
 			var linksExtendable sql.NullBool
 			var parentArticleID sql.NullInt64
@@ -1532,7 +1544,7 @@ LIMIT $2
 				&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
 				&mediaURL, &mediaType, &mediaDuration,
 				&feedTitle,
-				&linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote); err != nil {
+				&linksExtendable, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind); err != nil {
 				return err
 			}
 			a.Content = content.String
@@ -1554,6 +1566,7 @@ LIMIT $2
 				a.PrerankScore = &v
 			}
 			a.EditorNote = editorNote.String
+			a.Kind = kind.String
 			a.MediaURL = mediaURL.String
 			a.MediaType = mediaType.String
 			a.MediaDurationSeconds = int(mediaDuration.Int64)
@@ -1601,7 +1614,7 @@ func (r *ArticleRepository) FindArticlesNeedingLinkCheck(limit int) ([]model.Art
 		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
 		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
 		       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error,
-		       a.prerank_score, a.editor_note
+		       a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.links_extendable IS NULL
@@ -1633,7 +1646,7 @@ func (r *ArticleRepository) FindArticlesNeedingSuggestionCheck(limit int) ([]mod
 		       a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count,
 		       a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds,
 		       a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error,
-		       a.prerank_score, a.editor_note
+		       a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.link_set_suggested IS NULL
@@ -1764,7 +1777,7 @@ func (r *ArticleRepository) GetPDFOCRPending(limit int) ([]model.Article, error)
 		       media_url, media_type, media_duration_seconds,
 		       links_extendable, parent_article_id, processing_state,
 		       COALESCE(processing_error, '') as processing_error,
-		       prerank_score, editor_note
+		       prerank_score, editor_note, kind
 		FROM articles
 		WHERE processing_state = 'processing'
 		  AND is_clip = true

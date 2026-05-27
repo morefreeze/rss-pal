@@ -244,7 +244,13 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	c.Header("Cache-Control", "private, max-age=300, stale-while-revalidate=600")
+	// no-cache (not no-store) means the browser may keep the body but MUST
+	// revalidate via If-None-Match every time. ETag already hashes the
+	// article content + summaries, so unchanged articles still get a cheap
+	// 304 Not Modified. The previous max-age=300 / stale-while-revalidate=600
+	// strategy meant a re-captured article (⭐ bookmarklet overwrite) was
+	// invisible in the reader for up to 15 minutes even with a hard refresh.
+	c.Header("Cache-Control", "private, no-cache")
 
 	etag := ComputeDetailETag(*article)
 	c.Header("ETag", etag)

@@ -147,3 +147,50 @@ rss-pal/
 - `POST /api/progress/:article_id` — 更新进度
 - `GET /api/stats` — 统计数据
 - `POST /api/insights/generate` — 生成个性化洞察
+
+## Browser Extension Adapters (Twitter, MVP)
+
+The extension supports per-site adapters that auto-archive streaming content
+from logged-in tabs. With Chrome logged into x.com, browsing any of these
+pages will auto-archive recent tweets into rss-pal:
+
+- `https://x.com/i/lists/<id>` → twitter:list source
+- `https://x.com/<handle>` → twitter:user source
+- `https://x.com/i/bookmarks` → twitter:bookmarks source
+
+Sources auto-appear in the popup's "同步 Source" dropdown after they're first
+visited. Click "立即同步" to refresh a source manually (opens a background
+tab, extracts, flushes, closes).
+
+Auto-extract toggles (Options page):
+- Twitter list / user / bookmarks — ON by default
+- Twitter Home Timeline — OFF (high noise; future work)
+
+Tweet articles render as compact tweet cards (`kind=tweet` discriminator);
+all other articles keep their existing rendering.
+
+### Apply database migrations
+
+This feature adds two new columns:
+- `articles.kind` (TEXT, default `'article'`)
+- `feeds.provider_source_id` (TEXT, nullable)
+
+Apply locally:
+
+```bash
+docker-compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/029_articles_kind.sql
+docker-compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/030_feeds_provider_source_id.sql
+```
+
+The migrations are idempotent (`IF NOT EXISTS` everywhere) and backward-compatible.
+
+### Rebuild + reload
+
+```bash
+docker-compose up -d --build api worker frontend
+# then in Chrome: chrome://extensions → reload "RSS Pal"
+```
+
+See `docs/superpowers/specs/2026-05-26-extension-adapter-platform-twitter-mvp-design.md`
+for the full design, and `docs/extension-adapters/upstream-map.md` for the OpenCLI
+upstream tracking SOP.

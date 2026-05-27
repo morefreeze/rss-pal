@@ -1,11 +1,14 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/bytedance/rss-pal/internal/rss"
+	"github.com/gin-gonic/gin"
 )
 
 func TestExtractContentFromHTMLPreservesImages(t *testing.T) {
@@ -166,6 +169,91 @@ func TestShouldPromptDuplicate(t *testing.T) {
 	}
 }
 
+func TestArticleKind(t *testing.T) {
+	if got := articleKind(true); got != "tweet" {
+		t.Errorf("articleKind(true) = %q, want tweet", got)
+	}
+	if got := articleKind(false); got != "article" {
+		t.Errorf("articleKind(false) = %q, want article", got)
+	}
+}
+
+// TestCapture_KindSetByURL exercises the bookmarklet Capture handler end-to-end
+// against in-memory stub repos. A twitter status URL must produce an article
+// with Kind="tweet"; any other URL must produce Kind="article". This protects
+// the discriminator wiring (B3) from silent regressions when the handler is
+// refactored later — the model field, the handler branch, and the repo round-
+// trip all have to line up for the assertions below to pass.
+func TestCapture_KindSetByURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Mirrors backend/internal/rss/testdata/twitter/tweet_text_only.html — the
+	// shape ExtractTweet actually parses. statusID 9999999999999999999 must
+	// match the URL below so IsTwitterStatusURL hands it through.
+	twitterHTML := `<!DOCTYPE html>
+<html><head><title>karpathy on X</title></head><body>
+<main>
+  <article role="article" data-testid="tweet" tabindex="-1">
+    <div data-testid="User-Name">
+      <a role="link" href="/karpathy"><span>Andrej Karpathy</span></a>
+      <a role="link" href="/karpathy"><span>@karpathy</span></a>
+    </div>
+    <div data-testid="tweetText">
+      <span>hello from twitter.</span>
+    </div>
+    <a href="/karpathy/status/9999999999999999999" role="link"><time datetime="2026-04-21T09:00:00.000Z">Apr 21</time></a>
+  </article>
+</main>
+</body></html>`
+
+	plainHTML := `<html><body><article>
+		<h1>A normal article title</h1>
+		<p>Body paragraph one with enough characters to pass the 200-char gate easily right here for sure.</p>
+		<p>Body paragraph two with enough characters to pass the 200-char gate easily right here for sure.</p>
+	</article></body></html>`
+
+	cases := []struct {
+		name     string
+		url      string
+		html     string
+		wantKind string
+	}{
+		{"twitter status url → tweet", "https://x.com/karpathy/status/9999999999999999999", twitterHTML, "tweet"},
+		{"regular article url → article", "https://example.com/blog/post-1", plainHTML, "article"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo := newTestBookmarkletHandlerForPDF(t)
+			r := gin.New()
+			r.POST("/api/bookmarklet/capture", h.Capture)
+
+			body, _ := json.Marshal(map[string]any{
+				"url":   tc.url,
+				"title": "ignored — handler reassigns from extractor",
+				"html":  tc.html,
+			})
+			req := httptest.NewRequest("POST", "/api/bookmarklet/capture", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer test-token")
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+			}
+			if len(repo.created) != 1 {
+				t.Fatalf("expected 1 created article, got %d", len(repo.created))
+			}
+			art := repo.created[0]
+			if art.Kind != tc.wantKind {
+				t.Errorf("article.Kind = %q, want %q", art.Kind, tc.wantKind)
+			}
+		})
+	}
+}
+
 func TestCountMarkdownImages(t *testing.T) {
 	cases := []struct {
 		name string
@@ -192,225 +280,3 @@ func TestCountMarkdownImages(t *testing.T) {
 	}
 }
 
-func TestBuildTweetContent_FullCase(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:       "karpathy",
-		DisplayName:  "Andrej Karpathy",
-		PublishedAt:  time.Date(2026, 4, 23, 8, 0, 0, 0, time.UTC),
-		TextMarkdown: "+1 to this excellent thread.",
-		ImageURLs:    []string{"https://pbs.twimg.com/media/AAA111.jpg?name=large"},
-		Quote: &rss.Quote{
-			URL:         "https://x.com/someone_else/status/3333333333333333333",
-			Author:      "someone_else",
-			DisplayName: "Other Person",
-			PublishedAt: time.Date(2026, 4, 22, 15, 0, 0, 0, time.UTC),
-			Excerpt:     "quoted tweet body — extracted as excerpt.",
-		},
-	}
-	got := buildTweetContent(cap)
-	want := "> @karpathy (Andrej Karpathy) · 2026-04-23\n\n" +
-		"+1 to this excellent thread.\n\n" +
-		"![](https://pbs.twimg.com/media/AAA111.jpg?name=large)\n\n" +
-		"**引用** [@someone_else (Other Person)](https://x.com/someone_else/status/3333333333333333333) · 2026-04-22\n\n" +
-		"> quoted tweet body — extracted as excerpt."
-	if got != want {
-		t.Errorf("buildTweetContent mismatch\n got:\n%s\nwant:\n%s", got, want)
-	}
-}
-
-func TestBuildQuoteSection_FallbackURLOnly(t *testing.T) {
-	got := buildQuoteSection(&rss.Quote{URL: "https://x.com/x/status/1"})
-	if got != "引用: https://x.com/x/status/1" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestBuildQuoteSection_NoExcerpt(t *testing.T) {
-	got := buildQuoteSection(&rss.Quote{
-		URL:         "https://x.com/x/status/1",
-		Author:      "x",
-		DisplayName: "X User",
-		PublishedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
-	})
-	want := "**引用** [@x (X User)](https://x.com/x/status/1) · 2026-05-01"
-	if got != want {
-		t.Errorf("got %q\nwant %q", got, want)
-	}
-}
-
-func TestBuildQuoteSection_MultilineExcerpt(t *testing.T) {
-	got := buildQuoteSection(&rss.Quote{
-		URL:     "https://x.com/x/status/1",
-		Author:  "x",
-		Excerpt: "first paragraph.\n\nsecond paragraph.",
-	})
-	want := "**引用** [@x](https://x.com/x/status/1)\n\n> first paragraph.\n> \n> second paragraph."
-	if got != want {
-		t.Errorf("got %q\nwant %q", got, want)
-	}
-}
-
-func TestBuildQuoteSection_NilOrEmpty(t *testing.T) {
-	if got := buildQuoteSection(nil); got != "" {
-		t.Errorf("nil quote should produce empty, got %q", got)
-	}
-	if got := buildQuoteSection(&rss.Quote{}); got != "" {
-		t.Errorf("empty URL should produce empty, got %q", got)
-	}
-}
-
-func TestBuildTweetContent_ImageOnly(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:    "karpathy",
-		ImageURLs: []string{"https://pbs.twimg.com/media/IMG.jpg?name=large"},
-	}
-	got := buildTweetContent(cap)
-	want := "> @karpathy\n\n![](https://pbs.twimg.com/media/IMG.jpg?name=large)"
-	if got != want {
-		t.Errorf("got:\n%s\nwant:\n%s", got, want)
-	}
-}
-
-func TestBuildTweetContent_XArticle(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:       "ashpreetbedi",
-		DisplayName:  "Ashpreet Bedi",
-		PublishedAt:  time.Date(2026, 5, 8, 15, 0, 0, 0, time.UTC),
-		ArticleTitle: "Auto-Improving Software",
-		TextMarkdown: "Coding agents have changed how we build software.",
-	}
-	got := buildTweetContent(cap)
-	want := "> @ashpreetbedi (Ashpreet Bedi) · 2026-05-08\n\n" +
-		"# Auto-Improving Software\n\n" +
-		"Coding agents have changed how we build software."
-	if got != want {
-		t.Errorf("got:\n%s\nwant:\n%s", got, want)
-	}
-}
-
-func TestBuildTweetTitle_XArticle(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:       "ashpreetbedi",
-		DisplayName:  "Ashpreet Bedi",
-		ArticleTitle: "Auto-Improving Software",
-		TextMarkdown: "Coding agents have changed how we build software.",
-	}
-	want := "Ashpreet Bedi · Auto-Improving Software"
-	if got := buildTweetTitle(cap); got != want {
-		t.Errorf("got %q\nwant %q", got, want)
-	}
-}
-
-func TestBuildTweetContent_NoTimestamp(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:       "karpathy",
-		DisplayName:  "Andrej Karpathy",
-		TextMarkdown: "hi",
-	}
-	got := buildTweetContent(cap)
-	want := "> @karpathy (Andrej Karpathy)\n\nhi"
-	if got != want {
-		t.Errorf("got:\n%s\nwant:\n%s", got, want)
-	}
-}
-
-func TestBuildTweetTitle_ClauseBreakOnPeriod(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:       "karpathy",
-		DisplayName:  "Andrej Karpathy",
-		TextMarkdown: "+1 to this excellent thread.",
-	}
-	want := "Andrej Karpathy · +1 to this excellent thread"
-	if got := buildTweetTitle(cap); got != want {
-		t.Errorf("got %q\nwant %q", got, want)
-	}
-}
-
-func TestBuildTweetTitle_ClauseBreakOnComma(t *testing.T) {
-	cap := &rss.TweetCapture{
-		DisplayName:  "Andrej Karpathy",
-		TextMarkdown: "This works really well btw, at the end of your query ask your LLM to structure as HTML",
-	}
-	want := "Andrej Karpathy · This works really well btw"
-	if got := buildTweetTitle(cap); got != want {
-		t.Errorf("got %q\nwant %q", got, want)
-	}
-}
-
-func TestBuildTweetTitle_HandlePrefixWhenNoDisplayName(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:       "karpathy",
-		TextMarkdown: "hello world.",
-	}
-	if got := buildTweetTitle(cap); got != "@karpathy · hello world" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestBuildTweetTitle_ChineseClause(t *testing.T) {
-	cap := &rss.TweetCapture{
-		DisplayName:  "艾略特",
-		TextMarkdown: "今天凌晨北京时间下午，Andrej Karpathy 转发了一条推文。",
-	}
-	want := "艾略特 · 今天凌晨北京时间下午"
-	if got := buildTweetTitle(cap); got != want {
-		t.Errorf("got %q\nwant %q", got, want)
-	}
-}
-
-func TestBuildTweetTitle_NoBreakWordBoundary(t *testing.T) {
-	cap := &rss.TweetCapture{
-		DisplayName:  "tester",
-		TextMarkdown: strings.Repeat("word ", 30), // 150 chars, no clause break
-	}
-	got := buildTweetTitle(cap)
-	if !strings.HasPrefix(got, "tester · word") {
-		t.Errorf("missing prefix: %q", got)
-	}
-	if !strings.HasSuffix(got, "…") {
-		t.Errorf("missing ellipsis: %q", got)
-	}
-	if strings.Contains(got, " · word ") && strings.HasSuffix(strings.TrimSuffix(got, "…"), " ") {
-		t.Errorf("trailing space before ellipsis: %q", got)
-	}
-}
-
-func TestBuildTweetTitle_NoBreakNoSpace(t *testing.T) {
-	long := strings.Repeat("a", 80) // 80 a's, no breaks, no spaces
-	cap := &rss.TweetCapture{TextMarkdown: long}
-	got := buildTweetTitle(cap)
-	if len([]rune(got)) != 61 { // 60 a's + ellipsis
-		t.Errorf("title rune len = %d, want 61; got %q", len([]rune(got)), got)
-	}
-	if !strings.HasSuffix(got, "…") {
-		t.Errorf("title should end with ellipsis: %q", got)
-	}
-}
-
-func TestBuildTweetTitle_NewlinesFlatten(t *testing.T) {
-	cap := &rss.TweetCapture{TextMarkdown: "first line\nsecond line"}
-	if got := buildTweetTitle(cap); got != "first line second line" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestBuildTweetTitle_ImageOnlyFallback(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:    "karpathy",
-		ImageURLs: []string{"x"},
-	}
-	if got := buildTweetTitle(cap); got != "@karpathy 的推文" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestBuildTweetTitle_ImageOnlyDisplayNameFallback(t *testing.T) {
-	cap := &rss.TweetCapture{
-		Author:      "karpathy",
-		DisplayName: "Andrej Karpathy",
-		ImageURLs:   []string{"x"},
-	}
-	if got := buildTweetTitle(cap); got != "Andrej Karpathy 的推文" {
-		t.Errorf("got %q", got)
-	}
-}

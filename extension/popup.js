@@ -114,6 +114,88 @@
       } else {
         captureBtn.dataset.mode = 'html';
       }
+
+      // Probe current tab for an adapter-driven capture opportunity.
+      probeAdapterAndShowButton(tab, serverUrl, token);
+    }
+  }
+
+  async function probeAdapterAndShowButton(tab, serverUrl, token) {
+    if (!tab || !tab.id || !tab.url || !tab.url.startsWith('http')) return;
+    let probe = null;
+    try {
+      probe = await chrome.tabs.sendMessage(tab.id, { action: 'getCurrentExtract' });
+    } catch (_) {
+      // Content script not loaded on this tab — not an adapter page. Stay hidden.
+      return;
+    }
+    if (!probe || !probe.matched) return;
+
+    const section = document.getElementById('captureAdapterSection');
+    const btn = document.getElementById('captureAdapterBtn');
+    const status = document.getElementById('captureAdapterStatus');
+    if (!section || !btn) return;
+    section.style.display = 'block';
+
+    const count = (probe.items && probe.items.length) || 0;
+    const label = probe.sourceName || probe.sourceID || probe.name;
+    if (count === 0) {
+      btn.disabled = true;
+      btn.textContent = `⚡ ${label}: 暂无可抓内容（滚动页面后重开扩展）`;
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = `⚡ 抓取本页 ${count} 条到 RSS Pal`;
+    btn._probe = probe;
+    btn._serverUrl = serverUrl;
+    btn._token = token;
+  }
+
+  async function captureAdapter() {
+    const btn = document.getElementById('captureAdapterBtn');
+    const status = document.getElementById('captureAdapterStatus');
+    const probe = btn && btn._probe;
+    const serverUrl = btn && btn._serverUrl;
+    const token = btn && btn._token;
+    if (!probe || !serverUrl || !token) return;
+
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '抓取中…';
+    status.className = 'status';
+    status.style.display = 'none';
+
+    try {
+      const resp = await fetch(serverUrl.replace(/\/+$/, '') + '/api/extension/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({
+          source_kind: probe.sourceKind,
+          source_id: probe.sourceID,
+          source_name: probe.sourceName,
+          items: probe.items,
+        }),
+      });
+      if (!resp.ok) {
+        let msg = 'HTTP ' + resp.status;
+        try { const e = await resp.json(); msg = e.error || e.message || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const body = await resp.json();
+      const base = serverUrl.replace(/\/+$/, '');
+      const link = body.feed_id
+        ? ` · <a href="${base}/articles?feed_id=${encodeURIComponent(body.feed_id)}" target="_blank" rel="noopener noreferrer">打开 RSS Pal ↗</a>`
+        : '';
+      status.innerHTML = `✅ accepted ${body.accepted} / skipped ${body.skipped}${link}`;
+      status.className = 'status show status-success';
+      status.style.display = 'block';
+    } catch (e) {
+      status.textContent = '❌ ' + (e && e.message || e);
+      status.className = 'status show status-error';
+      status.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = origText;
     }
   }
 
@@ -352,6 +434,11 @@
 
   captureBtn.addEventListener('click', () => doCapture(false));
 
+  const captureAdapterBtn = document.getElementById('captureAdapterBtn');
+  if (captureAdapterBtn) {
+    captureAdapterBtn.addEventListener('click', captureAdapter);
+  }
+
   overwriteBtn.addEventListener('click', async () => {
     if (!lastCapture) return;
     hideDuplicate();
@@ -414,6 +501,163 @@
       notConfiguredMsg.textContent = '配置失败：' + err.message;
     }
   });
+
+  // === Sync Source UI ===
+  async function populateSourceSelect() {
+    const select = document.getElementById('sourceSelect');
+    const deleteBtn = document.getElementById('sourceDeleteBtn');
+    if (!select) return;
+    const known = await chrome.storage.sync.get(['known_sources']);
+    const list = Array.isArray(known.known_sources) ? known.known_sources : [];
+    // Sort most-recently-seen first so the dropdown reflects current use.
+    list.sort((a, b) => (b.last_seen || b.discovered_at || 0) - (a.last_seen || a.discovered_at || 0));
+    select.innerHTML = '';
+    if (!list.length) {
+      const opt = document.createElement('option');
+      opt.textContent = '(暂无已发现的 source — 打开一个 x.com list/profile/bookmarks 让它自动出现)';
+      opt.disabled = true;
+      select.appendChild(opt);
+      if (deleteBtn) deleteBtn.disabled = true;
+      return;
+    }
+    if (deleteBtn) deleteBtn.disabled = false;
+    for (const s of list) {
+      const opt = document.createElement('option');
+      opt.value = s.key;
+      opt.textContent = (s.source_kind || '') + ' · ' + (s.source_name || s.source_id || '');
+      select.appendChild(opt);
+    }
+  }
+
+  async function deleteSelectedSource() {
+    const select = document.getElementById('sourceSelect');
+    const status = document.getElementById('syncStatus');
+    if (!select || !select.value) return;
+    const key = select.value;
+    const known = await chrome.storage.sync.get(['known_sources']);
+    const list = Array.isArray(known.known_sources) ? known.known_sources : [];
+    const filtered = list.filter((s) => s.key !== key);
+    await chrome.storage.sync.set({ known_sources: filtered });
+    if (status) {
+      status.textContent = '已从列表移除 (下次访问该页面会重新出现)';
+      status.style.display = 'block';
+    }
+    await populateSourceSelect();
+  }
+
+  const syncSourceBtn = document.getElementById('syncSourceBtn');
+  if (syncSourceBtn) {
+    syncSourceBtn.addEventListener('click', async () => {
+      const select = document.getElementById('sourceSelect');
+      const status = document.getElementById('syncStatus');
+      if (!select || !status) return;
+      const key = select.value;
+      if (!key) {
+        status.textContent = '请选择一个 source';
+        return;
+      }
+
+      const data = await chrome.storage.sync.get(['known_sources', 'serverUrl', 'token']);
+      const source = (data.known_sources || []).find((s) => s.key === key);
+      if (!source) {
+        status.textContent = '未找到该 source';
+        return;
+      }
+      const serverUrl = (data.serverUrl || '').trim();
+      const token = (data.token || '').trim();
+      if (!serverUrl || !token) {
+        status.textContent = '请先在 Options 配置 RSS Pal 服务地址 + token';
+        return;
+      }
+
+      // Reconstruct URL from source kind + id
+      let url;
+      if (source.source_kind === 'twitter:list') {
+        url = 'https://x.com/i/lists/' + source.source_id;
+      } else if (source.source_kind === 'twitter:user') {
+        url = 'https://x.com/' + source.source_id;
+      } else if (source.source_kind === 'twitter:bookmarks') {
+        url = 'https://x.com/i/bookmarks';
+      } else {
+        status.textContent = '不支持的 source 类型：' + source.source_kind;
+        return;
+      }
+
+      syncSourceBtn.disabled = true;
+      status.textContent = '同步中…后台进行，可随时关闭此弹窗';
+
+      try {
+        await chrome.runtime.sendMessage({
+          action: 'startSync',
+          payload: { url, source, serverUrl, token },
+        });
+        // Re-render lastSyncResult after a tiny delay so the "running" state appears.
+        setTimeout(renderLastSyncResult, 200);
+      } catch (e) {
+        status.textContent = '启动同步失败：' + (e && e.message ? e.message : e);
+      } finally {
+        syncSourceBtn.disabled = false;
+      }
+    });
+  }
+
+  // Render the last sync result (running / done / failed) into the popup.
+  // Stored by background.js's runSync() under chrome.storage.local.lastSyncResult.
+  // Idempotent — safe to call from init() and after starting a new sync.
+  async function renderLastSyncResult() {
+    const container = document.getElementById('lastSyncResult');
+    if (!container) return;
+    const data = await chrome.storage.local.get(['lastSyncResult']);
+    const r = data.lastSyncResult;
+    if (!r) { container.innerHTML = ''; return; }
+    // Only show results from the last 10 minutes
+    if (r.completed_at && Date.now() - r.completed_at > 10 * 60 * 1000) {
+      container.innerHTML = '';
+      return;
+    }
+    const name = (r.source && r.source.source_name) || (r.feed_name) ||
+                 (r.source && r.source.source_id) || 'Source';
+    if (r.status === 'running') {
+      container.innerHTML = '<div class="sync-result sync-running">⏳ 同步中：' +
+        escapeHtml(name) + '</div>';
+      return;
+    }
+    if (r.status === 'failed') {
+      container.innerHTML = '<div class="sync-result sync-failed">❌ 同步失败：' +
+        escapeHtml(r.error || 'unknown') + '</div>';
+      return;
+    }
+    if (r.status === 'empty') {
+      // accepted=0 AND skipped=0 — backend may not have created a feed_id,
+      // so we can't deep-link. Show actionable hints instead.
+      // If probed_count is present, surface it: 0 means selectors failed,
+      // >0 means content was found but nothing made it through (different bug).
+      const probeInfo = (typeof r.probed_count === 'number')
+        ? '<br><span style="font-size:11px;color:#92400e">诊断: 同步时 adapter 在页面上找到 ' +
+          (r.probed_count | 0) + ' 个候选元素</span>'
+        : '';
+      container.innerHTML = '<div class="sync-result sync-empty">⚠️ 没有抓到任何内容：' +
+        escapeHtml(name) + probeInfo +
+        '<br>可能原因：页面未完全加载，或 selector 与当前 x.com DOM 失配。' +
+        '<br>建议：在新标签打开 ' + escapeHtml(name) +
+        '，滚动一屏后再点「立即同步」。如长期失效请反馈给开发者。</div>';
+      return;
+    }
+    // status === 'done'
+    let link = '';
+    if (r.feed_id && r.server_url) {
+      const href = String(r.server_url).replace(/\/+$/, '') +
+        '/articles?feed_id=' + encodeURIComponent(r.feed_id);
+      link = ' · <a href="' + escapeHtml(href) +
+        '" target="_blank" rel="noopener noreferrer">打开 RSS Pal ↗</a>';
+    }
+    container.innerHTML = '<div class="sync-result sync-done">✅ ' + escapeHtml(name) +
+      '：accepted ' + (r.accepted | 0) + ' / skipped ' + (r.skipped | 0) + link + '</div>';
+  }
+
+  populateSourceSelect();
+  renderLastSyncResult();
+  document.getElementById('sourceDeleteBtn')?.addEventListener('click', deleteSelectedSource);
 
   // Init
   init();
