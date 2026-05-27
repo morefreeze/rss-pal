@@ -83,7 +83,23 @@ export default function TweetCard({ article, compact = false }: Props) {
         </div>
       </header>
       <div className="tweet-card-body">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: ({ href, children, ...rest }) => {
+              // Tweet text often contains links to other x.com paths as
+              // root-relative URLs like /handle/status/id. Without a host,
+              // the browser treats them as same-origin and the SPA router
+              // sends the user back to the article list. Absolutise to x.com.
+              const finalHref = href && href.startsWith('/') ? `https://x.com${href}` : href
+              return (
+                <a href={finalHref} target="_blank" rel="noopener noreferrer" {...rest}>
+                  {children}
+                </a>
+              )
+            },
+          }}
+        >{body}</ReactMarkdown>
       </div>
       <footer className="tweet-card-footer">
         <a href={article.url} target="_blank" rel="noopener noreferrer">在 X 打开 ↗</a>
