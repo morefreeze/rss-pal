@@ -75,6 +75,7 @@ type Quote struct {
 	Author      string    // handle of quoted user (without @)
 	DisplayName string    // display name of quoted user
 	PublishedAt time.Time // <time datetime="..."> inside the quote card
+	ImageURLs   []string  // photo URLs inside the quote card (excluded from focal images)
 	Excerpt     string    // visible body text of the card, capped at ~280 runes
 }
 
@@ -282,6 +283,13 @@ func walkTextMarkdown(sel *goquery.Selection, b *strings.Builder) {
 				href, _ := n.Attr("href")
 				inner := strings.TrimSpace(n.Text())
 				if href != "" && inner != "" {
+					// Root-relative anchors (/handle, /handle/status/id) on
+					// x.com need an explicit host. Without it the reader's
+					// SPA treats them as same-origin and routes the user
+					// back to the article list when they click.
+					if strings.HasPrefix(href, "/") && !strings.HasPrefix(href, "//") {
+						href = "https://x.com" + href
+					}
 					fmt.Fprintf(b, "[%s](%s)", inner, href)
 				} else {
 					b.WriteString(inner)
@@ -368,7 +376,16 @@ func extractPublishedAt(focal *goquery.Selection) time.Time {
 // Each URL has its `name=...` query parameter rewritten to `name=large` to
 // pull the highest-quality variant Twitter serves anonymously.
 func extractTweetImages(focal *goquery.Selection) []string {
+	seen := map[string]bool{}
 	var urls []string
+	add := func(src string) {
+		if src == "" || seen[src] {
+			return
+		}
+		seen[src] = true
+		urls = append(urls, src)
+	}
+
 	focal.Find(`[data-testid="tweetPhoto"] img[src]`).Each(func(_ int, img *goquery.Selection) {
 		if hasAncestor(img, focal, `div[role="link"]`) {
 			return
@@ -376,9 +393,35 @@ func extractTweetImages(focal *goquery.Selection) []string {
 		if hasAncestor(img, focal, `[data-testid="longformRichTextComponent"]`) {
 			return
 		}
-		if src := normalizeFocalImageSrc(img); src != "" {
-			urls = append(urls, src)
+		add(normalizeFocalImageSrc(img))
+	})
+
+	// X Article (longform) cover image. Rendered inside a div[role="link"]
+	// because the whole card is the "tap to open article" entry, so the
+	// focal-photo rule above excludes it. We still want it — it's media
+	// the focal tweet's author posted, not a quoted-tweet thumbnail.
+	focal.Find(`[data-testid="article-cover-image"] img[src]`).Each(func(_ int, img *goquery.Selection) {
+		add(normalizeFocalImageSrc(img))
+	})
+
+	return urls
+}
+
+// extractCardImages collects photo URLs from inside a quote card subtree.
+// Mirrors extractTweetImages but scoped to the card — and intentionally
+// does NOT exclude images under role="link" (the card itself IS the
+// role="link" container we want to include). Returns deduplicated URLs
+// in DOM order.
+func extractCardImages(card *goquery.Selection) []string {
+	seen := map[string]bool{}
+	var urls []string
+	card.Find(`[data-testid="tweetPhoto"] img[src]`).Each(func(_ int, img *goquery.Selection) {
+		src := normalizeFocalImageSrc(img)
+		if src == "" || seen[src] {
+			return
 		}
+		seen[src] = true
+		urls = append(urls, src)
 	})
 	return urls
 }
@@ -445,6 +488,7 @@ func extractQuote(focal *goquery.Selection, focalStatusID string) *Quote {
 			DisplayName: extractCardDisplayName(card),
 			PublishedAt: extractCardPublishedAt(card),
 			Excerpt:     extractCardExcerpt(card),
+			ImageURLs:   extractCardImages(card),
 		}
 		return false
 	})
