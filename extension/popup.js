@@ -505,23 +505,44 @@
   // === Sync Source UI ===
   async function populateSourceSelect() {
     const select = document.getElementById('sourceSelect');
+    const deleteBtn = document.getElementById('sourceDeleteBtn');
     if (!select) return;
     const known = await chrome.storage.sync.get(['known_sources']);
     const list = Array.isArray(known.known_sources) ? known.known_sources : [];
+    // Sort most-recently-seen first so the dropdown reflects current use.
+    list.sort((a, b) => (b.last_seen || b.discovered_at || 0) - (a.last_seen || a.discovered_at || 0));
     select.innerHTML = '';
     if (!list.length) {
       const opt = document.createElement('option');
       opt.textContent = '(暂无已发现的 source — 打开一个 x.com list/profile/bookmarks 让它自动出现)';
       opt.disabled = true;
       select.appendChild(opt);
+      if (deleteBtn) deleteBtn.disabled = true;
       return;
     }
+    if (deleteBtn) deleteBtn.disabled = false;
     for (const s of list) {
       const opt = document.createElement('option');
       opt.value = s.key;
       opt.textContent = (s.source_kind || '') + ' · ' + (s.source_name || s.source_id || '');
       select.appendChild(opt);
     }
+  }
+
+  async function deleteSelectedSource() {
+    const select = document.getElementById('sourceSelect');
+    const status = document.getElementById('syncStatus');
+    if (!select || !select.value) return;
+    const key = select.value;
+    const known = await chrome.storage.sync.get(['known_sources']);
+    const list = Array.isArray(known.known_sources) ? known.known_sources : [];
+    const filtered = list.filter((s) => s.key !== key);
+    await chrome.storage.sync.set({ known_sources: filtered });
+    if (status) {
+      status.textContent = '已从列表移除 (下次访问该页面会重新出现)';
+      status.style.display = 'block';
+    }
+    await populateSourceSelect();
   }
 
   const syncSourceBtn = document.getElementById('syncSourceBtn');
@@ -636,6 +657,7 @@
 
   populateSourceSelect();
   renderLastSyncResult();
+  document.getElementById('sourceDeleteBtn')?.addEventListener('click', deleteSelectedSource);
 
   // Init
   init();

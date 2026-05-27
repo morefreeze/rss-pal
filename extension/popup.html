@@ -40,7 +40,10 @@
 
       <details id="syncSourceSection" class="sync-source-section">
         <summary class="sync-source-summary">同步其他 source（后台 tab 刷新）</summary>
-        <select id="sourceSelect" class="sync-source-select"></select>
+        <div class="sync-source-row">
+          <select id="sourceSelect" class="sync-source-select"></select>
+          <button class="btn btn-icon" id="sourceDeleteBtn" title="从列表移除">✕</button>
+        </div>
         <button class="btn btn-secondary" id="syncSourceBtn">立即同步</button>
         <p id="syncStatus" class="sync-status"></p>
         <div id="lastSyncResult"></div>
