@@ -105,12 +105,51 @@ async function runSync({ url, source, serverUrl, token }) {
       // lazy-loaded sites (x.com). 8s is empirically enough for visible tweets.
       await sleep(8000);
 
+      // Probe the synced tab for its extract count BEFORE flushing, so even if
+      // flush ends up processing 0 items we can tell the user "the adapter saw
+      // N items but none made it through" vs "the adapter found 0 items —
+      // selectors probably misaligned with current DOM".
+      // Use world: 'ISOLATED' to match content-script context (where
+      // window.__rssPalAdapters lives).
+      let probedCount = null;
+      try {
+        const probe = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'ISOLATED',
+          func: () => {
+            const reg = window.__rssPalAdapters;
+            if (!reg || typeof reg.findFor !== 'function') return null;
+            const a = reg.findFor(location);
+            if (!a || typeof a.extract !== 'function') return null;
+            try {
+              const r = a.extract(document);
+              return (r && Array.isArray(r.items)) ? r.items.length : null;
+            } catch (_) {
+              return null;
+            }
+          },
+        });
+        if (probe && probe[0] && typeof probe[0].result === 'number') {
+          probedCount = probe[0].result;
+        }
+      } catch (_e) {
+        // probe failure is non-fatal — leave probedCount null
+      }
+      result.probed_count = probedCount;
+
       const flushed = await flushQueueAndCapture(serverUrl, token, source);
       result.accepted = flushed.accepted;
       result.skipped = flushed.skipped;
       result.feed_id = flushed.feed_id;
       result.feed_name = flushed.feed_name;
       result.status = 'done';
+      // Distinguish empty result so popup can warn the user. The most likely
+      // cause is that the extract() returned no items — either selectors don't
+      // match the current x.com DOM, or the page didn't finish rendering
+      // before the 8s grace.
+      if (result.accepted === 0 && result.skipped === 0) {
+        result.status = 'empty';
+      }
     }
   } catch (e) {
     result.status = 'failed';
