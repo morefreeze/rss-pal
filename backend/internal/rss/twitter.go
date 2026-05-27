@@ -75,6 +75,7 @@ type Quote struct {
 	Author      string    // handle of quoted user (without @)
 	DisplayName string    // display name of quoted user
 	PublishedAt time.Time // <time datetime="..."> inside the quote card
+	ImageURLs   []string  // photo URLs inside the quote card (excluded from focal images)
 	Excerpt     string    // visible body text of the card, capped at ~280 runes
 }
 
@@ -383,6 +384,25 @@ func extractTweetImages(focal *goquery.Selection) []string {
 	return urls
 }
 
+// extractCardImages collects photo URLs from inside a quote card subtree.
+// Mirrors extractTweetImages but scoped to the card — and intentionally
+// does NOT exclude images under role="link" (the card itself IS the
+// role="link" container we want to include). Returns deduplicated URLs
+// in DOM order.
+func extractCardImages(card *goquery.Selection) []string {
+	seen := map[string]bool{}
+	var urls []string
+	card.Find(`[data-testid="tweetPhoto"] img[src]`).Each(func(_ int, img *goquery.Selection) {
+		src := normalizeFocalImageSrc(img)
+		if src == "" || seen[src] {
+			return
+		}
+		seen[src] = true
+		urls = append(urls, src)
+	})
+	return urls
+}
+
 // pickInlineImageURL returns the upgraded pbs.twimg.com URL for the first
 // usable <img> descendant of an inline tweetPhoto element, or "" if none
 // (e.g. video thumbnails the focal walker should skip). Shared with the
@@ -445,6 +465,7 @@ func extractQuote(focal *goquery.Selection, focalStatusID string) *Quote {
 			DisplayName: extractCardDisplayName(card),
 			PublishedAt: extractCardPublishedAt(card),
 			Excerpt:     extractCardExcerpt(card),
+			ImageURLs:   extractCardImages(card),
 		}
 		return false
 	})

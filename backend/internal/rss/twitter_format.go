@@ -44,7 +44,7 @@ func buildQuoteSection(q *Quote) string {
 	if q == nil || q.URL == "" {
 		return ""
 	}
-	if q.Author == "" && q.Excerpt == "" {
+	if q.Author == "" && q.Excerpt == "" && len(q.ImageURLs) == 0 {
 		return "引用: " + q.URL
 	}
 
@@ -82,6 +82,11 @@ func buildQuoteSection(q *Quote) string {
 			b.WriteString("> ")
 			b.WriteString(line)
 		}
+	}
+	for _, img := range q.ImageURLs {
+		b.WriteString("\n\n> ![](")
+		b.WriteString(img)
+		b.WriteString(")")
 	}
 	return b.String()
 }
