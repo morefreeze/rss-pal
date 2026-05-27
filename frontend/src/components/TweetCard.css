@@ -50,6 +50,17 @@
 .tweet-card-body p:first-child {
   margin-top: 0;
 }
+.tweet-card-body ol,
+.tweet-card-body ul {
+  padding-left: 1.6em;
+  margin: 0.5em 0;
+}
+.tweet-card-body li {
+  margin: 0.15em 0;
+}
+.tweet-card-body li > p {
+  margin: 0;
+}
 .tweet-card-footer {
   margin-top: 8px;
   font-size: 0.85em;
