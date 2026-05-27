@@ -225,20 +225,32 @@
         source_name: result.sourceName,
         items: result.items,
       });
-      // Auto-discover: append to known_sources
+      // Auto-discover: upsert into known_sources, refreshing last_seen so the
+      // popup dropdown can sort most-recently-visited first. Cap the list at
+      // KNOWN_SOURCES_MAX so it doesn't grow unbounded — evict the oldest by
+      // last_seen when full.
+      const KNOWN_SOURCES_MAX = 30;
       const known = await chrome.storage.sync.get(['known_sources']);
       const list = Array.isArray(known.known_sources) ? known.known_sources : [];
       const key = adapter.sourceKind + '/' + result.sourceID;
-      if (!list.find((s) => s.key === key)) {
+      const now = Date.now();
+      const existing = list.find((s) => s.key === key);
+      if (existing) {
+        existing.last_seen = now;
+        if (result.sourceName) existing.source_name = result.sourceName;
+      } else {
         list.push({
           key,
           source_kind: adapter.sourceKind,
           source_id: result.sourceID,
           source_name: result.sourceName,
-          discovered_at: Date.now(),
+          discovered_at: now,
+          last_seen: now,
         });
-        await chrome.storage.sync.set({ known_sources: list });
       }
+      list.sort((a, b) => (b.last_seen || b.discovered_at || 0) - (a.last_seen || a.discovered_at || 0));
+      if (list.length > KNOWN_SOURCES_MAX) list.length = KNOWN_SOURCES_MAX;
+      await chrome.storage.sync.set({ known_sources: list });
       // Trigger background flush (best effort)
       try {
         const p = chrome.runtime.sendMessage({ action: 'flushQueue' });

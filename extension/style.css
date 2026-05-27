@@ -231,6 +231,35 @@ body {
   margin-bottom: 8px;
 }
 
+.sync-source-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.sync-source-row .sync-source-select {
+  flex: 1;
+  margin-bottom: 0;
+}
+.btn-icon {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-icon:hover:not(:disabled) {
+  background: var(--bg-hover, #f3f4f6);
+  color: var(--text);
+}
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 #captureAdapterSection .btn-primary {
   background: var(--primary);
 }
