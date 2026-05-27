@@ -448,13 +448,21 @@
         status.textContent = '请选择一个 source';
         return;
       }
-      const known = await chrome.storage.sync.get(['known_sources']);
-      const source = (known.known_sources || []).find((s) => s.key === key);
+
+      const data = await chrome.storage.sync.get(['known_sources', 'serverUrl', 'token']);
+      const source = (data.known_sources || []).find((s) => s.key === key);
       if (!source) {
         status.textContent = '未找到该 source';
         return;
       }
+      const serverUrl = (data.serverUrl || '').trim();
+      const token = (data.token || '').trim();
+      if (!serverUrl || !token) {
+        status.textContent = '请先在 Options 配置 RSS Pal 服务地址 + token';
+        return;
+      }
 
+      // Reconstruct URL from source kind + id
       let url;
       if (source.source_kind === 'twitter:list') {
         url = 'https://x.com/i/lists/' + source.source_id;
@@ -468,35 +476,63 @@
       }
 
       syncSourceBtn.disabled = true;
-      status.textContent = '正在打开后台 tab…';
-      let tab;
-      try {
-        tab = await chrome.tabs.create({ url, active: false });
-      } catch (err) {
-        status.textContent = '打开 tab 失败：' + (err && err.message ? err.message : err);
-        syncSourceBtn.disabled = false;
-        return;
-      }
+      status.textContent = '同步中…后台进行，可随时关闭此弹窗';
 
-      status.textContent = '等待页面加载与抓取（约 15 秒）…';
-      setTimeout(async () => {
-        try {
-          await chrome.runtime.sendMessage({ action: 'flushQueue' });
-        } catch (_) {
-          // background may be asleep — periodic alarm will retry
-        }
-        try {
-          if (tab && tab.id != null) await chrome.tabs.remove(tab.id);
-        } catch (_) {
-          // tab may already be closed
-        }
-        status.textContent = '同步完成（详情请到 RSS Pal 查看）';
+      try {
+        await chrome.runtime.sendMessage({
+          action: 'startSync',
+          payload: { url, source, serverUrl, token },
+        });
+        // Re-render lastSyncResult after a tiny delay so the "running" state appears.
+        setTimeout(renderLastSyncResult, 200);
+      } catch (e) {
+        status.textContent = '启动同步失败：' + (e && e.message ? e.message : e);
+      } finally {
         syncSourceBtn.disabled = false;
-      }, 15000);
+      }
     });
   }
 
+  // Render the last sync result (running / done / failed) into the popup.
+  // Stored by background.js's runSync() under chrome.storage.local.lastSyncResult.
+  // Idempotent — safe to call from init() and after starting a new sync.
+  async function renderLastSyncResult() {
+    const container = document.getElementById('lastSyncResult');
+    if (!container) return;
+    const data = await chrome.storage.local.get(['lastSyncResult']);
+    const r = data.lastSyncResult;
+    if (!r) { container.innerHTML = ''; return; }
+    // Only show results from the last 10 minutes
+    if (r.completed_at && Date.now() - r.completed_at > 10 * 60 * 1000) {
+      container.innerHTML = '';
+      return;
+    }
+    const name = (r.source && r.source.source_name) || (r.feed_name) ||
+                 (r.source && r.source.source_id) || 'Source';
+    if (r.status === 'running') {
+      container.innerHTML = '<div class="sync-result sync-running">⏳ 同步中：' +
+        escapeHtml(name) + '</div>';
+      return;
+    }
+    if (r.status === 'failed') {
+      container.innerHTML = '<div class="sync-result sync-failed">❌ 同步失败：' +
+        escapeHtml(r.error || 'unknown') + '</div>';
+      return;
+    }
+    // status === 'done'
+    let link = '';
+    if (r.feed_id && r.server_url) {
+      const href = String(r.server_url).replace(/\/+$/, '') +
+        '/articles?feed_id=' + encodeURIComponent(r.feed_id);
+      link = ' · <a href="' + escapeHtml(href) +
+        '" target="_blank" rel="noopener noreferrer">打开 RSS Pal ↗</a>';
+    }
+    container.innerHTML = '<div class="sync-result sync-done">✅ ' + escapeHtml(name) +
+      '：accepted ' + (r.accepted | 0) + ' / skipped ' + (r.skipped | 0) + link + '</div>';
+  }
+
   populateSourceSelect();
+  renderLastSyncResult();
 
   // Init
   init();

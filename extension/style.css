@@ -232,6 +232,13 @@ body {
   min-height: 14px;
 }
 
+.sync-result { margin-top: 8px; padding: 6px 8px; border-radius: 4px; font-size: 12px; }
+.sync-result a { color: #2563eb; text-decoration: none; }
+.sync-result a:hover { text-decoration: underline; }
+.sync-running { background: #fef3c7; color: #92400e; }
+.sync-done    { background: #dcfce7; color: #166534; }
+.sync-failed  { background: #fee2e2; color: #991b1b; }
+
 /* --- Options --- */
 .options-container {
   max-width: 480px;
