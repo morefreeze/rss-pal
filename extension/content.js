@@ -161,6 +161,31 @@
 (function () {
   'use strict';
   if (!window.__rssPalAdapters) return;  // registry not loaded
+
+  // On-demand extract for popup's "⚡ 抓取本页" button. Registered globally
+  // so it works regardless of whether a passive adapter is also active on
+  // this page (popup probes via this message before showing the button).
+  chrome.runtime.onMessage.addListener(function (msg, _sender, sendResponse) {
+    if (!msg || msg.action !== 'getCurrentExtract') return;
+    try {
+      const ad = window.__rssPalAdapters.findFor(location);
+      if (!ad) { sendResponse({ matched: false }); return; }
+      const result = ad.extract(document) || {};
+      sendResponse({
+        matched: true,
+        site: ad.site,
+        name: ad.name,
+        sourceKind: ad.sourceKind,
+        sourceID: result.sourceID || '',
+        sourceName: result.sourceName || '',
+        items: Array.isArray(result.items) ? result.items : [],
+      });
+    } catch (e) {
+      sendResponse({ matched: false, error: String(e && e.message || e) });
+    }
+    return false; // synchronous response
+  });
+
   const adapter = window.__rssPalAdapters.findFor(location);
   if (!adapter || !adapter.passive) return;
 

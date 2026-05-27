@@ -215,6 +215,30 @@ body {
   margin-bottom: 8px;
 }
 
+.sync-source-summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  list-style: revert;
+}
+
+.sync-source-section[open] .sync-source-summary {
+  margin-bottom: 10px;
+}
+
+#captureAdapterSection {
+  margin-bottom: 8px;
+}
+
+#captureAdapterSection .btn-primary {
+  background: var(--primary);
+}
+
+#captureAdapterStatus {
+  margin-top: 6px;
+}
+
 .sync-source-select {
   width: 100%;
   padding: 6px 8px;

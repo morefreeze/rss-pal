@@ -114,6 +114,88 @@
       } else {
         captureBtn.dataset.mode = 'html';
       }
+
+      // Probe current tab for an adapter-driven capture opportunity.
+      probeAdapterAndShowButton(tab, serverUrl, token);
+    }
+  }
+
+  async function probeAdapterAndShowButton(tab, serverUrl, token) {
+    if (!tab || !tab.id || !tab.url || !tab.url.startsWith('http')) return;
+    let probe = null;
+    try {
+      probe = await chrome.tabs.sendMessage(tab.id, { action: 'getCurrentExtract' });
+    } catch (_) {
+      // Content script not loaded on this tab — not an adapter page. Stay hidden.
+      return;
+    }
+    if (!probe || !probe.matched) return;
+
+    const section = document.getElementById('captureAdapterSection');
+    const btn = document.getElementById('captureAdapterBtn');
+    const status = document.getElementById('captureAdapterStatus');
+    if (!section || !btn) return;
+    section.style.display = 'block';
+
+    const count = (probe.items && probe.items.length) || 0;
+    const label = probe.sourceName || probe.sourceID || probe.name;
+    if (count === 0) {
+      btn.disabled = true;
+      btn.textContent = `⚡ ${label}: 暂无可抓内容（滚动页面后重开扩展）`;
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = `⚡ 抓取本页 ${count} 条到 RSS Pal`;
+    btn._probe = probe;
+    btn._serverUrl = serverUrl;
+    btn._token = token;
+  }
+
+  async function captureAdapter() {
+    const btn = document.getElementById('captureAdapterBtn');
+    const status = document.getElementById('captureAdapterStatus');
+    const probe = btn && btn._probe;
+    const serverUrl = btn && btn._serverUrl;
+    const token = btn && btn._token;
+    if (!probe || !serverUrl || !token) return;
+
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '抓取中…';
+    status.className = 'status';
+    status.style.display = 'none';
+
+    try {
+      const resp = await fetch(serverUrl.replace(/\/+$/, '') + '/api/extension/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({
+          source_kind: probe.sourceKind,
+          source_id: probe.sourceID,
+          source_name: probe.sourceName,
+          items: probe.items,
+        }),
+      });
+      if (!resp.ok) {
+        let msg = 'HTTP ' + resp.status;
+        try { const e = await resp.json(); msg = e.error || e.message || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const body = await resp.json();
+      const base = serverUrl.replace(/\/+$/, '');
+      const link = body.feed_id
+        ? ` · <a href="${base}/articles?feed_id=${encodeURIComponent(body.feed_id)}" target="_blank" rel="noopener noreferrer">打开 RSS Pal ↗</a>`
+        : '';
+      status.innerHTML = `✅ accepted ${body.accepted} / skipped ${body.skipped}${link}`;
+      status.className = 'status show status-success';
+      status.style.display = 'block';
+    } catch (e) {
+      status.textContent = '❌ ' + (e && e.message || e);
+      status.className = 'status show status-error';
+      status.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = origText;
     }
   }
 
@@ -351,6 +433,11 @@
   // --- Events ---
 
   captureBtn.addEventListener('click', () => doCapture(false));
+
+  const captureAdapterBtn = document.getElementById('captureAdapterBtn');
+  if (captureAdapterBtn) {
+    captureAdapterBtn.addEventListener('click', captureAdapter);
+  }
 
   overwriteBtn.addEventListener('click', async () => {
     if (!lastCapture) return;
