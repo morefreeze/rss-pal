@@ -519,6 +519,22 @@
         escapeHtml(r.error || 'unknown') + '</div>';
       return;
     }
+    if (r.status === 'empty') {
+      // accepted=0 AND skipped=0 — backend may not have created a feed_id,
+      // so we can't deep-link. Show actionable hints instead.
+      // If probed_count is present, surface it: 0 means selectors failed,
+      // >0 means content was found but nothing made it through (different bug).
+      const probeInfo = (typeof r.probed_count === 'number')
+        ? '<br><span style="font-size:11px;color:#92400e">诊断: 同步时 adapter 在页面上找到 ' +
+          (r.probed_count | 0) + ' 个候选元素</span>'
+        : '';
+      container.innerHTML = '<div class="sync-result sync-empty">⚠️ 没有抓到任何内容：' +
+        escapeHtml(name) + probeInfo +
+        '<br>可能原因：页面未完全加载，或 selector 与当前 x.com DOM 失配。' +
+        '<br>建议：在新标签打开 ' + escapeHtml(name) +
+        '，滚动一屏后再点「立即同步」。如长期失效请反馈给开发者。</div>';
+      return;
+    }
     // status === 'done'
     let link = '';
     if (r.feed_id && r.server_url) {
