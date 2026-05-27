@@ -283,6 +283,13 @@ func walkTextMarkdown(sel *goquery.Selection, b *strings.Builder) {
 				href, _ := n.Attr("href")
 				inner := strings.TrimSpace(n.Text())
 				if href != "" && inner != "" {
+					// Root-relative anchors (/handle, /handle/status/id) on
+					// x.com need an explicit host. Without it the reader's
+					// SPA treats them as same-origin and routes the user
+					// back to the article list when they click.
+					if strings.HasPrefix(href, "/") && !strings.HasPrefix(href, "//") {
+						href = "https://x.com" + href
+					}
 					fmt.Fprintf(b, "[%s](%s)", inner, href)
 				} else {
 					b.WriteString(inner)
