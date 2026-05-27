@@ -210,6 +210,12 @@ func TestExtensionIngest_HappyPath(t *testing.T) {
 	if resp.Accepted != 2 || resp.Skipped != 0 {
 		t.Errorf("accepted=%d skipped=%d, want 2/0 (errors=%v)", resp.Accepted, resp.Skipped, resp.Errors)
 	}
+	if resp.FeedID <= 0 {
+		t.Errorf("resp.FeedID = %d, want > 0", resp.FeedID)
+	}
+	if resp.FeedName != "Test List" {
+		t.Errorf("resp.FeedName = %q, want %q", resp.FeedName, "Test List")
+	}
 	if got := len(articleRepo.created); got != 2 {
 		t.Errorf("created articles = %d, want 2", got)
 	}
@@ -277,6 +283,12 @@ func TestExtensionIngest_Dedupe(t *testing.T) {
 		t.Fatalf("first send: accepted=%d skipped=%d, want 2/0 (errors=%v)",
 			resp1.Accepted, resp1.Skipped, resp1.Errors)
 	}
+	if resp1.FeedID <= 0 {
+		t.Errorf("resp1.FeedID = %d, want > 0", resp1.FeedID)
+	}
+	if resp1.FeedName != "@bob" {
+		t.Errorf("resp1.FeedName = %q, want %q", resp1.FeedName, "@bob")
+	}
 
 	// Second send (identical payload) → both skipped.
 	resp2, code2 := doIngest(t, r, body)
@@ -286,6 +298,12 @@ func TestExtensionIngest_Dedupe(t *testing.T) {
 	if resp2.Accepted != 0 || resp2.Skipped != 2 {
 		t.Errorf("second send: accepted=%d skipped=%d, want 0/2 (errors=%v)",
 			resp2.Accepted, resp2.Skipped, resp2.Errors)
+	}
+	if resp2.FeedID != resp1.FeedID {
+		t.Errorf("resp2.FeedID = %d, want stable %d", resp2.FeedID, resp1.FeedID)
+	}
+	if resp2.FeedName != "@bob" {
+		t.Errorf("resp2.FeedName = %q, want %q", resp2.FeedName, "@bob")
 	}
 	// Repo should still hold only the original 2 rows.
 	if got := len(articleRepo.created); got != 2 {
