@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,60 +10,12 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/bytedance/rss-pal/internal/httpx"
 )
 
-func TestIsBlockedIP(t *testing.T) {
-	cases := []struct {
-		ip      string
-		blocked bool
-	}{
-		{"127.0.0.1", true},
-		{"10.0.0.1", true},
-		{"172.16.0.1", true},
-		{"192.168.1.1", true},
-		{"169.254.169.254", true}, // metadata
-		{"::1", true},
-		{"fc00::1", true},
-		{"fe80::1", true},
-		{"8.8.8.8", false},
-		{"1.1.1.1", false},
-		{"2606:4700:4700::1111", false},
-	}
-	for _, tc := range cases {
-		ip := net.ParseIP(tc.ip)
-		if ip == nil {
-			t.Fatalf("parse %q failed", tc.ip)
-		}
-		if got := isBlockedIP(ip); got != tc.blocked {
-			t.Errorf("isBlockedIP(%s) = %v, want %v", tc.ip, got, tc.blocked)
-		}
-	}
-}
-
-func TestValidateImageURL(t *testing.T) {
-	cases := []struct {
-		raw     string
-		wantErr bool
-	}{
-		{"https://example.com/img.png", false},
-		{"http://example.com/img.png", false},
-		{"ftp://example.com/img.png", true},
-		{"file:///etc/passwd", true},
-		{"https://127.0.0.1/img.png", true},
-		{"https://192.168.1.1/img.png", true},
-		{"not-a-url", true},
-		{"", true},
-	}
-	for _, tc := range cases {
-		_, err := validateImageURL(tc.raw)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("validateImageURL(%q) err=%v, wantErr=%v", tc.raw, err, tc.wantErr)
-		}
-	}
-}
-
-// allowLoopbackValidator wraps validateImageURL but accepts loopback hosts.
-// Used only in tests; never wired into production code.
+// allowLoopbackValidator accepts loopback hosts. Used only in tests; never
+// wired into production code.
 func allowLoopbackValidator(raw string) (*url.URL, error) {
 	if raw == "" {
 		return nil, errors.New("empty url")
@@ -82,11 +33,22 @@ func allowLoopbackValidator(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// newTestProxy builds an ImageProxy with the given validator and CheckRedirect
-// wired to p.checkRedirect — the same wiring as NewImageProxy uses.
+// newTestProxy builds an ImageProxy with the given validator and a client
+// whose CheckRedirect re-runs the same validator against redirect targets.
 func newTestProxy(validator func(string) (*url.URL, error)) *ImageProxy {
 	p := &ImageProxy{Validate: validator}
-	p.Client = &http.Client{Timeout: proxyTimeout, CheckRedirect: p.checkRedirect}
+	p.Client = &http.Client{
+		Timeout: proxyTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("too many redirects")
+			}
+			if _, err := p.Validate(req.URL.String()); err != nil {
+				return fmt.Errorf("redirect rejected: %w", err)
+			}
+			return nil
+		},
+	}
 	return p
 }
 
@@ -246,7 +208,7 @@ func TestProxyImage_RejectsRedirectToBlockedIP(t *testing.T) {
 		if calls == 1 {
 			return allowLoopbackValidator(raw)
 		}
-		return validateImageURL(raw) // strict on redirects
+		return httpx.ValidateURL(raw) // strict on redirects
 	}
 	proxy := newTestProxy(validator)
 	r := gin.New()
