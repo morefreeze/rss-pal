@@ -471,10 +471,12 @@ func buildVisionMessages(prompt string, imagePaths []string) ([]chatMessage, err
 	}, nil
 }
 
-// callVision is the multimodal equivalent of (s *Summarizer).call. It uses
-// s.visionModel for the chat completion request and does NOT retry: with
-// large image payloads, retries are too expensive — let the caller decide
-// to fall back to text-only.
+// callVision is the multimodal equivalent of (s *Summarizer).call. Uses
+// s.visionModel for the chat completion request. Retries up to 2 times on
+// transient network errors (io.EOF / connection-closed) — observed in the
+// wild against z.ai's coding paas endpoint on detailed (4000-tok) requests.
+// Does NOT retry on application errors (HTTP 4xx/5xx with a body) — those
+// indicate model rejection where retry just doubles the cost.
 func (s *Summarizer) callVision(ctx context.Context, prompt string, imagePaths []string, maxTokens int) (string, error) {
 	if s.visionModel == "" {
 		return "", errors.New("vision model not configured (call SetVisionModel)")
@@ -495,7 +497,43 @@ func (s *Summarizer) callVision(ctx context.Context, prompt string, imagePaths [
 	if err != nil {
 		return "", err
 	}
-	return s.doCall(ctx, body, maxTokens)
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
+		}
+		result, callErr := s.doCall(ctx, body, maxTokens)
+		if callErr == nil {
+			return result, nil
+		}
+		lastErr = callErr
+		if !isTransientNetErr(callErr) {
+			return "", callErr
+		}
+		log.Printf("vision call transient error (attempt %d/3): %v", attempt+1, callErr)
+	}
+	return "", lastErr
+}
+
+// isTransientNetErr reports whether err looks like a connection-level blip
+// (server closed the conn mid-response, DNS hiccup) versus an application
+// error from the model (4xx/5xx with a structured body). Retrying the former
+// is cheap; retrying the latter is wasteful.
+func isTransientNetErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "no such host")
 }
 
 // SummarizeWithImages produces brief + detailed summaries informed by the
