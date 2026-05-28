@@ -17,6 +17,7 @@ import (
 	_ "image/gif" // register GIF decoder
 	"image/jpeg"
 	_ "image/png" // register PNG decoder
+	_ "golang.org/x/image/webp" // register WebP decoder (WeChat wx_fmt=other is WebP)
 	"io"
 	"log"
 	"net/http"
