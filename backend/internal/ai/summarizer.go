@@ -15,10 +15,11 @@ import (
 const DefaultModel = "glm-4.5"
 
 type Summarizer struct {
-	apiKey     string
-	baseURL    string
-	model      string
-	httpClient *http.Client
+	apiKey      string
+	baseURL     string
+	model       string
+	visionModel string // optional; set via SetVisionModel for SummarizeWithImages*
+	httpClient  *http.Client
 }
 
 func NewSummarizer(apiKey, baseURL string) *Summarizer {
@@ -37,6 +38,13 @@ func NewSummarizerWithModel(apiKey, baseURL, model string) *Summarizer {
 	}
 }
 
+// SetVisionModel records the model id used by SummarizeWithImages*. Must be
+// set before calling those methods; the text-only summary path is unaffected.
+func (s *Summarizer) SetVisionModel(m string) { s.visionModel = m }
+
+// VisionModel returns the configured vision model id (or "" if unset).
+func (s *Summarizer) VisionModel() string { return s.visionModel }
+
 type chatRequest struct {
 	Model          string          `json:"model"`
 	MaxTokens      int             `json:"max_tokens"`
@@ -48,9 +56,23 @@ type responseFormat struct {
 	Type string `json:"type"` // "json_object"
 }
 
+// chatMessage carries either a string (legacy text-only path) or a
+// []contentBlock (vision OpenAI schema) as Content.
+// json.Marshal handles both via interface{}: strings serialize to "...",
+// blocks serialize to [{"type":"text",...},{"type":"image_url",...}].
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+}
+
+type contentBlock struct {
+	Type     string         `json:"type"` // "text" | "image_url"
+	Text     string         `json:"text,omitempty"`
+	ImageURL *imageURLBlock `json:"image_url,omitempty"`
+}
+
+type imageURLBlock struct {
+	URL string `json:"url"` // either an http(s) URL or "data:image/jpeg;base64,..."
 }
 
 type chatResponse struct {
