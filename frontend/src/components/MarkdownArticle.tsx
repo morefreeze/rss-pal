@@ -13,6 +13,8 @@ import { flattenImageAltBlankLines } from '../util/imageAlt'
 import VideoEmbed from './VideoEmbed'
 import { parsePlaceholder } from './parseVideoPlaceholder'
 import { CodeWrapContext } from './CodeWrapContext'
+import { LinkSetContext } from './LinkSetContext'
+import { LinkSetMarkIcon } from './LinkSetMarkIcon'
 
 type Props = {
   source: string
@@ -109,11 +111,27 @@ const COMPONENTS: Components = {
       />
     )
   },
-  a: ({ href, children, ...rest }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
-      {children}
-    </a>
-  ),
+  a: ({ href, children, ...rest }) => {
+    const ctx = useContext(LinkSetContext)
+    const normalized = href && ctx ? ctx.normalize(href) : null
+    const isCandidate = normalized != null && ctx?.candidateURLs.has(normalized) === true
+    const anchor = (
+      <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
+        {children}
+      </a>
+    )
+    if (!isCandidate || !ctx || normalized == null) return anchor
+    return (
+      <span style={{ display: 'inline' }}>
+        {anchor}
+        <LinkSetMarkIcon
+          marked={ctx.markedURLs.has(normalized)}
+          alreadyFetched={ctx.alreadyFetchedURLs.has(normalized)}
+          onToggle={() => ctx.onToggleMark(normalized)}
+        />
+      </span>
+    )
+  },
   p: ({ children, ...rest }) => {
     const text = extractParagraphText(children)
     if (text) {

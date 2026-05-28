@@ -1,96 +1,85 @@
+// Confirm-only dialog for the link_set inline marking flow.
+//
+// Selection happens in the article body via <LinkSetMarkIcon>; this dialog
+// shows what the user already chose and lets them: (1) uncheck rows for
+// this round without giving them up entirely, (2) ✕ to remove a candidate
+// from the inline marks, (3) confirm and dispatch a batch_fetch.
+//
+// Toolbar 全选/反选/取消全选 operate ONLY on the displayed rows — the dialog
+// cannot expand beyond what the user marked in-page. To add more, close
+// and click more icons.
+
 import { useEffect, useMemo, useState } from 'react'
-import { CandidateView, batchFetchCandidates, getArticleCandidates } from '../api/client'
+import {
+  CandidateView,
+  batchFetchCandidates,
+} from '../api/client'
 
 interface Props {
   open: boolean
   articleId: number
+  candidates: CandidateView[]               // full candidate list (already fetched from API)
+  markedURLs: Set<string>                    // normalized URLs the user marked in-page
+  normalize: (href: string) => string        // same normalizer used by the icon context
+  onUnmark: (normalizedURL: string) => void  // ✕ → parent removes from markedURLs
   onClose: () => void
   onFetched?: (insertedCount: number) => void
 }
 
-const SELECTION_TTL_MS = 24 * 60 * 60 * 1000 // 1 day
-const selectionKey = (id: number) => `rsspal_batch_sel_${id}`
+export function BatchFetchConfirmDialog({
+  open,
+  articleId,
+  candidates,
+  markedURLs,
+  normalize,
+  onUnmark,
+  onClose,
+  onFetched,
+}: Props) {
+  // Filter + order: keep candidates' original order (= position from API)
+  const rows = useMemo(
+    () => candidates.filter((c) => markedURLs.has(normalize(c.url))),
+    [candidates, markedURLs, normalize],
+  )
 
-function loadSavedURLs(articleId: number): string[] {
-  try {
-    const raw = localStorage.getItem(selectionKey(articleId))
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as { urls?: unknown; savedAt?: unknown }
-    if (typeof parsed?.savedAt !== 'number') return []
-    if (Date.now() - parsed.savedAt > SELECTION_TTL_MS) {
-      localStorage.removeItem(selectionKey(articleId))
-      return []
-    }
-    if (!Array.isArray(parsed.urls)) return []
-    return parsed.urls.filter((u): u is string => typeof u === 'string')
-  } catch {
-    return []
-  }
-}
-
-function saveSelectedURLs(articleId: number, urls: string[]) {
-  try {
-    if (urls.length === 0) {
-      localStorage.removeItem(selectionKey(articleId))
-      return
-    }
-    localStorage.setItem(
-      selectionKey(articleId),
-      JSON.stringify({ urls, savedAt: Date.now() }),
-    )
-  } catch {
-    /* quota or disabled — ignore */
-  }
-}
-
-export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) {
-  const [candidates, setCandidates] = useState<CandidateView[] | null>(null)
-  const [loading, setLoading] = useState(false)
+  // Per-row "include in this fetch" state. Identified by normalized URL so
+  // it survives rows shifting in/out as the user ✕s things.
+  const [checkedURLs, setCheckedURLs] = useState<Set<string>>(new Set())
   const [submitting, setSubmitting] = useState(false)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // On open: default-check every selectable row (not already_fetched).
   useEffect(() => {
     if (!open) return
-    setLoading(true)
     setError(null)
-    setSelected(new Set())
-    setLastClickedIdx(null)
-    // Reset candidates so the persist effect bails during the restore window
-    // (otherwise the brief empty-selection state would wipe the saved URLs
-    //  before the async restore finishes).
-    setCandidates(null)
-    getArticleCandidates(articleId)
-      .then((cands) => {
-        setCandidates(cands)
-        // Restore prior selection (if within 1-day TTL); map URLs back to indices
-        // and drop URLs that no longer appear or are already-fetched.
-        const savedURLs = loadSavedURLs(articleId)
-        if (savedURLs.length === 0) return
-        const savedSet = new Set(savedURLs)
-        const restored = new Set<number>()
-        cands.forEach((c, i) => {
-          if (!c.already_fetched && savedSet.has(c.url)) restored.add(i)
-        })
-        if (restored.size > 0) setSelected(restored)
-      })
-      .catch((e) => setError(e?.response?.data?.error || '获取候选链接失败'))
-      .finally(() => setLoading(false))
-  }, [open, articleId])
+    setSubmitting(false)
+    const initial = new Set<string>()
+    for (const c of rows) {
+      if (!c.already_fetched) initial.add(normalize(c.url))
+    }
+    setCheckedURLs(initial)
+    // We intentionally do not depend on `rows` here — that would reset
+    // the user's per-row checkbox edits every time markedURLs/candidates
+    // shift. Only re-init when the dialog re-opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
-  // Persist selection on every change (debounce isn't worth it — localStorage is fast).
+  // Drop checks for URLs the user ✕'d away while the dialog is open.
   useEffect(() => {
-    if (!candidates || !open) return
-    const urls: string[] = []
-    selected.forEach((i) => {
-      const c = candidates[i]
-      if (c && !c.already_fetched) urls.push(c.url)
+    if (!open) return
+    setCheckedURLs((prev) => {
+      const validURLs = new Set(rows.map((c) => normalize(c.url)))
+      let changed = false
+      const next = new Set<string>()
+      for (const u of prev) {
+        if (validURLs.has(u)) next.add(u)
+        else changed = true
+      }
+      return changed ? next : prev
     })
-    saveSelectedURLs(articleId, urls)
-  }, [selected, candidates, open, articleId])
+  }, [rows, open, normalize])
 
-  // Lock body scroll while modal is open
+  // Lock body scroll while open + ESC to close
   useEffect(() => {
     if (!open) return
     const prev = document.body.style.overflow
@@ -103,74 +92,53 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
     }
   }, [open, onClose])
 
-  const selectableIndices = useMemo(() => {
-    if (!candidates) return [] as number[]
-    return candidates.map((c, i) => (c.already_fetched ? -1 : i)).filter((i) => i >= 0)
-  }, [candidates])
-
   if (!open) return null
 
-  function toggleIdx(idx: number) {
-    if (!candidates) return
-    if (candidates[idx].already_fetched) return
-    setSelected((prev) => {
+  function toggleChecked(url: string) {
+    setCheckedURLs((prev) => {
       const next = new Set(prev)
-      if (next.has(idx)) next.delete(idx)
-      else next.add(idx)
+      if (next.has(url)) next.delete(url)
+      else next.add(url)
       return next
     })
-    setLastClickedIdx(idx)
   }
 
-  function rangeSelect(toIdx: number) {
-    if (!candidates || lastClickedIdx === null) {
-      toggleIdx(toIdx)
-      return
+  function selectAll() {
+    const all = new Set<string>()
+    for (const c of rows) {
+      if (!c.already_fetched) all.add(normalize(c.url))
     }
-    const lo = Math.min(lastClickedIdx, toIdx)
-    const hi = Math.max(lastClickedIdx, toIdx)
-    setSelected((prev) => {
-      const next = new Set(prev)
-      for (let i = lo; i <= hi; i++) {
-        if (!candidates[i].already_fetched) next.add(i)
-      }
-      return next
-    })
-    setLastClickedIdx(toIdx)
+    setCheckedURLs(all)
   }
-
-  function handleRowClick(e: React.MouseEvent, idx: number) {
-    if (e.shiftKey) {
-      e.preventDefault()
-      rangeSelect(idx)
-    } else {
-      toggleIdx(idx)
-    }
+  function deselectAll() {
+    setCheckedURLs(new Set())
   }
-
-  function selectAll() { setSelected(new Set(selectableIndices)) }
-  function deselectAll() { setSelected(new Set()) }
   function invertSelection() {
-    setSelected((prev) => {
-      const next = new Set<number>()
-      for (const i of selectableIndices) if (!prev.has(i)) next.add(i)
+    setCheckedURLs((prev) => {
+      const next = new Set<string>()
+      for (const c of rows) {
+        if (c.already_fetched) continue
+        const url = normalize(c.url)
+        if (!prev.has(url)) next.add(url)
+      }
       return next
     })
   }
 
   async function handleConfirm() {
-    if (!candidates || selected.size === 0) return
+    if (checkedURLs.size === 0) return
     setSubmitting(true)
     setError(null)
     try {
-      const chosen = Array.from(selected).sort((a, b) => a - b).map((i) => ({
-        title: candidates[i].title,
-        url: candidates[i].url,
-        editor_note: candidates[i].editor_note,
-      }))
+      // Submit in display order to preserve user intent.
+      const chosen = rows
+        .filter((c) => !c.already_fetched && checkedURLs.has(normalize(c.url)))
+        .map((c) => ({
+          title: c.title,
+          url: c.url,
+          editor_note: c.editor_note,
+        }))
       const result = await batchFetchCandidates(articleId, chosen)
-      // Successfully queued — clear saved selection so next open starts fresh.
-      saveSelectedURLs(articleId, [])
       onFetched?.(result.inserted)
       onClose()
     } catch (e: any) {
@@ -184,8 +152,8 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
     try { return new URL(url).host } catch { return url }
   }
 
-  const totalSelectable = candidates?.filter((c) => !c.already_fetched).length ?? 0
-  const confirmDisabled = submitting || selected.size === 0
+  const totalSelectable = rows.filter((c) => !c.already_fetched).length
+  const confirmDisabled = submitting || checkedURLs.size === 0
 
   return (
     <div
@@ -223,7 +191,7 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>选择要抓取的链接</h3>
+          <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>确认要抓取的链接</h3>
           <button
             type="button"
             onClick={onClose}
@@ -254,33 +222,32 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
           <button type="button" className="btn-ghost btn-sm" onClick={invertSelection}>反选</button>
           <button type="button" className="btn-ghost btn-sm" onClick={deselectAll}>取消全选</button>
           <span style={{ marginLeft: 'auto', color: 'var(--fg-muted)' }}>
-            已选 {selected.size} / 共 {totalSelectable} 可选
+            已勾选 {checkedURLs.size} / 共 {totalSelectable} 可抓取
           </span>
         </div>
 
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 12px', minWidth: 0 }}>
-          {loading && (
-            <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>加载候选中…</div>
-          )}
-          {error && !loading && (
+          {error && (
             <div style={{ padding: 16, fontSize: 13, color: 'crimson' }}>{error}</div>
           )}
-          {!loading && !error && candidates && candidates.length === 0 && (
-            <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>未找到可抓取的链接</div>
+          {rows.length === 0 && !error && (
+            <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>
+              还没有标记任何链接。回到正文，点击候选链接旁的小图标进行标记。
+            </div>
           )}
-          {!loading && !error && candidates && candidates.length > 0 && (
+          {rows.length > 0 && (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-              {candidates.map((c, i) => {
+              {rows.map((c) => {
+                const url = normalize(c.url)
                 const disabled = c.already_fetched
-                const checked = selected.has(i)
+                const checked = checkedURLs.has(url)
                 return (
                   <li
-                    key={i}
-                    onClick={(e) => !disabled && handleRowClick(e, i)}
+                    key={url}
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '20px minmax(0, 1fr) auto',
+                      gridTemplateColumns: '20px minmax(0, 1fr) auto auto',
                       alignItems: 'start',
                       columnGap: 10,
                       padding: '8px 10px',
@@ -288,10 +255,8 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
                       borderRadius: 4,
                       fontSize: 13,
                       color: 'var(--fg)',
-                      cursor: disabled ? 'not-allowed' : 'pointer',
                       opacity: disabled ? 0.5 : 1,
                       background: checked ? 'var(--surface-hover)' : 'transparent',
-                      userSelect: 'none',
                       boxSizing: 'border-box',
                     }}
                   >
@@ -299,14 +264,7 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
                       type="checkbox"
                       checked={checked}
                       disabled={disabled}
-                      readOnly
-                      onChange={() => {}}
-                      // No onClick — let the click bubble up to <li> so
-                      // handleRowClick toggles selected. We intentionally
-                      // don't drive selection via the checkbox's own
-                      // onChange because handleRowClick supports shift-
-                      // click range selection (e.stopPropagation here
-                      // used to swallow checkbox clicks entirely).
+                      onChange={() => !disabled && toggleChecked(url)}
                       style={{ marginTop: 3, cursor: disabled ? 'not-allowed' : 'pointer' }}
                     />
                     <div style={{ minWidth: 0, overflow: 'hidden' }}>
@@ -354,6 +312,21 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
                         }}>已抓取</span>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => onUnmark(url)}
+                      title="从标记中移除"
+                      aria-label="从标记中移除"
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--fg-muted)',
+                        fontSize: 16,
+                        lineHeight: 1,
+                        padding: '0 4px',
+                        cursor: 'pointer',
+                      }}
+                    >×</button>
                   </li>
                 )
               })}
@@ -397,7 +370,7 @@ export function BatchFetchModal({ open, articleId, onClose, onFetched }: Props) 
               cursor: confirmDisabled ? 'not-allowed' : 'pointer',
             }}
           >
-            {submitting ? '抓取中…' : `抓取选中（${selected.size}）`}
+            {submitting ? '抓取中…' : `开始抓取（${checkedURLs.size}）`}
           </button>
         </div>
       </div>
