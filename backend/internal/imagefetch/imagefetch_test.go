@@ -233,3 +233,69 @@ func TestFetchAndStore_skipsFailures(t *testing.T) {
 		t.Fatalf("expected 2 successful paths (indices 0 and 3 of good server), got %d: %v", len(paths), paths)
 	}
 }
+
+func TestCleanupExpired(t *testing.T) {
+	cacheDir := t.TempDir()
+	localDir := t.TempDir()
+
+	// Seed cache files at varied ages.
+	fresh := filepath.Join(cacheDir, "10", "0.jpg")
+	old := filepath.Join(cacheDir, "11", "0.jpg")
+	if err := os.MkdirAll(filepath.Dir(fresh), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fresh, []byte("fresh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(old, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate `old` to 25 hours ago.
+	backdate := time.Now().Add(-25 * time.Hour)
+	if err := os.Chtimes(old, backdate, backdate); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed a file in LocalArticleImagesDir that's even older — must NOT be touched.
+	localImg := filepath.Join(localDir, "99", "0.jpg")
+	if err := os.MkdirAll(filepath.Dir(localImg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localImg, []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ancient := time.Now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(localImg, ancient, ancient); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Dir:                   cacheDir,
+		LocalArticleImagesDir: localDir,
+		MaxLongSide:           1024,
+		TTL:                   24 * time.Hour,
+	}
+	removed, err := CleanupExpired(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("CleanupExpired: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("want removed=1, got %d", removed)
+	}
+
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("fresh file should still exist: %v", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("old file should be removed, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(old)); !os.IsNotExist(err) {
+		t.Errorf("empty article-id subdir should be removed, got err=%v", err)
+	}
+	if _, err := os.Stat(localImg); err != nil {
+		t.Errorf("local file must not be touched: %v", err)
+	}
+}
