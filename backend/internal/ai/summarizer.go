@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -422,6 +426,124 @@ func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, 
 		Brief:    brief,
 		Detailed: detailed,
 	}, nil
+}
+
+// loadImageBlock reads an on-disk image file and returns an image_url content
+// block with a base64 data URL. JPEG mime is hardcoded because imagefetch
+// always normalises to JPEG.
+func loadImageBlock(path string) (*contentBlock, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	enc := base64.StdEncoding.EncodeToString(data)
+	return &contentBlock{
+		Type:     "image_url",
+		ImageURL: &imageURLBlock{URL: "data:image/jpeg;base64," + enc},
+	}, nil
+}
+
+// buildVisionMessages assembles a system + user message pair with image
+// blocks attached to the user message. Returns ([]chatMessage{system,user},
+// nil) on success; if every image fails to load it returns (nil, nil) so the
+// caller can fall back to the text path.
+func buildVisionMessages(prompt string, imagePaths []string) ([]chatMessage, error) {
+	if len(imagePaths) == 0 {
+		return nil, nil
+	}
+	userBlocks := []contentBlock{{Type: "text", Text: prompt}}
+	loaded := 0
+	for _, p := range imagePaths {
+		blk, err := loadImageBlock(p)
+		if err != nil {
+			log.Printf("vision: skip image %s: %v", p, err)
+			continue
+		}
+		userBlocks = append(userBlocks, *blk)
+		loaded++
+	}
+	if loaded == 0 {
+		return nil, nil
+	}
+	return []chatMessage{
+		{Role: "system", Content: systemGuardrail},
+		{Role: "user", Content: userBlocks},
+	}, nil
+}
+
+// callVision is the multimodal equivalent of (s *Summarizer).call. It uses
+// s.visionModel for the chat completion request and does NOT retry: with
+// large image payloads, retries are too expensive — let the caller decide
+// to fall back to text-only.
+func (s *Summarizer) callVision(ctx context.Context, prompt string, imagePaths []string, maxTokens int) (string, error) {
+	if s.visionModel == "" {
+		return "", errors.New("vision model not configured (call SetVisionModel)")
+	}
+	msgs, err := buildVisionMessages(prompt, imagePaths)
+	if err != nil {
+		return "", err
+	}
+	if msgs == nil {
+		return "", errors.New("no images loaded")
+	}
+	req := chatRequest{
+		Model:     s.visionModel,
+		MaxTokens: maxTokens,
+		Messages:  msgs,
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	return s.doCall(ctx, body, maxTokens)
+}
+
+// SummarizeWithImages produces brief + detailed summaries informed by the
+// images at imagePaths. On any failure (vision model error, all images failed
+// to load), it falls back to the text-only Summarize() path so the caller
+// always gets a SummaryResult if the model is reachable in any form.
+func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content string, imagePaths []string) (*SummaryResult, error) {
+	if len(imagePaths) == 0 {
+		return s.Summarize(ctx, title, content)
+	}
+	content = truncateContent(content)
+
+	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请只输出要点列表，不要其他内容。`, title, content)
+
+	brief, err := s.callVision(ctx, briefPrompt, imagePaths, briefMaxTokens)
+	if err != nil {
+		log.Printf("vision summary failed, falling back to text: %v", err)
+		return s.Summarize(ctx, title, content)
+	}
+
+	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请用中文输出详细总结。`, title, content)
+
+	detailed, err := s.callVision(ctx, detailedPrompt, imagePaths, detailedMaxTokens)
+	if err != nil {
+		// Brief already succeeded; fall back only the detailed half.
+		log.Printf("vision detailed failed, falling back to text detailed: %v", err)
+		detText, derr := s.generateDetailed(ctx, title, content)
+		if derr != nil {
+			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%v text=%v", err, derr)
+		}
+		detailed = detText
+	}
+
+	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
 }
 
 // Polish takes a prompt template text and returns an improved version using the AI model.
