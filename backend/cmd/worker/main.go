@@ -138,6 +138,19 @@ func runFetchCycle(ctx context.Context, cfg *config.Config, feedRepo *repository
 		backfillSummaries(ctx, cfg, articleRepo, summarizer)
 		runClassifyCycle(ctx, articleRepo, prefRepo, summarizer)
 	}
+
+	// AI summary image cache TTL sweep. Cheap walk; safe to call every cycle.
+	ifCfg := imagefetch.Config{
+		Dir:                   cfg.AI.Vision.CacheDir,
+		LocalArticleImagesDir: filepath.Join(cfg.Backup.Dir, "article_images"),
+		MaxLongSide:           cfg.AI.Vision.MaxLongSide,
+		TTL:                   cfg.AI.Vision.CacheTTL,
+	}
+	if removed, err := imagefetch.CleanupExpired(ctx, ifCfg); err != nil {
+		log.Printf("imagefetch cleanup: %v", err)
+	} else if removed > 0 {
+		log.Printf("imagefetch cleanup: removed %d expired files", removed)
+	}
 }
 
 func asyncSummarize(summarizer *ai.Summarizer, articleRepo *repository.ArticleRepository, articleID int, title, content string) {
