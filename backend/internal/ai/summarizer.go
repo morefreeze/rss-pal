@@ -546,6 +546,140 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
 }
 
+// callVisionStream is the streaming companion of callVision. No retry (same
+// reason as callStream: any partial output already delivered to the caller
+// cannot be undone).
+func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imagePaths []string, maxTokens int, onDelta func(string)) (string, error) {
+	if s.visionModel == "" {
+		return "", errors.New("vision model not configured (call SetVisionModel)")
+	}
+	msgs, err := buildVisionMessages(prompt, imagePaths)
+	if err != nil {
+		return "", err
+	}
+	if msgs == nil {
+		return "", errors.New("no images loaded")
+	}
+	req := chatStreamRequest{
+		Model:     s.visionModel,
+		MaxTokens: maxTokens,
+		Stream:    true,
+		Messages:  msgs,
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("vision stream error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var full strings.Builder
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, rerr := reader.ReadString('\n')
+		if rerr != nil && rerr != io.EOF {
+			return full.String(), rerr
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if rerr == io.EOF {
+				break
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			if rerr == io.EOF {
+				break
+			}
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			break
+		}
+		var chunk streamChunk
+		if jerr := json.Unmarshal([]byte(payload), &chunk); jerr != nil {
+			if rerr == io.EOF {
+				break
+			}
+			continue
+		}
+		for _, ch := range chunk.Choices {
+			if ch.Delta.Content != "" {
+				full.WriteString(ch.Delta.Content)
+				onDelta(ch.Delta.Content)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+	}
+	return full.String(), nil
+}
+
+// SummarizeWithImagesStream is the streaming variant of SummarizeWithImages.
+// Same fallback contract: any vision-side failure (model error, no images,
+// empty stream) drops to SummarizeStream for the affected half.
+func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, content string,
+	imagePaths []string,
+	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
+	if len(imagePaths) == 0 {
+		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
+	}
+	content = truncateContent(content)
+
+	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请只输出要点列表，不要其他内容。`, title, content)
+
+	brief, err := s.callVisionStream(ctx, briefPrompt, imagePaths, briefMaxTokens, onBriefDelta)
+	if err != nil {
+		log.Printf("vision stream brief failed, falling back to text stream: %v", err)
+		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
+	}
+
+	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请用中文输出详细总结。`, title, content)
+
+	detailed, err := s.callVisionStream(ctx, detailedPrompt, imagePaths, detailedMaxTokens, onDetailedDelta)
+	if err != nil {
+		log.Printf("vision stream detailed failed, falling back to text stream detailed: %v", err)
+		dText, derr := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
+		if derr != nil {
+			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%v text=%v", err, derr)
+		}
+		detailed = dText
+	}
+
+	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+}
+
 // Polish takes a prompt template text and returns an improved version using the AI model.
 func (s *Summarizer) Polish(ctx context.Context, promptText string) (string, error) {
 	instruction := fmt.Sprintf(`你是一个专业的 prompt 工程师。用户写了一段用于 AI 摘要的指令，请帮助优化这段指令，使其更清晰、更具体、效果更好。
