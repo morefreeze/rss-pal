@@ -771,6 +771,7 @@ export default function ArticlePage() {
         },
       },
       ctrl.signal,
+      { forceVision: true },
     )
   }
 
