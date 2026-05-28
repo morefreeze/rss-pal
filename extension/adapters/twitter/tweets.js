@@ -65,6 +65,39 @@
     return { author: m[1], id: m[2] };
   }
 
+  // Extract tweet text preserving link hrefs. Twitter renders long external
+  // links as <a href="https://t.co/short"><span>https://</span><span>visible
+  // </span><span aria-hidden>…</span></a>; textContent collapses that to the
+  // truncated display ("https://appark.ai/cn/cheapest-price…") which then
+  // GFM-autolinks to a broken URL. Use href for absolute http(s) links so
+  // clicks resolve via t.co's redirect. Internal anchors (/handle, /hashtag/x)
+  // keep their visible text — those aren't reachable destinations from rss-pal
+  // anyway.
+  function extractTweetText(textEl) {
+    if (!textEl) return '';
+    let out = '';
+    const walk = (node) => {
+      for (const child of node.childNodes) {
+        if (child.nodeType === 3) {
+          out += child.textContent || '';
+        } else if (child.nodeType === 1) {
+          const tag = child.tagName;
+          if (tag === 'A') {
+            const href = child.getAttribute('href') || '';
+            if (/^https?:\/\//i.test(href)) out += href;
+            else walk(child);
+          } else if (tag === 'IMG') {
+            out += child.getAttribute('alt') || '';
+          } else {
+            walk(child);
+          }
+        }
+      }
+    };
+    walk(textEl);
+    return out.trim();
+  }
+
   function extractTweetArticle(article) {
     if (!article) return null;
     let parsed = null;
@@ -87,9 +120,7 @@
       }
     }
 
-    let text = '';
-    const textEl = article.querySelector('[data-testid="tweetText"]');
-    if (textEl) text = (textEl.textContent || '').trim();
+    const text = extractTweetText(article.querySelector('[data-testid="tweetText"]'));
 
     let createdAt = '';
     const timeEl = article.querySelector('time[datetime]');

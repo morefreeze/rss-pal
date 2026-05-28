@@ -47,6 +47,32 @@
     return { author: m[1], id: m[2] };
   }
 
+  // Extract tweet text preserving link hrefs — see tweets.js for rationale.
+  function extractTweetText(textEl) {
+    if (!textEl) return '';
+    let out = '';
+    const walk = (node) => {
+      for (const child of node.childNodes) {
+        if (child.nodeType === 3) {
+          out += child.textContent || '';
+        } else if (child.nodeType === 1) {
+          const tag = child.tagName;
+          if (tag === 'A') {
+            const href = child.getAttribute('href') || '';
+            if (/^https?:\/\//i.test(href)) out += href;
+            else walk(child);
+          } else if (tag === 'IMG') {
+            out += child.getAttribute('alt') || '';
+          } else {
+            walk(child);
+          }
+        }
+      }
+    };
+    walk(textEl);
+    return out.trim();
+  }
+
   function extractTweetArticle(article) {
     if (!article) return null;
     let parsed = null;
@@ -69,9 +95,7 @@
       }
     }
 
-    let text = '';
-    const textEl = article.querySelector('[data-testid="tweetText"]');
-    if (textEl) text = (textEl.textContent || '').trim();
+    const text = extractTweetText(article.querySelector('[data-testid="tweetText"]'));
 
     let createdAt = '';
     const timeEl = article.querySelector('time[datetime]');
