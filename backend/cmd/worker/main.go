@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/config"
+	"github.com/bytedance/rss-pal/internal/imagefetch"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
@@ -65,6 +67,7 @@ func main() {
 	var summarizer *ai.Summarizer
 	if cfg.Claude.APIKey != "" {
 		summarizer = ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
+		summarizer.SetVisionModel(cfg.AI.Vision.Model)
 		log.Println("AI summarizer initialized")
 	} else {
 		log.Println("CLAUDE_API_KEY not set, AI summarization disabled")
@@ -109,14 +112,14 @@ func main() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
+	runFetchCycle(context.Background(), cfg, feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
 
 	for range ticker.C {
-		runFetchCycle(context.Background(), feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
+		runFetchCycle(context.Background(), cfg, feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
 	}
 }
 
-func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string) {
+func runFetchCycle(ctx context.Context, cfg *config.Config, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string) {
 	if !cycleMu.TryLock() {
 		log.Println("Previous fetch cycle still running, skipping")
 		return
@@ -132,7 +135,7 @@ func runFetchCycle(ctx context.Context, feedRepo *repository.FeedRepository, art
 		backfillTranscripts(ctx, articleRepo, transcriptFetcher)
 	}
 	if summarizer != nil {
-		backfillSummaries(ctx, articleRepo, summarizer)
+		backfillSummaries(ctx, cfg, articleRepo, summarizer)
 		runClassifyCycle(ctx, articleRepo, prefRepo, summarizer)
 	}
 }
@@ -156,7 +159,7 @@ func asyncSummarize(summarizer *ai.Summarizer, articleRepo *repository.ArticleRe
 	}()
 }
 
-func backfillSummaries(ctx context.Context, articleRepo *repository.ArticleRepository, summarizer *ai.Summarizer) {
+func backfillSummaries(ctx context.Context, cfg *config.Config, articleRepo *repository.ArticleRepository, summarizer *ai.Summarizer) {
 	articles, err := articleRepo.GetArticlesWithoutSummary(maxBackfillPerCycle)
 	if err != nil {
 		log.Printf("Failed to get articles without summary: %v", err)
@@ -182,7 +185,31 @@ func backfillSummaries(ctx context.Context, articleRepo *repository.ArticleRepos
 			defer func() { <-sumSem }()
 			sCtx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 			defer cancel()
-			result, err := summarizer.Summarize(sCtx, article.Title, article.Content)
+
+			var result *ai.SummaryResult
+			var err error
+
+			visionCfg := cfg.AI.Vision
+			if ai.ShouldUseVisionAuto(article.Content, visionCfg) {
+				urls := ai.ExtractImageURLs(article.Content)
+				urls = filterCandidateImageURLs(urls, visionCfg.MaxImages)
+				if len(urls) > 0 {
+					ifCfg := imagefetch.Config{
+						Dir:                   visionCfg.CacheDir,
+						LocalArticleImagesDir: filepath.Join(cfg.Backup.Dir, "article_images"),
+						MaxLongSide:           visionCfg.MaxLongSide,
+						TTL:                   visionCfg.CacheTTL,
+					}
+					paths, _ := imagefetch.FetchAndStore(sCtx, article.ID, urls, ifCfg)
+					if len(paths) > 0 {
+						log.Printf("Vision-summarizing article %d with %d images", article.ID, len(paths))
+						result, err = summarizer.SummarizeWithImages(sCtx, article.Title, article.Content, paths)
+					}
+				}
+			}
+			if result == nil {
+				result, err = summarizer.Summarize(sCtx, article.Title, article.Content)
+			}
 			if err != nil {
 				log.Printf("Failed to backfill summary for article %d: %v", article.ID, err)
 				return
@@ -195,6 +222,35 @@ func backfillSummaries(ctx context.Context, articleRepo *repository.ArticleRepos
 		}(a)
 	}
 	wg.Wait()
+}
+
+// filterCandidateImageURLs drops avatar / unsupported / out-of-budget URLs.
+// Local /api/articles/<id>/images/<idx>.<ext> URLs pass through unchanged —
+// imagefetch resolves them to on-disk paths without downloading.
+func filterCandidateImageURLs(urls []string, maxImages int) []string {
+	out := make([]string, 0, len(urls))
+	for _, u := range urls {
+		if rss.IsAvatarImageURL(u, "") {
+			continue
+		}
+		if isAcceptableImageURL(u) {
+			out = append(out, u)
+		}
+		if len(out) >= maxImages {
+			break
+		}
+	}
+	return out
+}
+
+func isAcceptableImageURL(u string) bool {
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return true
+	}
+	if strings.HasPrefix(u, "/api/articles/") && strings.Contains(u, "/images/") {
+		return true
+	}
+	return false
 }
 
 func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRepository, fetcher transcript.Fetcher) {
