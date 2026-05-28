@@ -12,9 +12,10 @@
 ## 设计原则
 
 - **本地化优先**：rss-pal 跑在用户本机，z.ai 服务端不可能反向访问用户的 `localhost` 取图。所以必须先把图下载到本机再 base64 内联到 AI 请求里。
+- **临时缓存而非持久存**：为送 AI 下载的图片是**临时缓存**（默认 24 小时 TTL，过期自动清理），跟 PDF clip 那种"文章生命周期持久存"严格分目录。这样反复重新生成 / 短时间重试不重新下载，但磁盘不会无限涨。
 - **成本可控**：多模态调用比文本贵；用启发式 + 显式开关精确控制触发面，纯文本场景一律不走多模态。
 - **失败软降级**：图片下载失败、vision 调用失败、模型不可用，都 fallback 到现有纯文本总结，不阻塞用户。
-- **沿用已有约定**：图片落盘复用 `pdfextract` 已建立的 `/backups/article_images/<id>/<idx>.<ext>` 布局；HTTP 客户端复用 `internal/api/proxy.go` 的 SSRF-guarded transport；并发预算复用现有 `sumSem`。
+- **沿用已有约定**：HTTP 客户端复用 `internal/api/proxy.go` 的 SSRF-guarded transport；并发预算复用现有 `sumSem`。
 
 ## 触发判断
 
@@ -42,14 +43,17 @@
 ```go
 package imagefetch
 
-// FetchAndStore takes raw image URLs from an article's markdown, downloads
-// each through the same SSRF-guarded transport used by api/proxy.go, resizes
-// oversized images, and writes them to /backups/article_images/<id>/<idx>.<ext>.
-// Returns local file paths in the same order as the input slice. Missing /
-// failed entries are filtered out (caller can detect by length difference).
+// FetchAndStore downloads each remote URL through the SSRF-guarded transport
+// used by api/proxy.go, resizes oversized images, and writes them to
+// cfg.Dir/<articleID>/<idx>.<ext>. Returns local file paths in the same order
+// as input (missing/failed entries filtered out).
 //
-// Files already on disk are reused — caller can re-invoke without paying for
-// repeat downloads.
+// Local-path inputs (URLs matching /api/articles/<id>/images/<idx>.<ext>) are
+// resolved to their on-disk path under cfg.LocalArticleImagesDir and returned
+// directly — no copy, no download. Cleanup never touches that dir.
+//
+// Files already in cfg.Dir are reused (mtime touched so periodic cleanup
+// doesn't evict them while still in active use).
 func FetchAndStore(
     ctx context.Context,
     articleID int,
@@ -57,22 +61,39 @@ func FetchAndStore(
     cfg Config,
 ) ([]string, error)
 
+// CleanupExpired walks cfg.Dir and deletes any file whose mtime is older than
+// cfg.TTL. Empty article-id subdirs are removed afterward. Intended to be
+// invoked periodically from cmd/worker (similar cadence to existing backup
+// retention sweep).
+func CleanupExpired(ctx context.Context, cfg Config) (removed int, err error)
+
 type Config struct {
-    MaxLongSide int    // resize trigger; default 1024
-    Dir         string // base storage dir; default /backups/article_images
+    Dir                    string        // AI summary image cache root; default /backups/ai_summary_cache
+    LocalArticleImagesDir  string        // where PDF clip images live; default /backups/article_images (read-only from this pkg's POV)
+    MaxLongSide            int           // resize trigger; default 1024
+    TTL                    time.Duration // cache file age limit; default 24h
 }
 ```
 
 **Per-image pipeline:**
 
-1. **Hash + index → path**: index is the input slice position; extension is the original URL's path extension (lower-cased), or `.jpg` if unknown.
-2. **Stat the target**: exists & non-zero → return path immediately (cache hit).
+1. **Index → path**: `<cfg.Dir>/<articleID>/<idx>.jpg` (index is the input slice position). All cached files are JPEG-normalised, so extension is always `.jpg`.
+2. **Stat the target**: exists & non-zero → `os.Chtimes` to refresh mtime, return path (cache hit).
 3. **Download** via `proxy.SharedClient` (refactor: extract the `*http.Client` + SSRF check from `internal/api/proxy.go` into `internal/httpx` so both proxy handler and imagefetch share it).
 4. **Decode** with stdlib `image` (registers `image/png`, `image/jpeg`, `image/gif` decoders).
 5. **Resize** with `golang.org/x/image/draw` (BiLinear) if `max(W, H) > MaxLongSide`, scaling to a longest-side of `MaxLongSide` preserving aspect ratio.
-6. **Re-encode** as JPEG quality 85 (always — even if no resize — to normalise; original payload bytes are usually larger than JPEG q85 anyway). Override extension to `.jpg` in the on-disk filename.
+6. **Re-encode** as JPEG quality 85 (always — even if no resize — to normalise; original payload bytes are usually larger than JPEG q85 anyway).
 7. **Write** atomically: write to `<path>.tmp`, then `os.Rename`.
 8. **On failure** (download timeout, decode error, write error): log warn + return `("", err)` to caller; caller drops the entry from the result slice.
+
+**Cleanup pipeline (`CleanupExpired`):**
+
+1. Walk `cfg.Dir` (skip `LocalArticleImagesDir`).
+2. For each regular file with `mtime + cfg.TTL < now`: `os.Remove`.
+3. After processing each `<articleID>` subdir: if empty, `os.Remove` the dir.
+4. Errors per-file are logged + counted, do not abort the walk.
+
+Worker invokes `CleanupExpired` once per cycle (60s tick) — cheap because it's just a `filepath.Walk` + `Stat`, and most entries skip without I/O if recent.
 
 **Total payload budget**: after building all file paths, caller loads each, accumulates base64 byte counts; once total > `AI_VISION_PAYLOAD_BUDGET_MB * 1024 * 1024 / 0.75` (the /0.75 reverses base64's 33% overhead), stop including more.
 
@@ -150,6 +171,8 @@ if useVision {
 
 `shouldUseVisionAuto` lives in `internal/ai` alongside the summarizer (or a new `internal/ai/policy.go` if `summarizer.go` is getting crowded). It reads `imageURLs := extractImageURLs(content)` and applies the heuristic.
 
+**Cache cleanup**: once per fetch cycle (60s tick), `cmd/worker/main.go` calls `imagefetch.CleanupExpired(ctx, cfg.AI.ImageFetch())`. Per-cycle invocation amortises cleanup; nothing is time-critical about TTL accuracy.
+
 ## HTTP service path (frontend regen)
 
 `internal/api/article.go` `SummarizeStream`:
@@ -179,6 +202,8 @@ The article-page summary card sets `forceVision: true` for the user's regenerate
 | `AI_VISION_PAYLOAD_BUDGET_MB` | `4` | total base64 budget; drops tail images on overflow |
 | `AI_VISION_MIN_IMAGES` | `3` | auto-trigger image-count floor |
 | `AI_VISION_MAX_TEXT_CHARS` | `2000` | auto-trigger text-length ceiling |
+| `AI_VISION_CACHE_DIR` | `/backups/ai_summary_cache` | temp cache root; **must not equal `/backups/article_images`** (PDF clip persistent storage) |
+| `AI_VISION_CACHE_TTL_HOURS` | `24` | cache file age limit; files older than this are removed by worker sweep |
 
 All wired through `internal/config/config.go` with the same `getenv` / `getenvInt` helpers used today; collected into a single `AIConfig.Vision` struct so call sites don't read env directly.
 
@@ -204,7 +229,8 @@ No schema change required. `summary_brief` and `summary_detailed` are reused as-
 
 | Surface | Strategy |
 |---|---|
-| `internal/imagefetch.FetchAndStore` | Table tests with `httptest.Server` returning canned PNG/JPEG/GIF, plus oversize and corrupt cases. Use t.TempDir() for storage. |
+| `internal/imagefetch.FetchAndStore` | Table tests with `httptest.Server` returning canned PNG/JPEG/GIF, plus oversize and corrupt cases. Use `t.TempDir()` for storage. Assert cache hit refreshes mtime. |
+| `internal/imagefetch.CleanupExpired` | Test with `t.TempDir()`: seed files at varied mtimes; assert age-based removal + empty subdir cleanup; assert `LocalArticleImagesDir` is untouched even when older than TTL. |
 | `internal/ai` request shape | Mock OpenAI-compatible server (existing pattern if any, else `httptest.Server`); assert `Content` shape is `string` for legacy callers and `[]contentBlock` for vision callers. |
 | `internal/ai.shouldUseVisionAuto` | Pure function table-test (no I/O). |
 | Worker integration | Smoke test: feed in synthetic article via existing seed harness, run one cycle, assert summary contains marker phrases from the canned image / text. |
@@ -219,6 +245,7 @@ No schema change required. `summary_brief` and `summary_detailed` are reused as-
 | Vision API HTTP error | Log warn (`vision summary failed, falling back to text`), run text-only `Summarize()` |
 | Vision model invalid response | Same — fall back to text |
 | `imagefetch.FetchAndStore` disk write error | Log warn, drop that one path, continue |
+| `imagefetch.CleanupExpired` error on individual file | Log warn, count, continue walking (don't abort) |
 
 ## Out of scope
 
