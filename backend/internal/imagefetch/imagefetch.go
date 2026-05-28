@@ -219,3 +219,77 @@ func (r *sliceReader) Read(p []byte) (int, error) {
 	r.pos += n
 	return n, nil
 }
+
+// CleanupExpired walks cfg.Dir and removes every regular file whose mtime is
+// older than cfg.TTL. After processing each <articleID> subdir, removes the
+// subdir if it is now empty. Errors per-file are logged + counted; the walk
+// is not aborted on individual failures. Returns the number of files
+// successfully removed.
+//
+// cfg.LocalArticleImagesDir is never visited.
+func CleanupExpired(ctx context.Context, cfg Config) (int, error) {
+	if cfg.Dir == "" {
+		return 0, errors.New("imagefetch: Config.Dir is required")
+	}
+	if cfg.TTL <= 0 {
+		return 0, errors.New("imagefetch: Config.TTL must be positive")
+	}
+	threshold := time.Now().Add(-cfg.TTL)
+	removed := 0
+
+	rootEntries, err := os.ReadDir(cfg.Dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("readdir: %w", err)
+	}
+
+	for _, subEnt := range rootEntries {
+		if !subEnt.IsDir() {
+			continue
+		}
+		subPath := filepath.Join(cfg.Dir, subEnt.Name())
+		fileEntries, err := os.ReadDir(subPath)
+		if err != nil {
+			log.Printf("imagefetch cleanup: readdir %s: %v", subPath, err)
+			continue
+		}
+		remaining := 0
+		for _, fEnt := range fileEntries {
+			if fEnt.IsDir() {
+				remaining++
+				continue
+			}
+			fPath := filepath.Join(subPath, fEnt.Name())
+			info, err := fEnt.Info()
+			if err != nil {
+				log.Printf("imagefetch cleanup: info %s: %v", fPath, err)
+				remaining++
+				continue
+			}
+			if info.ModTime().Before(threshold) {
+				if err := os.Remove(fPath); err != nil {
+					log.Printf("imagefetch cleanup: remove %s: %v", fPath, err)
+					remaining++
+					continue
+				}
+				removed++
+			} else {
+				remaining++
+			}
+		}
+		if remaining == 0 {
+			if err := os.Remove(subPath); err != nil {
+				log.Printf("imagefetch cleanup: rmdir %s: %v", subPath, err)
+			}
+		}
+		// Cooperative cancellation between subdirs.
+		select {
+		case <-ctx.Done():
+			return removed, ctx.Err()
+		default:
+		}
+	}
+	return removed, nil
+}
