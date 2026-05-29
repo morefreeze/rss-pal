@@ -5,7 +5,6 @@ type SheetItem = { icon: string; label: string; to?: string; action?: 'logout' }
 
 const ITEMS: SheetItem[] = [
   { icon: '✨', label: '推荐',     to: '/recommended' },
-  { icon: '📅', label: '周刊',     to: '/weekly' },
   { icon: '💡', label: '洞察',     to: '/insights' },
   { icon: '📊', label: '统计',     to: '/stats' },
   { icon: '⚙️', label: '设置',     to: '/settings' },
