@@ -56,3 +56,27 @@ func (r *WeeklyDigestRepository) Upsert(userID int, weekStart time.Time, intro s
 	`, userID, weekStart, intro, ids)
 	return err
 }
+
+// UserIDsMissing returns user IDs that do not yet have a weekly_digests row
+// for `weekStart`. Mirrors DailyDigestRepository.UserIDsMissing.
+func (r *WeeklyDigestRepository) UserIDsMissing(weekStart time.Time) ([]int, error) {
+	rows, err := r.db.Query(`
+		SELECT u.id FROM users u
+		LEFT JOIN weekly_digests d ON d.user_id = u.id AND d.week_start = $1
+		WHERE d.id IS NULL
+		ORDER BY u.id
+	`, weekStart)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
