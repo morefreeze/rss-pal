@@ -14,19 +14,31 @@ function pad(n: number): string {
 function ymd(d: Date): string {
   return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate())
 }
+// Anchor every "calendar date" at 12:00 UTC so getUTCDay/Month/Date return
+// the intended Shanghai calendar values regardless of the runtime tz.
 function parseMondayUTC(s: string): Date {
-  return new Date(s + 'T00:00:00+08:00')
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d, 12))
 }
 
+// monthRelativeWeekNumber uses the ISO 8601 anchor: a week belongs to the
+// month containing its Thursday (equivalent to "≥ 4 days of the week fall in
+// that month"). W1 is the first such week of the month, W2 the next, etc.
 function monthRelativeWeekNumber(weekStart: string): number {
-  const d = parseMondayUTC(weekStart)
-  const firstOfMonth = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, -8))
-  let dow = firstOfMonth.getUTCDay()
-  if (dow === 0) dow = 7
-  const offsetToFirstMonday = dow === 1 ? 0 : (8 - dow)
-  const firstMonday = new Date(firstOfMonth)
-  firstMonday.setUTCDate(firstOfMonth.getUTCDate() + offsetToFirstMonday)
-  const diffDays = Math.round((d.getTime() - firstMonday.getTime()) / 86400000)
+  const monday = parseMondayUTC(weekStart)
+  const thursday = new Date(monday); thursday.setUTCDate(monday.getUTCDate() + 3)
+  const year = thursday.getUTCFullYear()
+  const month0 = thursday.getUTCMonth()
+  // First Thursday of (year, month0):
+  const firstOfMonth = new Date(Date.UTC(year, month0, 1, 12))
+  const dow = firstOfMonth.getUTCDay() // 0=Sun..6=Sat
+  const offsetToFirstThursday = (4 - dow + 7) % 7
+  const firstThursday = new Date(firstOfMonth)
+  firstThursday.setUTCDate(firstOfMonth.getUTCDate() + offsetToFirstThursday)
+  // The week containing firstThursday is W1 — its Monday is 3 days earlier.
+  const firstW1Monday = new Date(firstThursday)
+  firstW1Monday.setUTCDate(firstThursday.getUTCDate() - 3)
+  const diffDays = Math.round((monday.getTime() - firstW1Monday.getTime()) / 86400000)
   return Math.floor(diffDays / 7) + 1
 }
 
@@ -102,7 +114,9 @@ export default function BriefingWCardStrip({ currentWeekStart, onPick }: Props) 
             style={{
               flex: '0 0 auto',
               width: 88,
+              height: 'auto',
               padding: '8px 6px',
+              lineHeight: 1,
               border: isCurrent ? '2px solid var(--accent)' : '1px solid transparent',
               borderRadius: 8,
               background:
