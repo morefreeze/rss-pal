@@ -68,6 +68,7 @@ func main() {
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo)
 	dailyHandler := api.NewDailyHandler(articleRepo, dailyDigestRepo)
 	briefingHandler := api.NewBriefingHandler(userRepo)
+	briefingIndexHandler := api.NewBriefingIndexHandler(dailyDigestRepo, weeklyDigestRepo)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).
 		WithBackupRunner(backupRunner).
 		WithImageBaseDir(cfg.Backup.Dir)
@@ -238,6 +239,7 @@ func main() {
 		apiGroup.GET("/daily-digest", dailyHandler.Get)
 		apiGroup.GET("/briefing/last-tab", briefingHandler.GetLastTab)
 		apiGroup.POST("/briefing/last-tab", briefingHandler.SetLastTab)
+		apiGroup.GET("/briefing/index", briefingIndexHandler.Get)
 
 		// Templates
 		apiGroup.GET("/templates", settingsHandler.GetTemplates)
