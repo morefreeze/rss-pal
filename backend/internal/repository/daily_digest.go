@@ -80,3 +80,27 @@ func (r *DailyDigestRepository) UserIDsMissing(dayStart time.Time) ([]int, error
 	}
 	return out, rows.Err()
 }
+
+// ListDaysInRange returns the day_start values this user has digests for
+// where from ≤ day_start ≤ to. Ordered ascending. Used by the briefing
+// index endpoint to paint the calendar.
+func (r *DailyDigestRepository) ListDaysInRange(userID int, from, to time.Time) ([]time.Time, error) {
+	rows, err := r.db.Query(`
+		SELECT day_start FROM daily_digests
+		WHERE user_id = $1 AND day_start BETWEEN $2 AND $3
+		ORDER BY day_start
+	`, userID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []time.Time
+	for rows.Next() {
+		var d time.Time
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}

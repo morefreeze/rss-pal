@@ -80,3 +80,26 @@ func (r *WeeklyDigestRepository) UserIDsMissing(weekStart time.Time) ([]int, err
 	}
 	return out, rows.Err()
 }
+
+// ListWeeksInRange returns the week_start values this user has digests for
+// where from ≤ week_start ≤ to. Ordered ascending.
+func (r *WeeklyDigestRepository) ListWeeksInRange(userID int, from, to time.Time) ([]time.Time, error) {
+	rows, err := r.db.Query(`
+		SELECT week_start FROM weekly_digests
+		WHERE user_id = $1 AND week_start BETWEEN $2 AND $3
+		ORDER BY week_start
+	`, userID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []time.Time
+	for rows.Next() {
+		var d time.Time
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
