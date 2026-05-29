@@ -811,6 +811,17 @@ export const getBriefingLastTab = () =>
 export const setBriefingLastTab = (tab: BriefingTab) =>
   api.post('/briefing/last-tab', { tab })
 
+export interface BriefingIndex {
+  type: 'daily' | 'weekly'
+  today_label?: string         // present when type='daily'
+  this_week_start?: string     // present when type='weekly'
+  pending_window_start: string
+  cached: string[]
+}
+
+export const getBriefingIndex = (type: 'daily' | 'weekly', from: string, to: string) =>
+  api.get<BriefingIndex>('/briefing/index', { params: { type, from, to } }).then(r => r.data)
+
 // === Feed governance Phase 1 ===
 
 export type EventType = 'exposure' | 'click'
