@@ -215,6 +215,30 @@ func (r *UserRepository) SetBookmarkletToken(userID int, token string) error {
 	return err
 }
 
+// GetBriefingLastTab returns the user's most recently viewed briefing tab,
+// defaulting to "daily" if the column is somehow null.
+func (r *UserRepository) GetBriefingLastTab(userID int) (string, error) {
+	var tab sql.NullString
+	err := r.db.QueryRow(`SELECT briefing_last_tab FROM users WHERE id = $1`, userID).Scan(&tab)
+	if err == sql.ErrNoRows {
+		return "daily", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !tab.Valid || tab.String == "" {
+		return "daily", nil
+	}
+	return tab.String, nil
+}
+
+// SetBriefingLastTab persists the user's briefing tab choice.
+// Caller must validate `tab` ∈ {"daily","weekly"} before calling.
+func (r *UserRepository) SetBriefingLastTab(userID int, tab string) error {
+	_, err := r.db.Exec(`UPDATE users SET briefing_last_tab = $1 WHERE id = $2`, tab, userID)
+	return err
+}
+
 // ListAll returns every user (id-ordered). Used by daily cron.
 func (r *UserRepository) ListAll() ([]model.User, error) {
 	rows, err := r.db.Query(`SELECT id, username, COALESCE(is_admin, false) FROM users ORDER BY id`)
