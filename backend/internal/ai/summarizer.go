@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -15,10 +19,11 @@ import (
 const DefaultModel = "glm-4.5"
 
 type Summarizer struct {
-	apiKey     string
-	baseURL    string
-	model      string
-	httpClient *http.Client
+	apiKey      string
+	baseURL     string
+	model       string
+	visionModel string // optional; set via SetVisionModel for SummarizeWithImages*
+	httpClient  *http.Client
 }
 
 func NewSummarizer(apiKey, baseURL string) *Summarizer {
@@ -37,6 +42,13 @@ func NewSummarizerWithModel(apiKey, baseURL, model string) *Summarizer {
 	}
 }
 
+// SetVisionModel records the model id used by SummarizeWithImages*. Must be
+// set before calling those methods; the text-only summary path is unaffected.
+func (s *Summarizer) SetVisionModel(m string) { s.visionModel = m }
+
+// VisionModel returns the configured vision model id (or "" if unset).
+func (s *Summarizer) VisionModel() string { return s.visionModel }
+
 type chatRequest struct {
 	Model          string          `json:"model"`
 	MaxTokens      int             `json:"max_tokens"`
@@ -48,9 +60,23 @@ type responseFormat struct {
 	Type string `json:"type"` // "json_object"
 }
 
+// chatMessage carries either a string (legacy text-only path) or a
+// []contentBlock (vision OpenAI schema) as Content.
+// json.Marshal handles both via interface{}: strings serialize to "...",
+// blocks serialize to [{"type":"text",...},{"type":"image_url",...}].
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+}
+
+type contentBlock struct {
+	Type     string         `json:"type"` // "text" | "image_url"
+	Text     string         `json:"text,omitempty"`
+	ImageURL *imageURLBlock `json:"image_url,omitempty"`
+}
+
+type imageURLBlock struct {
+	URL string `json:"url"` // either an http(s) URL or "data:image/jpeg;base64,..."
 }
 
 type chatResponse struct {
@@ -400,6 +426,296 @@ func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, 
 		Brief:    brief,
 		Detailed: detailed,
 	}, nil
+}
+
+// loadImageBlock reads an on-disk image file and returns an image_url content
+// block with a base64 data URL. JPEG mime is hardcoded because imagefetch
+// always normalises to JPEG.
+func loadImageBlock(path string) (*contentBlock, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	enc := base64.StdEncoding.EncodeToString(data)
+	return &contentBlock{
+		Type:     "image_url",
+		ImageURL: &imageURLBlock{URL: "data:image/jpeg;base64," + enc},
+	}, nil
+}
+
+// buildVisionMessages assembles a system + user message pair with image
+// blocks attached to the user message. Returns ([]chatMessage{system,user},
+// nil) on success; if every image fails to load it returns (nil, nil) so the
+// caller can fall back to the text path.
+func buildVisionMessages(prompt string, imagePaths []string) ([]chatMessage, error) {
+	if len(imagePaths) == 0 {
+		return nil, nil
+	}
+	userBlocks := []contentBlock{{Type: "text", Text: prompt}}
+	loaded := 0
+	for _, p := range imagePaths {
+		blk, err := loadImageBlock(p)
+		if err != nil {
+			log.Printf("vision: skip image %s: %v", p, err)
+			continue
+		}
+		userBlocks = append(userBlocks, *blk)
+		loaded++
+	}
+	if loaded == 0 {
+		return nil, nil
+	}
+	return []chatMessage{
+		{Role: "system", Content: systemGuardrail},
+		{Role: "user", Content: userBlocks},
+	}, nil
+}
+
+// callVision is the multimodal equivalent of (s *Summarizer).call. Uses
+// s.visionModel for the chat completion request. Retries up to 2 times on
+// transient network errors (io.EOF / connection-closed) — observed in the
+// wild against z.ai's coding paas endpoint on detailed (4000-tok) requests.
+// Does NOT retry on application errors (HTTP 4xx/5xx with a body) — those
+// indicate model rejection where retry just doubles the cost.
+func (s *Summarizer) callVision(ctx context.Context, prompt string, imagePaths []string, maxTokens int) (string, error) {
+	if s.visionModel == "" {
+		return "", errors.New("vision model not configured (call SetVisionModel)")
+	}
+	msgs, err := buildVisionMessages(prompt, imagePaths)
+	if err != nil {
+		return "", err
+	}
+	if msgs == nil {
+		return "", errors.New("no images loaded")
+	}
+	req := chatRequest{
+		Model:     s.visionModel,
+		MaxTokens: maxTokens,
+		Messages:  msgs,
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
+		}
+		result, callErr := s.doCall(ctx, body, maxTokens)
+		if callErr == nil {
+			return result, nil
+		}
+		lastErr = callErr
+		if !isTransientNetErr(callErr) {
+			return "", callErr
+		}
+		log.Printf("vision call transient error (attempt %d/3): %v", attempt+1, callErr)
+	}
+	return "", lastErr
+}
+
+// isTransientNetErr reports whether err looks like a connection-level blip
+// (server closed the conn mid-response, DNS hiccup) versus an application
+// error from the model (4xx/5xx with a structured body). Retrying the former
+// is cheap; retrying the latter is wasteful.
+func isTransientNetErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "no such host")
+}
+
+// SummarizeWithImages produces brief + detailed summaries informed by the
+// images at imagePaths. On any failure (vision model error, all images failed
+// to load), it falls back to the text-only Summarize() path so the caller
+// always gets a SummaryResult if the model is reachable in any form.
+func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content string, imagePaths []string) (*SummaryResult, error) {
+	if len(imagePaths) == 0 {
+		return s.Summarize(ctx, title, content)
+	}
+	content = truncateContent(content)
+
+	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请只输出要点列表，不要其他内容。`, title, content)
+
+	brief, err := s.callVision(ctx, briefPrompt, imagePaths, briefMaxTokens)
+	if err != nil {
+		log.Printf("vision summary failed, falling back to text: %v", err)
+		return s.Summarize(ctx, title, content)
+	}
+
+	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请用中文输出详细总结。`, title, content)
+
+	detailed, err := s.callVision(ctx, detailedPrompt, imagePaths, detailedMaxTokens)
+	if err != nil {
+		// Brief already succeeded; fall back only the detailed half.
+		log.Printf("vision detailed failed, falling back to text detailed: %v", err)
+		detText, derr := s.generateDetailed(ctx, title, content)
+		if derr != nil {
+			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%v text=%v", err, derr)
+		}
+		detailed = detText
+	}
+
+	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+}
+
+// callVisionStream is the streaming companion of callVision. No retry (same
+// reason as callStream: any partial output already delivered to the caller
+// cannot be undone).
+func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imagePaths []string, maxTokens int, onDelta func(string)) (string, error) {
+	if s.visionModel == "" {
+		return "", errors.New("vision model not configured (call SetVisionModel)")
+	}
+	msgs, err := buildVisionMessages(prompt, imagePaths)
+	if err != nil {
+		return "", err
+	}
+	if msgs == nil {
+		return "", errors.New("no images loaded")
+	}
+	req := chatStreamRequest{
+		Model:     s.visionModel,
+		MaxTokens: maxTokens,
+		Stream:    true,
+		Messages:  msgs,
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("vision stream error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var full strings.Builder
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, rerr := reader.ReadString('\n')
+		if rerr != nil && rerr != io.EOF {
+			return full.String(), rerr
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if rerr == io.EOF {
+				break
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			if rerr == io.EOF {
+				break
+			}
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			break
+		}
+		var chunk streamChunk
+		if jerr := json.Unmarshal([]byte(payload), &chunk); jerr != nil {
+			if rerr == io.EOF {
+				break
+			}
+			continue
+		}
+		for _, ch := range chunk.Choices {
+			if ch.Delta.Content != "" {
+				full.WriteString(ch.Delta.Content)
+				onDelta(ch.Delta.Content)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+	}
+	return full.String(), nil
+}
+
+// SummarizeWithImagesStream is the streaming variant of SummarizeWithImages.
+// Same fallback contract: any vision-side failure (model error, no images,
+// empty stream) drops to SummarizeStream for the affected half.
+func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, content string,
+	imagePaths []string,
+	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
+	if len(imagePaths) == 0 {
+		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
+	}
+	content = truncateContent(content)
+
+	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请只输出要点列表，不要其他内容。`, title, content)
+
+	brief, err := s.callVisionStream(ctx, briefPrompt, imagePaths, briefMaxTokens, onBriefDelta)
+	if err != nil {
+		log.Printf("vision stream brief failed, falling back to text stream: %v", err)
+		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
+	}
+
+	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请用中文输出详细总结。`, title, content)
+
+	detailed, err := s.callVisionStream(ctx, detailedPrompt, imagePaths, detailedMaxTokens, onDetailedDelta)
+	if err != nil {
+		log.Printf("vision stream detailed failed, falling back to text stream detailed: %v", err)
+		dText, derr := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
+		if derr != nil {
+			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%v text=%v", err, derr)
+		}
+		detailed = dText
+	}
+
+	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
 }
 
 // Polish takes a prompt template text and returns an improved version using the AI model.

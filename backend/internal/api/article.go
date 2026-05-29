@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
+	"github.com/bytedance/rss-pal/internal/imagefetch"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
@@ -461,17 +463,43 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 
 	var brief, detailed string
 	var serr error
-	if h.templateRepo != nil && templateID > 0 {
-		tpl, terr := h.templateRepo.GetByID(templateID)
-		if terr == nil && tpl != nil {
-			brief, detailed, serr = summarizerToUse.SummarizeWithTemplateStream(
-				c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt, onBrief, onDetailed,
-			)
+
+	// Vision routing: caller passes ?force_vision=1 on the regen button. We
+	// also require the article to actually have at least one usable image URL;
+	// otherwise fall through to the text path so we don't pay vision model
+	// cost for a no-image article.
+	visionUsed := false
+	if c.Query("force_vision") == "1" && h.cfg != nil && summarizerToUse.Summarizer().VisionModel() != "" {
+		urls := ai.ExtractImageURLs(article.Content)
+		urls = filterCandidateImageURLsForAPI(urls, h.cfg.AI.Vision.MaxImages)
+		if len(urls) > 0 {
+			ifCfg := imagefetch.Config{
+				Dir:                   h.cfg.AI.Vision.CacheDir,
+				LocalArticleImagesDir: filepath.Join(h.cfg.Backup.Dir, "article_images"),
+				MaxLongSide:           h.cfg.AI.Vision.MaxLongSide,
+				TTL:                   h.cfg.AI.Vision.CacheTTL,
+			}
+			paths, _ := imagefetch.FetchAndStore(c.Request.Context(), id, urls, ifCfg)
+			if len(paths) > 0 {
+				brief, detailed, serr = summarizerToUse.SummarizeWithImagesStream(c.Request.Context(), article, paths, onBrief, onDetailed)
+				visionUsed = true
+			}
+		}
+	}
+
+	if !visionUsed {
+		if h.templateRepo != nil && templateID > 0 {
+			tpl, terr := h.templateRepo.GetByID(templateID)
+			if terr == nil && tpl != nil {
+				brief, detailed, serr = summarizerToUse.SummarizeWithTemplateStream(
+					c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt, onBrief, onDetailed,
+				)
+			} else {
+				brief, detailed, serr = summarizerToUse.SummarizeStream(c.Request.Context(), article, onBrief, onDetailed)
+			}
 		} else {
 			brief, detailed, serr = summarizerToUse.SummarizeStream(c.Request.Context(), article, onBrief, onDetailed)
 		}
-	} else {
-		brief, detailed, serr = summarizerToUse.SummarizeStream(c.Request.Context(), article, onBrief, onDetailed)
 	}
 
 	if serr != nil {
@@ -738,4 +766,26 @@ func derefIntPtr(p *int) any {
 		return "nil"
 	}
 	return *p
+}
+
+// filterCandidateImageURLsForAPI is the api-side equivalent of the worker's
+// filter helper. Kept separate to avoid a circular dep between worker and api
+// over a small piece of logic; if a third caller appears, factor into a shared
+// internal/ai helper.
+func filterCandidateImageURLsForAPI(urls []string, maxImages int) []string {
+	out := make([]string, 0, len(urls))
+	for _, u := range urls {
+		if rss.IsAvatarImageURL(u, "") {
+			continue
+		}
+		if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+			out = append(out, u)
+		} else if strings.HasPrefix(u, "/api/articles/") && strings.Contains(u, "/images/") {
+			out = append(out, u)
+		}
+		if len(out) >= maxImages {
+			break
+		}
+	}
+	return out
 }
