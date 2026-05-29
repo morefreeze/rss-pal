@@ -35,7 +35,10 @@ func startOfWeek(t time.Time) time.Time {
 func (h *WeeklyHandler) Get(c *gin.Context) {
 	userID := getUserID(c)
 
-	weekStart := startOfWeek(time.Now())
+	// Default to last week (this Monday - 7 days) since the worker generates
+	// "last week" on the Monday 05:00 cron tick — the current week's digest
+	// doesn't exist yet. Symmetric with daily's "default to yesterday".
+	weekStart := startOfWeek(time.Now()).AddDate(0, 0, -7)
 	if w := c.Query("week"); w != "" {
 		parsed, err := time.ParseInLocation("2006-01-02", w, shanghai)
 		if err != nil {
