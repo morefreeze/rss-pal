@@ -34,6 +34,7 @@ func main() {
 	templateRepo := repository.NewTemplateRepository(db)
 	shareRepo := repository.NewShareRepository(db)
 	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
+	dailyDigestRepo := repository.NewDailyDigestRepository(db)
 	eventRepo := repository.NewEventRepository(db)
 	feedHealthRepo := repository.NewFeedHealthRepository(db)
 	userTagRepo := repository.NewUserTagRepository(db)
@@ -63,7 +64,9 @@ func main() {
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
 	userInsightsRepo := repository.NewUserInsightRepository(db)
 	insightsHandler := api.NewInsightsHandler(prefRepo, articleRepo, templateRepo, userInsightsRepo, summarizer, cfg)
-	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo, summarizer)
+	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo)
+	dailyHandler := api.NewDailyHandler(articleRepo, dailyDigestRepo)
+	briefingHandler := api.NewBriefingHandler(userRepo)
 	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).
 		WithBackupRunner(backupRunner).
 		WithImageBaseDir(cfg.Backup.Dir)
@@ -229,8 +232,11 @@ func main() {
 		apiGroup.GET("/insights/latest", insightsHandler.Latest)
 		apiGroup.POST("/insights/generate", insightsHandler.Generate)
 
-		// Weekly digest
+		// Weekly / daily briefings (worker generates async; API is read-only)
 		apiGroup.GET("/weekly-digest", weeklyHandler.Get)
+		apiGroup.GET("/daily-digest", dailyHandler.Get)
+		apiGroup.GET("/briefing/last-tab", briefingHandler.GetLastTab)
+		apiGroup.POST("/briefing/last-tab", briefingHandler.SetLastTab)
 
 		// Templates
 		apiGroup.GET("/templates", settingsHandler.GetTemplates)
