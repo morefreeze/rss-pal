@@ -859,7 +859,10 @@ func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Ti
 		ORDER BY COALESCE(p.score, 0) DESC, a.published_at DESC
 		LIMIT $4
 	`
-	rows, err := r.db.Query(query, userID, start, end, limit)
+	// articles.published_at is TIMESTAMP WITHOUT TIME ZONE storing UTC.
+	// Convert the bounds to UTC explicitly so lib/pq's local-time formatting
+	// doesn't skew the comparison by the start's tz offset.
+	rows, err := r.db.Query(query, userID, start.UTC(), end.UTC(), limit)
 	if err != nil {
 		return nil, err
 	}

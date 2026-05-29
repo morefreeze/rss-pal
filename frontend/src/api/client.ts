@@ -785,10 +785,42 @@ export interface WeeklyDigest {
   week_start: string
   intro_text: string
   articles: Article[]
+  pending?: boolean
 }
 
 export const getWeeklyDigest = (week?: string) =>
   api.get<WeeklyDigest>('/weekly-digest', { params: week ? { week } : {} }).then(res => res.data)
+
+export interface DailyDigest {
+  requested_date: string
+  shown_date: string
+  pending: boolean
+  intro_text: string
+  articles: Article[]
+  mode: 'cached' | 'live' | 'pending'
+}
+
+export const getDailyDigest = (date?: string) =>
+  api.get<DailyDigest>('/daily-digest', { params: date ? { date } : {} }).then(r => r.data)
+
+export type BriefingTab = 'daily' | 'weekly'
+
+export const getBriefingLastTab = () =>
+  api.get<{ tab: BriefingTab }>('/briefing/last-tab').then(r => r.data)
+
+export const setBriefingLastTab = (tab: BriefingTab) =>
+  api.post('/briefing/last-tab', { tab })
+
+export interface BriefingIndex {
+  type: 'daily' | 'weekly'
+  today_label?: string         // present when type='daily'
+  this_week_start?: string     // present when type='weekly'
+  pending_window_start: string
+  cached: string[]
+}
+
+export const getBriefingIndex = (type: 'daily' | 'weekly', from: string, to: string) =>
+  api.get<BriefingIndex>('/briefing/index', { params: { type, from, to } }).then(r => r.data)
 
 // === Feed governance Phase 1 ===
 

@@ -12,6 +12,8 @@ import SettingsPage from './pages/SettingsPage'
 import SharePage from './pages/SharePage'
 import RecommendedPage from './pages/RecommendedPage'
 import WeeklyPage from './pages/WeeklyPage'
+import DailyPage from './pages/DailyPage'
+import BriefingRedirect from './components/BriefingRedirect'
 import FeedHealthPage from './pages/FeedHealthPage'
 import ClipPage from './pages/ClipPage'
 import ExtensionConfigPage from './pages/ExtensionConfigPage'
@@ -64,6 +66,8 @@ function App() {
           <Route path="feeds" element={<FeedListPage />} />
           <Route path="feeds/health" element={<FeedHealthPage />} />
           <Route path="recommended" element={<RecommendedPage />} />
+          <Route path="briefing" element={<BriefingRedirect />} />
+          <Route path="daily" element={<DailyPage />} />
           <Route path="weekly" element={<WeeklyPage />} />
           <Route path="articles" element={<ArticleListPage />} />
           <Route path="articles/:id" element={<ArticlePage />} />

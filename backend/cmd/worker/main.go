@@ -52,6 +52,8 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	templateRepo := repository.NewTemplateRepository(db)
 	userInsightsRepo := repository.NewUserInsightRepository(db)
+	dailyDigestRepo := repository.NewDailyDigestRepository(db)
+	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
 
 	fetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
 	contentFetcher := rss.NewContentFetcher()
@@ -84,6 +86,16 @@ func main() {
 			defaultModel:     ai.DefaultModel,
 		})
 		defer stopCron()
+	}
+
+	if summarizer != nil {
+		stopBriefing := scheduleBriefingCron(briefingDeps{
+			articleRepo: articleRepo,
+			dailyRepo:   dailyDigestRepo,
+			weeklyRepo:  weeklyDigestRepo,
+			summarizer:  summarizer,
+		})
+		defer stopBriefing()
 	}
 
 	backupRunner := backup.NewRunner(db, cfg.Backup.Dir)
