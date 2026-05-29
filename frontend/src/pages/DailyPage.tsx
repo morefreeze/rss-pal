@@ -1,23 +1,49 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getDailyDigest, DailyDigest } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import BriefingTabs from '../components/BriefingTabs'
+import BriefingCalendar from '../components/BriefingCalendar'
+import { writeNav } from '../utils/articleNav'
 import { toast } from '../utils/toast'
 
-function shiftDay(date: string, days: number): string {
-  const d = new Date(date + 'T00:00:00+08:00')
-  d.setDate(d.getDate() + days)
-  const shanghai = new Date(d.getTime() + 8 * 3600 * 1000)
-  return shanghai.toISOString().slice(0, 10)
-}
-
 export default function DailyPage() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+
+  const [date, setDate] = useState<string | undefined>(() => params.get('date') ?? undefined)
   const [digest, setDigest] = useState<DailyDigest | null>(null)
   const [loading, setLoading] = useState(true)
-  const [date, setDate] = useState<string | undefined>(undefined)
+  const [calOpen, setCalOpen] = useState(false)
+  const calBtnRef = useRef<HTMLButtonElement>(null)
+  const calPopRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { load(date) }, [date])
+
+  useEffect(() => {
+    if (date === undefined && params.get('date') !== null) {
+      navigate('/daily', { replace: true })
+    } else if (date !== undefined && params.get('date') !== date) {
+      navigate('/daily?date=' + date, { replace: true })
+    }
+  }, [date])
+
+  useEffect(() => {
+    if (!calOpen) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (calPopRef.current?.contains(t)) return
+      if (calBtnRef.current?.contains(t)) return
+      setCalOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCalOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [calOpen])
 
   const load = async (d?: string) => {
     setLoading(true)
@@ -29,6 +55,19 @@ export default function DailyPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const pickDate = (d: string) => {
+    setDate(d)
+    setCalOpen(false)
+  }
+
+  const onClickArticle = () => {
+    if (!digest) return
+    writeNav(digest.articles.map(a => a.id), null)
+    try {
+      sessionStorage.setItem('articleEntryPath', '/daily?date=' + digest.shown_date)
+    } catch { /* ignore */ }
   }
 
   if (loading) return (
@@ -44,21 +83,35 @@ export default function DailyPage() {
     </div>
   )
 
-  const headerTitle = digest.mode === 'live' ? `今日精选 · ${digest.shown_date}（收集中）` : `本日精选 · ${digest.shown_date}`
+  const headerTitle = digest.mode === 'live'
+    ? `今日精选 · ${digest.shown_date}（收集中）`
+    : `本日精选 · ${digest.shown_date}`
   const showStaleTag = digest.pending && digest.shown_date !== digest.requested_date
 
   return (
     <div>
       <BriefingTabs current="daily" />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, position: 'relative' }}>
         <h2 style={{ margin: 0 }}>{headerTitle}</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="secondary" title="前一天" onClick={() => setDate(shiftDay(digest.shown_date, -1))}>‹ 前一天</button>
-          <button className="secondary" title="后一天" onClick={() => setDate(shiftDay(digest.shown_date, 1))}>后一天 ›</button>
-          {date !== undefined && (
-            <button className="secondary" title="回到昨天" onClick={() => setDate(undefined)}>昨天</button>
-          )}
-        </div>
+        <button
+          ref={calBtnRef}
+          type="button"
+          aria-label="选择日期"
+          aria-expanded={calOpen}
+          className="secondary"
+          onClick={() => setCalOpen(o => !o)}
+        >
+          📅
+        </button>
+        {calOpen && (
+          <div ref={calPopRef} style={{ position: 'absolute', top: '100%', right: 0, marginTop: 8, zIndex: 100 }}>
+            <BriefingCalendar
+              currentDate={digest.shown_date}
+              onPick={pickDate}
+              onClose={() => setCalOpen(false)}
+            />
+          </div>
+        )}
       </div>
 
       {showStaleTag && (
@@ -92,7 +145,13 @@ export default function DailyPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {digest.articles.map(a => (
-                <Link key={a.id} to={`/articles/${a.id}`} className="card" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
+                <Link
+                  key={a.id}
+                  to={`/articles/${a.id}`}
+                  onClick={onClickArticle}
+                  className="card"
+                  style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}
+                >
                   <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{a.title}</div>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
                     {a.feed_title && <span className="text-muted text-sm">{a.feed_title}</span>}
