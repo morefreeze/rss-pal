@@ -68,20 +68,9 @@ func fireBriefings(ctx context.Context, deps briefingDeps, now time.Time) {
 	yesterday := today.AddDate(0, 0, -1)
 	fireDailyForAllUsers(ctx, deps, yesterday)
 	if isMondayShanghai(now) {
-		weekStart := mondayShanghai(now).AddDate(0, 0, -7)
+		weekStart := api.MondayLabel(now).AddDate(0, 0, -7)
 		fireWeeklyForAllUsers(ctx, deps, weekStart)
 	}
-}
-
-// mondayShanghai returns the Monday at 00:00 in Asia/Shanghai of the week containing `t`.
-func mondayShanghai(t time.Time) time.Time {
-	tt := t.In(briefingShanghai)
-	weekday := int(tt.Weekday())
-	if weekday == 0 {
-		weekday = 7
-	}
-	mon := tt.AddDate(0, 0, -(weekday - 1))
-	return time.Date(mon.Year(), mon.Month(), mon.Day(), 0, 0, 0, 0, briefingShanghai)
 }
 
 // fireDailyForAllUsers picks up the users missing a daily for `day` and generates one each.
@@ -220,5 +209,5 @@ func runBriefingCatchUp(ctx context.Context, deps briefingDeps) {
 	for k := 1; k <= 3; k++ {
 		fireDailyForAllUsers(ctx, deps, today.AddDate(0, 0, -k))
 	}
-	fireWeeklyForAllUsers(ctx, deps, mondayShanghai(now).AddDate(0, 0, -7))
+	fireWeeklyForAllUsers(ctx, deps, api.MondayLabel(now).AddDate(0, 0, -7))
 }
