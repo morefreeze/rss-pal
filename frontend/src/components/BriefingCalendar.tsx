@@ -13,16 +13,20 @@ function pad(n: number): string {
   return n < 10 ? '0' + n : '' + n
 }
 
+// Anchor every "calendar date" at 12:00 UTC. That way getUTCDay / getUTCMonth /
+// getUTCDate return the intended Shanghai calendar values regardless of the
+// runtime tz: 12:00 UTC = 20:00 Shanghai, still the same calendar day.
 function ymd(d: Date): string {
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+  return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate())
 }
 
-function parseShanghai(s: string): Date {
-  return new Date(s + 'T00:00:00+08:00')
+function ymdToDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d, 12))
 }
 
 function firstOfMonth(year: number, month0: number): Date {
-  return new Date(Date.UTC(year, month0, 1, -8)) // 00:00 Shanghai
+  return new Date(Date.UTC(year, month0, 1, 12))
 }
 
 function classifyCell(d: string, idx: BriefingIndex | null): CellStatus {
@@ -38,7 +42,7 @@ const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 
 export default function BriefingCalendar({ currentDate, onPick, onClose }: Props) {
   const initialMonth = useMemo(() => {
-    const d = parseShanghai(currentDate)
+    const d = ymdToDate(currentDate)
     return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1)
   }, [currentDate])
 
@@ -82,7 +86,7 @@ export default function BriefingCalendar({ currentDate, onPick, onClose }: Props
   }, [year, month0])
 
   const shiftMonth = (delta: number) => {
-    const next = new Date(Date.UTC(year, month0 + delta, 1, -8))
+    const next = new Date(Date.UTC(year, month0 + delta, 1, 12))
     setMonth(next.getUTCFullYear() + '-' + pad(next.getUTCMonth() + 1))
   }
 
@@ -96,7 +100,8 @@ export default function BriefingCalendar({ currentDate, onPick, onClose }: Props
         borderRadius: 8,
         boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
         padding: 12,
-        width: 280,
+        width: 'min(280px, calc(100vw - 24px))',
+        boxSizing: 'border-box',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -125,7 +130,11 @@ export default function BriefingCalendar({ currentDate, onPick, onClose }: Props
               data-status={inMonth ? status : 'out'}
               style={{
                 height: 32,
+                minWidth: 0,
+                padding: 0,
                 fontSize: 13,
+                fontWeight: 500,
+                lineHeight: 1,
                 border: isCurrent ? '2px solid var(--accent)' : '1px solid transparent',
                 borderRadius: 4,
                 background:
@@ -159,6 +168,9 @@ const btnStyle: React.CSSProperties = {
   border: '1px solid var(--border)',
   borderRadius: 4,
   padding: '4px 8px',
+  height: 'auto',
+  fontSize: 13,
+  fontWeight: 500,
   cursor: 'pointer',
   color: 'var(--fg)',
 }
