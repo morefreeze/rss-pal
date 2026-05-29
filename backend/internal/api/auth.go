@@ -28,18 +28,28 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func (h *AuthHandler) generateToken(user *model.User) (string, error) {
+const (
+	tokenTTL         = 7 * 24 * time.Hour
+	tokenRenewBefore = 3 * 24 * time.Hour
+	newTokenHeader   = "X-New-Token"
+)
+
+func (h *AuthHandler) signToken(userID int, username string, isAdmin bool) (string, error) {
 	claims := Claims{
-		UserID:   user.ID,
-		Username: user.Username,
-		IsAdmin:  user.IsAdmin,
+		UserID:   userID,
+		Username: username,
+		IsAdmin:  isAdmin,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(tokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(h.cfg.JWT.Secret))
+}
+
+func (h *AuthHandler) generateToken(user *model.User) (string, error) {
+	return h.signToken(user.ID, user.Username, user.IsAdmin)
 }
 
 func (h *AuthHandler) InitAdmin(c *gin.Context) {
@@ -136,6 +146,15 @@ func (h *AuthHandler) AuthMiddleware() gin.HandlerFunc {
 		if err != nil || !token.Valid {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
+		}
+
+		// Sliding renewal: when the token has less than tokenRenewBefore
+		// left, issue a fresh one in X-New-Token. Set before c.Next() so
+		// streaming handlers don't race the header flush.
+		if claims.ExpiresAt != nil && time.Until(claims.ExpiresAt.Time) < tokenRenewBefore {
+			if fresh, err := h.signToken(claims.UserID, claims.Username, claims.IsAdmin); err == nil {
+				c.Writer.Header().Set(newTokenHeader, fresh)
+			}
 		}
 
 		c.Set("userID", claims.UserID)

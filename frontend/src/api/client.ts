@@ -30,7 +30,13 @@ api.interceptors.request.use(config => {
 })
 
 api.interceptors.response.use(
-  res => res,
+  res => {
+    const fresh = res.headers?.['x-new-token']
+    if (typeof fresh === 'string' && fresh) {
+      localStorage.setItem('token', fresh)
+    }
+    return res
+  },
   async (err: AxiosError) => {
     const config = err.config as RetriableConfig | undefined
 
