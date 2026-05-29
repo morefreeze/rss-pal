@@ -62,11 +62,15 @@ func scheduleBriefingCron(deps briefingDeps) context.CancelFunc {
 	return cancel
 }
 
-// fireBriefings runs the daily job, and if `now` is Monday Asia/Shanghai, the weekly job too.
+// fireBriefings runs the daily job for the last 3 completed days (so a
+// transient AI failure on one tick gets retried on the next), and the weekly
+// job if `now` is Monday Asia/Shanghai. UserIDsMissing makes per-day work
+// idempotent — already-generated users are skipped.
 func fireBriefings(ctx context.Context, deps briefingDeps, now time.Time) {
 	today := api.TodayLabel(now)
-	yesterday := today.AddDate(0, 0, -1)
-	fireDailyForAllUsers(ctx, deps, yesterday)
+	for k := 1; k <= 3; k++ {
+		fireDailyForAllUsers(ctx, deps, today.AddDate(0, 0, -k))
+	}
 	if isMondayShanghai(now) {
 		weekStart := api.MondayLabel(now).AddDate(0, 0, -7)
 		fireWeeklyForAllUsers(ctx, deps, weekStart)
