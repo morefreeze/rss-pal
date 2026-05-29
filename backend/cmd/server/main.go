@@ -44,6 +44,7 @@ func main() {
 	hiddenRepo := repository.NewHiddenArticleRepository(db)
 
 	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
+	summarizer.SetVisionModel(cfg.AI.Vision.Model)
 	summarizerService := service.NewSummarizerService(summarizer)
 
 	backupRunner := backup.NewRunner(db, cfg.Backup.Dir)
