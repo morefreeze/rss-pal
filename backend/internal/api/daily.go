@@ -74,6 +74,13 @@ func (h *DailyHandler) Get(c *gin.Context) {
 	now := time.Now()
 	today := TodayLabel(now)
 
+	// explicitDate is true iff the caller passed ?date=. We only do the
+	// "fall back one day if requested is missing" trick for the default
+	// case (no param) so that opening /daily fresh in the morning still
+	// shows something even if yesterday isn't generated yet. When the
+	// user explicitly clicks a date in the calendar we respect their
+	// pick and surface the pending state instead of jumping back.
+	explicitDate := false
 	requested := today.AddDate(0, 0, -1)
 	if q := c.Query("date"); q != "" {
 		parsed, err := ParseDailyDate(q)
@@ -82,6 +89,7 @@ func (h *DailyHandler) Get(c *gin.Context) {
 			return
 		}
 		requested = parsed
+		explicitDate = true
 	}
 
 	if requested.After(today) {
@@ -127,7 +135,7 @@ func (h *DailyHandler) Get(c *gin.Context) {
 		return
 	}
 	fallback := requested.AddDate(0, 0, -1)
-	if !fallback.Before(lookbackLimit) {
+	if !explicitDate && !fallback.Before(lookbackLimit) {
 		fb, ferr := h.digestRepo.Get(userID, fallback)
 		if ferr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": ferr.Error()})
