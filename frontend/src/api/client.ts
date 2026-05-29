@@ -626,6 +626,7 @@ export async function generateSummaryStream(
   templateId: number | undefined,
   handlers: SummaryStreamHandlers,
   signal?: AbortSignal,
+  opts?: { forceVision?: boolean },
 ): Promise<void> {
   const token = localStorage.getItem('token')
   const headers: Record<string, string> = {
@@ -636,9 +637,12 @@ export async function generateSummaryStream(
 
   const body = templateId ? JSON.stringify({ template_id: templateId }) : '{}'
 
+  const qp = new URLSearchParams({ stream: '1' })
+  if (opts?.forceVision) qp.set('force_vision', '1')
+
   let resp: Response
   try {
-    resp = await fetch(`/api/articles/${articleId}/summary?stream=1`, {
+    resp = await fetch(`/api/articles/${articleId}/summary?${qp.toString()}`, {
       method: 'POST',
       credentials: 'include',
       headers,

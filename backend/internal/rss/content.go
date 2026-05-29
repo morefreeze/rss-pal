@@ -446,6 +446,28 @@ func isAvatarImg(s *goquery.Selection) bool {
 	return false
 }
 
+// IsAvatarImageURL is the markdown-time companion to isAvatarImg: it inspects
+// just the src URL and the alt text (the only signals that survive HTML →
+// markdown round-trip). Shared keyword lists with the DOM-based detector.
+func IsAvatarImageURL(src, alt string) bool {
+	srcLower := strings.ToLower(src)
+	for _, kw := range avatarURLKeywords {
+		if strings.Contains(srcLower, kw) {
+			return true
+		}
+	}
+	altLower := strings.ToLower(alt)
+	if altLower == "" {
+		return false
+	}
+	for _, kw := range avatarAttrKeywords {
+		if strings.Contains(altLower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // StripAvatars removes <img> elements matching avatar heuristics from doc,
 // mutating it in place. Called before markdown conversion so avatars never
 // enter stored content.

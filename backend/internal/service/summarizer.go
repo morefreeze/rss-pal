@@ -78,3 +78,35 @@ func (s *SummarizerService) ExtractTopics(ctx context.Context, article *model.Ar
 
 	return s.summarizer.ExtractTopics(ctx, article.Title, content)
 }
+
+// SummarizeWithImages routes through the vision path. imagePaths are local
+// files (typically from imagefetch.FetchAndStore).
+func (s *SummarizerService) SummarizeWithImages(ctx context.Context, article *model.Article, imagePaths []string) (brief, detailed string, err error) {
+	content := article.Content
+	if content == "" {
+		content = article.Title
+	}
+	result, err := s.summarizer.SummarizeWithImages(ctx, article.Title, content, imagePaths)
+	if err != nil {
+		return "", "", err
+	}
+	return result.Brief, result.Detailed, nil
+}
+
+// SummarizeWithImagesStream is the streaming variant.
+func (s *SummarizerService) SummarizeWithImagesStream(ctx context.Context, article *model.Article, imagePaths []string,
+	onBriefDelta, onDetailedDelta func(string)) (brief, detailed string, err error) {
+	content := article.Content
+	if content == "" {
+		content = article.Title
+	}
+	result, err := s.summarizer.SummarizeWithImagesStream(ctx, article.Title, content, imagePaths, onBriefDelta, onDetailedDelta)
+	if err != nil {
+		return "", "", err
+	}
+	return result.Brief, result.Detailed, nil
+}
+
+// Summarizer returns the underlying *ai.Summarizer (for VisionModel inspection
+// at handler-construction time).
+func (s *SummarizerService) Summarizer() *ai.Summarizer { return s.summarizer }

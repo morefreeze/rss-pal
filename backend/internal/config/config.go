@@ -2,12 +2,15 @@ package config
 
 import (
 	"os"
+	"strconv"
+	"time"
 )
 
 type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	Claude   ClaudeConfig
+	AI       AIConfig
 	Auth     AuthConfig
 	JWT      JWTConfig
 	RSSHub   RSSHubConfig
@@ -34,6 +37,24 @@ type DatabaseConfig struct {
 type ClaudeConfig struct {
 	APIKey  string
 	BaseURL string
+}
+
+type AIConfig struct {
+	Vision VisionConfig
+}
+
+// VisionConfig groups everything the vision-summary path needs.
+// Defaults are tuned for z.ai's glm-4v-plus, 6-image cap, 1024 longest-side,
+// 4 MB base64 payload budget, 24h cache TTL.
+type VisionConfig struct {
+	Model           string        // chat completions "model" field for vision calls
+	MaxImages       int           // hard cap per article
+	MaxLongSide     int           // resize threshold; px
+	PayloadBudgetMB int           // base64 budget; drops tail images on overflow
+	MinImages       int           // auto-trigger image-count floor
+	MaxTextChars    int           // auto-trigger text-length ceiling
+	CacheDir        string        // temp cache root
+	CacheTTL        time.Duration // cache file age limit
 }
 
 type AuthConfig struct {
@@ -65,6 +86,18 @@ func Load() *Config {
 			APIKey:  getEnv("CLAUDE_API_KEY", ""),
 			BaseURL: getEnv("CLAUDE_BASE_URL", "https://api.anthropic.com"),
 		},
+		AI: AIConfig{
+			Vision: VisionConfig{
+				Model:           getEnv("AI_VISION_MODEL", "glm-4v-plus"),
+				MaxImages:       getEnvInt("AI_VISION_MAX_IMAGES", 6),
+				MaxLongSide:     getEnvInt("AI_VISION_MAX_LONG_SIDE", 1024),
+				PayloadBudgetMB: getEnvInt("AI_VISION_PAYLOAD_BUDGET_MB", 4),
+				MinImages:       getEnvInt("AI_VISION_MIN_IMAGES", 3),
+				MaxTextChars:    getEnvInt("AI_VISION_MAX_TEXT_CHARS", 2000),
+				CacheDir:        getEnv("AI_VISION_CACHE_DIR", "/backups/ai_summary_cache"),
+				CacheTTL:        time.Duration(getEnvInt("AI_VISION_CACHE_TTL_HOURS", 24)) * time.Hour,
+			},
+		},
 		Auth: AuthConfig{
 			Password: getEnv("AUTH_PASSWORD", "admin"),
 		},
@@ -85,4 +118,16 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultValue
+	}
+	return n
 }
