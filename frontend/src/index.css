@@ -32,6 +32,10 @@ body[data-theme='paper'] {
   --border: #d9cdaa;
   --code-bg: #ebe2c8;
   --link: #5b3b00;
+  --cal-done: #22c55e;
+  --cal-pending: #f97316;
+  --cal-disabled: rgba(0, 0, 0, 0.08);
+  --cal-today: var(--accent);
 }
 body[data-theme='quiet'] {
   --bg: #fafaf7;
@@ -45,6 +49,10 @@ body[data-theme='quiet'] {
   --border: #e3e3de;
   --code-bg: #f3f3ee;
   --link: #3a5a40;
+  --cal-done: #22c55e;
+  --cal-pending: #f97316;
+  --cal-disabled: rgba(0, 0, 0, 0.08);
+  --cal-today: var(--accent);
 }
 body[data-theme='pearl'] {
   --bg: #ebebeb;
@@ -58,6 +66,10 @@ body[data-theme='pearl'] {
   --border: #d4d4d4;
   --code-bg: #f3f3f3;
   --link: #0066cc;
+  --cal-done: #22c55e;
+  --cal-pending: #f97316;
+  --cal-disabled: rgba(0, 0, 0, 0.08);
+  --cal-today: var(--accent);
 }
 body[data-theme='night'] {
   --bg: #1a1a1a;
@@ -71,6 +83,10 @@ body[data-theme='night'] {
   --border: #333333;
   --code-bg: #262626;
   --link: #7eb6ff;
+  --cal-done: #16a34a;
+  --cal-pending: #ea580c;
+  --cal-disabled: rgba(255, 255, 255, 0.10);
+  --cal-today: var(--accent);
 }
 body[data-theme='neon'] {
   --bg: #0a1929;
@@ -84,6 +100,10 @@ body[data-theme='neon'] {
   --border: #1f3a5c;
   --code-bg: #102438;
   --link: #00d9ff;
+  --cal-done: #16a34a;
+  --cal-pending: #ea580c;
+  --cal-disabled: rgba(255, 255, 255, 0.10);
+  --cal-today: var(--accent);
 }
 
 /* Fallback when no theme attr yet (pre-boot) — Paper.
