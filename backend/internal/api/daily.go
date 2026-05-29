@@ -47,6 +47,18 @@ func DailyWindow(day time.Time) (time.Time, time.Time) {
 	return start, end
 }
 
+// MondayLabel returns the Monday at 00:00 in Asia/Shanghai of the week containing `now`.
+// Symmetric with TodayLabel but week-anchored.
+func MondayLabel(now time.Time) time.Time {
+	t := now.In(briefingShanghai)
+	weekday := int(t.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	mon := t.AddDate(0, 0, -(weekday - 1))
+	return time.Date(mon.Year(), mon.Month(), mon.Day(), 0, 0, 0, 0, briefingShanghai)
+}
+
 type DailyHandler struct {
 	articleRepo *repository.ArticleRepository
 	digestRepo  *repository.DailyDigestRepository
