@@ -23,12 +23,12 @@ echo "公钥: $SSH_PUB_KEY"
 AD=$(oci iam availability-domain list --compartment-id "$COMPARTMENT_ID" --query "data[0].id" --raw-output)
 echo "Availability Domain: $AD"
 
-# 3. 查找 Oracle Linux 8 ARM 镜像（Always Free 兼容）
-echo "查找 Oracle Linux 8 ARM 镜像..."
+# 3. 查找 Ubuntu 24.04 ARM 镜像（Always Free 兼容）
+echo "查找 Ubuntu 24.04 ARM 镜像..."
 IMAGE_ID=$(oci compute image list \
   --compartment-id "$COMPARTMENT_ID" \
-  --operating-system "Oracle Linux" \
-  --operating-system-version "8" \
+  --operating-system "Canonical Ubuntu" \
+  --operating-system-version "24.04" \
   --query "data[0].id" \
   --raw-output)
 echo "Image ID: $IMAGE_ID"

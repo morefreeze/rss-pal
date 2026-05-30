@@ -58,8 +58,9 @@ if [[ "$OS" == "unknown" ]]; then
 fi
 
 # CentOS 默认 opc 用户，Ubuntu 默认 ubuntu 用户
+# Oracle Cloud Ubuntu 默认用户是 opc（不是 ubuntu）
 if [[ "$EUID" -ne 0 ]]; then
-  error "请用 root 用户运行此脚本（CentOS: sudo bash deploy-oracle.sh）"
+  error "请用 root 用户运行此脚本（sudo bash deploy-oracle.sh）"
 fi
 
 # ==========================================
