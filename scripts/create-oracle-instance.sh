@@ -111,7 +111,7 @@ INSTANCE_ID=$(oci compute instance launch \
   --display-name "rss-pal" \
   --shape "VM.Standard.A1.Flex" \
   --shape-config "{\"ocpus\":4,\"memoryInGBs\":24}" \
-  --source-details "{\"sourceType\":\"image\",\"imageId\":\"$IMAGE_ID\",\"bootVolumeSizeInGBs\":50}" \
+  --source-details "{\"sourceType\":\"image\",\"imageId\":\"$IMAGE_ID\",\"bootVolumeSizeInGBs\":47}" \
   --subnet-id "$SUBNET_ID" \
   --ssh-authorized-keys-file ~/.ssh/rss-pal-key.pub \
   --query "data.id" \
