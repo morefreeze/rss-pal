@@ -29,19 +29,8 @@ IMAGE_ID=$(oci compute image list \
   --compartment-id "$COMPARTMENT_ID" \
   --operating-system "Oracle Linux" \
   --operating-system-version "8" \
-  --shape "VM.Standard.A1.Flex" \
-  --query "data[?.\"display-name\".contains(\`display-name\`, 'aarch64')].id | [0]" \
+  --query "data[0].id" \
   --raw-output)
-
-if [[ -z "$IMAGE_ID" ]]; then
-  echo "⚠️  未找到特定 ARM 镜像，尝试通用查找..."
-  IMAGE_ID=$(oci compute image list \
-    --compartment-id "$COMPARTMENT_ID" \
-    --operating-system "Oracle Linux" \
-    --operating-system-version "8" \
-    --query "data[0].id" \
-    --raw-output)
-fi
 echo "Image ID: $IMAGE_ID"
 
 # 4. 检查是否有现成的 VCN
