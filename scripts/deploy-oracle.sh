@@ -151,6 +151,19 @@ fi
 info "当前版本: $(git log --oneline -1)"
 
 # ==========================================
+step "4.5 修复 npm 镜像源"
+# ==========================================
+# package-lock.json 包含字节内部镜像 registry.npmmirror.com，外部无法访问
+LOCK_FILE="$APP_DIR/frontend/package-lock.json"
+if [[ -f "$LOCK_FILE" ]] && grep -q "registry.npmmirror.com" "$LOCK_FILE" 2>/dev/null; then
+  info "替换 registry.npmmirror.com → registry.npmmirror.com..."
+  sed -i 's/registry\.npmmirror\.com/registry.npmmirror.com/g' "$LOCK_FILE"
+  info "✅ 已替换 $(grep -c 'registry.npmmirror.com' "$LOCK_FILE") 处引用"
+else
+  info "package-lock.json 无需修改"
+fi
+
+# ==========================================
 step "5. 配置环境变量"
 # ==========================================
 if [[ -f "$ENV_FILE" ]]; then
