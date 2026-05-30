@@ -82,7 +82,7 @@ if [[ -z "$VCN_ID" || "$VCN_ID" == "null" ]]; then
   # 更新路由表（默认路由指向 Internet Gateway）
   ROUTE_TABLE_ID=$(oci network route-table list --compartment-id "$COMPARTMENT_ID" --vcn-id "$VCN_ID" --query "data[0].id" --raw-output)
   oci network route-table update --rt-id "$ROUTE_TABLE_ID" \
-    --route-rules "[{"cidrBlock":"0.0.0.0/0","networkEntityId":"$IGW_ID"}]" \
+    --route-rules "[{\"cidrBlock\":\"0.0.0.0/0\",\"networkEntityId\":\"$IGW_ID\"}]" \
     --force
   echo "✅ Route Table 已更新"
 else
