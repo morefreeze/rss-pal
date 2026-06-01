@@ -1,4 +1,4 @@
-import { memo, useContext, useMemo, useState } from 'react'
+import { createContext, memo, useContext, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -18,7 +18,16 @@ import { LinkSetMarkIcon } from './LinkSetMarkIcon'
 
 type Props = {
   source: string
+  // Optional map of original-URL → [width, height]. When present, the
+  // matching <img> renders with explicit dimensions so the browser reserves
+  // layout space before the bytes arrive — which prevents reading-progress
+  // from regressing as lazy-loaded images decode mid-scroll.
+  imageDimensions?: Record<string, [number, number]>
 }
+
+// Carries the dimensions map down to the COMPONENTS.img override, which is
+// defined at module scope (hoisted for ref stability — see comment below).
+const ImageDimensionsContext = createContext<Record<string, [number, number]> | null>(null)
 
 const AVATAR_ATTR_KEYWORDS = [
   'avatar', 'gravatar', 'profile', 'author',
@@ -100,12 +109,20 @@ const COMPONENTS: Components = {
         ? src
         : `/api/proxy/image?url=${encodeURIComponent(src)}`
       : undefined
+    // Lookup intrinsic dimensions by ORIGINAL url (the markdown-level src,
+    // before proxy rewriting). When present, modern browsers use the
+    // width+height attributes as an aspect-ratio hint and reserve the
+    // correct vertical space even while the image is still downloading.
+    const dims = useContext(ImageDimensionsContext)
+    const dim = src ? dims?.[src] : undefined
     return (
       <img
         src={proxied}
         alt={alt ?? ''}
         loading="lazy"
         decoding="async"
+        width={dim?.[0]}
+        height={dim?.[1]}
         style={{ maxWidth: '100%', height: 'auto' }}
         {...rest}
       />
@@ -152,20 +169,23 @@ const COMPONENTS: Components = {
 // Wrapped in React.memo so the parent (ArticlePage) re-rendering on every
 // scroll-progress / activity-tick state change doesn't force a full
 // markdown re-parse and image remount.
-function MarkdownArticle({ source }: Props) {
+function MarkdownArticle({ source, imageDimensions }: Props) {
   const cleaned = useMemo(
     () => flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source))),
     [source],
   )
+  const dims = imageDimensions ?? null
   return (
     <div className="markdown-body">
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
-        components={COMPONENTS}
-      >
-        {cleaned}
-      </ReactMarkdown>
+      <ImageDimensionsContext.Provider value={dims}>
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
+          components={COMPONENTS}
+        >
+          {cleaned}
+        </ReactMarkdown>
+      </ImageDimensionsContext.Provider>
     </div>
   )
 }

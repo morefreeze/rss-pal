@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -355,7 +356,7 @@ JOIN feeds ON articles.feed_id = feeds.id` + joins
 
 func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
@@ -366,7 +367,8 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	var parentArticleID sql.NullInt64
 	var processingState, processingError, editorNote sql.NullString
 	var prerankScore sql.NullFloat64
-	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind)
+	var imageDimensions []byte
+	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +399,22 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	a.MediaURL = mediaURL.String
 	a.MediaType = mediaType.String
 	a.MediaDurationSeconds = int(mediaDuration.Int64)
+	a.ImageDimensions = decodeImageDimensions(imageDimensions)
 	return &a, nil
+}
+
+// decodeImageDimensions parses the JSONB column into a typed map. Returns
+// nil on empty / parse failure so the frontend sees omitempty and falls
+// back to the no-dimensions render path.
+func decodeImageDimensions(raw []byte) map[string][2]int {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string][2]int)
+	if err := json.Unmarshal(raw, &out); err != nil || len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // GetByIDWithFeedType returns the article alongside its feed's feed_type
@@ -405,7 +422,7 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
@@ -416,12 +433,13 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	var parentArticleID sql.NullInt64
 	var processingState, processingError, editorNote sql.NullString
 	var prerankScore sql.NullFloat64
+	var imageDimensions []byte
 	err := r.db.QueryRow(query, id, userID).Scan(
 		&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
 		&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
 		&mediaURL, &mediaType, &mediaDuration,
 		&feedTitle, &feedType,
-		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind,
+		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions,
 	)
 	if err != nil {
 		return nil, "", err
@@ -453,6 +471,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	a.MediaURL = mediaURL.String
 	a.MediaType = mediaType.String
 	a.MediaDurationSeconds = int(mediaDuration.Int64)
+	a.ImageDimensions = decodeImageDimensions(imageDimensions)
 	return &a, feedType.String, nil
 }
 
