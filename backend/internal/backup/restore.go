@@ -127,6 +127,33 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 				continue
 			}
 			var newID int
+			// Clip articles bypass the (feed_id, url) unique constraint by design
+			// (the index excludes is_clip=true rows), so they always insert as a
+			// new row. Use a separate INSERT path to avoid issuing an ON CONFLICT
+			// clause that postgres can't infer for clip inserts.
+			if ar.IsClip {
+				err := tx.QueryRowContext(ctx, `
+					INSERT INTO articles (
+						feed_id, title, url, content, published_at,
+						summary_brief, summary_detailed, fetched_at,
+						word_count, reading_minutes, editor_note,
+						media_url, media_type, media_duration_seconds,
+						is_clip
+					) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14, TRUE)
+					RETURNING id`,
+					feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
+					ar.SummaryBrief, ar.SummaryDetailed, ar.FetchedAt,
+					ar.WordCount, ar.ReadingMinutes, ar.EditorNote,
+					ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds,
+				).Scan(&newID)
+				if err != nil {
+					return stats, fmt.Errorf("insert saved clip %s: %w", ar.URL, err)
+				}
+				idMap[ar.ExportID] = newID
+				stats.SavedArticles++
+				continue
+			}
+
 			err := tx.QueryRowContext(ctx, `
 				INSERT INTO articles (
 					feed_id, title, url, content, published_at,
