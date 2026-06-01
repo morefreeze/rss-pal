@@ -64,6 +64,133 @@ npm run dev   # 开发模式，代理到 :8080
 | `AUTH_PASSWORD` | `admin` | 管理员初始密码 |
 | `JWT_SECRET` | — | JWT 签名密钥（**生产环境必须设置**） |
 
+## 云服务器部署（生产环境）
+
+### 需求基线
+
+rss-pal 跑全套服务（postgres + api + worker + frontend + rsshub + status-monitor），实测：
+
+- **CPU**: 2 核起步；worker AI 摘要并发跑 OCR/视觉时建议 4 核
+- **内存**: 4 GB 起步（含 rsshub-chromium，仅 chromium 就要 ~1 GB）
+- **磁盘**: 50 GB 起步（PostgreSQL + AI summary cache + PDF 网摘图片 + 备份）
+- **带宽**: 5 Mbps 够个人用；抓取 RSS 是上传消耗，不大
+- **公网 IP**: 必须独立 IP（共享 IP 不能装 SSL）
+
+### 国内云厂商对比（2026 年价格，3 年付）
+
+| 厂商 | 套餐 | 配置 | 3 年价格 | 月均 | 续费 | 备注 |
+|------|------|------|---------|------|------|------|
+| **阿里云轻量** | 2C4G | 2核4G / 200M峰值带宽 / 50G SSD / 不限流量 | ¥597 | ¥16.6 | ¥199/年同价 | 续费不涨价，性价比最高 |
+| **腾讯云轻量** | 2C4G6M | 2核4G / 6M带宽 / 80G SSD / 1200G/月流量 | ¥528 | ¥14.7 | 同价 | "买1年送3个月"活动可叠加 |
+| **京东云轻量** | 2C4G5M | 2核4G / 5M带宽 / 60G SSD / 500G/月流量 | ¥528–558 | ¥14.7 | 看活动 | 价格接近腾讯但生态弱 |
+| **华为云 Flexus L** | 2C4G | 2核4G / 5M带宽 / 80G SSD | ~¥800（年付 ~¥268） | ~¥22 | 略涨 | 没看到明确 3 年套餐 |
+| **UCloud 快杰共享** | 2C4G5M | 2核4G / 5M带宽 | ¥1398 | ¥38.8 | 涨价 | 偏企业，个人贵 |
+| **Oracle Cloud Always Free** | A1.Flex | 4 OCPU ARM / 24G RAM / 47G | **¥0** | ¥0 | 永久免费 | 当前部署用的就是这个；国内访问绕路 |
+
+**结论**：
+1. 当前 Oracle Cloud Always Free（4 OCPU ARM + 24G RAM）规格远超任何国内付费套餐，且永久免费。国内访问慢是唯一短板。
+2. 如果一定要切国内：**腾讯云轻量 2核4G6M / 528 元 3 年**最划算，6M 带宽对外服务体验好于阿里云轻量的"200M 峰值"（峰值通常只跑 30 秒）。
+3. 阿里云轻量"续费不涨价"是它独有的承诺，3 年到期后续费仍 199/年，长期持有更划算。
+4. 警惕首年特价：很多套餐 3 年后续费按原价（2核4G 标价 ~¥1000/年），下单前查清续费规则。
+5. **不要买 1C2G**——chromium-bundled rsshub 单进程就接近 1 GB 内存，OOM 风险高。
+
+### 部署前安全检查（**手动**，部署 README 不会自动做）
+
+`scripts/deploy-oracle.sh` 扫描出以下需要你手动确认的风险：
+
+#### A. 必须改的弱默认值（漏改会被打）
+- [ ] **`.env` 里 `JWT_SECRET`**：默认是 `rss-pal-secret-change-in-production`（硬编码在 `deploy-oracle.sh:184` 和 `docker-compose.yml:42`）。生成方式：
+  ```bash
+  openssl rand -hex 32   # 复制到 JWT_SECRET=
+  ```
+  确认命令：`grep JWT_SECRET /opt/rss-pal/.env`，确保不是默认字符串。
+- [ ] **`.env` 里 `AUTH_PASSWORD`**：默认 `admin`（`deploy-oracle.sh:182`）。改成 16 位以上随机字符串。首次登录后通过 UI 再改一次。
+- [ ] **PostgreSQL 密码**：`docker-compose.yml:8` 写死 `POSTGRES_PASSWORD: postgres`，且 `DB_PASSWORD: postgres` 也写死在 `api`/`worker` 环境。本地开发无所谓，**云上必须改**：把两处都改成 `${DB_PASSWORD}` 并在 `.env` 里设强密码。
+- [ ] **`CLAUDE_API_KEY` 不要回传**：检查 `.env` 文件权限 `chmod 600 /opt/rss-pal/.env`，确保非 root 用户读不到。
+
+#### B. 网络暴露面（云上 firewall 配错就漏）
+- [ ] **PostgreSQL 5432 端口不要暴露**：`docker-compose.yml:14` 当前是 `"5432:5432"`，即绑定到 0.0.0.0。Oracle Cloud / 阿里云安全列表如果配错（开了 0.0.0.0），数据库直接公网可达。**改成** `"127.0.0.1:5432:5432"`。
+- [ ] **API 8080 端口同理**：`docker-compose.yml:53` 的 `"8080:8080"` 建议改为 `"127.0.0.1:8080:8080"`，让外网只能通过 nginx 80/443 访问。
+- [ ] **status-monitor 8090** 同上：`docker-compose.yml:127`，改 `127.0.0.1:8090:8090`。
+- [ ] **云厂商安全组只开** `22 / 80 / 443`，且 22 端口源限定你自己的 IP（不要 0.0.0.0/0）。
+- [ ] **服务器 firewall** 与云安全组双重防护：`ufw status` 或 `firewall-cmd --list-all` 确认。
+
+#### C. SSH 加固
+- [ ] **禁用密码登录**：`/etc/ssh/sshd_config` 设 `PasswordAuthentication no`、`PermitRootLogin no`。仅允许密钥登录。
+- [ ] **改默认端口**（可选）：`Port 22222` 之类，配合云安全组同步改。
+- [ ] **fail2ban**：`apt install fail2ban` / `dnf install fail2ban`，启用 sshd jail。
+- [ ] **SSH key 离线备份**：`scripts/create-oracle-instance.sh:14` 生成的 `~/.ssh/rss-pal-key` 是登录唯一凭证，丢了进不去。
+
+#### D. TLS / HTTPS
+- [ ] **必须申请 Let's Encrypt 证书**：`deploy-oracle.sh:347` 的 `certbot --nginx -d $DOMAIN` 必须跑。**不要**用 IP 直接对外暴露 HTTP（admin token 走 Authorization 明文头）。
+- [ ] **certbot 自动续期**：`systemctl status certbot.timer` 确认。Let's Encrypt 90 天有效期。
+- [ ] **HSTS / 安全头**：当前 `frontend/nginx.conf` 没有加 `Strict-Transport-Security`、`X-Frame-Options`、`X-Content-Type-Options`、`Referrer-Policy`、`Content-Security-Policy`。生产环境建议在 nginx server 块里加：
+  ```nginx
+  add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "SAMEORIGIN" always;
+  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+  ```
+- [ ] **TLS 协议**：`frontend/nginx.conf` 未显式设置 `ssl_protocols`，依赖 nginx 默认；建议显式 `ssl_protocols TLSv1.2 TLSv1.3;`。
+
+#### E. 供应链与脚本执行
+- [ ] **`deploy-oracle.sh:106` 直接 pipe `https://get.docker.com | sh`**：官方脚本但仍是供应链风险。生产可改成：
+  ```bash
+  curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+  # 人工审查 /tmp/get-docker.sh
+  sh /tmp/get-docker.sh
+  ```
+- [ ] **`auto_deploy.sh` 自动 `git pull + docker compose up --build`**：如果 GitHub 仓库或你的账号被劫持，恶意 commit 凌晨 3 点自动跑到生产。生产环境建议：
+  - 关掉 `auto_deploy.sh` cron（`crontab -e` 删除那行）
+  - 或者把它改成"只拉取，不重启"，需要人工 `docker compose up -d --build` 才生效
+  - 或者用 commit signature 校验：`git verify-commit HEAD` 失败就退出
+- [ ] **`package-lock.json` 被 `sed -i` 改镜像源**（`deploy-oracle.sh:160`）：会破坏 npm 的 integrity 校验（lock 文件的 hash 仍是原镜像的）。功能上 OK 但 supply chain 校验降级。
+
+#### F. 数据库与备份
+- [ ] **备份目录权限**：`/opt/rss-pal/backups/` 含全量数据库 dump。`chmod 700 /opt/rss-pal/backups` 且 owner 不要是其他用户。
+- [ ] **异地备份**：当前备份只在本机。Oracle Cloud 实例如果被删/坏盘，数据全没。每周拷一份到对象存储（OSS / S3 / 本地 NAS）。
+- [ ] **`DB_SSLMODE=disable`** 是默认值；同主机连 postgres 无所谓，但如果 DB 拆到外部托管，必须改 `require`。
+- [ ] **不要把 `.env` / `backups/` 提交进 git**：`.gitignore` 已经包含，部署前 `git status` 再确认一次。
+
+#### G. 容器加固
+- [ ] **Docker 镜像非 root 运行**：当前 `backend/Dockerfile` / `Dockerfile.worker` / `frontend/Dockerfile` 都没 `USER` 指令，容器进程跑 root。建议加 `USER 1000:1000`。这一项需要测试，不要直接 patch。
+- [ ] **资源限制**：`docker-compose.yml` 无 `mem_limit` / `cpus`，单个容器 OOM 会拖死整机。`api` 和 `worker` 各加 `mem_limit: 1g`，`rsshub` 加 `mem_limit: 1500m`，`postgres` 加 `mem_limit: 2g`。
+- [ ] **日志大小限制**：默认 docker json-file driver 无限增长，磁盘吃满。compose 顶部加：
+  ```yaml
+  x-logging: &default-logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  ```
+  每个 service 加 `logging: *default-logging`。
+
+#### H. 系统层
+- [ ] **自动安全更新**：Ubuntu 装 `unattended-upgrades`，CentOS 装 `dnf-automatic`。
+- [ ] **时钟同步**：`timedatectl status` 确认 NTP 启用，JWT 过期校验依赖系统时间。
+- [ ] **swap 文件**：4G 内存机器建议开 2G swap，防 build 时 OOM。
+- [ ] **首次登录后**：通过 UI 改 admin 密码（即使 `.env` 已设了强 `AUTH_PASSWORD`，UI 再改一次走 hash 流程）。
+
+#### I. 部署后 30 秒自检
+```bash
+# 1. 没有默认密钥
+grep -E "rss-pal-secret-change|=admin$|=postgres$" /opt/rss-pal/.env && echo "⚠️ 仍有默认值" || echo "✅"
+
+# 2. 数据库不监听公网
+ss -tlnp | grep -E "5432|8080|8090" | grep -v "127.0.0.1" && echo "⚠️ 端口暴露公网" || echo "✅"
+
+# 3. HTTPS 工作
+curl -sI https://your-domain.com | grep -i "strict-transport-security" || echo "⚠️ 缺 HSTS"
+
+# 4. SSH 密码登录禁用
+sudo sshd -T 2>/dev/null | grep -E "passwordauthentication|permitrootlogin"
+
+# 5. .env 权限
+stat -c "%a %U" /opt/rss-pal/.env  # 应该是 600 + root
+```
+
+> 备注：本节由 `scripts/deploy-oracle.sh` / `docker-compose.yml` / `frontend/nginx.conf` / `auto_deploy.sh` 静态审计得出，未在线上验证。改完 docker-compose 端口/密码后，**先在测试机跑一遍**，确认 api 仍能连上 db、nginx 仍能反代 api，再推到生产。
+
 ## 项目结构
 
 ```
