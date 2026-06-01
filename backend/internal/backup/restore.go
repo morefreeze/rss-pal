@@ -134,7 +134,7 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 					word_count, reading_minutes, editor_note,
 					media_url, media_type, media_duration_seconds
 				) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14)
-				ON CONFLICT (feed_id, url) WHERE parent_article_id IS NULL
+				ON CONFLICT (feed_id, url) WHERE parent_article_id IS NULL AND NOT is_clip
 				DO NOTHING
 				RETURNING id`,
 				feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
@@ -143,10 +143,13 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 				ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds,
 			).Scan(&newID)
 			if err == sql.ErrNoRows {
-				// Conflict — row exists; look it up.
+				// Conflict — row exists; look it up. is_clip filter mirrors
+				// uniq_articles_feed_url_no_child so we never match a clip-bin
+				// row that legitimately shares (feed_id, url).
 				err = tx.QueryRowContext(ctx, `
 					SELECT id FROM articles
-					WHERE feed_id = $1 AND url = $2 AND parent_article_id IS NULL`,
+					WHERE feed_id = $1 AND url = $2
+					  AND parent_article_id IS NULL AND NOT is_clip`,
 					feedID, ar.URL).Scan(&newID)
 			}
 			if err != nil {
