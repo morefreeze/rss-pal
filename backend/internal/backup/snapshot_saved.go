@@ -51,6 +51,9 @@ type SavedArticleRow struct {
 	MediaURL             string     `json:"media_url,omitempty"`
 	MediaType            string     `json:"media_type,omitempty"`
 	MediaDurationSeconds int        `json:"media_duration_seconds,omitempty"`
+	// Older backups predate the is_clip column; absence decodes to false,
+	// matching the pre-migration-025 world where all articles were non-clip.
+	IsClip               bool       `json:"is_clip,omitempty"`
 }
 
 // ReadingProgressRow attaches to a SavedArticleRow via ArticleExportID.
@@ -193,7 +196,8 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 		       COALESCE(a.summary_brief, ''), COALESCE(a.summary_detailed, ''),
 		       a.fetched_at, a.word_count, a.reading_minutes,
 		       COALESCE(a.editor_note, ''),
-		       COALESCE(a.media_url, ''), COALESCE(a.media_type, ''), COALESCE(a.media_duration_seconds, 0)
+		       COALESCE(a.media_url, ''), COALESCE(a.media_type, ''), COALESCE(a.media_duration_seconds, 0),
+		       a.is_clip
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.parent_article_id IS NULL
@@ -203,6 +207,7 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 		      WHERE p.article_id = a.id AND p.signal_type = 'save'
 		    )
 		    OR f.feed_type = 'saved'
+		    OR a.is_clip
 		  )
 		ORDER BY a.id`)
 	if err != nil {
@@ -218,7 +223,8 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 			&r.SummaryBrief, &r.SummaryDetailed,
 			&r.FetchedAt, &r.WordCount, &r.ReadingMinutes,
 			&r.EditorNote,
-			&r.MediaURL, &r.MediaType, &r.MediaDurationSeconds); err != nil {
+			&r.MediaURL, &r.MediaType, &r.MediaDurationSeconds,
+			&r.IsClip); err != nil {
 			return nil, err
 		}
 		ss.SavedArticles = append(ss.SavedArticles, r)
