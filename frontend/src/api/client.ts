@@ -207,6 +207,10 @@ export interface Article {
   editor_note?: string
   manual_tags: UserTag[]
   kind?: 'article' | 'tweet' | 'tweet_thread'
+  // Per-image intrinsic dimensions, keyed by the original (pre-proxy) URL
+  // as it appears in markdown. Used to render <img width=W height=H ...>
+  // so the browser reserves layout space before lazy-loaded images decode.
+  image_dimensions?: Record<string, [number, number]>
 }
 
 export interface CandidateView {
