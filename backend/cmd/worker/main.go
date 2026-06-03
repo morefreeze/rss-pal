@@ -39,7 +39,7 @@ var sumSem = make(chan struct{}, maxConcurrentSummary)
 func main() {
 	cfg := config.Load()
 
-	db, err := repository.NewDB(&cfg.Database)
+	db, err := repository.NewBypassDB(&cfg.Database)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
