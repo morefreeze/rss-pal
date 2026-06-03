@@ -158,6 +158,6 @@ Migration 034 creates a `rsspal_app` Postgres role with `NOSUPERUSER NOBYPASSRLS
 
 1. Apply migration 034: `docker-compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/034_app_role_and_grants.sql`
 2. Set a real password: `docker-compose exec postgres psql -U postgres -c "ALTER ROLE rsspal_app PASSWORD '<strong-password>'"`
-3. Update `.env`: `DB_USER=rsspal_app` and `DB_PASSWORD=<strong-password>`. Backup/restore handlers need separate admin credentials (tracked in Task 6.1).
+3. Update `.env`: `DB_USER=rsspal_app` and `DB_PASSWORD=<strong-password>`. Also set `DB_ADMIN_USER=postgres` and `DB_ADMIN_PASSWORD=<original postgres password>` so backup/restore (which uses a separate `*sql.DB` via `repository.NewAdminDB`) continues to work with the privilege it needs.
 4. Restart: `docker-compose up -d --build api worker`
 5. Smoke-test isolation with a second invited user.

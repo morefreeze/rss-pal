@@ -45,10 +45,30 @@ func NewBypassDB(cfg *config.DatabaseConfig) (*sql.DB, error) {
 	return db, nil
 }
 
+// NewAdminDB opens a *sql.DB using cfg.AdminUser / cfg.AdminPassword and
+// app.bypass_rls=true as a session default. Use for backup snapshot / restore
+// which must read and write across user boundaries regardless of which role
+// the rest of the app connects as.
+func NewAdminDB(cfg *config.DatabaseConfig) (*sql.DB, error) {
+	dsn := DSNWithBypass(dsnFromCfgAs(cfg, cfg.AdminUser, cfg.AdminPassword))
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open admin database: %w", err)
+	}
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping admin database: %w", err)
+	}
+	return db, nil
+}
+
 func dsnFromCfg(cfg *config.DatabaseConfig) string {
+	return dsnFromCfgAs(cfg, cfg.User, cfg.Password)
+}
+
+func dsnFromCfgAs(cfg *config.DatabaseConfig, user, password string) string {
 	return fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode,
+		cfg.Host, cfg.Port, user, password, cfg.DBName, cfg.SSLMode,
 	)
 }
 

@@ -23,6 +23,12 @@ func main() {
 	}
 	defer db.Close()
 
+	adminDB, err := repository.NewAdminDB(&cfg.Database)
+	if err != nil {
+		log.Fatalf("Failed to connect to admin database: %v", err)
+	}
+	defer adminDB.Close()
+
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
 	articleRepo.SetImageBaseDir(cfg.Backup.Dir)
@@ -47,13 +53,13 @@ func main() {
 	summarizer.SetVisionModel(cfg.AI.Vision.Model)
 	summarizerService := service.NewSummarizerService(summarizer)
 
-	backupRunner := backup.NewRunner(db, cfg.Backup.Dir)
+	backupRunner := backup.NewRunner(adminDB, cfg.Backup.Dir)
 
 	contentFetcher := rss.NewContentFetcher()
 
 	authHandler := api.NewAuthHandler(cfg, userRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
-	adminHandler := api.NewAdminHandler(db, backupRunner, cfg)
+	adminHandler := api.NewAdminHandler(adminDB, backupRunner, cfg)
 	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, hiddenRepo, summarizerService, contentFetcher)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
