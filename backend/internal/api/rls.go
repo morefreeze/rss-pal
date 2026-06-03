@@ -5,11 +5,14 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/gin-gonic/gin"
 )
 
-// CtxKeyTx is the gin context key under which the per-request *sql.Tx is stored.
-const CtxKeyTx = "tx"
+// CtxKeyTx is the gin context key under which the per-request *sql.Tx is
+// stored. Aliases ctxkey.Tx so the api package and repository WithCtx
+// helpers share a single source of truth for the string literal.
+const CtxKeyTx = ctxkey.Tx
 
 // RLSTxMiddleware opens a per-request transaction, sets app.user_id (and
 // app.is_admin if applicable) via SET LOCAL, and exposes the tx via the gin
