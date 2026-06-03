@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,12 +51,13 @@ type pdfCaptureResult struct {
 // ctx flows into pdfextract.ExtractFast so a cancelled request short-
 // circuits the (potentially-slow) pdftotext/pdfimages shell-outs.
 func (h *BookmarkletHandler) processPDFCapture(
-	ctx context.Context,
+	c *gin.Context,
 	user *model.User,
 	rawURL, browserTitle string,
 	pdfBytes []byte,
 	imageBaseDir string,
 ) (pdfCaptureResult, error) {
+	ctx := c.Request.Context()
 	normalized := util.NormalizeURLKeepFragment(rawURL)
 
 	// 1. Sync-attempt extraction. ErrNoText is the documented signal
@@ -85,13 +85,14 @@ func (h *BookmarkletHandler) processPDFCapture(
 	}
 
 	// 3. Lookup/get the user's clip feed (creates on first capture).
-	feed, err := h.feedRepo.GetOrCreateClipFeed(user.ID)
+	feed, err := h.feedRepo.WithCtx(c).GetOrCreateClipFeed(user.ID)
 	if err != nil {
 		return pdfCaptureResult{}, fmt.Errorf("clip feed: %w", err)
 	}
 
 	// 4. Dedup against existing article (same user, same normalized URL).
-	existing, err := h.articleRepo.FindByOwnerAndURL(user.ID, normalized)
+	articleRepo := h.articleRepo.WithCtx(c)
+	existing, err := articleRepo.FindByOwnerAndURL(user.ID, normalized)
 	if err != nil {
 		return pdfCaptureResult{}, fmt.Errorf("lookup: %w", err)
 	}
@@ -108,7 +109,7 @@ func (h *BookmarkletHandler) processPDFCapture(
 			// (MarkPDFFailed leaves it in 'failed' which the worker
 			// explicitly skips — that was the previous bug here.) Surfaces
 			// "processing" to the user so they know we accepted the retry.
-			if err := h.articleRepo.ResetPDFToProcessing(existing.ID); err != nil {
+			if err := articleRepo.ResetPDFToProcessing(existing.ID); err != nil {
 				log.Printf("pdf: reset existing %d to processing (re-queue): %v", existing.ID, err)
 			}
 			return pdfCaptureResult{
@@ -123,7 +124,7 @@ func (h *BookmarkletHandler) processPDFCapture(
 			URL:    normalized,
 			IsClip: true,
 		}
-		if err := h.articleRepo.CreatePDFStub(article); err != nil {
+		if err := articleRepo.CreatePDFStub(article); err != nil {
 			return pdfCaptureResult{}, fmt.Errorf("create stub: %w", err)
 		}
 		// Best-effort image dump while we have the bytes. Failure to write
@@ -150,7 +151,7 @@ func (h *BookmarkletHandler) processPDFCapture(
 			URL:    normalized,
 			IsClip: true,
 		}
-		if err := h.articleRepo.Create(article); err != nil {
+		if err := articleRepo.Create(article); err != nil {
 			return pdfCaptureResult{}, fmt.Errorf("create: %w", err)
 		}
 	}
@@ -170,17 +171,17 @@ func (h *BookmarkletHandler) processPDFCapture(
 		content = content[:50000] + "..."
 	}
 	wc, rm := rss.ComputeMetrics(content)
-	if err := h.articleRepo.UpdateContentAndMarkReady(article.ID, content, wc, rm); err != nil {
+	if err := articleRepo.UpdateContentAndMarkReady(article.ID, content, wc, rm); err != nil {
 		return pdfCaptureResult{}, fmt.Errorf("update content: %w", err)
 	}
 	if title != "" && title != article.Title {
-		if err := h.articleRepo.UpdateTitle(article.ID, title); err != nil {
+		if err := articleRepo.UpdateTitle(article.ID, title); err != nil {
 			log.Printf("pdf: UpdateTitle for article=%d: %v", article.ID, err)
 		}
 	}
 	// Clearing the cached summary forces the worker's backfillSummaries
 	// loop to regenerate from the freshly extracted content.
-	if err := h.articleRepo.UpdateSummary(article.ID, "", ""); err != nil {
+	if err := articleRepo.UpdateSummary(article.ID, "", ""); err != nil {
 		log.Printf("pdf: clear summary for article=%d: %v", article.ID, err)
 	}
 
@@ -264,7 +265,7 @@ func (h *BookmarkletHandler) CapturePDF(c *gin.Context) {
 		return
 	}
 
-	res, err := h.processPDFCapture(c.Request.Context(), user, rawURL, browserTitle, pdfBytes, h.imageBaseDir)
+	res, err := h.processPDFCapture(c, user, rawURL, browserTitle, pdfBytes, h.imageBaseDir)
 	if err != nil {
 		log.Printf("CapturePDF user=%d url=%s: %v", user.ID, rawURL, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "处理 PDF 失败"})
@@ -368,7 +369,7 @@ func (h *BookmarkletHandler) CapturePDFURL(c *gin.Context) {
 		return
 	}
 
-	res, err := h.processPDFCapture(c.Request.Context(), user, req.URL, "", pdfBytes, h.imageBaseDir)
+	res, err := h.processPDFCapture(c, user, req.URL, "", pdfBytes, h.imageBaseDir)
 	if err != nil {
 		log.Printf("CapturePDFURL user=%d url=%s: %v", user.ID, req.URL, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "处理 PDF 失败"})

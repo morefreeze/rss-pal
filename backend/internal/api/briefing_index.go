@@ -71,7 +71,7 @@ func (h *BriefingIndexHandler) Get(c *gin.Context) {
 	now := time.Now()
 
 	if kind == "daily" {
-		days, dErr := h.dailyRepo.ListDaysInRange(userID, from, to)
+		days, dErr := h.dailyRepo.WithCtx(c).ListDaysInRange(userID, from, to)
 		if dErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": dErr.Error()})
 			return
@@ -87,7 +87,7 @@ func (h *BriefingIndexHandler) Get(c *gin.Context) {
 	}
 
 	// weekly
-	weeks, wErr := h.weeklyRepo.ListWeeksInRange(userID, from, to)
+	weeks, wErr := h.weeklyRepo.WithCtx(c).ListWeeksInRange(userID, from, to)
 	if wErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": wErr.Error()})
 		return

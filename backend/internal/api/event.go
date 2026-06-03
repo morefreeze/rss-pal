@@ -37,7 +37,7 @@ func (h *EventHandler) Create(c *gin.Context) {
 		return
 	}
 	userID := getUserID(c)
-	if err := h.repo.Insert(userID, req.ArticleID, req.EventType); err != nil {
+	if err := h.repo.WithCtx(c).Insert(userID, req.ArticleID, req.EventType); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

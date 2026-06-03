@@ -48,9 +48,10 @@ type insightQuota struct {
 	RemainingMonth int `json:"remaining_month"`
 }
 
-func (h *InsightsHandler) computeQuota(userID int) (insightQuota, bool) {
-	today, _ := h.userInsightsRepo.CountManualSince(userID, 24*time.Hour)
-	month, _ := h.userInsightsRepo.CountManualSince(userID, 30*24*time.Hour)
+func (h *InsightsHandler) computeQuota(c *gin.Context, userID int) (insightQuota, bool) {
+	insightsRepo := h.userInsightsRepo.WithCtx(c)
+	today, _ := insightsRepo.CountManualSince(userID, 24*time.Hour)
+	month, _ := insightsRepo.CountManualSince(userID, 30*24*time.Hour)
 	q := insightQuota{
 		RemainingToday: dailyManualLimit - today,
 		RemainingMonth: monthlyManualLimit - month,
@@ -68,8 +69,8 @@ func (h *InsightsHandler) computeQuota(userID int) (insightQuota, bool) {
 // metadata so the frontend can render clickable cards without an extra round-trip.
 func (h *InsightsHandler) Latest(c *gin.Context) {
 	userID := getUserID(c)
-	ins, _ := h.userInsightsRepo.GetLatest(userID)
-	quota, _ := h.computeQuota(userID)
+	ins, _ := h.userInsightsRepo.WithCtx(c).GetLatest(userID)
+	quota, _ := h.computeQuota(c, userID)
 	resp := gin.H{
 		"insight":         ins,
 		"remaining_today": quota.RemainingToday,
@@ -112,11 +113,11 @@ func (h *InsightsHandler) Latest(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func (h *InsightsHandler) chooseSummarizer(userID int) *ai.Summarizer {
+func (h *InsightsHandler) chooseSummarizer(c *gin.Context, userID int) *ai.Summarizer {
 	if h.templateRepo == nil {
 		return h.summarizer
 	}
-	aiCfg, err := h.templateRepo.GetUserAIConfig(userID)
+	aiCfg, err := h.templateRepo.WithCtx(c).GetUserAIConfig(userID)
 	if err != nil || aiCfg == nil || aiCfg.APIKey == "" {
 		return h.summarizer
 	}
@@ -133,7 +134,7 @@ func (h *InsightsHandler) chooseSummarizer(userID int) *ai.Summarizer {
 func (h *InsightsHandler) Generate(c *gin.Context) {
 	userID := getUserID(c)
 
-	quota, ok := h.computeQuota(userID)
+	quota, ok := h.computeQuota(c, userID)
 	if !ok {
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"error":           "quota_exceeded",
@@ -143,7 +144,8 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 		return
 	}
 
-	topics, err := h.prefRepo.GetTopics(userID)
+	prefRepo := h.prefRepo.WithCtx(c)
+	topics, err := prefRepo.GetTopics(userID)
 	if err != nil || len(topics) == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"status":          "no_data",
@@ -153,16 +155,16 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 		})
 		return
 	}
-	tags, _ := h.prefRepo.GetTags(userID)
-	titles, _ := h.prefRepo.GetRecentReadTitles(userID, 20)
+	tags, _ := prefRepo.GetTags(userID)
+	titles, _ := prefRepo.GetRecentReadTitles(userID, 20)
 	candidates, err := h.articleRepo.WithCtx(c).GetInsightCandidates(userID, 40, 10)
 	if err != nil {
 		log.Printf("insights: GetInsightCandidates user=%d: %v", userID, err)
 		candidates = nil
 	}
 
-	summarizer := h.chooseSummarizer(userID)
-	id, err := h.userInsightsRepo.InsertPending(userID, "manual", summarizer.Model())
+	summarizer := h.chooseSummarizer(c, userID)
+	id, err := h.userInsightsRepo.WithCtx(c).InsertPending(userID, "manual", summarizer.Model())
 	if err != nil {
 		if errors.Is(err, repository.ErrPendingExists) {
 			c.JSON(http.StatusConflict, gin.H{

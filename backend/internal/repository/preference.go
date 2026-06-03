@@ -6,14 +6,27 @@ import (
 	"strings"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 )
 
 type PreferenceRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewPreferenceRepository(db *sql.DB) *PreferenceRepository {
 	return &PreferenceRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *PreferenceRepository) WithCtx(c ctxkey.CtxGetter) *PreferenceRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &PreferenceRepository{db: q}
+		}
+	}
+	return r
 }
 
 func (r *PreferenceRepository) Add(preference *model.UserPreference) error {

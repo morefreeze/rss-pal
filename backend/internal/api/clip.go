@@ -73,7 +73,7 @@ func (h *ClipHandler) List(c *gin.Context) {
 		q.SavedOnly = true
 	}
 
-	rows, total, err := h.clip.ListClipped(q)
+	rows, total, err := h.clip.WithCtx(c).ListClipped(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -86,7 +86,7 @@ func (h *ClipHandler) List(c *gin.Context) {
 	for i, r := range rows {
 		ids[i] = r.Article.ID
 	}
-	tagMap, err := h.bindRepo.GetManualForArticles(ids, userID)
+	tagMap, err := h.bindRepo.WithCtx(c).GetManualForArticles(ids, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -7,15 +7,28 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/lib/pq"
 )
 
 type ProgressRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewProgressRepository(db *sql.DB) *ProgressRepository {
 	return &ProgressRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *ProgressRepository) WithCtx(c ctxkey.CtxGetter) *ProgressRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &ProgressRepository{db: q}
+		}
+	}
+	return r
 }
 
 func (r *ProgressRepository) GetByArticleAndUser(articleID, userID int) (*model.ReadingProgress, error) {

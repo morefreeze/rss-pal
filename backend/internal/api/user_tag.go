@@ -42,7 +42,7 @@ func validateTagName(name string) (string, error) {
 
 // GET /api/tags
 func (h *UserTagHandler) ListTags(c *gin.Context) {
-	tags, err := h.tagRepo.GetTagsForUser(getUserID(c))
+	tags, err := h.tagRepo.WithCtx(c).GetTagsForUser(getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -65,7 +65,7 @@ func (h *UserTagHandler) CreateTag(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	id, err := h.tagRepo.CreateTag(getUserID(c), name)
+	id, err := h.tagRepo.WithCtx(c).CreateTag(getUserID(c), name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -90,7 +90,7 @@ func (h *UserTagHandler) RenameTag(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	err = h.tagRepo.RenameTag(getUserID(c), id, name)
+	err = h.tagRepo.WithCtx(c).RenameTag(getUserID(c), id, name)
 	switch {
 	case errors.Is(err, repository.ErrTagNameConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": "tag name already exists"})
@@ -110,7 +110,7 @@ func (h *UserTagHandler) DeleteTag(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	err = h.tagRepo.DeleteTag(getUserID(c), id)
+	err = h.tagRepo.WithCtx(c).DeleteTag(getUserID(c), id)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		c.JSON(http.StatusNotFound, gin.H{"error": "tag not found"})
@@ -130,7 +130,8 @@ func (h *UserTagHandler) GetArticleTags(c *gin.Context) {
 	}
 	userID := getUserID(c)
 
-	source, err := h.bindRepo.GetSourceForArticle(articleID, userID)
+	bindRepo := h.bindRepo.WithCtx(c)
+	source, err := bindRepo.GetSourceForArticle(articleID, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
@@ -139,7 +140,7 @@ func (h *UserTagHandler) GetArticleTags(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	manual, err := h.bindRepo.GetManualForArticle(articleID, userID)
+	manual, err := bindRepo.GetManualForArticle(articleID, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -147,7 +148,7 @@ func (h *UserTagHandler) GetArticleTags(c *gin.Context) {
 	if manual == nil {
 		manual = []model.UserTag{}
 	}
-	suggestions, err := h.suggestRepo.SuggestionsForArticle(articleID, userID)
+	suggestions, err := h.suggestRepo.WithCtx(c).SuggestionsForArticle(articleID, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -180,7 +181,7 @@ func (h *UserTagHandler) DismissSuggestion(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.suggestRepo.DismissSuggestion(articleID, getUserID(c), name); err != nil {
+	if err := h.suggestRepo.WithCtx(c).DismissSuggestion(articleID, getUserID(c), name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -204,7 +205,7 @@ func (h *UserTagHandler) AddArticleTag(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	tagID, err := h.bindRepo.BindByName(articleID, getUserID(c), name)
+	tagID, err := h.bindRepo.WithCtx(c).BindByName(articleID, getUserID(c), name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -224,7 +225,7 @@ func (h *UserTagHandler) RemoveArticleTag(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tagId"})
 		return
 	}
-	err = h.bindRepo.Unbind(articleID, tagID, getUserID(c))
+	err = h.bindRepo.WithCtx(c).Unbind(articleID, tagID, getUserID(c))
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		c.JSON(http.StatusNotFound, gin.H{"error": "binding not found"})
@@ -256,7 +257,7 @@ func (h *UserTagHandler) GetTagSidebar(c *gin.Context) {
 		UnreadOnly: c.Query("unread") == "true",
 		SavedOnly:  c.Query("saved") == "true",
 	}
-	data, err := h.tagRepo.GetTagsForSidebar(filter)
+	data, err := h.tagRepo.WithCtx(c).GetTagsForSidebar(filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

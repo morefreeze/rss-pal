@@ -125,7 +125,8 @@ func (h *DailyHandler) Get(c *gin.Context) {
 	}
 
 	// Cached branch: try requested, then fall back one day if missing.
-	dd, err := h.digestRepo.Get(userID, requested)
+	digestRepo := h.digestRepo.WithCtx(c)
+	dd, err := digestRepo.Get(userID, requested)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -136,7 +137,7 @@ func (h *DailyHandler) Get(c *gin.Context) {
 	}
 	fallback := requested.AddDate(0, 0, -1)
 	if !explicitDate && !fallback.Before(lookbackLimit) {
-		fb, ferr := h.digestRepo.Get(userID, fallback)
+		fb, ferr := digestRepo.Get(userID, fallback)
 		if ferr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": ferr.Error()})
 			return

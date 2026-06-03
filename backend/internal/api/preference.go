@@ -36,9 +36,10 @@ func (h *PreferenceHandler) applyCachedClassification(c *gin.Context, userID, ar
 	}
 	tw := SignalToTopicWeight(strength)
 	gw := SignalToTagWeight(strength)
-	_ = h.prefRepo.UpsertTopic(userID, topic, tw)
+	prefRepo := h.prefRepo.WithCtx(c)
+	_ = prefRepo.UpsertTopic(userID, topic, tw)
 	for _, t := range tags {
-		_ = h.prefRepo.UpsertTag(userID, t, gw)
+		_ = prefRepo.UpsertTag(userID, t, gw)
 	}
 }
 
@@ -58,9 +59,10 @@ func (h *PreferenceHandler) dampenCachedClassification(c *gin.Context, userID, a
 	const dampenStrength = 0.5
 	topicDelta := -SignalToTopicWeight(dampenStrength)
 	tagDelta := -SignalToTagWeight(dampenStrength)
-	_ = h.prefRepo.DampenTopic(userID, topic, topicDelta)
+	prefRepo := h.prefRepo.WithCtx(c)
+	_ = prefRepo.DampenTopic(userID, topic, topicDelta)
 	for _, t := range tags {
-		_ = h.prefRepo.DampenTag(userID, t, tagDelta)
+		_ = prefRepo.DampenTag(userID, t, tagDelta)
 	}
 }
 
@@ -78,7 +80,7 @@ func (h *PreferenceHandler) Like(c *gin.Context) {
 		SignalValue: 1.0,
 	}
 
-	if err := h.prefRepo.Add(pref); err != nil {
+	if err := h.prefRepo.WithCtx(c).Add(pref); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -101,7 +103,7 @@ func (h *PreferenceHandler) Dislike(c *gin.Context) {
 		SignalValue: 1.0,
 	}
 
-	if err := h.prefRepo.Add(pref); err != nil {
+	if err := h.prefRepo.WithCtx(c).Add(pref); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -124,7 +126,7 @@ func (h *PreferenceHandler) Save(c *gin.Context) {
 		SignalValue: 1.0,
 	}
 
-	if err := h.prefRepo.Add(pref); err != nil {
+	if err := h.prefRepo.WithCtx(c).Add(pref); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -139,7 +141,7 @@ func (h *PreferenceHandler) Unsave(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.prefRepo.DeleteSignal(getUserID(c), req.ArticleID, "save"); err != nil {
+	if err := h.prefRepo.WithCtx(c).DeleteSignal(getUserID(c), req.ArticleID, "save"); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -163,7 +165,7 @@ func (h *PreferenceHandler) RecordReadDuration(c *gin.Context) {
 		SignalValue:  req.DurationSeconds,
 	}
 
-	if err := h.prefRepo.Add(pref); err != nil {
+	if err := h.prefRepo.WithCtx(c).Add(pref); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -173,7 +175,7 @@ func (h *PreferenceHandler) RecordReadDuration(c *gin.Context) {
 }
 
 func (h *PreferenceHandler) GetTopics(c *gin.Context) {
-	topics, err := h.prefRepo.GetTopics(getUserID(c))
+	topics, err := h.prefRepo.WithCtx(c).GetTopics(getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -182,7 +184,7 @@ func (h *PreferenceHandler) GetTopics(c *gin.Context) {
 }
 
 func (h *PreferenceHandler) GetTags(c *gin.Context) {
-	tags, err := h.prefRepo.GetTags(getUserID(c))
+	tags, err := h.prefRepo.WithCtx(c).GetTags(getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -195,7 +197,7 @@ func (h *PreferenceHandler) DeleteTopic(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.prefRepo.DeleteTopic(getUserID(c), id)
+	rows, err := h.prefRepo.WithCtx(c).DeleteTopic(getUserID(c), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -212,7 +214,7 @@ func (h *PreferenceHandler) DeleteTag(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.prefRepo.DeleteTag(getUserID(c), id)
+	rows, err := h.prefRepo.WithCtx(c).DeleteTag(getUserID(c), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -240,7 +242,7 @@ func (h *ProgressHandler) Get(c *gin.Context) {
 		return
 	}
 
-	progress, err := h.repo.GetByArticleAndUser(articleID, getUserID(c))
+	progress, err := h.repo.WithCtx(c).GetByArticleAndUser(articleID, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -276,14 +278,14 @@ func (h *ProgressHandler) Update(c *gin.Context) {
 		IsCompleted:    req.IsCompleted,
 	}
 
-	result, err := h.repo.Upsert(progress)
+	result, err := h.repo.WithCtx(c).Upsert(progress)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	if result.NewlyCompleted && h.eventRepo != nil {
-		_ = h.eventRepo.Insert(userID, articleID, model.EventTypeCompletedRead)
+		_ = h.eventRepo.WithCtx(c).Insert(userID, articleID, model.EventTypeCompletedRead)
 	}
 
 	c.JSON(http.StatusOK, progress)
@@ -296,7 +298,7 @@ func (h *ProgressHandler) Reset(c *gin.Context) {
 		return
 	}
 
-	if err := h.repo.Reset(articleID, getUserID(c)); err != nil {
+	if err := h.repo.WithCtx(c).Reset(articleID, getUserID(c)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
