@@ -3,6 +3,7 @@ package testdb
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,6 +48,27 @@ func New(t *testing.T) (*sql.DB, func()) {
 		sep = "&"
 	}
 	schemaDSN = fmt.Sprintf("%s%ssearch_path=%s", dsn, sep, schema)
+
+	// Append app.bypass_rls=true to the session defaults so existing
+	// repository tests (which don't SET app.user_id) continue to work
+	// after migration 033 enables RLS on shared-owned tables. Tests that
+	// specifically want to verify RLS scoping (Task 5.1) open their own
+	// BeginTx + set_config('app.user_id', ..., true) on this pool —
+	// SET LOCAL inside that tx overrides the session default.
+	u, err := url.Parse(schemaDSN)
+	if err != nil {
+		t.Fatalf("parse schemaDSN: %v", err)
+	}
+	q := u.Query()
+	existing := q.Get("options")
+	bypass := "-c app.bypass_rls=true"
+	if existing == "" {
+		q.Set("options", bypass)
+	} else if !strings.Contains(existing, "app.bypass_rls=") {
+		q.Set("options", existing+" "+bypass)
+	}
+	u.RawQuery = q.Encode()
+	schemaDSN = u.String()
 
 	db, err := sql.Open("postgres", schemaDSN)
 	if err != nil {
