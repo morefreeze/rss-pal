@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -18,26 +19,35 @@ func RLSTxMiddleware(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uidRaw, exists := c.Get("userID")
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing user"})
+			log.Printf("rls: userID missing from context after AuthMiddleware")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal: missing user context"})
 			return
 		}
-		userID, _ := uidRaw.(int)
+		userID, ok := uidRaw.(int)
+		if !ok {
+			log.Printf("rls: userID context value has wrong type %T", uidRaw)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal: bad user context"})
+			return
+		}
 		isAdmin := c.GetBool("isAdmin")
 
 		tx, err := db.BeginTx(c.Request.Context(), nil)
 		if err != nil {
+			log.Printf("rls: BeginTx: %v", err)
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "tx begin"})
 			return
 		}
 		// set_config(name, value, is_local=true) is equivalent to SET LOCAL
 		// but accepts a parameterised value.
 		if _, err := tx.Exec(`SELECT set_config('app.user_id', $1, true)`, userID); err != nil {
+			log.Printf("rls: set app.user_id for user %d: %v", userID, err)
 			_ = tx.Rollback()
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "tx setup"})
 			return
 		}
 		if isAdmin {
 			if _, err := tx.Exec(`SELECT set_config('app.is_admin', 'true', true)`); err != nil {
+				log.Printf("rls: set app.is_admin: %v", err)
 				_ = tx.Rollback()
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "tx setup"})
 				return
@@ -55,11 +65,16 @@ func RLSTxMiddleware(db *sql.DB) gin.HandlerFunc {
 
 		c.Next()
 
+		// Treat any handler-recorded error as a rollback signal. Handlers in this
+		// codebase do not use c.Error() for telemetry or validation logging — only
+		// for genuine failures. If that convention changes, this check must change
+		// with it, or commits will silently roll back.
 		if c.Writer.Status() >= 500 || len(c.Errors) > 0 {
 			_ = tx.Rollback()
 			return
 		}
 		if err := tx.Commit(); err != nil {
+			log.Printf("CRITICAL: rls: tx.Commit failed after %d response: %v", c.Writer.Status(), err)
 			_ = c.Error(err)
 		}
 	}
