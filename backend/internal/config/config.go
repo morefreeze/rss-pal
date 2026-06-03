@@ -32,6 +32,15 @@ type DatabaseConfig struct {
 	Password string
 	DBName   string
 	SSLMode  string
+
+	// AdminUser/AdminPassword are used by the backup/restore admin handler
+	// and the BackupRunner. They must be a Postgres role with privilege to
+	// read all users' rows and write into RLS-protected tables (typically
+	// a SUPERUSER like postgres, or any role with BYPASSRLS). Defaults:
+	// fall back to User/Password so dev/test setups that don't distinguish
+	// runtime from admin keep working.
+	AdminUser     string
+	AdminPassword string
 }
 
 type ClaudeConfig struct {
@@ -75,12 +84,14 @@ func Load() *Config {
 			Port: getEnv("SERVER_PORT", "8080"),
 		},
 		Database: DatabaseConfig{
-			Host:     getEnv("DB_HOST", "localhost"),
-			Port:     getEnv("DB_PORT", "5432"),
-			User:     getEnv("DB_USER", "postgres"),
-			Password: getEnv("DB_PASSWORD", "postgres"),
-			DBName:   getEnv("DB_NAME", "rsspal"),
-			SSLMode:  getEnv("DB_SSLMODE", "disable"),
+			Host:          getEnv("DB_HOST", "localhost"),
+			Port:          getEnv("DB_PORT", "5432"),
+			User:          getEnv("DB_USER", "postgres"),
+			Password:      getEnv("DB_PASSWORD", "postgres"),
+			DBName:        getEnv("DB_NAME", "rsspal"),
+			SSLMode:       getEnv("DB_SSLMODE", "disable"),
+			AdminUser:     getEnv("DB_ADMIN_USER", getEnv("DB_USER", "postgres")),
+			AdminPassword: getEnv("DB_ADMIN_PASSWORD", getEnv("DB_PASSWORD", "postgres")),
 		},
 		Claude: ClaudeConfig{
 			APIKey:  getEnv("CLAUDE_API_KEY", ""),
