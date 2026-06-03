@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"log"
 	"net/http"
@@ -127,6 +128,26 @@ func (h *ExtensionIngestHandler) authenticate(c *gin.Context) (*model.User, erro
 		return nil, errors.New("token not found")
 	}
 	return user, nil
+}
+
+// ResolveOwner implements PublicTokenResolver for /api/extension/ingest.
+// It reads the Authorization: Bearer header and resolves the token
+// directly against the (non-RLS) users table on the open tx so the
+// middleware can set app.user_id before handler logic runs.
+func (h *ExtensionIngestHandler) ResolveOwner(c *gin.Context, tx *sql.Tx) (int, error) {
+	token := bearerToken(c)
+	if token == "" {
+		return 0, ErrPublicTokenInvalid
+	}
+	var uid int
+	err := tx.QueryRow(`SELECT id FROM users WHERE bookmarklet_token = $1`, token).Scan(&uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrPublicTokenInvalid
+	}
+	if err != nil {
+		return 0, err
+	}
+	return uid, nil
 }
 
 // Ingest is POST /api/extension/ingest. Authenticated by bookmarklet token

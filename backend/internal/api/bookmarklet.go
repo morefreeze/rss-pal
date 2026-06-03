@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -204,9 +205,36 @@ func (h *BookmarkletHandler) WithImageBaseDir(path string) *BookmarkletHandler {
 	return h
 }
 
+// ResolveOwner implements PublicTokenResolver for the bookmarklet
+// endpoints. It reads the Authorization: Bearer token directly off the
+// request and resolves it against users.bookmarklet_token via the open
+// tx. The users table is intentionally NOT RLS-protected, so this lookup
+// works before app.user_id has been set on the tx.
+//
+// Missing/empty/unknown tokens map to ErrPublicTokenInvalid → 401.
+func (h *BookmarkletHandler) ResolveOwner(c *gin.Context, tx *sql.Tx) (int, error) {
+	token := bearerToken(c)
+	if token == "" {
+		return 0, ErrPublicTokenInvalid
+	}
+	var uid int
+	err := tx.QueryRow(`SELECT id FROM users WHERE bookmarklet_token = $1`, token).Scan(&uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrPublicTokenInvalid
+	}
+	if err != nil {
+		return 0, err
+	}
+	return uid, nil
+}
+
 // Capture is the POST /api/bookmarklet/capture handler. It does its own
 // bearer-token authentication against users.bookmarklet_token (no JWT) so it
-// can be invoked from any third-party origin.
+// can be invoked from any third-party origin. When wired via
+// PublicTokenMiddleware the middleware ALSO performs the lookup (to set
+// app.user_id on the tx) — the handler re-authenticates here to keep the
+// flow symmetric with extension/share and so that direct unit tests of the
+// handler still work without standing up the middleware.
 func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	user, err := h.authenticate(c)
 	if err != nil {
