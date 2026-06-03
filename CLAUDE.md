@@ -101,3 +101,13 @@ Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`,
 - Articles can be classified by AI into categories defined in `model.ValidCategories`.
 - Link sets: feeds with `expand_links=true` have the worker extract linked articles as child articles (`parent_article_id`).
 - The module path is `github.com/bytedance/rss-pal` (Go 1.24).
+
+## Multi-tenant DB role (Phase 3 prep)
+
+Migration 034 creates a `rsspal_app` Postgres role with `NOSUPERUSER NOBYPASSRLS`. Until production `.env` is switched, the app continues connecting as `postgres` (superuser, bypasses RLS). To make RLS load-bearing in production:
+
+1. Apply migration 034: `docker-compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/034_app_role_and_grants.sql`
+2. Set a real password: `docker-compose exec postgres psql -U postgres -c "ALTER ROLE rsspal_app PASSWORD '<strong-password>'"`
+3. Update `.env`: `DB_USER=rsspal_app` and `DB_PASSWORD=<strong-password>`. Backup/restore handlers need separate admin credentials (tracked in Task 6.1).
+4. Restart: `docker-compose up -d --build api worker`
+5. Smoke-test isolation with a second invited user.

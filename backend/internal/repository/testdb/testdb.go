@@ -15,7 +15,19 @@ import (
 
 // New returns a *sql.DB pointing at a fresh, migrated schema in the test DB.
 // The schema is dropped via t.Cleanup. Concurrent tests get isolated schemas.
+//
+// This is a thin back-compat wrapper around NewWithSchema; new tests that
+// also need the schema name (e.g. to open a second connection as rsspal_app)
+// should call NewWithSchema directly.
 func New(t *testing.T) (*sql.DB, func()) {
+	db, _, cleanup := NewWithSchema(t)
+	return db, cleanup
+}
+
+// NewWithSchema is like New but also returns the per-test schema name so
+// callers can open additional connections (e.g. as a different role) that
+// point at the same migrated schema.
+func NewWithSchema(t *testing.T) (*sql.DB, string, func()) {
 	t.Helper()
 	dsn := os.Getenv("TEST_DB_URL")
 	if dsn == "" {
@@ -83,7 +95,7 @@ func New(t *testing.T) (*sql.DB, func()) {
 		_, _ = adminDB.Exec(fmt.Sprintf(`DROP SCHEMA IF EXISTS %q CASCADE`, schema))
 		adminDB.Close()
 	}
-	return db, cleanup
+	return db, schema, cleanup
 }
 
 func runMigrations(db *sql.DB) error {
