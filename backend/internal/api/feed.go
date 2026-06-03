@@ -223,6 +223,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 	}
 
 	log.Printf("Manual fetch triggered for feed: %s", feed.URL)
+	articleRepo := h.articleRepo.WithCtx(c)
 
 	// HTML feeds use scraping instead of RSS parsing
 	if feed.FeedType == "html" {
@@ -242,7 +243,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			if item.Link == "" {
 				continue
 			}
-			exists, _ := h.articleRepo.Exists(feed.ID, item.Link)
+			exists, _ := articleRepo.Exists(feed.ID, item.Link)
 			if exists {
 				continue
 			}
@@ -255,7 +256,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 				PublishedAt: publishedTime(item.PublishedParsed, item.UpdatedParsed),
 			}
 			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
-			if err := h.articleRepo.Create(article); err != nil {
+			if err := articleRepo.Create(article); err != nil {
 				log.Printf("Failed to create article: %v", err)
 			} else {
 				newCount++
@@ -295,15 +296,15 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			break
 		}
 
-		exists, _ := h.articleRepo.Exists(feed.ID, item.Link)
+		exists, _ := articleRepo.Exists(feed.ID, item.Link)
 		mediaInfo := rss.ExtractVideoMedia(item.Link)
 		if mediaInfo == nil {
 			mediaInfo = rss.ExtractMedia(item)
 		}
 		if exists {
-			h.articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedTime(item.PublishedParsed, item.UpdatedParsed))
+			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedTime(item.PublishedParsed, item.UpdatedParsed))
 			if mediaInfo != nil {
-				if err := h.articleRepo.UpdateMediaIfNull(feed.ID, item.Link, mediaInfo.URL, mediaInfo.Type, mediaInfo.Duration); err != nil {
+				if err := articleRepo.UpdateMediaIfNull(feed.ID, item.Link, mediaInfo.URL, mediaInfo.Type, mediaInfo.Duration); err != nil {
 					log.Printf("Failed to backfill media for %s: %v", item.Link, err)
 				}
 			}
@@ -337,7 +338,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			article.MediaDurationSeconds = mediaInfo.Duration
 		}
 
-		if err := h.articleRepo.Create(article); err != nil {
+		if err := articleRepo.Create(article); err != nil {
 			log.Printf("Failed to create article: %v", err)
 		} else {
 			newCount++
@@ -589,7 +590,7 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 	}
 
 	// 5. Insert the article.
-	if err := h.articleRepo.Create(article); err != nil {
+	if err := h.articleRepo.WithCtx(c).Create(article); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存文章失败: " + err.Error()})
 		return
 	}

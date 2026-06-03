@@ -1,10 +1,32 @@
 package repository
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// txOrBegin returns (tx, commit, rollback) for the current Querier. If the
+// Querier is already a *sql.Tx (e.g. RLS middleware wrapped the request in
+// one), the returned tx is the same outer tx and commit/rollback are no-ops —
+// the outer middleware owns the lifecycle. Otherwise it opens a fresh inner
+// tx on the *sql.DB and returns real commit/rollback funcs.
+func txOrBegin(q Querier) (Querier, func() error, func() error, error) {
+	if tx, ok := q.(*sql.Tx); ok {
+		noop := func() error { return nil }
+		return tx, noop, noop, nil
+	}
+	db, ok := q.(*sql.DB)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("txOrBegin: Querier is neither *sql.Tx nor *sql.DB")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return tx, tx.Commit, tx.Rollback, nil
+}
 
 // LinkSetCandidate is one row in link_set_candidates.
 type LinkSetCandidate struct {
@@ -20,17 +42,17 @@ type LinkSetCandidate struct {
 // in one transaction. Old rows are deleted, new ones inserted. Position
 // preserves document order from extraction.
 func (r *ArticleRepository) ReplaceLinkSetCandidates(parentID int, candidates []LinkSetCandidate) error {
-	tx, err := r.db.Begin()
+	tx, commit, rollback, err := txOrBegin(r.db)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollback()
 
 	if _, err := tx.Exec(`DELETE FROM link_set_candidates WHERE parent_article_id = $1`, parentID); err != nil {
 		return err
 	}
 	if len(candidates) == 0 {
-		return tx.Commit()
+		return commit()
 	}
 
 	var (
@@ -51,7 +73,7 @@ func (r *ArticleRepository) ReplaceLinkSetCandidates(parentID int, candidates []
 	if _, err := tx.Exec(query, args...); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return commit()
 }
 
 // GetLinkSetCandidates returns the cached candidates for a parent in
@@ -114,11 +136,11 @@ func (r *ArticleRepository) InsertLinkSetChildren(children []LinkSetChildInput) 
 	if len(children) == 0 {
 		return 0, nil
 	}
-	tx, err := r.db.Begin()
+	tx, commit, rollback, err := txOrBegin(r.db)
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollback()
 
 	var (
 		placeholders []string
@@ -160,7 +182,7 @@ func (r *ArticleRepository) InsertLinkSetChildren(children []LinkSetChildInput) 
 		inserted++
 	}
 	rows.Close()
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return 0, err
 	}
 	return inserted, nil

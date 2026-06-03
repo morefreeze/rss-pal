@@ -105,7 +105,7 @@ func (h *DailyHandler) Get(c *gin.Context) {
 	// Live branch: in-progress today
 	if requested.Equal(today) {
 		start, _ := DailyWindow(today)
-		articles, err := h.articleRepo.GetTopArticlesInRange(userID, start, now, 5)
+		articles, err := h.articleRepo.WithCtx(c).GetTopArticlesInRange(userID, start, now, 5)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -162,7 +162,7 @@ func (h *DailyHandler) respondCached(c *gin.Context, userID int, requested, show
 	for i, id := range dd.ArticleIDs {
 		ids[i] = int(id)
 	}
-	articles, err := h.articleRepo.GetByIDsForUser(userID, ids)
+	articles, err := h.articleRepo.WithCtx(c).GetByIDsForUser(userID, ids)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
