@@ -253,6 +253,29 @@ func (h *AuthHandler) ListInviteCodes(c *gin.Context) {
 	c.JSON(http.StatusOK, codes)
 }
 
+// UpdateVisibilityFloor lets the caller move their own shared-content floor.
+// Body: {"days_back": N}. N must be >= 0. Larger N = more history. New users
+// default to 7. Owner-owned (private) feeds are unaffected — the floor only
+// gates shared (owner_id IS NULL) feeds.
+func (h *AuthHandler) UpdateVisibilityFloor(c *gin.Context) {
+	var req struct {
+		DaysBack int `json:"days_back" binding:"min=0"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "days_back must be a non-negative integer"})
+		return
+	}
+	floor, err := h.userRepo.WithCtx(c).UpdateSharedVisibleFrom(getUserID(c), req.DaysBack)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"shared_visible_from": floor,
+		"days_back":           req.DaysBack,
+	})
+}
+
 func getUserID(c *gin.Context) int {
 	return c.GetInt("userID")
 }
