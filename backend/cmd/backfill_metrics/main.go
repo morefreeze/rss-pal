@@ -13,7 +13,7 @@ import (
 // and content is non-empty. Safe to re-run (idempotent on already-set rows).
 func main() {
 	cfg := config.Load()
-	db, err := repository.NewDB(&cfg.Database)
+	db, err := repository.NewBypassDB(&cfg.Database)
 	if err != nil {
 		log.Fatalf("db connect: %v", err)
 	}

@@ -82,7 +82,7 @@ func probe(url string) (int, error) {
 
 func main() {
 	cfg := config.Load()
-	db, err := repository.NewDB(&cfg.Database)
+	db, err := repository.NewBypassDB(&cfg.Database)
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
