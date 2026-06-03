@@ -33,7 +33,7 @@ type ArticleHandler struct {
 }
 
 func (h *ArticleHandler) GetUnreadCount(c *gin.Context) {
-	count, err := h.articleRepo.GetUnreadCount(getUserID(c))
+	count, err := h.articleRepo.WithCtx(c).GetUnreadCount(getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -116,7 +116,7 @@ func (h *ArticleHandler) GetGrouped(c *gin.Context) {
 	unreadOnly := c.Query("unread") == "true"
 	savedOnly := c.Query("saved") == "true"
 
-	grouped, err := h.articleRepo.GetGroupedByCategory(getUserID(c), feedID, unreadOnly, savedOnly)
+	grouped, err := h.articleRepo.WithCtx(c).GetGroupedByCategory(getUserID(c), feedID, unreadOnly, savedOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -171,7 +171,7 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
-	articles, err := h.articleRepo.GetAll(limit, offset, feedID, unreadOnly, savedOnly, userID, tagID, untagged, sort, dir)
+	articles, err := h.articleRepo.WithCtx(c).GetAll(limit, offset, feedID, unreadOnly, savedOnly, userID, tagID, untagged, sort, dir)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -218,7 +218,7 @@ func (h *ArticleHandler) Search(c *gin.Context) {
 	if limit > 50 {
 		limit = 50
 	}
-	articles, err := h.articleRepo.Search(query, getUserID(c), limit)
+	articles, err := h.articleRepo.WithCtx(c).Search(query, getUserID(c), limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -240,7 +240,7 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	article, feedType, err := h.articleRepo.GetByIDWithFeedType(id, getUserID(c))
+	article, feedType, err := h.articleRepo.WithCtx(c).GetByIDWithFeedType(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -275,7 +275,7 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		"hidden":           hidden,
 	}
 	if article.LinksExtendable != nil && *article.LinksExtendable {
-		children, err := h.articleRepo.GetVisibleChildren(article.ID, userID)
+		children, err := h.articleRepo.WithCtx(c).GetVisibleChildren(article.ID, userID)
 		if err == nil {
 			response["children"] = children
 		} else {
@@ -297,7 +297,7 @@ func (h *ArticleHandler) Hide(c *gin.Context) {
 	// Existence + tenancy check via GetByID (which already filters by feed
 	// visibility). Hidden articles are still reachable here on purpose —
 	// the hide is idempotent.
-	if _, err := h.articleRepo.GetByID(id, userID); err != nil {
+	if _, err := h.articleRepo.WithCtx(c).GetByID(id, userID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
@@ -318,7 +318,7 @@ func (h *ArticleHandler) Unhide(c *gin.Context) {
 		return
 	}
 	userID := getUserID(c)
-	if _, err := h.articleRepo.GetByID(id, userID); err != nil {
+	if _, err := h.articleRepo.WithCtx(c).GetByID(id, userID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
@@ -332,7 +332,7 @@ func (h *ArticleHandler) Unhide(c *gin.Context) {
 func (h *ArticleHandler) GetRecommended(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 
-	articles, err := h.articleRepo.GetRecommended(limit, getUserID(c))
+	articles, err := h.articleRepo.WithCtx(c).GetRecommended(limit, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -348,8 +348,9 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
+	articleRepo := h.articleRepo.WithCtx(c)
 
-	article, err := h.articleRepo.GetByID(id, userID)
+	article, err := articleRepo.GetByID(id, userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -399,7 +400,7 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			if err := h.articleRepo.UpdateSummary(id, brief, detailed); err != nil {
+			if err := articleRepo.UpdateSummary(id, brief, detailed); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
@@ -418,7 +419,7 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		return
 	}
 
-	if err := h.articleRepo.UpdateSummary(id, brief, detailed); err != nil {
+	if err := articleRepo.UpdateSummary(id, brief, detailed); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -510,7 +511,7 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 	writeAndFlush(map[string]any{"type": "brief_done", "text": brief})
 	writeAndFlush(map[string]any{"type": "detailed_done", "text": detailed})
 
-	if err := h.articleRepo.UpdateSummary(id, brief, detailed); err != nil {
+	if err := h.articleRepo.WithCtx(c).UpdateSummary(id, brief, detailed); err != nil {
 		writeAndFlush(map[string]any{"type": "error", "msg": err.Error()})
 		return
 	}
@@ -546,12 +547,13 @@ func (h *ArticleHandler) ExpandChild(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
+	articleRepo := h.articleRepo.WithCtx(c)
 	// Authorise: the article must be visible to this user.
-	if _, err := h.articleRepo.GetByID(id, getUserID(c)); err != nil {
+	if _, err := articleRepo.GetByID(id, getUserID(c)); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
-	n, err := h.articleRepo.UpdateProcessingState(id, "stub", "processing")
+	n, err := articleRepo.UpdateProcessingState(id, "stub", "processing")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -572,7 +574,7 @@ func (h *ArticleHandler) GetLinkSetRecommended(c *gin.Context) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	articles, err := h.articleRepo.GetLinkSetRecommendations(getUserID(c), days, limit)
+	articles, err := h.articleRepo.WithCtx(c).GetLinkSetRecommendations(getUserID(c), days, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -600,12 +602,13 @@ func (h *ArticleHandler) GetCandidates(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	if _, err := h.articleRepo.GetByID(id, getUserID(c)); err != nil {
+	articleRepo := h.articleRepo.WithCtx(c)
+	if _, err := articleRepo.GetByID(id, getUserID(c)); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
 
-	cached, fetched, err := h.articleRepo.GetLinkSetCandidates(id)
+	cached, fetched, err := articleRepo.GetLinkSetCandidates(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -627,7 +630,7 @@ func (h *ArticleHandler) GetCandidates(c *gin.Context) {
 
 	// Fallback: cache empty — extract live (slow path). This happens for
 	// articles detected before this cache was added.
-	article, err := h.articleRepo.GetByID(id, getUserID(c))
+	article, err := articleRepo.GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -653,9 +656,9 @@ func (h *ArticleHandler) GetCandidates(c *gin.Context) {
 			Position:        i,
 		})
 	}
-	_ = h.articleRepo.ReplaceLinkSetCandidates(id, repoCands)
+	_ = articleRepo.ReplaceLinkSetCandidates(id, repoCands)
 
-	children, _ := h.articleRepo.GetChildren(id)
+	children, _ := articleRepo.GetChildren(id)
 	existing := make(map[string]struct{}, len(children))
 	for _, ch := range children {
 		existing[ch.URL] = struct{}{}
@@ -690,7 +693,8 @@ func (h *ArticleHandler) BatchFetch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	parent, err := h.articleRepo.GetByID(id, getUserID(c))
+	articleRepo := h.articleRepo.WithCtx(c)
+	parent, err := articleRepo.GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -724,7 +728,7 @@ func (h *ArticleHandler) BatchFetch(c *gin.Context) {
 			PublishedAt:     parent.PublishedAt,
 		})
 	}
-	n, err := h.articleRepo.InsertLinkSetChildren(inputs)
+	n, err := articleRepo.InsertLinkSetChildren(inputs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -741,7 +745,8 @@ func (h *ArticleHandler) ConfirmLinkSetSuggestion(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	article, err := h.articleRepo.GetByID(id, getUserID(c))
+	articleRepo := h.articleRepo.WithCtx(c)
+	article, err := articleRepo.GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -754,7 +759,7 @@ func (h *ArticleHandler) ConfirmLinkSetSuggestion(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no suggestion to confirm"})
 		return
 	}
-	if err := h.articleRepo.ConfirmLinkSetSuggestion(id); err != nil {
+	if err := articleRepo.ConfirmLinkSetSuggestion(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

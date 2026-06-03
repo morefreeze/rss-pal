@@ -22,11 +22,11 @@ func NewPreferenceHandler(prefRepo *repository.PreferenceRepository, articleRepo
 // applyCachedClassification, when the article already has a cached classification,
 // upserts the topic + tags into the user's interest tables synchronously. Silently
 // no-ops when the article is not yet classified (worker will pick it up).
-func (h *PreferenceHandler) applyCachedClassification(userID, articleID int, signalType string, signalValue float64) {
+func (h *PreferenceHandler) applyCachedClassification(c *gin.Context, userID, articleID int, signalType string, signalValue float64) {
 	if h.articleRepo == nil {
 		return
 	}
-	topic, tags, err := h.articleRepo.GetClassification(articleID)
+	topic, tags, err := h.articleRepo.WithCtx(c).GetClassification(articleID)
 	if err != nil || topic == "" {
 		return
 	}
@@ -47,11 +47,11 @@ func (h *PreferenceHandler) applyCachedClassification(userID, articleID int, sig
 // article's topic/tags. No-op when the article has no cached classification (worker
 // will pick it up later, by which time the article is already hidden via the per-article
 // dislike score).
-func (h *PreferenceHandler) dampenCachedClassification(userID, articleID int) {
+func (h *PreferenceHandler) dampenCachedClassification(c *gin.Context, userID, articleID int) {
 	if h.articleRepo == nil {
 		return
 	}
-	topic, tags, err := h.articleRepo.GetClassification(articleID)
+	topic, tags, err := h.articleRepo.WithCtx(c).GetClassification(articleID)
 	if err != nil || topic == "" {
 		return
 	}
@@ -83,7 +83,7 @@ func (h *PreferenceHandler) Like(c *gin.Context) {
 		return
 	}
 
-	h.applyCachedClassification(pref.UserID, pref.ArticleID, "like", 1.0)
+	h.applyCachedClassification(c, pref.UserID, pref.ArticleID, "like", 1.0)
 	c.Status(http.StatusOK)
 }
 
@@ -106,7 +106,7 @@ func (h *PreferenceHandler) Dislike(c *gin.Context) {
 		return
 	}
 
-	h.dampenCachedClassification(pref.UserID, pref.ArticleID)
+	h.dampenCachedClassification(c, pref.UserID, pref.ArticleID)
 	c.Status(http.StatusOK)
 }
 
@@ -129,7 +129,7 @@ func (h *PreferenceHandler) Save(c *gin.Context) {
 		return
 	}
 
-	h.applyCachedClassification(pref.UserID, pref.ArticleID, "save", 1.0)
+	h.applyCachedClassification(c, pref.UserID, pref.ArticleID, "save", 1.0)
 	c.Status(http.StatusOK)
 }
 
@@ -168,7 +168,7 @@ func (h *PreferenceHandler) RecordReadDuration(c *gin.Context) {
 		return
 	}
 
-	h.applyCachedClassification(pref.UserID, pref.ArticleID, "read_duration", req.DurationSeconds)
+	h.applyCachedClassification(c, pref.UserID, pref.ArticleID, "read_duration", req.DurationSeconds)
 	c.Status(http.StatusOK)
 }
 

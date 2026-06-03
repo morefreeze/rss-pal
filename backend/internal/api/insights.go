@@ -87,7 +87,7 @@ func (h *InsightsHandler) Latest(c *gin.Context) {
 			}
 		}
 		if len(ids) > 0 {
-			arts, err := h.articleRepo.GetByIDsForUser(userID, ids)
+			arts, err := h.articleRepo.WithCtx(c).GetByIDsForUser(userID, ids)
 			if err != nil {
 				log.Printf("insights: Latest GetByIDsForUser user=%d: %v", userID, err)
 			} else {
@@ -155,7 +155,7 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 	}
 	tags, _ := h.prefRepo.GetTags(userID)
 	titles, _ := h.prefRepo.GetRecentReadTitles(userID, 20)
-	candidates, err := h.articleRepo.GetInsightCandidates(userID, 40, 10)
+	candidates, err := h.articleRepo.WithCtx(c).GetInsightCandidates(userID, 40, 10)
 	if err != nil {
 		log.Printf("insights: GetInsightCandidates user=%d: %v", userID, err)
 		candidates = nil

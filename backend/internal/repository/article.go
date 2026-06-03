@@ -91,7 +91,7 @@ LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.use
 }
 
 type ArticleRepository struct {
-	db *sql.DB
+	db Querier
 	// imageBaseDir is the root for PDF clip image storage. Callers that
 	// need Delete() to clean image dirs MUST call SetImageBaseDir at
 	// startup. Forgetting silently turns image cleanup into a no-op.
@@ -100,6 +100,20 @@ type ArticleRepository struct {
 
 func NewArticleRepository(db *sql.DB) *ArticleRepository {
 	return &ArticleRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under api.CtxKeyTx ("tx") by RLSTxMiddleware. Falls back to the
+// underlying handle if no tx is present (e.g. worker code, tests that bypass
+// middleware). The structural interface lets us accept *gin.Context without
+// importing gin from the repository package.
+func (r *ArticleRepository) WithCtx(c interface{ Get(string) (interface{}, bool) }) *ArticleRepository {
+	if v, ok := c.Get("tx"); ok {
+		if q, ok := v.(Querier); ok {
+			return &ArticleRepository{db: q, imageBaseDir: r.imageBaseDir}
+		}
+	}
+	return r
 }
 
 // SetImageBaseDir tells the repo where PDF clip images live, so Delete

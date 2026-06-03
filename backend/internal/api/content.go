@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -37,7 +36,8 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleRepo.GetByID(id, getUserID(c))
+	articleRepo := h.articleRepo.WithCtx(c)
+	article, err := articleRepo.GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
@@ -69,7 +69,7 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 
 	// Update article content
 	wc, rm := rss.ComputeMetrics(content)
-	if err := h.articleRepo.UpdateContent(id, content, wc, rm); err != nil {
+	if err := articleRepo.UpdateContent(id, content, wc, rm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -77,7 +77,7 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 	// Best-effort: re-read the parent feed's RSS to backfill media_url for
 	// audio/video enclosures. Failures are logged and swallowed — the content
 	// update is what the user really asked for.
-	h.tryBackfillMedia(c.Request.Context(), article)
+	h.tryBackfillMedia(c, article)
 
 	c.JSON(http.StatusOK, gin.H{"content": content})
 }
@@ -88,7 +88,7 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 //  2. Fetch the article's HTML page and scan for embedded audio/video URLs.
 //
 // All failures are logged and swallowed — this is opportunistic.
-func (h *ContentHandler) tryBackfillMedia(ctx context.Context, article *model.Article) {
+func (h *ContentHandler) tryBackfillMedia(c *gin.Context, article *model.Article) {
 	if h.feedRepo == nil || h.fetcher == nil {
 		return
 	}
@@ -97,6 +97,7 @@ func (h *ContentHandler) tryBackfillMedia(ctx context.Context, article *model.Ar
 		return
 	}
 
+	ctx := c.Request.Context()
 	var mi *rss.MediaInfo
 
 	// Tier 1: parent feed RSS (cheap when it works).
@@ -124,7 +125,7 @@ func (h *ContentHandler) tryBackfillMedia(ctx context.Context, article *model.Ar
 	if mi == nil || mi.URL == "" {
 		return
 	}
-	if err := h.articleRepo.UpdateMediaIfNull(feed.ID, article.URL, mi.URL, mi.Type, mi.Duration); err != nil {
+	if err := h.articleRepo.WithCtx(c).UpdateMediaIfNull(feed.ID, article.URL, mi.URL, mi.Type, mi.Duration); err != nil {
 		log.Printf("UpdateMediaIfNull failed article=%d feed=%d: %v", article.ID, feed.ID, err)
 	}
 }
@@ -136,7 +137,7 @@ func (h *ContentHandler) ExportMarkdown(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleRepo.GetByID(id, getUserID(c))
+	article, err := h.articleRepo.WithCtx(c).GetByID(id, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
