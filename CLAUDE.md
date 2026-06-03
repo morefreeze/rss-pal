@@ -102,6 +102,56 @@ Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`,
 - Link sets: feeds with `expand_links=true` have the worker extract linked articles as child articles (`parent_article_id`).
 - The module path is `github.com/bytedance/rss-pal` (Go 1.24).
 
+## Multi-tenant rules (RLS)
+
+Every per-user table has Postgres Row-Level Security enabled (migration 033). The HTTP middleware `api.RLSTxMiddleware` opens a transaction per JWT-authenticated request and sets `app.user_id` via `set_config(..., true)` so policies filter rows automatically. Public-token endpoints use `api.PublicTokenMiddleware` with a per-route resolver that derives the owner from the token (share token, bookmarklet token, extension token). The worker sets `app.bypass_rls=true` on its pool DSN (via `repository.NewBypassDB`) so cross-user batch work isn't blocked.
+
+The runtime role `rsspal_app` is NOSUPERUSER NOBYPASSRLS (migration 034). Until the operator switches `.env` (see the Phase 3 prep section below), the app connects as `postgres` and RLS is paper-only — every test that needs to verify enforcement uses `testdb.NewAsApp(t, schema)` to open a `rsspal_app`-bound connection.
+
+### When adding a new table
+
+1. If the table stores per-user state, give it `user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE`.
+2. In the same migration, enable RLS and add the standard policy:
+   ```sql
+   ALTER TABLE foo ENABLE ROW LEVEL SECURITY;
+   ALTER TABLE foo FORCE ROW LEVEL SECURITY;
+   CREATE POLICY foo_user_isolation ON foo
+       USING (app_rls_bypass() OR user_id = app_current_user_id())
+       WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id());
+   ```
+3. The `ALTER DEFAULT PRIVILEGES` from migration 034 ensures `rsspal_app` automatically gets DML; no extra GRANT needed.
+4. Add a row to the `TestRLS_PrivateTablesAreScoped` matrix in `backend/internal/repository/rls_leak_test.go` so the leak suite covers the new table.
+
+For "shared-but-owned" tables (rows reachable by multiple users via an ownership chain like `feeds.owner_id`), model after `articles_via_feed` in migration 033.
+
+### When adding a new repository
+
+Follow the canonical `Querier + WithCtx` pattern (see `backend/internal/repository/article.go`). The struct field is `db Querier`. Add a `WithCtx(c ctxkey.CtxGetter) *FooRepository` method that returns a copy bound to the per-request tx (key: `ctxkey.Tx`) or the receiver if no tx is in context. Preserve all auxiliary struct fields.
+
+If a repository method opens its own inner transaction (`r.db.Begin()`), use `txOrBegin(r.db)` from `backend/internal/repository/tx.go` so a wrapping outer tx is reused with no-op commit/rollback. **Callers MUST propagate errors** from these methods — swallowing the error inside an outer tx commits partial state.
+
+### When adding a new HTTP endpoint
+
+- **JWT-authenticated route** (under `apiGroup` in `cmd/server/main.go`): nothing extra. `AuthMiddleware` + `RLSTxMiddleware` already set `userID` on the gin context and stash the tx under `ctxkey.Tx`. Repositories pick it up via `WithCtx(c)`.
+- **Public-token route** (registered on root `router`): wrap with `api.PublicTokenMiddleware(db, yourHandler.ResolveOwner)`. The resolver receives `(c *gin.Context, tx *sql.Tx)` and returns `(userID int, err error)`. Look up the owner from a non-RLS table (`share_tokens`, `users.bookmarklet_token`). Return `api.ErrPublicTokenInvalid` for invalid tokens — the middleware turns that into 401.
+- **Best-effort writes inside a handler**: do NOT use `_ = repo.X(...)`. A failure inside the outer tx poisons the whole transaction. Use `bestEffort(c, "label", func() error { return repo.X(...) })` from `backend/internal/api/savepoint.go` — it opens a SAVEPOINT and rolls back to it on failure, leaving the outer tx healthy.
+
+### When adding a new worker task
+
+- Worker pool already bypasses RLS via `app.bypass_rls=true` in its DSN (`repository.NewBypassDB`). Repos accept `*sql.DB` directly; `WithCtx` is a no-op without a tx in context.
+- If the task spawns a goroutine that outlives the originating request (e.g. async insight generation in `runAsyncManual`), do NOT use `WithCtx(c)` on that goroutine's repo calls — the request tx is gone by the time the goroutine runs. Use the bare repo and accept that the goroutine runs with whatever bypass state is on the worker pool.
+
+### When adding a new CLI under `backend/cmd/`
+
+- Use `repository.NewBypassDB(&cfg.Database)` if the CLI does cross-user work (e.g. `cmd/worker`, `cmd/backfill_content`, `cmd/backfill_metrics`, `cmd/seed`, `cmd/backfill_image_dimensions`).
+- The API server (`cmd/server`) and any future per-user CLI uses plain `NewDB`.
+
+### Testing isolation
+
+For DB-level isolation tests, use `testdb.NewWithSchema(t)` for the privileged seeding handle plus `testdb.NewAsApp(t, schema)` for a `rsspal_app`-bound handle that's actually subject to RLS. See `backend/internal/repository/rls_leak_test.go` for the canonical fixture. For HTTP-level tests, stand up the gin router against a `rsspal_app` pool and exercise endpoints with signed JWTs; see `backend/internal/api/rls_http_leak_test.go`.
+
+The default `testdb.New(t)` opens a SUPERUSER connection with `app.bypass_rls=true` baked into its DSN — use it for migration smoke tests, schema introspection, or anything that does NOT need to prove RLS enforcement. Don't use it to verify isolation; the bypass will mask leaks.
+
 ## Multi-tenant DB role (Phase 3 prep)
 
 Migration 034 creates a `rsspal_app` Postgres role with `NOSUPERUSER NOBYPASSRLS`. Until production `.env` is switched, the app continues connecting as `postgres` (superuser, bypasses RLS). To make RLS load-bearing in production:
