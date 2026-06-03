@@ -147,6 +147,7 @@ func main() {
 	// Protected routes
 	apiGroup := router.Group("/api")
 	apiGroup.Use(authHandler.AuthMiddleware())
+	apiGroup.Use(api.RLSTxMiddleware(db))
 	{
 		// User
 		apiGroup.GET("/auth/me", authHandler.GetMe)
