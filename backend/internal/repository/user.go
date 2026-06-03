@@ -43,19 +43,39 @@ func (r *UserRepository) CreateAdmin(username, password string) (*model.User, er
 		return nil, err
 	}
 
+	// Founding admin sees the full shared backlog (epoch). Regular users that
+	// register later get the default 7-day floor from the column default.
 	user := &model.User{Username: username, PasswordHash: string(hash), IsAdmin: true}
 	err = r.db.QueryRow(
-		`INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, $3) RETURNING id, created_at`,
+		`INSERT INTO users (username, password_hash, is_admin, shared_visible_from)
+		 VALUES ($1, $2, $3, '1970-01-01'::TIMESTAMP)
+		 RETURNING id, created_at, shared_visible_from`,
 		user.Username, user.PasswordHash, user.IsAdmin,
-	).Scan(&user.ID, &user.CreatedAt)
+	).Scan(&user.ID, &user.CreatedAt, &user.SharedVisibleFrom)
 	return user, err
+}
+
+// UpdateSharedVisibleFrom moves the calling user's shared-content floor to
+// NOW() - daysBack days. daysBack must be >= 0. Returns the new floor value.
+func (r *UserRepository) UpdateSharedVisibleFrom(userID, daysBack int) (time.Time, error) {
+	if daysBack < 0 {
+		return time.Time{}, fmt.Errorf("days_back must be >= 0")
+	}
+	var floor time.Time
+	err := r.db.QueryRow(
+		`UPDATE users SET shared_visible_from = NOW() - ($1 || ' days')::INTERVAL
+		   WHERE id = $2
+		 RETURNING shared_visible_from`,
+		daysBack, userID,
+	).Scan(&floor)
+	return floor, err
 }
 
 func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at FROM users WHERE username = $1`, username,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt)
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE username = $1`, username,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -65,8 +85,8 @@ func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 func (r *UserRepository) FindByID(id int) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at FROM users WHERE id = $1`, id,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt)
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE id = $1`, id,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -134,9 +154,9 @@ func (r *UserRepository) Register(username, password string, code string) (*mode
 
 	user := &model.User{Username: username, PasswordHash: string(hash), IsAdmin: false}
 	err = tx.QueryRow(
-		`INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, $3) RETURNING id, created_at`,
+		`INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, $3) RETURNING id, created_at, shared_visible_from`,
 		user.Username, user.PasswordHash, user.IsAdmin,
-	).Scan(&user.ID, &user.CreatedAt)
+	).Scan(&user.ID, &user.CreatedAt, &user.SharedVisibleFrom)
 	if err != nil {
 		return nil, err
 	}
@@ -206,9 +226,9 @@ func (r *UserRepository) GetByBookmarkletToken(token string) (*model.User, error
 	}
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at FROM users WHERE bookmarklet_token = $1`,
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE bookmarklet_token = $1`,
 		token,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt)
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

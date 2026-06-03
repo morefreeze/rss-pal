@@ -181,6 +181,7 @@ func main() {
 		// User
 		apiGroup.GET("/auth/me", authHandler.GetMe)
 		apiGroup.PUT("/auth/password", authHandler.ChangePassword)
+		apiGroup.PUT("/auth/visibility-floor", authHandler.UpdateVisibilityFloor)
 		apiGroup.POST("/auth/invite-codes", authHandler.CreateInviteCode)
 		apiGroup.GET("/auth/invite-codes", authHandler.ListInviteCodes)
 
