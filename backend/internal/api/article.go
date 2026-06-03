@@ -656,7 +656,7 @@ func (h *ArticleHandler) GetCandidates(c *gin.Context) {
 			Position:        i,
 		})
 	}
-	_ = articleRepo.ReplaceLinkSetCandidates(id, repoCands)
+	bestEffort(c, "link-set candidates cache", func() error { return articleRepo.ReplaceLinkSetCandidates(id, repoCands) })
 
 	children, _ := articleRepo.GetChildren(id)
 	existing := make(map[string]struct{}, len(children))

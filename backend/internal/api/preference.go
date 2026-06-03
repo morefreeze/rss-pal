@@ -37,9 +37,9 @@ func (h *PreferenceHandler) applyCachedClassification(c *gin.Context, userID, ar
 	tw := SignalToTopicWeight(strength)
 	gw := SignalToTagWeight(strength)
 	prefRepo := h.prefRepo.WithCtx(c)
-	_ = prefRepo.UpsertTopic(userID, topic, tw)
+	bestEffort(c, "pref upsert topic", func() error { return prefRepo.UpsertTopic(userID, topic, tw) })
 	for _, t := range tags {
-		_ = prefRepo.UpsertTag(userID, t, gw)
+		bestEffort(c, "pref upsert tag", func() error { return prefRepo.UpsertTag(userID, t, gw) })
 	}
 }
 
@@ -60,9 +60,9 @@ func (h *PreferenceHandler) dampenCachedClassification(c *gin.Context, userID, a
 	topicDelta := -SignalToTopicWeight(dampenStrength)
 	tagDelta := -SignalToTagWeight(dampenStrength)
 	prefRepo := h.prefRepo.WithCtx(c)
-	_ = prefRepo.DampenTopic(userID, topic, topicDelta)
+	bestEffort(c, "pref dampen topic", func() error { return prefRepo.DampenTopic(userID, topic, topicDelta) })
 	for _, t := range tags {
-		_ = prefRepo.DampenTag(userID, t, tagDelta)
+		bestEffort(c, "pref dampen tag", func() error { return prefRepo.DampenTag(userID, t, tagDelta) })
 	}
 }
 
@@ -285,7 +285,9 @@ func (h *ProgressHandler) Update(c *gin.Context) {
 	}
 
 	if result.NewlyCompleted && h.eventRepo != nil {
-		_ = h.eventRepo.WithCtx(c).Insert(userID, articleID, model.EventTypeCompletedRead)
+		bestEffort(c, "completed-read event", func() error {
+			return h.eventRepo.WithCtx(c).Insert(userID, articleID, model.EventTypeCompletedRead)
+		})
 	}
 
 	c.JSON(http.StatusOK, progress)

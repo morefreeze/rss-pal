@@ -239,7 +239,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			log.Printf("Failed to update feed info: %v", err)
 		}
 		if htmlFeed.Title != "" {
-			_ = feedRepo.UpdateTitle(feed.ID, htmlFeed.Title)
+			bestEffort(c, "feed auto-title", func() error { return feedRepo.UpdateTitle(feed.ID, htmlFeed.Title) })
 		}
 		newCount := 0
 		for _, item := range htmlFeed.Items {
