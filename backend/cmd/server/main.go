@@ -115,8 +115,13 @@ func main() {
 	router.POST("/api/auth/login", authHandler.Login)
 	router.POST("/api/auth/register", authHandler.Register)
 
-	// Public share route (no auth required)
-	router.GET("/api/share/:token", shareHandler.GetByToken)
+	// Public share route — no JWT, but PublicTokenMiddleware opens a tx and
+	// sets app.user_id to the share token's creator so RLS-protected reads
+	// (articles, feeds) see the owner's rows. Without this wrap the handler
+	// would silently return empty rows after migration 033.
+	router.GET("/api/share/:token",
+		api.PublicTokenMiddleware(db, shareHandler.ResolveOwner),
+		shareHandler.GetByToken)
 
 	// Public image proxy (no auth — <img> tags can't reliably carry auth headers).
 	router.GET("/api/proxy/image", api.NewImageProxy().Handle)
@@ -127,22 +132,40 @@ func main() {
 	// behind the URL is an extracted figure raster (never source content,
 	// never DB rows). Acceptable trade-off for a personal single-user tool;
 	// signed-URL tokens would be the next step if multi-tenant.
+	//
+	// Task 4.2 note: this endpoint is INTENTIONALLY NOT wrapped in
+	// PublicTokenMiddleware because the handler reads from the file system,
+	// not the DB — no RLS surface area. If a future change makes it query
+	// articles/feeds, switch the closure to a resolver that opens the tx,
+	// sets app.bypass_rls LOCAL for the article→feed→owner_id chase, then
+	// returns the owner_id so the middleware can set app.user_id.
 	pdfImgHandler := api.NewArticleImageHandler(cfg.Backup.Dir,
 		func(c *gin.Context, articleID int) (bool, error) { return true, nil })
 	router.GET("/api/articles/:id/images/:idx", pdfImgHandler.Serve)
 
-	// Public bookmarklet capture (CORS + per-user token auth, no JWT)
-	router.POST("/api/bookmarklet/capture", bookmarkletHandler.Capture)
+	// Public bookmarklet capture (CORS + per-user token auth, no JWT).
+	// PublicTokenMiddleware resolves the owning user from the bearer
+	// bookmarklet_token, opens a per-request tx, and sets app.user_id so
+	// every repository.WithCtx call inside the handler runs under RLS.
+	router.POST("/api/bookmarklet/capture",
+		api.PublicTokenMiddleware(db, bookmarkletHandler.ResolveOwner),
+		bookmarkletHandler.Capture)
 	// PDF capture variants share the same per-user bookmarklet token auth.
 	// capture-pdf takes multipart form-data with the PDF bytes from the
 	// browser; capture-pdf-url asks the server to fetch the PDF itself.
-	router.POST("/api/bookmarklet/capture-pdf", bookmarkletHandler.CapturePDF)
-	router.POST("/api/bookmarklet/capture-pdf-url", bookmarkletHandler.CapturePDFURL)
+	router.POST("/api/bookmarklet/capture-pdf",
+		api.PublicTokenMiddleware(db, bookmarkletHandler.ResolveOwner),
+		bookmarkletHandler.CapturePDF)
+	router.POST("/api/bookmarklet/capture-pdf-url",
+		api.PublicTokenMiddleware(db, bookmarkletHandler.ResolveOwner),
+		bookmarkletHandler.CapturePDFURL)
 
 	// Extension ingest uses the same per-user bookmarklet token as the
 	// bookmarklet capture path (not JWT), so the popup's configured token
 	// works for both ⭐ capture-html and ⚡ adapter-driven ingest.
-	router.POST("/api/extension/ingest", extensionIngestHandler.Ingest)
+	router.POST("/api/extension/ingest",
+		api.PublicTokenMiddleware(db, extensionIngestHandler.ResolveOwner),
+		extensionIngestHandler.Ingest)
 
 	// Protected routes
 	apiGroup := router.Group("/api")
