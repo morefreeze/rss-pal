@@ -6,14 +6,27 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 )
 
 type FeedRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewFeedRepository(db *sql.DB) *FeedRepository {
 	return &FeedRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *FeedRepository) WithCtx(c ctxkey.CtxGetter) *FeedRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &FeedRepository{db: q}
+		}
+	}
+	return r
 }
 
 func (r *FeedRepository) scanFeed(row *sql.Row) (*model.Feed, error) {

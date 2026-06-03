@@ -8,15 +8,28 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/lib/pq"
 )
 
 type UserInsightRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewUserInsightRepository(db *sql.DB) *UserInsightRepository {
 	return &UserInsightRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *UserInsightRepository) WithCtx(c ctxkey.CtxGetter) *UserInsightRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &UserInsightRepository{db: q}
+		}
+	}
+	return r
 }
 
 // ErrPendingExists is returned by InsertPending when a pending row already

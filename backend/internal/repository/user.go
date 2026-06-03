@@ -7,15 +7,30 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type UserRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present (e.g. pre-auth handlers like login/register
+// that run before the RLS middleware). This is safe because UserRepository
+// queries do not depend on RLS for authentication paths.
+func (r *UserRepository) WithCtx(c ctxkey.CtxGetter) *UserRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &UserRepository{db: q}
+		}
+	}
+	return r
 }
 
 func (r *UserRepository) CreateAdmin(username, password string) (*model.User, error) {
@@ -74,11 +89,11 @@ func (r *UserRepository) ChangePassword(userID int, newPassword string) error {
 }
 
 func (r *UserRepository) Register(username, password string, code string) (*model.User, error) {
-	tx, err := r.db.Begin()
+	tx, commit, rollback, err := txOrBegin(r.db)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer rollback()
 
 	// Validate invite code
 	var codeID int
@@ -128,7 +143,10 @@ func (r *UserRepository) Register(username, password string, code string) (*mode
 		return nil, err
 	}
 
-	return user, tx.Commit()
+	if err := commit(); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 func (r *UserRepository) CreateInviteCode(createdBy int, expiresInHours int) (*model.InviteCode, error) {

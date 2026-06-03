@@ -26,7 +26,7 @@ func (h *ShareHandler) Create(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
-	st, err := h.shareRepo.GetOrCreate(id, userID)
+	st, err := h.shareRepo.WithCtx(c).GetOrCreate(id, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +42,7 @@ func (h *ShareHandler) Create(c *gin.Context) {
 func (h *ShareHandler) GetByToken(c *gin.Context) {
 	token := c.Param("token")
 
-	article, err := h.shareRepo.GetArticleByToken(token)
+	article, err := h.shareRepo.WithCtx(c).GetArticleByToken(token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -76,7 +76,7 @@ func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
 		}
 	}
 
-	if err := h.progressRepo.MarkAllRead(getUserID(c), feedID, unreadOnly, savedOnly, clip); err != nil {
+	if err := h.progressRepo.WithCtx(c).MarkAllRead(getUserID(c), feedID, unreadOnly, savedOnly, clip); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -183,7 +183,7 @@ func (h *ArticleHandler) GetAll(c *gin.Context) {
 	for i, a := range articles {
 		ids[i] = a.ID
 	}
-	tagMap, err := h.bindRepo.GetManualForArticles(ids, userID)
+	tagMap, err := h.bindRepo.WithCtx(c).GetManualForArticles(ids, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -263,9 +263,9 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 
 	userID := getUserID(c)
 
-	progress, _ := h.progressRepo.GetByArticleAndUser(id, userID)
-	signals, _ := h.prefRepo.GetUserSignals(userID, id)
-	hidden, _, _ := h.hiddenRepo.IsHidden(userID, id)
+	progress, _ := h.progressRepo.WithCtx(c).GetByArticleAndUser(id, userID)
+	signals, _ := h.prefRepo.WithCtx(c).GetUserSignals(userID, id)
+	hidden, _, _ := h.hiddenRepo.WithCtx(c).IsHidden(userID, id)
 
 	response := gin.H{
 		"article":          article,
@@ -301,7 +301,7 @@ func (h *ArticleHandler) Hide(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
-	ts, err := h.hiddenRepo.Hide(userID, id)
+	ts, err := h.hiddenRepo.WithCtx(c).Hide(userID, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -322,7 +322,7 @@ func (h *ArticleHandler) Unhide(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
-	if err := h.hiddenRepo.Unhide(userID, id); err != nil {
+	if err := h.hiddenRepo.WithCtx(c).Unhide(userID, id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -360,7 +360,7 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	summarizerToUse := h.summarizer
 
 	if h.templateRepo != nil && h.cfg != nil {
-		aiCfg, err := h.templateRepo.GetUserAIConfig(userID)
+		aiCfg, err := h.templateRepo.WithCtx(c).GetUserAIConfig(userID)
 		if err == nil && aiCfg != nil && aiCfg.APIKey != "" {
 			// Build a temporary summarizer from the user's own key/url/model
 			baseURL := aiCfg.BaseURL
@@ -391,7 +391,7 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	var brief, detailed string
 
 	if h.templateRepo != nil && bodyReq.TemplateID > 0 {
-		tpl, terr := h.templateRepo.GetByID(bodyReq.TemplateID)
+		tpl, terr := h.templateRepo.WithCtx(c).GetByID(bodyReq.TemplateID)
 		if terr == nil && tpl != nil {
 			brief, detailed, err = summarizerToUse.SummarizeWithTemplate(
 				c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt,
@@ -490,7 +490,7 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 
 	if !visionUsed {
 		if h.templateRepo != nil && templateID > 0 {
-			tpl, terr := h.templateRepo.GetByID(templateID)
+			tpl, terr := h.templateRepo.WithCtx(c).GetByID(templateID)
 			if terr == nil && tpl != nil {
 				brief, detailed, serr = summarizerToUse.SummarizeWithTemplateStream(
 					c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt, onBrief, onDetailed,

@@ -92,7 +92,7 @@ func (h *ContentHandler) tryBackfillMedia(c *gin.Context, article *model.Article
 	if h.feedRepo == nil || h.fetcher == nil {
 		return
 	}
-	feed, err := h.feedRepo.GetByID(article.FeedID)
+	feed, err := h.feedRepo.WithCtx(c).GetByID(article.FeedID)
 	if err != nil || feed == nil {
 		return
 	}

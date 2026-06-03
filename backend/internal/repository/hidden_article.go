@@ -3,17 +3,31 @@ package repository
 import (
 	"database/sql"
 	"time"
+
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 )
 
 // HiddenArticleRepository manages per-user soft-delete ("hide") state for
 // articles. The articles row itself is untouched; this table is a pure
 // visibility overlay applied by user-facing list queries.
 type HiddenArticleRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewHiddenArticleRepository(db *sql.DB) *HiddenArticleRepository {
 	return &HiddenArticleRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *HiddenArticleRepository) WithCtx(c ctxkey.CtxGetter) *HiddenArticleRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &HiddenArticleRepository{db: q}
+		}
+	}
+	return r
 }
 
 // Hide marks the article hidden for the user. Idempotent: a second call

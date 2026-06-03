@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/lib/pq"
 )
 
@@ -55,11 +56,23 @@ func effectiveSourceFor(feedID int, feedTitle, feedType, articleURL string) Effe
 var ErrTagNameConflict = errors.New("tag name already exists")
 
 type UserTagRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewUserTagRepository(db *sql.DB) *UserTagRepository {
 	return &UserTagRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *UserTagRepository) WithCtx(c ctxkey.CtxGetter) *UserTagRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &UserTagRepository{db: q}
+		}
+	}
+	return r
 }
 
 // GetTagsForUser returns the user's manual tags with the count of distinct
@@ -217,22 +230,34 @@ func (r *UserTagRepository) DeleteTag(userID, tagID int) error {
 }
 
 type ArticleUserTagRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewArticleUserTagRepository(db *sql.DB) *ArticleUserTagRepository {
 	return &ArticleUserTagRepository{db: db}
 }
 
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *ArticleUserTagRepository) WithCtx(c ctxkey.CtxGetter) *ArticleUserTagRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &ArticleUserTagRepository{db: q}
+		}
+	}
+	return r
+}
+
 // BindByName ensures (article_id, tag with given name, user) is bound.
 // Creates the tag in the user's dictionary if it does not exist.
 // Idempotent: returns the tag ID whether new or pre-existing.
 func (r *ArticleUserTagRepository) BindByName(articleID, userID int, name string) (int, error) {
-	tx, err := r.db.Begin()
+	tx, commit, rollback, err := txOrBegin(r.db)
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollback()
 
 	var tagID int
 	err = tx.QueryRow(`
@@ -252,7 +277,7 @@ func (r *ArticleUserTagRepository) BindByName(articleID, userID int, name string
 		return 0, err
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return 0, err
 	}
 	return tagID, nil
@@ -361,11 +386,23 @@ func (r *ArticleUserTagRepository) GetManualForArticles(articleIDs []int, userID
 }
 
 type TagSuggestionRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewTagSuggestionRepository(db *sql.DB) *TagSuggestionRepository {
 	return &TagSuggestionRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *TagSuggestionRepository) WithCtx(c ctxkey.CtxGetter) *TagSuggestionRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &TagSuggestionRepository{db: q}
+		}
+	}
+	return r
 }
 
 // SuggestionsForArticle returns up to 5 candidate names from articles.tags,

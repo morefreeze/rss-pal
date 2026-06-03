@@ -6,15 +6,28 @@ import (
 	"strings"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/lib/pq"
 )
 
 type ClipRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewClipRepository(db *sql.DB) *ClipRepository {
 	return &ClipRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *ClipRepository) WithCtx(c ctxkey.CtxGetter) *ClipRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &ClipRepository{db: q}
+		}
+	}
+	return r
 }
 
 // ClipQuery describes a /api/clip request.
