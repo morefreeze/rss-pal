@@ -24,6 +24,10 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 // handle if no tx is present (e.g. pre-auth handlers like login/register
 // that run before the RLS middleware). This is safe because UserRepository
 // queries do not depend on RLS for authentication paths.
+//
+// TODO(rls-phase-3): the users table itself will need a policy exemption or
+// the migration must run with bypass; pre-auth Register has no app.user_id
+// in context.
 func (r *UserRepository) WithCtx(c ctxkey.CtxGetter) *UserRepository {
 	if v, ok := c.Get(ctxkey.Tx); ok {
 		if q, ok := v.(Querier); ok {
