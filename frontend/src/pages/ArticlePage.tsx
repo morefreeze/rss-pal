@@ -1342,7 +1342,7 @@ export default function ArticlePage() {
                 >
                   <CodeWrapContext.Provider value={reader.codeWrap}>
                     <LinkSetContext.Provider value={linkSetCtxValue}>
-                      <MarkdownArticle source={article.content} />
+                      <MarkdownArticle source={article.content} imageDimensions={article.image_dimensions} />
                     </LinkSetContext.Provider>
                   </CodeWrapContext.Provider>
                 </div>
