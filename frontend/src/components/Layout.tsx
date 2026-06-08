@@ -1,11 +1,35 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { logout, getUnreadCount } from '../api/client'
+import { logout, getUnreadCount, getServerHealth } from '../api/client'
 import Toaster from './Toaster'
 import { PlayerProvider, usePlayer } from '../player/PlayerContext'
 import MiniPlayer from './MiniPlayer'
 import MobileTabBar from './MobileTabBar'
 import { useBreakpoint } from '../hooks/useBreakpoint'
+import { VERSION as FRONTEND_VERSION } from '../version'
+
+function VersionFooter() {
+  const [backend, setBackend] = useState<string>('-')
+  useEffect(() => {
+    getServerHealth()
+      .then(h => setBackend(h.version || '-'))
+      .catch(() => setBackend('?'))
+  }, [])
+  return (
+    <footer
+      className="version-footer text-muted"
+      style={{
+        fontSize: 12,
+        textAlign: 'center',
+        padding: '16px 0',
+        marginBottom: 'var(--bottom-chrome, 0px)',
+        opacity: 0.65,
+      }}
+    >
+      frontend {FRONTEND_VERSION} · backend {backend}
+    </footer>
+  )
+}
 
 interface LayoutProps {
   user: { id: number; username: string; is_admin: boolean } | null
@@ -273,6 +297,7 @@ function LayoutInner({
       <main>
         <Outlet />
       </main>
+      <VersionFooter />
       <Toaster />
       <MiniPlayer />
       {bp !== 'desktop' && (

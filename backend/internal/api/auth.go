@@ -53,7 +53,7 @@ func (h *AuthHandler) generateToken(user *model.User) (string, error) {
 }
 
 func (h *AuthHandler) InitAdmin(c *gin.Context) {
-	exists, err := h.userRepo.AdminExists()
+	exists, err := h.userRepo.WithCtx(c).AdminExists()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -63,7 +63,7 @@ func (h *AuthHandler) InitAdmin(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userRepo.CreateAdmin("admin", h.cfg.Auth.Password)
+	user, err := h.userRepo.WithCtx(c).CreateAdmin("admin", h.cfg.Auth.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -85,12 +85,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userRepo.FindByUsername(req.Username)
+	userRepo := h.userRepo.WithCtx(c)
+	user, err := userRepo.FindByUsername(req.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if user == nil || !h.userRepo.VerifyPassword(user, req.Password) {
+	if user == nil || !userRepo.VerifyPassword(user, req.Password) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
@@ -111,7 +112,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userRepo.Register(req.Username, req.Password, req.Code)
+	user, err := h.userRepo.WithCtx(c).Register(req.Username, req.Password, req.Code)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -166,7 +167,7 @@ func (h *AuthHandler) AuthMiddleware() gin.HandlerFunc {
 
 func (h *AuthHandler) GetMe(c *gin.Context) {
 	userID := c.GetInt("userID")
-	user, err := h.userRepo.FindByID(userID)
+	user, err := h.userRepo.WithCtx(c).FindByID(userID)
 	if err != nil || user == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
 		return
@@ -189,16 +190,17 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
-	user, err := h.userRepo.FindByID(userID)
+	userRepo := h.userRepo.WithCtx(c)
+	user, err := userRepo.FindByID(userID)
 	if err != nil || user == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
 		return
 	}
-	if !h.userRepo.VerifyPassword(user, req.OldPassword) {
+	if !userRepo.VerifyPassword(user, req.OldPassword) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "旧密码不正确"})
 		return
 	}
-	if err := h.userRepo.ChangePassword(userID, req.NewPassword); err != nil {
+	if err := userRepo.ChangePassword(userID, req.NewPassword); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "修改失败，请重试"})
 		return
 	}
@@ -211,7 +213,8 @@ func (h *AuthHandler) CreateInviteCode(c *gin.Context) {
 		return
 	}
 
-	count, err := h.userRepo.CountNonAdminUsers()
+	userRepo := h.userRepo.WithCtx(c)
+	count, err := userRepo.CountNonAdminUsers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -227,7 +230,7 @@ func (h *AuthHandler) CreateInviteCode(c *gin.Context) {
 	}
 
 	userID := c.GetInt("userID")
-	code, err := h.userRepo.CreateInviteCode(userID, req.ExpiresInHours)
+	code, err := userRepo.CreateInviteCode(userID, req.ExpiresInHours)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -242,12 +245,35 @@ func (h *AuthHandler) ListInviteCodes(c *gin.Context) {
 		return
 	}
 
-	codes, err := h.userRepo.ListInviteCodes()
+	codes, err := h.userRepo.WithCtx(c).ListInviteCodes()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, codes)
+}
+
+// UpdateVisibilityFloor lets the caller move their own shared-content floor.
+// Body: {"days_back": N}. N must be >= 0. Larger N = more history. New users
+// default to 7. Owner-owned (private) feeds are unaffected — the floor only
+// gates shared (owner_id IS NULL) feeds.
+func (h *AuthHandler) UpdateVisibilityFloor(c *gin.Context) {
+	var req struct {
+		DaysBack int `json:"days_back" binding:"min=0"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "days_back must be a non-negative integer"})
+		return
+	}
+	floor, err := h.userRepo.WithCtx(c).UpdateSharedVisibleFrom(getUserID(c), req.DaysBack)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"shared_visible_from": floor,
+		"days_back":           req.DaysBack,
+	})
 }
 
 func getUserID(c *gin.Context) int {

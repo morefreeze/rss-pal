@@ -32,12 +32,13 @@ func NewSettingsHandler(cfg *config.Config, templateRepo *repository.TemplateRep
 func (h *SettingsHandler) GetTemplates(c *gin.Context) {
 	userID := getUserID(c)
 
-	systemTemplates, err := h.templateRepo.GetSystemTemplates()
+	templateRepo := h.templateRepo.WithCtx(c)
+	systemTemplates, err := templateRepo.GetSystemTemplates()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	userTemplates, err := h.templateRepo.GetUserTemplates(userID)
+	userTemplates, err := templateRepo.GetUserTemplates(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -75,7 +76,7 @@ func (h *SettingsHandler) CreateTemplate(c *gin.Context) {
 		DetailedPrompt: req.DetailedPrompt,
 		IsSystem:       false,
 	}
-	if err := h.templateRepo.CreateUserTemplate(t); err != nil {
+	if err := h.templateRepo.WithCtx(c).CreateUserTemplate(t); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -92,7 +93,7 @@ func (h *SettingsHandler) DeleteTemplate(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
-	if err := h.templateRepo.DeleteUserTemplate(id, userID); err != nil {
+	if err := h.templateRepo.WithCtx(c).DeleteUserTemplate(id, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -111,7 +112,7 @@ func (h *SettingsHandler) SetDefaultTemplate(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
-	if err := h.templateRepo.SetUserDefaultTemplate(userID, req.TemplateID); err != nil {
+	if err := h.templateRepo.WithCtx(c).SetUserDefaultTemplate(userID, req.TemplateID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -123,7 +124,7 @@ func (h *SettingsHandler) SetDefaultTemplate(c *gin.Context) {
 func (h *SettingsHandler) GetAIConfig(c *gin.Context) {
 	userID := getUserID(c)
 
-	cfg, err := h.templateRepo.GetUserAIConfig(userID)
+	cfg, err := h.templateRepo.WithCtx(c).GetUserAIConfig(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -158,8 +159,9 @@ func (h *SettingsHandler) SaveAIConfig(c *gin.Context) {
 	userID := getUserID(c)
 
 	// If api_key is empty, preserve existing key
+	templateRepo := h.templateRepo.WithCtx(c)
 	if req.APIKey == "" {
-		existing, _ := h.templateRepo.GetUserAIConfig(userID)
+		existing, _ := templateRepo.GetUserAIConfig(userID)
 		if existing != nil {
 			req.APIKey = existing.APIKey
 		}
@@ -171,7 +173,7 @@ func (h *SettingsHandler) SaveAIConfig(c *gin.Context) {
 		BaseURL: req.BaseURL,
 		Model:   req.Model,
 	}
-	if err := h.templateRepo.UpsertUserAIConfig(cfg); err != nil {
+	if err := templateRepo.UpsertUserAIConfig(cfg); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -215,7 +217,7 @@ func (h *SettingsHandler) PolishPrompt(c *gin.Context) {
 // bookmarklet token；未生成过返回 token=null。
 func (h *SettingsHandler) GetBookmarkletToken(c *gin.Context) {
 	userID := getUserID(c)
-	token, err := h.userRepo.GetBookmarkletToken(userID)
+	token, err := h.userRepo.WithCtx(c).GetBookmarkletToken(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -236,7 +238,7 @@ func (h *SettingsHandler) RegenerateBookmarkletToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成 token 失败"})
 		return
 	}
-	if err := h.userRepo.SetBookmarkletToken(userID, token); err != nil {
+	if err := h.userRepo.WithCtx(c).SetBookmarkletToken(userID, token); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 token 失败"})
 		return
 	}

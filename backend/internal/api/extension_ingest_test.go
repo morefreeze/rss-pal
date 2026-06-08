@@ -12,6 +12,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/extension/normalizer"
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/gin-gonic/gin"
 )
 
@@ -62,6 +63,8 @@ func (s *stubExtFeedRepo) GetOrCreateByKindAndSource(
 	s.feeds[key] = f
 	return f, nil
 }
+
+func (s *stubExtFeedRepo) WithCtx(_ ctxkey.CtxGetter) extensionFeedRepo { return s }
 
 // stubExtArticleRepo is the minimum article-repo surface the extension
 // ingest handler exercises: FindByOwnerAndURL + Create. It deliberately
@@ -117,6 +120,8 @@ func (s *stubExtArticleRepo) Create(a *model.Article) error {
 	return nil
 }
 
+func (s *stubExtArticleRepo) WithCtx(_ ctxkey.CtxGetter) extensionArticleRepo { return s }
+
 // stubExtUserRepo resolves a single fixed bookmarklet token to a user. Tests
 // set the token to testBookmarkletToken and send "Authorization: Bearer ..."
 // to exercise the production auth path.
@@ -131,6 +136,8 @@ func (s *stubExtUserRepo) GetByBookmarkletToken(token string) (*model.User, erro
 	}
 	return s.user, nil
 }
+
+func (s *stubExtUserRepo) WithCtx(_ ctxkey.CtxGetter) extensionUserRepo { return s }
 
 const testBookmarkletToken = "test-bookmarklet-token-fixture"
 

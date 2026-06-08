@@ -74,14 +74,14 @@ func (h *FeedHealthHandler) Get(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
-	metrics, err := h.repo.ComputeMetrics(userID, window)
+	metrics, err := h.repo.WithCtx(c).ComputeMetrics(userID, window)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Need feed status/weight — fetch the user-visible feeds and join in app code.
-	feeds, err := h.feedRepo.GetVisibleByUser(userID)
+	feeds, err := h.feedRepo.WithCtx(c).GetVisibleByUser(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

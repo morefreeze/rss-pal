@@ -48,7 +48,7 @@ func (h *WeeklyHandler) Get(c *gin.Context) {
 		weekStart = startOfWeek(parsed)
 	}
 
-	cached, err := h.digestRepo.Get(userID, weekStart)
+	cached, err := h.digestRepo.WithCtx(c).Get(userID, weekStart)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -68,7 +68,7 @@ func (h *WeeklyHandler) Get(c *gin.Context) {
 	for i, id := range cached.ArticleIDs {
 		ids[i] = int(id)
 	}
-	articles, err := h.articleRepo.GetByIDsForUser(userID, ids)
+	articles, err := h.articleRepo.WithCtx(c).GetByIDsForUser(userID, ids)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

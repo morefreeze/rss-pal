@@ -29,7 +29,7 @@ func (h *PlaybackHandler) Get(c *gin.Context) {
 		return
 	}
 	userID := getUserID(c)
-	p, err := h.repo.Get(userID, articleID)
+	p, err := h.repo.WithCtx(c).Get(userID, articleID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -67,14 +67,14 @@ func (h *PlaybackHandler) Put(c *gin.Context) {
 	}
 	userID := getUserID(c)
 
-	result, err := h.repo.Upsert(userID, articleID, req.PositionSeconds, req.IsCompleted)
+	result, err := h.repo.WithCtx(c).Upsert(userID, articleID, req.PositionSeconds, req.IsCompleted)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	if result.NewlyCompleted {
-		err := h.prefRepo.Add(&model.UserPreference{
+		err := h.prefRepo.WithCtx(c).Add(&model.UserPreference{
 			UserID:      userID,
 			ArticleID:   articleID,
 			SignalType:  "completed_listen",

@@ -4,15 +4,28 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/bytedance/rss-pal/internal/service"
 )
 
 type FeedHealthRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewFeedHealthRepository(db *sql.DB) *FeedHealthRepository {
 	return &FeedHealthRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *FeedHealthRepository) WithCtx(c ctxkey.CtxGetter) *FeedHealthRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &FeedHealthRepository{db: q}
+		}
+	}
+	return r
 }
 
 // ComputeMetrics returns one FeedMetrics per non-archived feed visible to the user.

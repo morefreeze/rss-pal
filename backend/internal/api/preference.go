@@ -22,11 +22,11 @@ func NewPreferenceHandler(prefRepo *repository.PreferenceRepository, articleRepo
 // applyCachedClassification, when the article already has a cached classification,
 // upserts the topic + tags into the user's interest tables synchronously. Silently
 // no-ops when the article is not yet classified (worker will pick it up).
-func (h *PreferenceHandler) applyCachedClassification(userID, articleID int, signalType string, signalValue float64) {
+func (h *PreferenceHandler) applyCachedClassification(c *gin.Context, userID, articleID int, signalType string, signalValue float64) {
 	if h.articleRepo == nil {
 		return
 	}
-	topic, tags, err := h.articleRepo.GetClassification(articleID)
+	topic, tags, err := h.articleRepo.WithCtx(c).GetClassification(articleID)
 	if err != nil || topic == "" {
 		return
 	}
@@ -36,9 +36,10 @@ func (h *PreferenceHandler) applyCachedClassification(userID, articleID int, sig
 	}
 	tw := SignalToTopicWeight(strength)
 	gw := SignalToTagWeight(strength)
-	_ = h.prefRepo.UpsertTopic(userID, topic, tw)
+	prefRepo := h.prefRepo.WithCtx(c)
+	bestEffort(c, "pref upsert topic", func() error { return prefRepo.UpsertTopic(userID, topic, tw) })
 	for _, t := range tags {
-		_ = h.prefRepo.UpsertTag(userID, t, gw)
+		bestEffort(c, "pref upsert tag", func() error { return prefRepo.UpsertTag(userID, t, gw) })
 	}
 }
 
@@ -47,20 +48,21 @@ func (h *PreferenceHandler) applyCachedClassification(userID, articleID int, sig
 // article's topic/tags. No-op when the article has no cached classification (worker
 // will pick it up later, by which time the article is already hidden via the per-article
 // dislike score).
-func (h *PreferenceHandler) dampenCachedClassification(userID, articleID int) {
+func (h *PreferenceHandler) dampenCachedClassification(c *gin.Context, userID, articleID int) {
 	if h.articleRepo == nil {
 		return
 	}
-	topic, tags, err := h.articleRepo.GetClassification(articleID)
+	topic, tags, err := h.articleRepo.WithCtx(c).GetClassification(articleID)
 	if err != nil || topic == "" {
 		return
 	}
 	const dampenStrength = 0.5
 	topicDelta := -SignalToTopicWeight(dampenStrength)
 	tagDelta := -SignalToTagWeight(dampenStrength)
-	_ = h.prefRepo.DampenTopic(userID, topic, topicDelta)
+	prefRepo := h.prefRepo.WithCtx(c)
+	bestEffort(c, "pref dampen topic", func() error { return prefRepo.DampenTopic(userID, topic, topicDelta) })
 	for _, t := range tags {
-		_ = h.prefRepo.DampenTag(userID, t, tagDelta)
+		bestEffort(c, "pref dampen tag", func() error { return prefRepo.DampenTag(userID, t, tagDelta) })
 	}
 }
 
@@ -78,12 +80,12 @@ func (h *PreferenceHandler) Like(c *gin.Context) {
 		SignalValue: 1.0,
 	}
 
-	if err := h.prefRepo.Add(pref); err != nil {
+	if err := h.prefRepo.WithCtx(c).Add(pref); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	h.applyCachedClassification(pref.UserID, pref.ArticleID, "like", 1.0)
+	h.applyCachedClassification(c, pref.UserID, pref.ArticleID, "like", 1.0)
 	c.Status(http.StatusOK)
 }
 
@@ -101,12 +103,12 @@ func (h *PreferenceHandler) Dislike(c *gin.Context) {
 		SignalValue: 1.0,
 	}
 
-	if err := h.prefRepo.Add(pref); err != nil {
+	if err := h.prefRepo.WithCtx(c).Add(pref); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	h.dampenCachedClassification(pref.UserID, pref.ArticleID)
+	h.dampenCachedClassification(c, pref.UserID, pref.ArticleID)
 	c.Status(http.StatusOK)
 }
 
@@ -124,12 +126,12 @@ func (h *PreferenceHandler) Save(c *gin.Context) {
 		SignalValue: 1.0,
 	}
 
-	if err := h.prefRepo.Add(pref); err != nil {
+	if err := h.prefRepo.WithCtx(c).Add(pref); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	h.applyCachedClassification(pref.UserID, pref.ArticleID, "save", 1.0)
+	h.applyCachedClassification(c, pref.UserID, pref.ArticleID, "save", 1.0)
 	c.Status(http.StatusOK)
 }
 
@@ -139,7 +141,7 @@ func (h *PreferenceHandler) Unsave(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.prefRepo.DeleteSignal(getUserID(c), req.ArticleID, "save"); err != nil {
+	if err := h.prefRepo.WithCtx(c).DeleteSignal(getUserID(c), req.ArticleID, "save"); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -163,17 +165,17 @@ func (h *PreferenceHandler) RecordReadDuration(c *gin.Context) {
 		SignalValue:  req.DurationSeconds,
 	}
 
-	if err := h.prefRepo.Add(pref); err != nil {
+	if err := h.prefRepo.WithCtx(c).Add(pref); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	h.applyCachedClassification(pref.UserID, pref.ArticleID, "read_duration", req.DurationSeconds)
+	h.applyCachedClassification(c, pref.UserID, pref.ArticleID, "read_duration", req.DurationSeconds)
 	c.Status(http.StatusOK)
 }
 
 func (h *PreferenceHandler) GetTopics(c *gin.Context) {
-	topics, err := h.prefRepo.GetTopics(getUserID(c))
+	topics, err := h.prefRepo.WithCtx(c).GetTopics(getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -182,7 +184,7 @@ func (h *PreferenceHandler) GetTopics(c *gin.Context) {
 }
 
 func (h *PreferenceHandler) GetTags(c *gin.Context) {
-	tags, err := h.prefRepo.GetTags(getUserID(c))
+	tags, err := h.prefRepo.WithCtx(c).GetTags(getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -195,7 +197,7 @@ func (h *PreferenceHandler) DeleteTopic(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.prefRepo.DeleteTopic(getUserID(c), id)
+	rows, err := h.prefRepo.WithCtx(c).DeleteTopic(getUserID(c), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -212,7 +214,7 @@ func (h *PreferenceHandler) DeleteTag(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.prefRepo.DeleteTag(getUserID(c), id)
+	rows, err := h.prefRepo.WithCtx(c).DeleteTag(getUserID(c), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -240,7 +242,7 @@ func (h *ProgressHandler) Get(c *gin.Context) {
 		return
 	}
 
-	progress, err := h.repo.GetByArticleAndUser(articleID, getUserID(c))
+	progress, err := h.repo.WithCtx(c).GetByArticleAndUser(articleID, getUserID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -276,14 +278,16 @@ func (h *ProgressHandler) Update(c *gin.Context) {
 		IsCompleted:    req.IsCompleted,
 	}
 
-	result, err := h.repo.Upsert(progress)
+	result, err := h.repo.WithCtx(c).Upsert(progress)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	if result.NewlyCompleted && h.eventRepo != nil {
-		_ = h.eventRepo.Insert(userID, articleID, model.EventTypeCompletedRead)
+		bestEffort(c, "completed-read event", func() error {
+			return h.eventRepo.WithCtx(c).Insert(userID, articleID, model.EventTypeCompletedRead)
+		})
 	}
 
 	c.JSON(http.StatusOK, progress)
@@ -296,7 +300,7 @@ func (h *ProgressHandler) Reset(c *gin.Context) {
 		return
 	}
 
-	if err := h.repo.Reset(articleID, getUserID(c)); err != nil {
+	if err := h.repo.WithCtx(c).Reset(articleID, getUserID(c)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

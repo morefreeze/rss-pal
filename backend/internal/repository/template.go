@@ -4,14 +4,27 @@ import (
 	"database/sql"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 )
 
 type TemplateRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewTemplateRepository(db *sql.DB) *TemplateRepository {
 	return &TemplateRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *TemplateRepository) WithCtx(c ctxkey.CtxGetter) *TemplateRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &TemplateRepository{db: q}
+		}
+	}
+	return r
 }
 
 // GetSystemTemplates 获取所有系统模板

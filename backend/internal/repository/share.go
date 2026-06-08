@@ -5,14 +5,27 @@ import (
 	"math/rand"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 )
 
 type ShareRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewShareRepository(db *sql.DB) *ShareRepository {
 	return &ShareRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *ShareRepository) WithCtx(c ctxkey.CtxGetter) *ShareRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &ShareRepository{db: q}
+		}
+	}
+	return r
 }
 
 // GetOrCreate 创建 share token（如果该 article 已有 token，返回已有的）

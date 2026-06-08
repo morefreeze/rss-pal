@@ -38,7 +38,7 @@ func main() {
 	flag.Parse()
 
 	cfg := config.Load()
-	db, err := repository.NewDB(&cfg.Database)
+	db, err := repository.NewBypassDB(&cfg.Database)
 	if err != nil {
 		log.Fatalf("db connect: %v", err)
 	}
