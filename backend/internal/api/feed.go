@@ -44,7 +44,7 @@ func (h *FeedHandler) WithBackupRunner(r *backup.Runner) *FeedHandler {
 
 func (h *FeedHandler) GetAll(c *gin.Context) {
 	userID := getUserID(c)
-	feeds, err := h.repo.GetVisibleByUser(userID)
+	feeds, err := h.repo.WithCtx(c).GetVisibleByUser(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -59,7 +59,7 @@ func (h *FeedHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	feed, err := h.repo.GetByID(id)
+	feed, err := h.repo.WithCtx(c).GetByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
 		return
@@ -127,7 +127,7 @@ func (h *FeedHandler) Create(c *gin.Context) {
 		ExpandLinks:      req.ExpandLinks,
 	}
 
-	if err := h.repo.Create(feed); err != nil {
+	if err := h.repo.WithCtx(c).Create(feed); err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			c.JSON(http.StatusConflict, gin.H{"error": "该订阅地址已存在"})
 			return
@@ -149,7 +149,8 @@ func (h *FeedHandler) Update(c *gin.Context) {
 		return
 	}
 
-	existing, err := h.repo.GetByID(id)
+	feedRepo := h.repo.WithCtx(c)
+	existing, err := feedRepo.GetByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
 		return
@@ -167,7 +168,7 @@ func (h *FeedHandler) Update(c *gin.Context) {
 	}
 
 	feed.ID = id
-	if err := h.repo.Update(&feed); err != nil {
+	if err := feedRepo.Update(&feed); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -182,7 +183,8 @@ func (h *FeedHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	feed, err := h.repo.GetByID(id)
+	feedRepo := h.repo.WithCtx(c)
+	feed, err := feedRepo.GetByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
 		return
@@ -193,7 +195,7 @@ func (h *FeedHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.repo.Delete(id); err != nil {
+	if err := feedRepo.Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -211,7 +213,8 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 		return
 	}
 
-	feed, err := h.repo.GetByID(id)
+	feedRepo := h.repo.WithCtx(c)
+	feed, err := feedRepo.GetByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
 		return
@@ -223,6 +226,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 	}
 
 	log.Printf("Manual fetch triggered for feed: %s", feed.URL)
+	articleRepo := h.articleRepo.WithCtx(c)
 
 	// HTML feeds use scraping instead of RSS parsing
 	if feed.FeedType == "html" {
@@ -231,18 +235,18 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "fetch failed: " + err.Error()})
 			return
 		}
-		if err := h.repo.UpdateFetchInfo(feed.ID, "", "", time.Now()); err != nil {
+		if err := feedRepo.UpdateFetchInfo(feed.ID, "", "", time.Now()); err != nil {
 			log.Printf("Failed to update feed info: %v", err)
 		}
 		if htmlFeed.Title != "" {
-			_ = h.repo.UpdateTitle(feed.ID, htmlFeed.Title)
+			bestEffort(c, "feed auto-title", func() error { return feedRepo.UpdateTitle(feed.ID, htmlFeed.Title) })
 		}
 		newCount := 0
 		for _, item := range htmlFeed.Items {
 			if item.Link == "" {
 				continue
 			}
-			exists, _ := h.articleRepo.Exists(feed.ID, item.Link)
+			exists, _ := articleRepo.Exists(feed.ID, item.Link)
 			if exists {
 				continue
 			}
@@ -255,7 +259,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 				PublishedAt: publishedTime(item.PublishedParsed, item.UpdatedParsed),
 			}
 			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
-			if err := h.articleRepo.Create(article); err != nil {
+			if err := articleRepo.Create(article); err != nil {
 				log.Printf("Failed to create article: %v", err)
 			} else {
 				newCount++
@@ -280,11 +284,11 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 		return
 	}
 
-	if err := h.repo.UpdateFetchInfo(feed.ID, result.ETag, result.LastModified, time.Now()); err != nil {
+	if err := feedRepo.UpdateFetchInfo(feed.ID, result.ETag, result.LastModified, time.Now()); err != nil {
 		log.Printf("Failed to update feed info: %v", err)
 	}
 	if result.Feed != nil && result.Feed.Title != "" {
-		if err := h.repo.UpdateTitle(feed.ID, result.Feed.Title); err != nil {
+		if err := feedRepo.UpdateTitle(feed.ID, result.Feed.Title); err != nil {
 			log.Printf("Failed to update feed title: %v", err)
 		}
 	}
@@ -295,15 +299,15 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			break
 		}
 
-		exists, _ := h.articleRepo.Exists(feed.ID, item.Link)
+		exists, _ := articleRepo.Exists(feed.ID, item.Link)
 		mediaInfo := rss.ExtractVideoMedia(item.Link)
 		if mediaInfo == nil {
 			mediaInfo = rss.ExtractMedia(item)
 		}
 		if exists {
-			h.articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedTime(item.PublishedParsed, item.UpdatedParsed))
+			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedTime(item.PublishedParsed, item.UpdatedParsed))
 			if mediaInfo != nil {
-				if err := h.articleRepo.UpdateMediaIfNull(feed.ID, item.Link, mediaInfo.URL, mediaInfo.Type, mediaInfo.Duration); err != nil {
+				if err := articleRepo.UpdateMediaIfNull(feed.ID, item.Link, mediaInfo.URL, mediaInfo.Type, mediaInfo.Duration); err != nil {
 					log.Printf("Failed to backfill media for %s: %v", item.Link, err)
 				}
 			}
@@ -337,7 +341,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			article.MediaDurationSeconds = mediaInfo.Duration
 		}
 
-		if err := h.articleRepo.Create(article); err != nil {
+		if err := articleRepo.Create(article); err != nil {
 			log.Printf("Failed to create article: %v", err)
 		} else {
 			newCount++
@@ -360,7 +364,7 @@ func publishedTime(published, updated *time.Time) *time.Time {
 
 func (h *FeedHandler) ExportOPML(c *gin.Context) {
 	userID := getUserID(c)
-	feeds, err := h.repo.GetVisibleByUser(userID)
+	feeds, err := h.repo.WithCtx(c).GetVisibleByUser(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -413,7 +417,7 @@ func (h *FeedHandler) UpdateStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.repo.UpdateStatus(id, req.Status); err != nil {
+	if err := h.repo.WithCtx(c).UpdateStatus(id, req.Status); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -434,7 +438,7 @@ func (h *FeedHandler) UpdateWeight(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.repo.UpdateWeight(id, req.PriorityWeight); err != nil {
+	if err := h.repo.WithCtx(c).UpdateWeight(id, req.PriorityWeight); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -547,13 +551,14 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 			FeedType:         "link_set",
 			ExpandLinks:      true,
 		}
-		if err := h.repo.Create(feed); err != nil {
+		feedRepo := h.repo.WithCtx(c)
+		if err := feedRepo.Create(feed); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
 		// 4. Set feed to paused status (matches is_active=false).
-		if err := h.repo.UpdateStatus(feed.ID, "paused"); err != nil {
+		if err := feedRepo.UpdateStatus(feed.ID, "paused"); err != nil {
 			log.Printf("oneoff_link_set: set paused status: %v", err)
 		}
 
@@ -572,7 +577,7 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "需要登录"})
 			return
 		}
-		saved, err := h.repo.GetOrCreateClipFeed(*ownerID)
+		saved, err := h.repo.WithCtx(c).GetOrCreateClipFeed(*ownerID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -589,7 +594,7 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 	}
 
 	// 5. Insert the article.
-	if err := h.articleRepo.Create(article); err != nil {
+	if err := h.articleRepo.WithCtx(c).Create(article); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存文章失败: " + err.Error()})
 		return
 	}

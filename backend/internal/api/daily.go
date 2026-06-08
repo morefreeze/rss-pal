@@ -105,7 +105,7 @@ func (h *DailyHandler) Get(c *gin.Context) {
 	// Live branch: in-progress today
 	if requested.Equal(today) {
 		start, _ := DailyWindow(today)
-		articles, err := h.articleRepo.GetTopArticlesInRange(userID, start, now, 5)
+		articles, err := h.articleRepo.WithCtx(c).GetTopArticlesInRange(userID, start, now, 5)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -125,7 +125,8 @@ func (h *DailyHandler) Get(c *gin.Context) {
 	}
 
 	// Cached branch: try requested, then fall back one day if missing.
-	dd, err := h.digestRepo.Get(userID, requested)
+	digestRepo := h.digestRepo.WithCtx(c)
+	dd, err := digestRepo.Get(userID, requested)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -136,7 +137,7 @@ func (h *DailyHandler) Get(c *gin.Context) {
 	}
 	fallback := requested.AddDate(0, 0, -1)
 	if !explicitDate && !fallback.Before(lookbackLimit) {
-		fb, ferr := h.digestRepo.Get(userID, fallback)
+		fb, ferr := digestRepo.Get(userID, fallback)
 		if ferr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": ferr.Error()})
 			return
@@ -162,7 +163,7 @@ func (h *DailyHandler) respondCached(c *gin.Context, userID int, requested, show
 	for i, id := range dd.ArticleIDs {
 		ids[i] = int(id)
 	}
-	articles, err := h.articleRepo.GetByIDsForUser(userID, ids)
+	articles, err := h.articleRepo.WithCtx(c).GetByIDsForUser(userID, ids)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

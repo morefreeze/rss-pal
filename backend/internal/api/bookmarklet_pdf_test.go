@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/gin-gonic/gin"
 )
 
@@ -36,6 +37,9 @@ func (s *stubUserRepo) GetByBookmarkletToken(token string) (*model.User, error) 
 	return s.user, nil
 }
 
+// WithCtx is a no-op for the stub (no tx in tests).
+func (s *stubUserRepo) WithCtx(_ ctxkey.CtxGetter) bookmarkletUserRepo { return s }
+
 type stubFeedRepo struct {
 	feed *model.Feed
 	err  error
@@ -47,6 +51,8 @@ func (s *stubFeedRepo) GetOrCreateClipFeed(ownerID int) (*model.Feed, error) {
 	}
 	return s.feed, nil
 }
+
+func (s *stubFeedRepo) WithCtx(_ ctxkey.CtxGetter) bookmarkletFeedRepo { return s }
 
 type stubArticleRepo struct {
 	nextID         int32 // atomic so concurrent writes are safe
@@ -131,6 +137,8 @@ func (s *stubArticleRepo) ResetPDFToProcessing(id int) error {
 	}
 	return nil
 }
+
+func (s *stubArticleRepo) WithCtx(_ ctxkey.CtxGetter) bookmarkletArticleRepo { return s }
 
 // newTestBookmarkletHandlerForPDF wires a handler against stubbed repos.
 // The "test-token" maps to a fixed user (id=42); requests authenticated

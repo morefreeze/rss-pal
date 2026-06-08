@@ -23,7 +23,7 @@ func ValidateBriefingTab(tab string) bool {
 // GetLastTab serves GET /api/briefing/last-tab.
 func (h *BriefingHandler) GetLastTab(c *gin.Context) {
 	userID := getUserID(c)
-	tab, err := h.userRepo.GetBriefingLastTab(userID)
+	tab, err := h.userRepo.WithCtx(c).GetBriefingLastTab(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -48,7 +48,7 @@ func (h *BriefingHandler) SetLastTab(c *gin.Context) {
 		return
 	}
 	userID := getUserID(c)
-	if err := h.userRepo.SetBriefingLastTab(userID, body.Tab); err != nil {
+	if err := h.userRepo.WithCtx(c).SetBriefingLastTab(userID, body.Tab); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

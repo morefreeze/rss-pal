@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/lib/pq"
 )
 
@@ -17,11 +18,23 @@ type WeeklyDigest struct {
 }
 
 type WeeklyDigestRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewWeeklyDigestRepository(db *sql.DB) *WeeklyDigestRepository {
 	return &WeeklyDigestRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *WeeklyDigestRepository) WithCtx(c ctxkey.CtxGetter) *WeeklyDigestRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &WeeklyDigestRepository{db: q}
+		}
+	}
+	return r
 }
 
 func (r *WeeklyDigestRepository) Get(userID int, weekStart time.Time) (*WeeklyDigest, error) {

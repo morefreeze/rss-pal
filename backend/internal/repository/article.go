@@ -9,6 +9,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/pdfextract"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/lib/pq"
 )
 
@@ -91,7 +92,7 @@ LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.use
 }
 
 type ArticleRepository struct {
-	db *sql.DB
+	db Querier
 	// imageBaseDir is the root for PDF clip image storage. Callers that
 	// need Delete() to clean image dirs MUST call SetImageBaseDir at
 	// startup. Forgetting silently turns image cleanup into a no-op.
@@ -100,6 +101,20 @@ type ArticleRepository struct {
 
 func NewArticleRepository(db *sql.DB) *ArticleRepository {
 	return &ArticleRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present (e.g. worker code, tests that bypass
+// middleware). ctxkey.CtxGetter is a structural interface so we accept
+// *gin.Context without importing gin from the repository package.
+func (r *ArticleRepository) WithCtx(c ctxkey.CtxGetter) *ArticleRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &ArticleRepository{db: q, imageBaseDir: r.imageBaseDir}
+		}
+	}
+	return r
 }
 
 // SetImageBaseDir tells the repo where PDF clip images live, so Delete
@@ -1814,3 +1829,8 @@ func (r *ArticleRepository) GetPDFOCRPending(limit int) ([]model.Article, error)
 	defer rows.Close()
 	return r.scanArticleNoFeedTitle(rows)
 }
+
+// querier returns the underlying Querier. Exposed (unexported) so the
+// _internal_test.go file in this package can assert that WithCtx rebinds it.
+// Do not call from production code.
+func (r *ArticleRepository) querier() Querier { return r.db }

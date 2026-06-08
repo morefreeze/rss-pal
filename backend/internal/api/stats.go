@@ -17,7 +17,7 @@ func NewStatsHandler(statsRepo *repository.StatsRepository) *StatsHandler {
 
 func (h *StatsHandler) GetStats(c *gin.Context) {
 	userID := getUserID(c)
-	stats, err := h.statsRepo.GetStats(userID)
+	stats, err := h.statsRepo.WithCtx(c).GetStats(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -27,7 +27,7 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 
 func (h *StatsHandler) GetProgress(c *gin.Context) {
 	userID := getUserID(c)
-	progress, err := h.statsRepo.GetFetchProgress(userID)
+	progress, err := h.statsRepo.WithCtx(c).GetFetchProgress(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

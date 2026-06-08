@@ -5,7 +5,11 @@ services:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required in .env}
+      # postgres role password on fresh init. After Phase 3 RLS rollout, the
+      # runtime DB_PASSWORD belongs to rsspal_app — the postgres superuser
+      # password lives in DB_ADMIN_PASSWORD. Back-compat: if DB_ADMIN_PASSWORD
+      # is unset, fall back to DB_PASSWORD (pre-Phase-3 deployments).
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD:-${DB_PASSWORD:?DB_PASSWORD required in .env}}
       POSTGRES_DB: rsspal
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -25,8 +29,12 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: postgres
+      DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required in .env}
+      # Separate admin creds for backup/restore (NewAdminDB). Falls back to
+      # DB_USER/DB_PASSWORD when unset so pre-Phase-3 deployments keep working.
+      DB_ADMIN_USER: ${DB_ADMIN_USER:-${DB_USER:-postgres}}
+      DB_ADMIN_PASSWORD: ${DB_ADMIN_PASSWORD:-${DB_PASSWORD}}
       DB_NAME: rsspal
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}
       CLAUDE_BASE_URL: ${CLAUDE_BASE_URL:-https://api.anthropic.com}
@@ -63,7 +71,7 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: postgres
+      DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required in .env}
       DB_NAME: rsspal
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}

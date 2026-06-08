@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/gin-gonic/gin"
@@ -78,14 +80,21 @@ func shouldPromptDuplicate(newLen, oldLen, newImages, oldImages int, force bool)
 // bookmarklet handlers need. Defined as an interface so tests can swap in
 // a stub without standing up a real database. Concrete repository pointers
 // satisfy it via Go's structural typing.
+//
+// WithCtx returns a tx-bound view; today a no-op for public-token handlers
+// (no tx in context), kept on the interface so handler call sites stay
+// uniform with the rest of the codebase and Phase 4.2 can wrap them in a
+// tx without any further handler edits.
 type bookmarkletUserRepo interface {
 	GetByBookmarkletToken(token string) (*model.User, error)
+	WithCtx(c ctxkey.CtxGetter) bookmarkletUserRepo
 }
 
 // bookmarkletFeedRepo is the subset of *repository.FeedRepository the
 // bookmarklet handlers need.
 type bookmarkletFeedRepo interface {
 	GetOrCreateClipFeed(ownerID int) (*model.Feed, error)
+	WithCtx(c ctxkey.CtxGetter) bookmarkletFeedRepo
 }
 
 // bookmarkletArticleRepo is the subset of *repository.ArticleRepository
@@ -102,6 +111,7 @@ type bookmarkletArticleRepo interface {
 	UpdateContentAndMarkReady(id int, content string, wordCount, readingMinutes int) error
 	MarkPDFFailed(id int, msg string) error
 	ResetPDFToProcessing(id int) error
+	WithCtx(c ctxkey.CtxGetter) bookmarkletArticleRepo
 }
 
 type BookmarkletHandler struct {
@@ -118,10 +128,66 @@ func NewBookmarkletHandler(
 	articleRepo *repository.ArticleRepository,
 ) *BookmarkletHandler {
 	return &BookmarkletHandler{
-		userRepo:    userRepo,
-		feedRepo:    feedRepo,
-		articleRepo: articleRepo,
+		userRepo:    bookmarkletUserRepoAdapter{userRepo},
+		feedRepo:    bookmarkletFeedRepoAdapter{feedRepo},
+		articleRepo: bookmarkletArticleRepoAdapter{articleRepo},
 	}
+}
+
+// Adapter shims wrap the concrete repositories so their WithCtx methods
+// return the interface type (rather than *repository.XRepository). The
+// stubs in *_test.go implement the interface directly, so they are not
+// wrapped.
+
+type bookmarkletUserRepoAdapter struct{ r *repository.UserRepository }
+
+func (a bookmarkletUserRepoAdapter) GetByBookmarkletToken(token string) (*model.User, error) {
+	return a.r.GetByBookmarkletToken(token)
+}
+func (a bookmarkletUserRepoAdapter) WithCtx(c ctxkey.CtxGetter) bookmarkletUserRepo {
+	return bookmarkletUserRepoAdapter{a.r.WithCtx(c)}
+}
+
+type bookmarkletFeedRepoAdapter struct{ r *repository.FeedRepository }
+
+func (a bookmarkletFeedRepoAdapter) GetOrCreateClipFeed(ownerID int) (*model.Feed, error) {
+	return a.r.GetOrCreateClipFeed(ownerID)
+}
+func (a bookmarkletFeedRepoAdapter) WithCtx(c ctxkey.CtxGetter) bookmarkletFeedRepo {
+	return bookmarkletFeedRepoAdapter{a.r.WithCtx(c)}
+}
+
+type bookmarkletArticleRepoAdapter struct{ r *repository.ArticleRepository }
+
+func (a bookmarkletArticleRepoAdapter) FindByOwnerAndURL(ownerID int, exactURL string) (*model.Article, error) {
+	return a.r.FindByOwnerAndURL(ownerID, exactURL)
+}
+func (a bookmarkletArticleRepoAdapter) Create(article *model.Article) error {
+	return a.r.Create(article)
+}
+func (a bookmarkletArticleRepoAdapter) UpdateContent(id int, content string, wordCount, readingMinutes int) error {
+	return a.r.UpdateContent(id, content, wordCount, readingMinutes)
+}
+func (a bookmarkletArticleRepoAdapter) UpdateTitle(id int, title string) error {
+	return a.r.UpdateTitle(id, title)
+}
+func (a bookmarkletArticleRepoAdapter) UpdateSummary(id int, summaryBrief, summaryDetailed string) error {
+	return a.r.UpdateSummary(id, summaryBrief, summaryDetailed)
+}
+func (a bookmarkletArticleRepoAdapter) CreatePDFStub(art *model.Article) error {
+	return a.r.CreatePDFStub(art)
+}
+func (a bookmarkletArticleRepoAdapter) UpdateContentAndMarkReady(id int, content string, wordCount, readingMinutes int) error {
+	return a.r.UpdateContentAndMarkReady(id, content, wordCount, readingMinutes)
+}
+func (a bookmarkletArticleRepoAdapter) MarkPDFFailed(id int, msg string) error {
+	return a.r.MarkPDFFailed(id, msg)
+}
+func (a bookmarkletArticleRepoAdapter) ResetPDFToProcessing(id int) error {
+	return a.r.ResetPDFToProcessing(id)
+}
+func (a bookmarkletArticleRepoAdapter) WithCtx(c ctxkey.CtxGetter) bookmarkletArticleRepo {
+	return bookmarkletArticleRepoAdapter{a.r.WithCtx(c)}
 }
 
 // WithBackupRunner wires a backup runner so successful captures trigger a
@@ -139,9 +205,36 @@ func (h *BookmarkletHandler) WithImageBaseDir(path string) *BookmarkletHandler {
 	return h
 }
 
+// ResolveOwner implements PublicTokenResolver for the bookmarklet
+// endpoints. It reads the Authorization: Bearer token directly off the
+// request and resolves it against users.bookmarklet_token via the open
+// tx. The users table is intentionally NOT RLS-protected, so this lookup
+// works before app.user_id has been set on the tx.
+//
+// Missing/empty/unknown tokens map to ErrPublicTokenInvalid → 401.
+func (h *BookmarkletHandler) ResolveOwner(c *gin.Context, tx *sql.Tx) (int, error) {
+	token := bearerToken(c)
+	if token == "" {
+		return 0, ErrPublicTokenInvalid
+	}
+	var uid int
+	err := tx.QueryRow(`SELECT id FROM users WHERE bookmarklet_token = $1`, token).Scan(&uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrPublicTokenInvalid
+	}
+	if err != nil {
+		return 0, err
+	}
+	return uid, nil
+}
+
 // Capture is the POST /api/bookmarklet/capture handler. It does its own
 // bearer-token authentication against users.bookmarklet_token (no JWT) so it
-// can be invoked from any third-party origin.
+// can be invoked from any third-party origin. When wired via
+// PublicTokenMiddleware the middleware ALSO performs the lookup (to set
+// app.user_id on the tx) — the handler re-authenticates here to keep the
+// flow symmetric with extension/share and so that direct unit tests of the
+// handler still work without standing up the middleware.
 func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	user, err := h.authenticate(c)
 	if err != nil {
@@ -209,10 +302,11 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		title = normalized
 	}
 
+	articleRepo := h.articleRepo.WithCtx(c)
 	var existing *model.Article
 	if !req.ForceNew {
 		var err error
-		existing, err = h.articleRepo.FindByOwnerAndURL(user.ID, normalized)
+		existing, err = articleRepo.FindByOwnerAndURL(user.ID, normalized)
 		if err != nil {
 			log.Printf("bookmarklet: lookup failed for user=%d url=%s: %v", user.ID, normalized, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询文章失败"})
@@ -237,7 +331,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 			return
 		}
 		wc, rm := rss.ComputeMetrics(content)
-		if err := h.articleRepo.UpdateContent(existing.ID, content, wc, rm); err != nil {
+		if err := articleRepo.UpdateContent(existing.ID, content, wc, rm); err != nil {
 			log.Printf("bookmarklet: UpdateContent failed for article=%d: %v", existing.ID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章失败"})
 			return
@@ -246,13 +340,13 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		// parse — refresh the title too, otherwise stale titles from a
 		// previous (worse) extraction stick around forever.
 		if title != "" && title != existing.Title {
-			if err := h.articleRepo.UpdateTitle(existing.ID, title); err != nil {
+			if err := articleRepo.UpdateTitle(existing.ID, title); err != nil {
 				log.Printf("bookmarklet: UpdateTitle failed for article=%d: %v", existing.ID, err)
 			}
 		}
 		// Clearing summaries forces the worker's backfillSummaries loop to
 		// regenerate them from the new content on its next pass.
-		if err := h.articleRepo.UpdateSummary(existing.ID, "", ""); err != nil {
+		if err := articleRepo.UpdateSummary(existing.ID, "", ""); err != nil {
 			log.Printf("bookmarklet: clear summary failed for article=%d: %v", existing.ID, err)
 		}
 		log.Printf("bookmarklet: updated article=%d user=%d url=%s len=%d (force=%v)", existing.ID, user.ID, normalized, newLen, req.Force)
@@ -267,7 +361,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		return
 	}
 
-	feed, err := h.feedRepo.GetOrCreateClipFeed(user.ID)
+	feed, err := h.feedRepo.WithCtx(c).GetOrCreateClipFeed(user.ID)
 	if err != nil {
 		log.Printf("bookmarklet: GetOrCreateClipFeed failed for user=%d: %v", user.ID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建网摘 feed 失败"})
@@ -284,7 +378,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		Kind:        articleKind(wasTwitter),
 	}
 	article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
-	if err := h.articleRepo.Create(article); err != nil {
+	if err := articleRepo.Create(article); err != nil {
 		log.Printf("bookmarklet: Create article failed for user=%d url=%s: %v", user.ID, normalized, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "新建文章失败"})
 		return
@@ -313,7 +407,7 @@ func (h *BookmarkletHandler) authenticate(c *gin.Context) (*model.User, error) {
 	if token == "" {
 		return nil, errors.New("empty token")
 	}
-	user, err := h.userRepo.GetByBookmarkletToken(token)
+	user, err := h.userRepo.WithCtx(c).GetByBookmarkletToken(token)
 	if err != nil {
 		return nil, err
 	}

@@ -7,15 +7,34 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type UserRepository struct {
-	db *sql.DB
+	db Querier
 }
 
 func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present (e.g. pre-auth handlers like login/register
+// that run before the RLS middleware). This is safe because UserRepository
+// queries do not depend on RLS for authentication paths.
+//
+// TODO(rls-phase-3): the users table itself will need a policy exemption or
+// the migration must run with bypass; pre-auth Register has no app.user_id
+// in context.
+func (r *UserRepository) WithCtx(c ctxkey.CtxGetter) *UserRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &UserRepository{db: q}
+		}
+	}
+	return r
 }
 
 func (r *UserRepository) CreateAdmin(username, password string) (*model.User, error) {
@@ -24,19 +43,39 @@ func (r *UserRepository) CreateAdmin(username, password string) (*model.User, er
 		return nil, err
 	}
 
+	// Founding admin sees the full shared backlog (epoch). Regular users that
+	// register later get the default 7-day floor from the column default.
 	user := &model.User{Username: username, PasswordHash: string(hash), IsAdmin: true}
 	err = r.db.QueryRow(
-		`INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, $3) RETURNING id, created_at`,
+		`INSERT INTO users (username, password_hash, is_admin, shared_visible_from)
+		 VALUES ($1, $2, $3, '1970-01-01'::TIMESTAMP)
+		 RETURNING id, created_at, shared_visible_from`,
 		user.Username, user.PasswordHash, user.IsAdmin,
-	).Scan(&user.ID, &user.CreatedAt)
+	).Scan(&user.ID, &user.CreatedAt, &user.SharedVisibleFrom)
 	return user, err
+}
+
+// UpdateSharedVisibleFrom moves the calling user's shared-content floor to
+// NOW() - daysBack days. daysBack must be >= 0. Returns the new floor value.
+func (r *UserRepository) UpdateSharedVisibleFrom(userID, daysBack int) (time.Time, error) {
+	if daysBack < 0 {
+		return time.Time{}, fmt.Errorf("days_back must be >= 0")
+	}
+	var floor time.Time
+	err := r.db.QueryRow(
+		`UPDATE users SET shared_visible_from = NOW() - ($1 || ' days')::INTERVAL
+		   WHERE id = $2
+		 RETURNING shared_visible_from`,
+		daysBack, userID,
+	).Scan(&floor)
+	return floor, err
 }
 
 func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at FROM users WHERE username = $1`, username,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt)
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE username = $1`, username,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -46,8 +85,8 @@ func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 func (r *UserRepository) FindByID(id int) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at FROM users WHERE id = $1`, id,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt)
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE id = $1`, id,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -74,11 +113,11 @@ func (r *UserRepository) ChangePassword(userID int, newPassword string) error {
 }
 
 func (r *UserRepository) Register(username, password string, code string) (*model.User, error) {
-	tx, err := r.db.Begin()
+	tx, commit, rollback, err := txOrBegin(r.db)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer rollback()
 
 	// Validate invite code
 	var codeID int
@@ -115,9 +154,9 @@ func (r *UserRepository) Register(username, password string, code string) (*mode
 
 	user := &model.User{Username: username, PasswordHash: string(hash), IsAdmin: false}
 	err = tx.QueryRow(
-		`INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, $3) RETURNING id, created_at`,
+		`INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, $3) RETURNING id, created_at, shared_visible_from`,
 		user.Username, user.PasswordHash, user.IsAdmin,
-	).Scan(&user.ID, &user.CreatedAt)
+	).Scan(&user.ID, &user.CreatedAt, &user.SharedVisibleFrom)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +167,10 @@ func (r *UserRepository) Register(username, password string, code string) (*mode
 		return nil, err
 	}
 
-	return user, tx.Commit()
+	if err := commit(); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 func (r *UserRepository) CreateInviteCode(createdBy int, expiresInHours int) (*model.InviteCode, error) {
@@ -184,9 +226,9 @@ func (r *UserRepository) GetByBookmarkletToken(token string) (*model.User, error
 	}
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at FROM users WHERE bookmarklet_token = $1`,
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE bookmarklet_token = $1`,
 		token,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt)
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
