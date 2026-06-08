@@ -10,6 +10,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
+	"github.com/bytedance/rss-pal/internal/version"
 	gingzip "github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
@@ -113,7 +114,7 @@ func main() {
 
 	// Health check (public, no auth)
 	router.GET("/api/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
+		c.JSON(200, gin.H{"status": "ok", "version": version.Version})
 	})
 
 	// Public routes
