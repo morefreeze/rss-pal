@@ -176,8 +176,16 @@ func (r *FeedRepository) Create(feed *model.Feed) error {
 }
 
 func (r *FeedRepository) Update(feed *model.Feed) error {
-	query := `UPDATE feeds SET title = $1, is_active = $2 WHERE id = $3`
-	_, err := r.db.Exec(query, feed.Title, feed.IsActive, feed.ID)
+	// Worker's GetAllActive filters on `status`, so flipping is_active alone
+	// leaves the feed "paused in UI, still fetched by worker". Mirror status
+	// here until the is_active column is dropped. Archived state has its own
+	// path (UpdateStatus) and won't reach here.
+	status := "active"
+	if !feed.IsActive {
+		status = "paused"
+	}
+	query := `UPDATE feeds SET title = $1, is_active = $2, status = $3 WHERE id = $4`
+	_, err := r.db.Exec(query, feed.Title, feed.IsActive, status, feed.ID)
 	return err
 }
 
