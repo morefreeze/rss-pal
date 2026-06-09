@@ -4,4 +4,4 @@ package version
 // At the start of a dev cycle, bump the patch and append .alpha
 // (e.g. v0.0.1 -> v0.0.2.alpha). Right before merging to master, drop the
 // .alpha suffix (e.g. v0.0.2.alpha -> v0.0.2).
-const Version = "v0.0.2.alpha"
+const Version = "v0.0.2"
