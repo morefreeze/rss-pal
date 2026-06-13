@@ -92,7 +92,7 @@ func TestSummarizeWithImages_visionShape(t *testing.T) {
 	imgPath := filepath.Join(dir, "0.jpg")
 	writeTestJPEG(t, imgPath)
 
-	_, err := s.SummarizeWithImages(context.Background(), "Title", "Some text", []string{imgPath})
+	_, err := s.SummarizeWithImages(context.Background(), "Title", "Some text", []string{imgPath}, []string{"https://example.com/pic.jpg"})
 	if err != nil {
 		t.Fatalf("SummarizeWithImages: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestSummarizeWithImages_emptyImageList_fallsBackToTextPath(t *testing.T) {
 	s := NewSummarizerWithModel("test-key", srv.URL, "text-model")
 	s.SetVisionModel("vision-model")
 
-	_, err := s.SummarizeWithImages(context.Background(), "Title", "Body", nil)
+	_, err := s.SummarizeWithImages(context.Background(), "Title", "Body", nil, nil)
 	if err != nil {
 		t.Fatalf("SummarizeWithImages with nil images: %v", err)
 	}
@@ -165,6 +165,69 @@ func TestSummarizeWithImages_emptyImageList_fallsBackToTextPath(t *testing.T) {
 	if parsed["model"] != "text-model" {
 		t.Errorf("with no images, expected text-model fallback, got %v", parsed["model"])
 	}
+}
+
+func TestSummarizeWithImages_promptEmbedsImageURLs(t *testing.T) {
+	srv, cap := newCaptureServer(t, "brief", "detailed")
+	s := NewSummarizerWithModel("test-key", srv.URL, "text-model")
+	s.SetVisionModel("vision-model")
+
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "0.jpg")
+	writeTestJPEG(t, imgPath)
+
+	const url1 = "https://cdn.example.com/post/figure-A.jpg"
+	_, err := s.SummarizeWithImages(context.Background(), "Title", "Body text", []string{imgPath}, []string{url1})
+	if err != nil {
+		t.Fatalf("SummarizeWithImages: %v", err)
+	}
+	if len(cap.bodies) == 0 {
+		t.Fatal("expected at least 1 request body captured")
+	}
+	for i, body := range cap.bodies {
+		var parsed map[string]any
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("body %d not json: %v", i, err)
+		}
+		msgs, _ := parsed["messages"].([]any)
+		userText := ""
+		for _, m := range msgs {
+			mm, _ := m.(map[string]any)
+			if mm["role"] != "user" {
+				continue
+			}
+			arr, _ := mm["content"].([]any)
+			for _, blk := range arr {
+				bb, _ := blk.(map[string]any)
+				if bb["type"] == "text" {
+					if t, ok := bb["text"].(string); ok {
+						userText += t
+					}
+				}
+			}
+		}
+		if !containsAll(userText, url1, "附图 URL 列表", "![](URL)") {
+			t.Errorf("body %d: user-text missing URL/instruction/embed-hint.\ngot: %s", i, truncate(userText, 600))
+		}
+	}
+}
+
+func containsAll(s string, needles ...string) bool {
+	for _, n := range needles {
+		if !contains(s, n) {
+			return false
+		}
+	}
+	return true
+}
+
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func startsWith(s, prefix string) bool { return len(s) >= len(prefix) && s[:len(prefix)] == prefix }

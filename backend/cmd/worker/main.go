@@ -225,10 +225,10 @@ func backfillSummaries(ctx context.Context, cfg *config.Config, articleRepo *rep
 						MaxLongSide:           visionCfg.MaxLongSide,
 						TTL:                   visionCfg.CacheTTL,
 					}
-					paths, _ := imagefetch.FetchAndStore(sCtx, article.ID, urls, ifCfg)
+					paths, gotURLs, _ := imagefetch.FetchAndStore(sCtx, article.ID, urls, ifCfg)
 					if len(paths) > 0 {
 						log.Printf("Vision-summarizing article %d with %d images", article.ID, len(paths))
-						result, err = summarizer.SummarizeWithImages(sCtx, article.Title, article.Content, paths)
+						result, err = summarizer.SummarizeWithImages(sCtx, article.Title, article.Content, paths, gotURLs)
 					}
 				}
 			}

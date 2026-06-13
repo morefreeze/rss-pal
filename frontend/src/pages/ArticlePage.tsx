@@ -1057,7 +1057,7 @@ export default function ArticlePage() {
             title="AI 总结结束"
             aria-label="AI summary end"
           >
-            🏁
+            💡
             {showCelebration && reader.confettiEnabled && <ConfettiBurst />}
           </div>
         )}

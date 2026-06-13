@@ -80,12 +80,16 @@ func TestFetchAndStore_basic(t *testing.T) {
 		TTL:                   24 * time.Hour,
 		Validate:              allowLoopback,
 	}
-	paths, err := FetchAndStore(context.Background(), 42, []string{srv.URL + "/a.png"}, cfg)
+	srcURL := srv.URL + "/a.png"
+	paths, urls, err := FetchAndStore(context.Background(), 42, []string{srcURL}, cfg)
 	if err != nil {
 		t.Fatalf("FetchAndStore: %v", err)
 	}
 	if len(paths) != 1 {
 		t.Fatalf("want 1 path, got %d", len(paths))
+	}
+	if len(urls) != 1 || urls[0] != srcURL {
+		t.Errorf("expected urls=[%q], got %v", srcURL, urls)
 	}
 	if !strings.HasSuffix(paths[0], "/42/0.jpg") {
 		t.Errorf("expected path ending /42/0.jpg, got %s", paths[0])
@@ -112,7 +116,7 @@ func TestFetchAndStore_resizesOversize(t *testing.T) {
 		TTL:         24 * time.Hour,
 		Validate:    allowLoopback,
 	}
-	paths, err := FetchAndStore(context.Background(), 7, []string{srv.URL + "/x.png"}, cfg)
+	paths, _, err := FetchAndStore(context.Background(), 7, []string{srv.URL + "/x.png"}, cfg)
 	if err != nil || len(paths) != 1 {
 		t.Fatalf("FetchAndStore: paths=%v err=%v", paths, err)
 	}
@@ -142,7 +146,7 @@ func TestFetchAndStore_cacheHitRefreshesMtime(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cfg := Config{Dir: t.TempDir(), MaxLongSide: 1024, TTL: 24 * time.Hour, Validate: allowLoopback}
-	first, err := FetchAndStore(context.Background(), 1, []string{srv.URL + "/a.png"}, cfg)
+	first, _, err := FetchAndStore(context.Background(), 1, []string{srv.URL + "/a.png"}, cfg)
 	if err != nil || len(first) != 1 {
 		t.Fatalf("first: paths=%v err=%v", first, err)
 	}
@@ -153,7 +157,7 @@ func TestFetchAndStore_cacheHitRefreshesMtime(t *testing.T) {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	second, err := FetchAndStore(context.Background(), 1, []string{srv.URL + "/a.png"}, cfg)
+	second, _, err := FetchAndStore(context.Background(), 1, []string{srv.URL + "/a.png"}, cfg)
 	if err != nil || len(second) != 1 || second[0] != first[0] {
 		t.Fatalf("second: paths=%v err=%v", second, err)
 	}
@@ -184,7 +188,7 @@ func TestFetchAndStore_localArticleImagesURL(t *testing.T) {
 		TTL:                   24 * time.Hour,
 		Validate:              allowLoopback,
 	}
-	paths, err := FetchAndStore(context.Background(), 9, []string{"/api/articles/9/images/0.png"}, cfg)
+	paths, _, err := FetchAndStore(context.Background(), 9, []string{"/api/articles/9/images/0.png"}, cfg)
 	if err != nil {
 		t.Fatalf("FetchAndStore: %v", err)
 	}
@@ -220,17 +224,22 @@ func TestFetchAndStore_skipsFailures(t *testing.T) {
 	t.Cleanup(corrupt.Close)
 
 	cfg := Config{Dir: t.TempDir(), MaxLongSide: 1024, TTL: 24 * time.Hour, Validate: allowLoopback}
-	paths, err := FetchAndStore(context.Background(), 5, []string{
-		good.URL + "/a.jpg",
+	goodA := good.URL + "/a.jpg"
+	goodD := good.URL + "/d.jpg"
+	paths, urls, err := FetchAndStore(context.Background(), 5, []string{
+		goodA,
 		bad.URL + "/b.jpg",
 		corrupt.URL + "/c.png",
-		good.URL + "/d.jpg",
+		goodD,
 	}, cfg)
 	if err != nil {
 		t.Fatalf("FetchAndStore: %v", err)
 	}
 	if len(paths) != 2 {
 		t.Fatalf("expected 2 successful paths (indices 0 and 3 of good server), got %d: %v", len(paths), paths)
+	}
+	if len(urls) != 2 || urls[0] != goodA || urls[1] != goodD {
+		t.Errorf("expected gotURLs to mirror successful inputs [%q, %q], got %v", goodA, goodD, urls)
 	}
 }
 

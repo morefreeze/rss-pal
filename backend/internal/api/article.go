@@ -480,9 +480,9 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 				MaxLongSide:           h.cfg.AI.Vision.MaxLongSide,
 				TTL:                   h.cfg.AI.Vision.CacheTTL,
 			}
-			paths, _ := imagefetch.FetchAndStore(c.Request.Context(), id, urls, ifCfg)
+			paths, gotURLs, _ := imagefetch.FetchAndStore(c.Request.Context(), id, urls, ifCfg)
 			if len(paths) > 0 {
-				brief, detailed, serr = summarizerToUse.SummarizeWithImagesStream(c.Request.Context(), article, paths, onBrief, onDetailed)
+				brief, detailed, serr = summarizerToUse.SummarizeWithImagesStream(c.Request.Context(), article, paths, gotURLs, onBrief, onDetailed)
 				visionUsed = true
 			}
 		}
