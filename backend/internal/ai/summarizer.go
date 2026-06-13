@@ -536,40 +536,48 @@ func isTransientNetErr(err error) bool {
 		strings.Contains(msg, "no such host")
 }
 
+// buildImageURLList formats imageURLs as a numbered list aligned with the
+// attached image blocks (image N in the multimodal payload ↔ list item N).
+// Returns "" if urls is empty so callers can skip the prompt section cleanly.
+func buildImageURLList(urls []string) string {
+	if len(urls) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, u := range urls {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, u)
+	}
+	return b.String()
+}
+
+// imageEmbedInstruction tells the model to insert ![](URL) inline at points
+// where a specific image illustrates the surrounding text. Kept conservative
+// to discourage shotgunning every URL into the output.
+const imageEmbedInstruction = `如果某张附图能直观说明总结中的某个要点或段落，请在该处插入对应图片的 Markdown 引用 ![](URL)，URL 必须从下方"附图 URL 列表"原样复制，按附图顺序与列表编号一一对应；不要修改 URL，也不要凭空编造。无关或不确定的图片可以省略，避免每张图都罗列。`
+
 // SummarizeWithImages produces brief + detailed summaries informed by the
-// images at imagePaths. On any failure (vision model error, all images failed
-// to load), it falls back to the text-only Summarize() path so the caller
-// always gets a SummaryResult if the model is reachable in any form.
-func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content string, imagePaths []string) (*SummaryResult, error) {
+// images at imagePaths. imageURLs must be the original source URLs aligned with
+// imagePaths (same length, same order) so the model can embed markdown image
+// references back into the output. Pass nil/empty imageURLs to skip the embed
+// instruction (still vision-informed, but text-only output).
+// On any failure (vision model error, all images failed to load), it falls back
+// to the text-only Summarize() path so the caller always gets a SummaryResult
+// if the model is reachable in any form.
+func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content string, imagePaths, imageURLs []string) (*SummaryResult, error) {
 	if len(imagePaths) == 0 {
 		return s.Summarize(ctx, title, content)
 	}
 	content = truncateContent(content)
+	urlList := buildImageURLList(imageURLs)
 
-	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
-
-标题：%s
-
-内容：
-%s
-
-请只输出要点列表，不要其他内容。`, title, content)
-
+	briefPrompt := buildVisionBriefPrompt(title, content, urlList)
 	brief, err := s.callVision(ctx, briefPrompt, imagePaths, briefMaxTokens)
 	if err != nil {
 		log.Printf("vision summary failed, falling back to text: %v", err)
 		return s.Summarize(ctx, title, content)
 	}
 
-	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
-
-标题：%s
-
-内容：
-%s
-
-请用中文输出详细总结。`, title, content)
-
+	detailedPrompt := buildVisionDetailedPrompt(title, content, urlList)
 	detailed, err := s.callVision(ctx, detailedPrompt, imagePaths, detailedMaxTokens)
 	if err != nil {
 		// Brief already succeeded; fall back only the detailed half.
@@ -582,6 +590,56 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 	}
 
 	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+}
+
+func buildVisionBriefPrompt(title, content, urlList string) string {
+	if urlList == "" {
+		return fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请只输出要点列表，不要其他内容。`, title, content)
+	}
+	return fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容。
+
+%s
+
+标题：%s
+
+内容：
+%s
+
+附图 URL 列表（按附图顺序）：
+%s
+请只输出要点列表，不要其他内容；图片引用直接放在相关要点的下一行。`, imageEmbedInstruction, title, content, urlList)
+}
+
+func buildVisionDetailedPrompt(title, content, urlList string) string {
+	if urlList == "" {
+		return fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
+
+标题：%s
+
+内容：
+%s
+
+请用中文输出详细总结。`, title, content)
+	}
+	return fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论，使用 Markdown 格式。结合附带的图片内容。
+
+%s
+
+标题：%s
+
+内容：
+%s
+
+附图 URL 列表（按附图顺序）：
+%s
+请用中文输出详细总结。`, imageEmbedInstruction, title, content, urlList)
 }
 
 // callVisionStream is the streaming companion of callVision. No retry (same
@@ -671,40 +729,26 @@ func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imageP
 }
 
 // SummarizeWithImagesStream is the streaming variant of SummarizeWithImages.
-// Same fallback contract: any vision-side failure (model error, no images,
+// imageURLs must be aligned with imagePaths (same length, same order). Same
+// fallback contract: any vision-side failure (model error, no images,
 // empty stream) drops to SummarizeStream for the affected half.
 func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, content string,
-	imagePaths []string,
+	imagePaths, imageURLs []string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
 	if len(imagePaths) == 0 {
 		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
 	}
 	content = truncateContent(content)
+	urlList := buildImageURLList(imageURLs)
 
-	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
-
-标题：%s
-
-内容：
-%s
-
-请只输出要点列表，不要其他内容。`, title, content)
-
+	briefPrompt := buildVisionBriefPrompt(title, content, urlList)
 	brief, err := s.callVisionStream(ctx, briefPrompt, imagePaths, briefMaxTokens, onBriefDelta)
 	if err != nil {
 		log.Printf("vision stream brief failed, falling back to text stream: %v", err)
 		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
 	}
 
-	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
-
-标题：%s
-
-内容：
-%s
-
-请用中文输出详细总结。`, title, content)
-
+	detailedPrompt := buildVisionDetailedPrompt(title, content, urlList)
 	detailed, err := s.callVisionStream(ctx, detailedPrompt, imagePaths, detailedMaxTokens, onDetailedDelta)
 	if err != nil {
 		log.Printf("vision stream detailed failed, falling back to text stream detailed: %v", err)

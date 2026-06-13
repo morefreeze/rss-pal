@@ -80,13 +80,15 @@ func (s *SummarizerService) ExtractTopics(ctx context.Context, article *model.Ar
 }
 
 // SummarizeWithImages routes through the vision path. imagePaths are local
-// files (typically from imagefetch.FetchAndStore).
-func (s *SummarizerService) SummarizeWithImages(ctx context.Context, article *model.Article, imagePaths []string) (brief, detailed string, err error) {
+// files (typically from imagefetch.FetchAndStore); imageURLs are the matching
+// source URLs (same slice from FetchAndStore) used to instruct the model to
+// embed markdown image references in the summary.
+func (s *SummarizerService) SummarizeWithImages(ctx context.Context, article *model.Article, imagePaths, imageURLs []string) (brief, detailed string, err error) {
 	content := article.Content
 	if content == "" {
 		content = article.Title
 	}
-	result, err := s.summarizer.SummarizeWithImages(ctx, article.Title, content, imagePaths)
+	result, err := s.summarizer.SummarizeWithImages(ctx, article.Title, content, imagePaths, imageURLs)
 	if err != nil {
 		return "", "", err
 	}
@@ -94,13 +96,13 @@ func (s *SummarizerService) SummarizeWithImages(ctx context.Context, article *mo
 }
 
 // SummarizeWithImagesStream is the streaming variant.
-func (s *SummarizerService) SummarizeWithImagesStream(ctx context.Context, article *model.Article, imagePaths []string,
+func (s *SummarizerService) SummarizeWithImagesStream(ctx context.Context, article *model.Article, imagePaths, imageURLs []string,
 	onBriefDelta, onDetailedDelta func(string)) (brief, detailed string, err error) {
 	content := article.Content
 	if content == "" {
 		content = article.Title
 	}
-	result, err := s.summarizer.SummarizeWithImagesStream(ctx, article.Title, content, imagePaths, onBriefDelta, onDetailedDelta)
+	result, err := s.summarizer.SummarizeWithImagesStream(ctx, article.Title, content, imagePaths, imageURLs, onBriefDelta, onDetailedDelta)
 	if err != nil {
 		return "", "", err
 	}

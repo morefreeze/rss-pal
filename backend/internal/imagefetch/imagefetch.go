@@ -56,25 +56,33 @@ type Config struct {
 var localArticleImageRE = regexp.MustCompile(`^/api/articles/(\d+)/images/(\d+)\.([a-z0-9]+)$`)
 
 // FetchAndStore implements the spec contract. See package doc.
-func FetchAndStore(ctx context.Context, articleID int, urls []string, cfg Config) ([]string, error) {
+//
+// Returns two parallel slices: paths[i] is the on-disk JPEG for the URL
+// gotURLs[i]. Failed fetches are skipped from BOTH slices so the alignment is
+// preserved — callers can rely on paths[i] ↔ gotURLs[i] when threading the
+// original URL into downstream prompts (e.g. for the vision summary to insert
+// markdown image references).
+func FetchAndStore(ctx context.Context, articleID int, urls []string, cfg Config) (paths []string, gotURLs []string, err error) {
 	if cfg.Dir == "" {
-		return nil, errors.New("imagefetch: Config.Dir is required")
+		return nil, nil, errors.New("imagefetch: Config.Dir is required")
 	}
 	if cfg.MaxLongSide <= 0 {
 		cfg.MaxLongSide = 1024
 	}
 
 	client := httpx.NewClient(downloadTimeout)
-	out := make([]string, 0, len(urls))
+	paths = make([]string, 0, len(urls))
+	gotURLs = make([]string, 0, len(urls))
 	for idx, raw := range urls {
-		path, err := fetchOne(ctx, client, articleID, idx, raw, cfg)
-		if err != nil {
-			log.Printf("imagefetch: article %d idx %d %q: %v", articleID, idx, raw, err)
+		path, ferr := fetchOne(ctx, client, articleID, idx, raw, cfg)
+		if ferr != nil {
+			log.Printf("imagefetch: article %d idx %d %q: %v", articleID, idx, raw, ferr)
 			continue
 		}
-		out = append(out, path)
+		paths = append(paths, path)
+		gotURLs = append(gotURLs, raw)
 	}
-	return out, nil
+	return paths, gotURLs, nil
 }
 
 func fetchOne(ctx context.Context, client *http.Client, articleID, idx int, raw string, cfg Config) (string, error) {
