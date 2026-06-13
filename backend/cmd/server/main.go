@@ -38,6 +38,7 @@ func main() {
 	progressRepo := repository.NewProgressRepository(db)
 	statsRepo := repository.NewStatsRepository(db)
 	userRepo := repository.NewUserRepository(db)
+	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
 	templateRepo := repository.NewTemplateRepository(db)
 	shareRepo := repository.NewShareRepository(db)
 	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
@@ -58,7 +59,7 @@ func main() {
 
 	contentFetcher := rss.NewContentFetcher()
 
-	authHandler := api.NewAuthHandler(cfg, userRepo)
+	authHandler := api.NewAuthHandler(cfg, userRepo, refreshTokenRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(adminDB, backupRunner, cfg)
 	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, hiddenRepo, summarizerService, contentFetcher)
@@ -121,6 +122,10 @@ func main() {
 	router.POST("/api/auth/init", authHandler.InitAdmin)
 	router.POST("/api/auth/login", authHandler.Login)
 	router.POST("/api/auth/register", authHandler.Register)
+	// refresh / logout are also public (no JWT yet on refresh; logout is best-
+	// effort and shouldn't 401 if the access JWT is already expired).
+	router.POST("/api/auth/refresh", authHandler.Refresh)
+	router.POST("/api/auth/logout", authHandler.Logout)
 
 	// Public share route — no JWT, but PublicTokenMiddleware opens a tx and
 	// sets app.user_id to the share token's creator so RLS-protected reads

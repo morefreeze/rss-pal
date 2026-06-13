@@ -13,12 +13,13 @@ import (
 )
 
 type AuthHandler struct {
-	cfg     *config.Config
-	userRepo *repository.UserRepository
+	cfg          *config.Config
+	userRepo     *repository.UserRepository
+	refreshRepo  *repository.RefreshTokenRepository
 }
 
-func NewAuthHandler(cfg *config.Config, userRepo *repository.UserRepository) *AuthHandler {
-	return &AuthHandler{cfg: cfg, userRepo: userRepo}
+func NewAuthHandler(cfg *config.Config, userRepo *repository.UserRepository, refreshRepo *repository.RefreshTokenRepository) *AuthHandler {
+	return &AuthHandler{cfg: cfg, userRepo: userRepo, refreshRepo: refreshRepo}
 }
 
 type Claims struct {
@@ -32,6 +33,11 @@ const (
 	tokenTTL         = 7 * 24 * time.Hour
 	tokenRenewBefore = 3 * 24 * time.Hour
 	newTokenHeader   = "X-New-Token"
+	// refreshTokenTTL is the lifetime of a "记住此设备" refresh token. Long
+	// enough that an occasional-use device (every few weeks) never sees the
+	// login prompt; short enough that an unused old device eventually requires
+	// re-auth without the user explicitly revoking it.
+	refreshTokenTTL = 90 * 24 * time.Hour
 )
 
 func (h *AuthHandler) signToken(userID int, username string, isAdmin bool) (string, error) {
@@ -102,7 +108,81 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	resp := gin.H{"token": token, "user": user}
+	if req.Remember && h.refreshRepo != nil {
+		ua := c.GetHeader("User-Agent")
+		plaintext, _, rerr := h.refreshRepo.WithCtx(c).Issue(user.ID, refreshTokenTTL, ua)
+		if rerr != nil {
+			// Refresh-token failure shouldn't break login — fall back to the
+			// regular access-only response so the user can still sign in.
+			c.Header("X-Refresh-Issue-Error", "1")
+		} else {
+			resp["refresh_token"] = plaintext
+			resp["refresh_token_expires_at"] = time.Now().Add(refreshTokenTTL).UTC()
+		}
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// Refresh trades a valid refresh token for a fresh access JWT. Unauthenticated
+// endpoint — the refresh token itself is the credential. The refresh token
+// stays the same (no rotation in v1) for the rest of its TTL.
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	if h.refreshRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "refresh disabled"})
+		return
+	}
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing refresh_token"})
+		return
+	}
+
+	hash := repository.HashRefreshToken(req.RefreshToken)
+	row, err := h.refreshRepo.FindActiveByHash(hash)
+	if err == repository.ErrInvalidRefreshToken {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token invalid"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userRepo.FindByID(row.UserID)
+	if err != nil || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token invalid"})
+		return
+	}
+
+	token, err := h.generateToken(user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Best-effort: bump last_used_at. A failure here doesn't break the refresh.
+	_ = h.refreshRepo.TouchLastUsed(row.ID)
+
 	c.JSON(http.StatusOK, gin.H{"token": token, "user": user})
+}
+
+// Logout revokes the supplied refresh token (if any) so a stolen-laptop
+// scenario can be remediated. Stateless wrt the access JWT — the client is
+// expected to forget it locally; the JWT itself remains valid until its TTL
+// elapses since we have no JWT blacklist.
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	_ = c.ShouldBindJSON(&req) // body is optional
+	if req.RefreshToken != "" && h.refreshRepo != nil {
+		hash := repository.HashRefreshToken(req.RefreshToken)
+		_ = h.refreshRepo.RevokeByHash(hash)
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {

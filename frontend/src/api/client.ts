@@ -2,8 +2,11 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { clearAllFabCollapsed } from '../components/CollapsibleFab'
 
 // Per-request retry counter so the interceptor never retries more than once.
+// __refreshed marks the request as already replayed after a refresh-token
+// exchange so we never loop refresh→401→refresh.
 interface RetriableConfig extends InternalAxiosRequestConfig {
   __retryCount?: number
+  __refreshed?: boolean
 }
 
 export const api = axios.create({
@@ -13,6 +16,43 @@ export const api = axios.create({
   // interceptor retry on outright network failure.
   timeout: 10000,
 })
+
+// Single-flight refresh: if multiple in-flight requests all 401 at once, we
+// only POST /auth/refresh ONCE and share the resulting promise. Each request
+// then replays with the new access JWT.
+let refreshInFlight: Promise<string | null> | null = null
+
+async function tryRefreshAccessToken(): Promise<string | null> {
+  const refresh = localStorage.getItem('refresh_token')
+  if (!refresh) return null
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = (async () => {
+    try {
+      // Bypass the JWT interceptor (no token, plain axios call) — refresh
+      // never carries the (expired) Authorization header.
+      const res = await axios.post<{ token: string }>('/api/auth/refresh', { refresh_token: refresh })
+      if (res.data?.token) {
+        localStorage.setItem('token', res.data.token)
+        return res.data.token
+      }
+      return null
+    } catch {
+      return null
+    } finally {
+      refreshInFlight = null
+    }
+  })()
+  return refreshInFlight
+}
+
+// Clears all auth state. Called when both access JWT and refresh token have
+// been rejected (or no refresh token was issued in the first place).
+function clearAuthLocal() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('user')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('refresh_token_expires_at')
+}
 
 // JWT interceptor
 api.interceptors.request.use(config => {
@@ -59,11 +99,24 @@ api.interceptors.response.use(
       // does NOT mean the user's session is invalid, so don't blow
       // away localStorage or redirect to /login.
       const url = err.config?.url || ''
-      if (!url.startsWith('/bookmarklet/')) {
-        localStorage.removeItem('token')
-        localStorage.removeItem('user')
-        window.location.href = '/login'
+      if (url.startsWith('/bookmarklet/')) {
+        return Promise.reject(err)
       }
+      // Don't try to refresh on refresh itself, or on requests we've already
+      // replayed once after a refresh.
+      if (config && !config.__refreshed && !url.startsWith('/auth/refresh')) {
+        const fresh = await tryRefreshAccessToken()
+        if (fresh) {
+          config.__refreshed = true
+          // Inject the new token (request interceptor would also pick it up,
+          // but being explicit avoids races with header overrides).
+          config.headers = config.headers ?? {}
+          ;(config.headers as Record<string, string>).Authorization = `Bearer ${fresh}`
+          return api(config)
+        }
+      }
+      clearAuthLocal()
+      window.location.href = '/login'
     }
     return Promise.reject(err)
   }
@@ -77,10 +130,20 @@ export const initAdmin = (password: string) =>
     return res.data
   })
 
-export const login = (username: string, password: string) =>
-  api.post('/auth/login', { username, password }).then(res => {
+export const login = (username: string, password: string, remember = false) =>
+  api.post('/auth/login', { username, password, remember }).then(res => {
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('user', JSON.stringify(res.data.user))
+    if (res.data.refresh_token) {
+      localStorage.setItem('refresh_token', res.data.refresh_token)
+      if (res.data.refresh_token_expires_at) {
+        localStorage.setItem('refresh_token_expires_at', res.data.refresh_token_expires_at)
+      }
+    } else {
+      // User unchecked "remember" on re-login — drop any stale refresh token.
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('refresh_token_expires_at')
+    }
     return res.data
   })
 
@@ -101,8 +164,16 @@ export const changePassword = (oldPassword: string, newPassword: string) =>
   api.put('/auth/password', { old_password: oldPassword, new_password: newPassword }).then(res => res.data)
 
 export const logout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
+  // Best-effort server-side revoke so the refresh token can't be reused
+  // if it's been stolen. Fire-and-forget; never block the UX on the call.
+  const refresh = localStorage.getItem('refresh_token')
+  if (refresh) {
+    // Use a bare axios call so the request interceptor doesn't override
+    // the now-stale Authorization header; the access JWT isn't required
+    // for logout anyway.
+    void axios.post('/api/auth/logout', { refresh_token: refresh }).catch(() => {})
+  }
+  clearAuthLocal()
   // Clear session-local state so a new login gets a clean slate
   sessionStorage.removeItem('readArticles')
   sessionStorage.removeItem('articleNavList')

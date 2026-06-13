@@ -71,7 +71,7 @@ func newHTTPLeakFixture(t *testing.T) (*httpLeakFixture, func()) {
 		nil, // summarizer — unused by GetByID/Hide
 		nil, // contentFetcher — unused by GetByID/Hide
 	)
-	authHandler := api.NewAuthHandler(cfg, repository.NewUserRepository(appDB))
+	authHandler := api.NewAuthHandler(cfg, repository.NewUserRepository(appDB), repository.NewRefreshTokenRepository(appDB))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
