@@ -7,7 +7,18 @@ LOG_FILE="$PROJECT_DIR/scripts/deploy.log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 
-log "=== Auto deploy started ==="
+# Pick whichever compose CLI is installed: the legacy docker-compose binary or
+# the v2 plugin subcommand. OCI hosts (Ubuntu 22.04+) only ship the plugin.
+if command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE="docker-compose"
+elif docker compose version >/dev/null 2>&1; then
+  COMPOSE="docker compose"
+else
+  log "ERROR: neither 'docker-compose' nor 'docker compose' is available"
+  exit 1
+fi
+
+log "=== Auto deploy started (compose=$COMPOSE) ==="
 
 # 1. Save current commit for rollback
 PREV_COMMIT=$(git rev-parse HEAD)
@@ -27,12 +38,12 @@ git pull origin master
 
 # 3. Rebuild and restart
 log "Building and restarting containers..."
-if docker-compose up -d --build 2>&1 | tee -a "$LOG_FILE"; then
+if $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"; then
   # 4. Health check: wait and verify containers are healthy
   log "Build succeeded, running health check..."
   sleep 15
 
-  FAILED=$(docker-compose ps --filter "status=exited" -q 2>/dev/null | wc -l | tr -d ' ')
+  FAILED=$($COMPOSE ps --filter "status=exited" -q 2>/dev/null | wc -l | tr -d ' ')
   if [ "$FAILED" -gt 0 ]; then
     log "⚠️  $FAILED container(s) exited after build, rolling back..."
     ROLLBACK=true
@@ -49,7 +60,7 @@ if docker-compose up -d --build 2>&1 | tee -a "$LOG_FILE"; then
     fi
   fi
 else
-  log "⚠️  docker-compose build failed, rolling back..."
+  log "⚠️  compose build failed, rolling back..."
   ROLLBACK=true
 fi
 
@@ -57,7 +68,7 @@ fi
 if [ "${ROLLBACK:-false}" = "true" ]; then
   log "Rolling back to $PREV_COMMIT..."
   git checkout "$PREV_COMMIT"
-  docker-compose up -d --build 2>&1 | tee -a "$LOG_FILE"
+  $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"
   sleep 10
   log "Rollback complete. Staying on $(git rev-parse --short HEAD)"
 fi
