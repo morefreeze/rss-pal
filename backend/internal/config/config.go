@@ -53,7 +53,7 @@ type AIConfig struct {
 }
 
 // VisionConfig groups everything the vision-summary path needs.
-// Defaults are tuned for z.ai's glm-4v-plus, 6-image cap, 1024 longest-side,
+// Defaults are tuned for z.ai's glm-5v-turbo, 6-image cap, 1024 longest-side,
 // 4 MB base64 payload budget, 24h cache TTL.
 type VisionConfig struct {
 	Model           string        // chat completions "model" field for vision calls
@@ -99,7 +99,7 @@ func Load() *Config {
 		},
 		AI: AIConfig{
 			Vision: VisionConfig{
-				Model:           getEnv("AI_VISION_MODEL", "glm-4v-plus"),
+				Model:           getEnv("AI_VISION_MODEL", "glm-5v-turbo"),
 				MaxImages:       getEnvInt("AI_VISION_MAX_IMAGES", 6),
 				MaxLongSide:     getEnvInt("AI_VISION_MAX_LONG_SIDE", 1024),
 				PayloadBudgetMB: getEnvInt("AI_VISION_PAYLOAD_BUDGET_MB", 4),

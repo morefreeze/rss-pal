@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const DefaultModel = "glm-4.5"
+const DefaultModel = "glm-5.2"
 
 type Summarizer struct {
 	apiKey      string
