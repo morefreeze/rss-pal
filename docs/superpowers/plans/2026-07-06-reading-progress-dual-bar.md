@@ -13,6 +13,12 @@ entirely: content height changes only re-measure the current viewport layer;
 the historical layer changes only when the user scrolls beyond the saved
 high-water mark or explicitly marks read/unread.
 
+**Temporary disablement note:** Both top progress-bar layers are currently
+not mounted in `ArticlePage`. The app still records and restores reading
+progress; only the visual bar is hidden. `frontend/test/articleProgressBarDisabled.test.cjs`
+guards this temporary state, including removal of the old AI-marker/confetti
+visual path from the article page.
+
 **Tech Stack:** React 18, TypeScript, Vite, no additional runtime dependencies.
 
 ---
@@ -24,6 +30,8 @@ high-water mark or explicitly marks read/unread.
 - Modify `frontend/src/pages/ArticlePage.tsx`: maintain `currentScrollPosition` separately from `progress.scroll_position`; wire helper into scroll, restore, mark-read, mark-unread, and resize paths.
 - Create `frontend/src/components/ArticleProgressBar.tsx`: isolated progress-bar rendering for historical/current fills and the AI marker.
 - Modify `frontend/src/index.css`: add progress-track and two-fill classes.
+- Temporarily disable the `ArticleProgressBar` mount in `ArticlePage` and add
+  `frontend/test/articleProgressBarDisabled.test.cjs`.
 
 ## Task 1: Progress Math Test
 

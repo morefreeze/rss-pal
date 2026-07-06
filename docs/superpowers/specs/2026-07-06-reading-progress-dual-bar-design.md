@@ -4,6 +4,15 @@ Date: 2026-07-06
 Status: Approved for implementation approach
 Scope: `frontend/src/pages/ArticlePage.tsx`, `frontend/src/index.css`
 
+## Temporary Disablement
+
+After testing the dual-bar UI, both top progress-bar layers are temporarily
+disabled from the article page. Reading progress persistence, restoration,
+completion, and metadata text remain active. The disabled UI path is covered by
+a lightweight static test so the bars and their old AI-marker/confetti visual
+logic are not accidentally re-mounted while the root visual issue is being
+investigated.
+
 ## Problem
 
 When a user re-enters an article with saved reading progress, the fixed top
