@@ -37,6 +37,8 @@ Keep the backend API unchanged and split the state only in the article page:
   high-water mark used for persistence and read completion.
 - Add a local current-scroll state derived from `window.scrollY` and the
   article's scrollable height.
+- Render the top bar through a dedicated progress-bar component so the UI no
+  longer depends on legacy inline progress DOM.
 - Render the fixed progress bar with two overlapping fills:
   - historical fill width from the high-water mark
   - current fill width from the current-scroll state
@@ -58,9 +60,8 @@ change to frontend display behavior.
   so it matches where the user is now.
 - Mark-as-read sets both current and historical display to 100%.
 - Mark-as-unread resets both display values to 0%.
-- Content height changes may rescale the historical high-water mark as the
-  current code already does, but the current viewport bar is re-measured from
-  current pixels instead of copied from the historical value.
+- Content height changes never rescale the historical high-water mark. They
+  only re-measure the current viewport bar from current pixels.
 
 ## Styling
 
@@ -83,7 +84,8 @@ therefore be:
   - scroll beyond saved progress
   - mark read
   - mark unread
-  - content height changes after image/layout settling
+  - content height changes after image/layout settling without historical
+    progress jumping
 
 No backend migration or API test is required because the saved data contract is
 unchanged.

@@ -12,9 +12,36 @@ export interface ReadingProgressResult {
   isCompleted: boolean
 }
 
+export interface ProgressDisplayInput {
+  currentPosition: number
+  historicalHighWater: number
+}
+
+export interface ProgressDisplay {
+  currentPosition: number
+  historicalPosition: number
+  currentPercent: number
+  historicalPercent: number
+}
+
 export function clampProgress(value: number): number {
   if (!Number.isFinite(value)) return 0
   return Math.min(1, Math.max(0, value))
+}
+
+function progressPercent(value: number): number {
+  return Math.min(100, Math.round(clampProgress(value) * 100))
+}
+
+export function deriveProgressDisplay(input: ProgressDisplayInput): ProgressDisplay {
+  const currentPosition = clampProgress(input.currentPosition)
+  const historicalPosition = clampProgress(input.historicalHighWater)
+  return {
+    currentPosition,
+    historicalPosition,
+    currentPercent: progressPercent(currentPosition),
+    historicalPercent: progressPercent(historicalPosition),
+  }
 }
 
 export function computeViewportProgress(
@@ -42,16 +69,4 @@ export function evaluateReadingProgress(input: ReadingProgressInput): ReadingPro
     shouldPersist: currentPosition > savedHighWater,
     isCompleted,
   }
-}
-
-export function rescaleProgressForHeightChange(
-  progress: number,
-  oldContentHeight: number,
-  newContentHeight: number,
-  viewportHeight: number,
-): number {
-  const oldScrollable = oldContentHeight - viewportHeight
-  const newScrollable = newContentHeight - viewportHeight
-  if (oldScrollable < 1 || newScrollable < 1) return clampProgress(progress)
-  return clampProgress(progress * (oldScrollable / newScrollable))
 }

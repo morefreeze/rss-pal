@@ -1,7 +1,7 @@
 import {
   computeViewportProgress,
+  deriveProgressDisplay,
   evaluateReadingProgress,
-  rescaleProgressForHeightChange,
 } from '../src/utils/readingProgress'
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -57,10 +57,22 @@ const gated = evaluateReadingProgress({
 })
 assertEqual(gated.isCompleted, true, 'time gate completes')
 
-assertClose(
-  rescaleProgressForHeightChange(0.5, 2000, 3000, 1000),
-  0.25,
-  'height change rescales by scrollable denominator',
-)
+const displayBeforeLayoutShift = deriveProgressDisplay({
+  currentPosition: 0.25,
+  historicalHighWater: 0.6,
+})
+assertClose(displayBeforeLayoutShift.currentPosition, 0.25, 'display current before layout shift')
+assertClose(displayBeforeLayoutShift.historicalPosition, 0.6, 'display history before layout shift')
+assertEqual(displayBeforeLayoutShift.currentPercent, 25, 'display current percent')
+assertEqual(displayBeforeLayoutShift.historicalPercent, 60, 'display history percent')
+
+const displayAfterLayoutShift = deriveProgressDisplay({
+  currentPosition: 0.18,
+  historicalHighWater: 0.6,
+})
+assertClose(displayAfterLayoutShift.currentPosition, 0.18, 'display current after layout shift')
+assertClose(displayAfterLayoutShift.historicalPosition, 0.6, 'display history remains stable after layout shift')
+assertEqual(displayAfterLayoutShift.currentPercent, 18, 'display current percent after layout shift')
+assertEqual(displayAfterLayoutShift.historicalPercent, 60, 'display history percent after layout shift')
 
 console.log('readingProgress tests passed')

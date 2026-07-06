@@ -21,7 +21,6 @@ import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
 import BackFab from '../components/BackFab'
 import { ArticleDetailSkeleton } from '../components/ArticleDetailSkeleton'
-import ConfettiBurst from '../components/ConfettiBurst'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
@@ -29,11 +28,12 @@ import TagBar from '../components/TagBar'
 import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
+import ArticleProgressBar from '../components/ArticleProgressBar'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 import {
   computeViewportProgress,
+  deriveProgressDisplay,
   evaluateReadingProgress,
-  rescaleProgressForHeightChange,
 } from '../utils/readingProgress'
 
 // isPDFClipArticle returns true for clipped PDF articles, driving the
@@ -619,14 +619,9 @@ export default function ArticlePage() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
 
-  // Rescale maxScrollRef + displayed scroll_position when the article's
-  // scrollable height changes (lazy-loaded images settling, late markdown
-  // re-parse, etc.). Without this, an early handleScroll computed against a
-  // tiny scrollHeight locks in an inflated ratio; subsequent scrolls hit the
-  // monotonic guard until the user crosses that ratio in the new (much
-  // larger) layout — at which point progress visibly "jumps" (e.g. 20→50%
-  // on image-only articles). Rescaling preserves the pixel-position the
-  // user actually reached.
+  // Re-measure only the current viewport position when layout height changes.
+  // The historical high-water mark must remain stable; it advances only when
+  // the user actually scrolls beyond it.
   useEffect(() => {
     const el = contentRef.current
     if (!el) return
@@ -635,14 +630,7 @@ export default function ArticlePage() {
       const newHeight = el.scrollHeight
       if (newHeight <= 0 || newHeight === lastHeight) return
       const vh = window.innerHeight
-      const nextHighWater = rescaleProgressForHeightChange(maxScrollRef.current, lastHeight, newHeight, vh)
-      maxScrollRef.current = nextHighWater
       setCurrentScrollPosition(computeViewportProgress(window.scrollY, newHeight, vh))
-      setProgress((prev) =>
-        prev
-          ? { ...prev, scroll_position: nextHighWater }
-          : prev,
-      )
       lastHeight = newHeight
     })
     ro.observe(el)
@@ -997,8 +985,10 @@ export default function ArticlePage() {
     return new Date(dateStr).toLocaleString('zh-CN')
   }
 
-  const historicalProgressPercent = progress?.scroll_position ? Math.min(100, Math.round(progress.scroll_position * 100)) : 0
-  const currentProgressPercent = currentScrollPosition ? Math.min(100, Math.round(currentScrollPosition * 100)) : 0
+  const progressDisplay = deriveProgressDisplay({
+    currentPosition: currentScrollPosition,
+    historicalHighWater: progress?.scroll_position ?? maxScrollRef.current,
+  })
 
   if (loading && !article) return (
     <div className="card">
@@ -1045,27 +1035,13 @@ export default function ArticlePage() {
     <div ref={contentRef}>
       {/* Sticky progress bar at top of viewport — always visible so the
           AI marker shows up from the moment the article opens. */}
-      <div className="article-progress-track">
-        <div
-          className="article-progress-fill article-progress-fill-history"
-          style={{ width: `${historicalProgressPercent}%` }}
-        />
-        <div
-          className="article-progress-fill article-progress-fill-current"
-          style={{ width: `${currentProgressPercent}%` }}
-        />
-        {aiMarkerPos !== null && (
-          <div
-            className={`ai-marker${showCelebration ? ' pulse' : ''}`}
-            style={{ left: `${aiMarkerPos * 100}%` }}
-            title="AI 总结结束"
-            aria-label="AI summary end"
-          >
-            💡
-            {showCelebration && reader.confettiEnabled && <ConfettiBurst />}
-          </div>
-        )}
-      </div>
+      <ArticleProgressBar
+        historicalPercent={progressDisplay.historicalPercent}
+        currentPercent={progressDisplay.currentPercent}
+        aiMarkerPercent={aiMarkerPos === null ? null : Math.min(100, Math.max(0, aiMarkerPos * 100))}
+        showCelebration={showCelebration}
+        confettiEnabled={reader.confettiEnabled}
+      />
 
       {hidden && (
         <div
@@ -1123,7 +1099,7 @@ export default function ArticlePage() {
           <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
           <span>·</span>
           <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
-          {currentProgressPercent > 0 && <span>· 阅读进度 {currentProgressPercent}%</span>}
+          {progressDisplay.currentPercent > 0 && <span>· 阅读进度 {progressDisplay.currentPercent}%</span>}
         </div>
 
         <TagBar articleId={article.id} />

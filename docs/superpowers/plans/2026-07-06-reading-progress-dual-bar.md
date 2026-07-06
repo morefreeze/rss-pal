@@ -4,7 +4,14 @@
 
 **Goal:** Split article-page reading progress into a persisted historical high-water mark and a local current viewport position, then render them as light-blue and dark-blue progress layers.
 
-**Architecture:** Keep the backend progress API unchanged. Add a small pure helper for scroll-progress math, use it from `ArticlePage`, and keep persistence monotonic by writing only when current progress exceeds the high-water mark. Style the existing fixed top progress bar as two overlapping fills.
+**Architecture:** Keep the backend progress API unchanged. Add pure helpers for scroll-progress math and stable display derivation, use them from `ArticlePage`, and keep persistence monotonic by writing only when current progress exceeds the high-water mark. Render the top bar through a dedicated `ArticleProgressBar` component instead of inline legacy progress DOM.
+
+**Follow-up implementation note:** A later bug report showed the historical
+layer still jumped because the first implementation retained layout-height
+rescaling. The final implementation removes `rescaleProgressForHeightChange`
+entirely: content height changes only re-measure the current viewport layer;
+the historical layer changes only when the user scrolls beyond the saved
+high-water mark or explicitly marks read/unread.
 
 **Tech Stack:** React 18, TypeScript, Vite, no additional runtime dependencies.
 
@@ -12,9 +19,10 @@
 
 ## File Structure
 
-- Create `frontend/src/utils/readingProgress.ts`: pure progress helpers for clamping, viewport progress, high-water updates, and height-change rescaling.
+- Create `frontend/src/utils/readingProgress.ts`: pure progress helpers for clamping, viewport progress, high-water updates, and stable display derivation.
 - Create `frontend/test/readingProgress.test.ts`: no-dependency TypeScript assertions for the helper.
 - Modify `frontend/src/pages/ArticlePage.tsx`: maintain `currentScrollPosition` separately from `progress.scroll_position`; wire helper into scroll, restore, mark-read, mark-unread, and resize paths.
+- Create `frontend/src/components/ArticleProgressBar.tsx`: isolated progress-bar rendering for historical/current fills and the AI marker.
 - Modify `frontend/src/index.css`: add progress-track and two-fill classes.
 
 ## Task 1: Progress Math Test
