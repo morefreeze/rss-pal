@@ -30,6 +30,11 @@ import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
+import {
+  computeViewportProgress,
+  evaluateReadingProgress,
+  rescaleProgressForHeightChange,
+} from '../utils/readingProgress'
 
 // isPDFClipArticle returns true for clipped PDF articles, driving the
 // two-column reading layout. Anchored on the "## 第 N 页" page-section
@@ -54,6 +59,7 @@ export default function ArticlePage() {
   const handleBack = useCallback(() => navigate(entryPath), [navigate, entryPath])
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
+  const [currentScrollPosition, setCurrentScrollPosition] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
@@ -276,7 +282,9 @@ export default function ArticlePage() {
       // Clamp: historical rows may have >1 from before write-side clamping,
       // and without this they'd block all future scroll persistence (handleScroll
       // requires scrollPosition > maxScrollRef.current to write).
-      maxScrollRef.current = Math.min(1, data.progress?.scroll_position ?? 0)
+      const savedScrollPosition = Math.min(1, data.progress?.scroll_position ?? 0)
+      maxScrollRef.current = savedScrollPosition
+      setCurrentScrollPosition(savedScrollPosition)
       setFromBookmarklet(Boolean(data.from_bookmarklet))
       setHidden(Boolean(data.hidden))
       setLinkSetChildren(data.children ?? null)
@@ -299,6 +307,7 @@ export default function ArticlePage() {
 
   useEffect(() => {
     scrollRestoredForRef.current = null
+    setCurrentScrollPosition(0)
     loadArticle()
 
     return () => {
@@ -376,6 +385,7 @@ export default function ArticlePage() {
         return
       }
       window.scrollTo(0, max * saved)
+      setCurrentScrollPosition(saved)
       scrollRestoredForRef.current = article.id
       toast.info(`已恢复上次阅读位置（${Math.round(saved * 100)}%）`)
     }
@@ -556,33 +566,37 @@ export default function ArticlePage() {
     if (!article || !contentRef.current) return
 
     const scrollTop = window.scrollY
-    const scrollHeight = contentRef.current.scrollHeight - window.innerHeight
-    // Clamp to [0,1]: iOS rubber-band overscroll and mid-load scrollHeight
-    // shrinkage can otherwise push the ratio past 1, which then gets persisted
-    // and displays as >100% on reload.
-    const rawPosition = scrollHeight > 0 ? scrollTop / scrollHeight : 0
-    const scrollPosition = Math.min(1, Math.max(0, rawPosition))
+    const scrollPosition = computeViewportProgress(
+      scrollTop,
+      contentRef.current.scrollHeight,
+      window.innerHeight,
+    )
+    const nextReadingProgress = evaluateReadingProgress({
+      currentPosition: scrollPosition,
+      savedHighWater: maxScrollRef.current,
+      activeReadSeconds: activeReadSecondsRef.current,
+      readingMinutes: article.reading_minutes,
+    })
+    setCurrentScrollPosition(nextReadingProgress.currentPosition)
 
-    // Monotonic: only persist when we've read further than before.
-    if (scrollPosition <= maxScrollRef.current) return
-    maxScrollRef.current = scrollPosition
+    // Monotonic persistence: scrolling up moves only the current-position
+    // layer; the saved high-water mark and backend row stay unchanged.
+    if (!nextReadingProgress.shouldPersist) return
+    maxScrollRef.current = nextReadingProgress.highWaterPosition
 
-    const readMin = article?.reading_minutes || 1
-    const minSeconds = Math.min(15, Math.floor(readMin * 30))
     // Two completion paths:
     //   1. Slow read: > 0.9 scroll AND past the time gate (default anti-spam)
     //   2. Bottom-scroll: > 0.95 explicitly mark complete (user clearly
     //      reached the end intentionally; don't punish fast readers /
     //      re-visits of familiar content)
-    const isCompleted = scrollPosition > 0.95 ||
-      (scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds)
+    const isCompleted = nextReadingProgress.isCompleted
     const wasCompleted = progress?.is_completed
 
     setProgress(prev => prev
-      ? { ...prev, scroll_position: scrollPosition, is_completed: isCompleted }
-      : { id: 0, article_id: article.id, scroll_position: scrollPosition, last_read_at: new Date().toISOString(), is_completed: isCompleted })
+      ? { ...prev, scroll_position: nextReadingProgress.highWaterPosition, is_completed: isCompleted }
+      : { id: 0, article_id: article.id, scroll_position: nextReadingProgress.highWaterPosition, last_read_at: new Date().toISOString(), is_completed: isCompleted })
 
-    pendingProgressRef.current = { scrollPosition, isCompleted }
+    pendingProgressRef.current = { scrollPosition: nextReadingProgress.highWaterPosition, isCompleted }
 
     if (isCompleted && !wasCompleted) {
       try {
@@ -621,19 +635,12 @@ export default function ArticlePage() {
       const newHeight = el.scrollHeight
       if (newHeight <= 0 || newHeight === lastHeight) return
       const vh = window.innerHeight
-      const lastDenom = lastHeight - vh
-      const newDenom = newHeight - vh
-      // Skip when either side isn't really scrollable; nothing meaningful to
-      // rescale and we'd divide by zero / negative.
-      if (lastDenom < 1 || newDenom < 1) {
-        lastHeight = newHeight
-        return
-      }
-      const factor = lastDenom / newDenom
-      maxScrollRef.current = Math.min(1, Math.max(0, maxScrollRef.current * factor))
+      const nextHighWater = rescaleProgressForHeightChange(maxScrollRef.current, lastHeight, newHeight, vh)
+      maxScrollRef.current = nextHighWater
+      setCurrentScrollPosition(computeViewportProgress(window.scrollY, newHeight, vh))
       setProgress((prev) =>
         prev
-          ? { ...prev, scroll_position: Math.min(1, Math.max(0, prev.scroll_position * factor)) }
+          ? { ...prev, scroll_position: nextHighWater }
           : prev,
       )
       lastHeight = newHeight
@@ -895,6 +902,7 @@ export default function ArticlePage() {
     const newProgress = await updateProgress(article.id, 1.0, true)
     setProgress(newProgress)
     maxScrollRef.current = 1.0
+    setCurrentScrollPosition(1.0)
     try {
       const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
       if (!read.includes(article.id)) {
@@ -910,6 +918,7 @@ export default function ArticlePage() {
     await resetProgress(article.id)
     setProgress(null)
     maxScrollRef.current = 0
+    setCurrentScrollPosition(0)
     try {
       const read: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
       sessionStorage.setItem('readArticles', JSON.stringify(read.filter(id => id !== article.id)))
@@ -988,7 +997,8 @@ export default function ArticlePage() {
     return new Date(dateStr).toLocaleString('zh-CN')
   }
 
-  const progressPercent = progress?.scroll_position ? Math.min(100, Math.round(progress.scroll_position * 100)) : 0
+  const historicalProgressPercent = progress?.scroll_position ? Math.min(100, Math.round(progress.scroll_position * 100)) : 0
+  const currentProgressPercent = currentScrollPosition ? Math.min(100, Math.round(currentScrollPosition * 100)) : 0
 
   if (loading && !article) return (
     <div className="card">
@@ -1035,21 +1045,15 @@ export default function ArticlePage() {
     <div ref={contentRef}>
       {/* Sticky progress bar at top of viewport — always visible so the
           AI marker shows up from the moment the article opens. */}
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 4,
-        backgroundColor: '#e0e0e0',
-        zIndex: 1000,
-      }}>
-        <div style={{
-          height: '100%',
-          width: `${progressPercent}%`,
-          backgroundColor: '#0066cc',
-          transition: 'width 0.3s ease',
-        }} />
+      <div className="article-progress-track">
+        <div
+          className="article-progress-fill article-progress-fill-history"
+          style={{ width: `${historicalProgressPercent}%` }}
+        />
+        <div
+          className="article-progress-fill article-progress-fill-current"
+          style={{ width: `${currentProgressPercent}%` }}
+        />
         {aiMarkerPos !== null && (
           <div
             className={`ai-marker${showCelebration ? ' pulse' : ''}`}
@@ -1119,7 +1123,7 @@ export default function ArticlePage() {
           <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
           <span>·</span>
           <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
-          {progressPercent > 0 && <span>· 阅读进度 {progressPercent}%</span>}
+          {currentProgressPercent > 0 && <span>· 阅读进度 {currentProgressPercent}%</span>}
         </div>
 
         <TagBar articleId={article.id} />
