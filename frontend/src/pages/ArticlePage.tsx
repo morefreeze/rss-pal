@@ -32,6 +32,7 @@ import ArticleProgressBar from '../components/ArticleProgressBar'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 import {
   computeViewportProgress,
+  deriveHistoricalHighWater,
   deriveProgressDisplay,
   evaluateReadingProgress,
 } from '../utils/readingProgress'
@@ -488,7 +489,9 @@ export default function ArticlePage() {
     }
     try {
       const newProgress = await updateProgress(article.id, pending.scrollPosition, pending.isCompleted)
-      setProgress(newProgress)
+      const highWaterPosition = deriveHistoricalHighWater(newProgress.scroll_position, maxScrollRef.current)
+      maxScrollRef.current = highWaterPosition
+      setProgress({ ...newProgress, scroll_position: highWaterPosition })
     } catch {
       // network blip — let the next scroll re-schedule
     }
@@ -908,7 +911,7 @@ export default function ArticlePage() {
 
   const progressDisplay = deriveProgressDisplay({
     currentPosition: currentScrollPosition,
-    historicalHighWater: progress?.scroll_position ?? maxScrollRef.current,
+    historicalHighWater: deriveHistoricalHighWater(progress?.scroll_position, maxScrollRef.current),
   })
 
   if (loading && !article) return (

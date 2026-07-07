@@ -1,5 +1,6 @@
 import {
   computeViewportProgress,
+  deriveHistoricalHighWater,
   deriveProgressDisplay,
   evaluateReadingProgress,
 } from '../src/utils/readingProgress'
@@ -74,5 +75,16 @@ assertClose(displayAfterLayoutShift.currentPosition, 0.18, 'display current afte
 assertClose(displayAfterLayoutShift.historicalPosition, 0.6, 'display history remains stable after layout shift')
 assertEqual(displayAfterLayoutShift.currentPercent, 18, 'display current percent after layout shift')
 assertEqual(displayAfterLayoutShift.historicalPercent, 60, 'display history percent after layout shift')
+
+assertClose(
+  deriveHistoricalHighWater(0.6, 0.72),
+  0.72,
+  'display history does not regress behind local high-water',
+)
+assertClose(
+  deriveHistoricalHighWater(0.8, 0.72),
+  0.8,
+  'display history accepts newer server high-water',
+)
 
 console.log('readingProgress tests passed')
