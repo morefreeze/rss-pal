@@ -14,9 +14,10 @@ the historical layer changes only when the user scrolls beyond the saved
 high-water mark or explicitly marks read/unread.
 
 **Current implementation note:** The top progress UI has a light-blue
-historical high-water bar and a dark-blue current-position bar. The old
-AI-marker/confetti visual path is not mounted. `frontend/test/articleProgressBar.test.cjs`
-guards this state.
+historical high-water bar, a dark-blue current-position bar, and an AI summary
+marker bulb. The marker is measured independently and does not affect progress
+persistence. The old confetti visual path is not mounted.
+`frontend/test/articleProgressBar.test.cjs` guards this state.
 
 **Stale-response fix note:** The light-blue historical display derives from
 `max(serverProgress, localHighWaterRef)`. This keeps older in-flight save
@@ -32,9 +33,9 @@ response or optimistic state restores it.
 - Create `frontend/src/utils/readingProgress.ts`: pure progress helpers for clamping, viewport progress, high-water updates, and stable display derivation.
 - Create `frontend/test/readingProgress.test.ts`: no-dependency TypeScript assertions for the helper.
 - Modify `frontend/src/pages/ArticlePage.tsx`: maintain `currentScrollPosition` separately from `progress.scroll_position`; wire helper into scroll, restore, mark-read, mark-unread, and resize paths.
-- Create `frontend/src/components/ArticleProgressBar.tsx`: isolated progress-bar rendering for historical high-water and current viewport fills.
+- Create `frontend/src/components/ArticleProgressBar.tsx`: isolated progress-bar rendering for historical high-water/current viewport fills and the AI summary marker bulb.
 - Modify `frontend/src/index.css`: add progress-track, light-blue historical fill, and dark-blue current fill classes.
-- Add `frontend/test/articleProgressBar.test.cjs` to ensure the article page mounts both progress layers and does not restore the old AI-marker/confetti path.
+- Add `frontend/test/articleProgressBar.test.cjs` to ensure the article page mounts both progress layers, restores the AI summary marker bulb, and does not restore the old confetti path.
 
 ## Task 1: Progress Math Test
 
@@ -393,7 +394,7 @@ gh pr create --title "fix: show current and saved reading progress" --body "$(ca
 ## Summary
 - render light-blue saved high-water progress and dark-blue current viewport progress
 - keep progress persistence monotonic and server-backed
-- keep the old AI-marker/confetti visual path out of the top bar
+- render the AI summary marker bulb without restoring confetti
 
 ## Test Plan
 - npm run build
