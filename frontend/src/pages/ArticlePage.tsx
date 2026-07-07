@@ -21,7 +21,6 @@ import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
 import BackFab from '../components/BackFab'
 import { ArticleDetailSkeleton } from '../components/ArticleDetailSkeleton'
-import ConfettiBurst from '../components/ConfettiBurst'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
@@ -29,7 +28,14 @@ import TagBar from '../components/TagBar'
 import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
+import ArticleProgressBar from '../components/ArticleProgressBar'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
+import {
+  computeViewportProgress,
+  deriveHistoricalHighWater,
+  deriveProgressDisplay,
+  evaluateReadingProgress,
+} from '../utils/readingProgress'
 
 // isPDFClipArticle returns true for clipped PDF articles, driving the
 // two-column reading layout. Anchored on the "## 第 N 页" page-section
@@ -54,6 +60,7 @@ export default function ArticlePage() {
   const handleBack = useCallback(() => navigate(entryPath), [navigate, entryPath])
   const [article, setArticle] = useState<Article | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
+  const [currentScrollPosition, setCurrentScrollPosition] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
@@ -149,9 +156,6 @@ export default function ArticlePage() {
   // Progress (0..1) at which the AI summary card has just exited the viewport.
   // null while we can't measure (no summary content, layout not ready).
   const [aiMarkerPos, setAiMarkerPos] = useState<number | null>(null)
-  const [confettiFired, setConfettiFired] = useState(false)
-  const [showCelebration, setShowCelebration] = useState(false)
-  const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Template selector state
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
@@ -276,7 +280,9 @@ export default function ArticlePage() {
       // Clamp: historical rows may have >1 from before write-side clamping,
       // and without this they'd block all future scroll persistence (handleScroll
       // requires scrollPosition > maxScrollRef.current to write).
-      maxScrollRef.current = Math.min(1, data.progress?.scroll_position ?? 0)
+      const savedScrollPosition = Math.min(1, data.progress?.scroll_position ?? 0)
+      maxScrollRef.current = savedScrollPosition
+      setCurrentScrollPosition(savedScrollPosition)
       setFromBookmarklet(Boolean(data.from_bookmarklet))
       setHidden(Boolean(data.hidden))
       setLinkSetChildren(data.children ?? null)
@@ -299,6 +305,7 @@ export default function ArticlePage() {
 
   useEffect(() => {
     scrollRestoredForRef.current = null
+    setCurrentScrollPosition(0)
     loadArticle()
 
     return () => {
@@ -376,6 +383,7 @@ export default function ArticlePage() {
         return
       }
       window.scrollTo(0, max * saved)
+      setCurrentScrollPosition(saved)
       scrollRestoredForRef.current = article.id
       toast.info(`已恢复上次阅读位置（${Math.round(saved * 100)}%）`)
     }
@@ -485,7 +493,9 @@ export default function ArticlePage() {
     }
     try {
       const newProgress = await updateProgress(article.id, pending.scrollPosition, pending.isCompleted)
-      setProgress(newProgress)
+      const highWaterPosition = deriveHistoricalHighWater(newProgress.scroll_position, maxScrollRef.current)
+      maxScrollRef.current = highWaterPosition
+      setProgress({ ...newProgress, scroll_position: highWaterPosition })
     } catch {
       // network blip — let the next scroll re-schedule
     }
@@ -556,33 +566,37 @@ export default function ArticlePage() {
     if (!article || !contentRef.current) return
 
     const scrollTop = window.scrollY
-    const scrollHeight = contentRef.current.scrollHeight - window.innerHeight
-    // Clamp to [0,1]: iOS rubber-band overscroll and mid-load scrollHeight
-    // shrinkage can otherwise push the ratio past 1, which then gets persisted
-    // and displays as >100% on reload.
-    const rawPosition = scrollHeight > 0 ? scrollTop / scrollHeight : 0
-    const scrollPosition = Math.min(1, Math.max(0, rawPosition))
+    const scrollPosition = computeViewportProgress(
+      scrollTop,
+      contentRef.current.scrollHeight,
+      window.innerHeight,
+    )
+    const nextReadingProgress = evaluateReadingProgress({
+      currentPosition: scrollPosition,
+      savedHighWater: maxScrollRef.current,
+      activeReadSeconds: activeReadSecondsRef.current,
+      readingMinutes: article.reading_minutes,
+    })
+    setCurrentScrollPosition(nextReadingProgress.currentPosition)
 
-    // Monotonic: only persist when we've read further than before.
-    if (scrollPosition <= maxScrollRef.current) return
-    maxScrollRef.current = scrollPosition
+    // Monotonic persistence: scrolling up moves only the current-position
+    // layer; the saved high-water mark and backend row stay unchanged.
+    if (!nextReadingProgress.shouldPersist) return
+    maxScrollRef.current = nextReadingProgress.highWaterPosition
 
-    const readMin = article?.reading_minutes || 1
-    const minSeconds = Math.min(15, Math.floor(readMin * 30))
     // Two completion paths:
     //   1. Slow read: > 0.9 scroll AND past the time gate (default anti-spam)
     //   2. Bottom-scroll: > 0.95 explicitly mark complete (user clearly
     //      reached the end intentionally; don't punish fast readers /
     //      re-visits of familiar content)
-    const isCompleted = scrollPosition > 0.95 ||
-      (scrollPosition > 0.9 && activeReadSecondsRef.current >= minSeconds)
+    const isCompleted = nextReadingProgress.isCompleted
     const wasCompleted = progress?.is_completed
 
     setProgress(prev => prev
-      ? { ...prev, scroll_position: scrollPosition, is_completed: isCompleted }
-      : { id: 0, article_id: article.id, scroll_position: scrollPosition, last_read_at: new Date().toISOString(), is_completed: isCompleted })
+      ? { ...prev, scroll_position: nextReadingProgress.highWaterPosition, is_completed: isCompleted }
+      : { id: 0, article_id: article.id, scroll_position: nextReadingProgress.highWaterPosition, last_read_at: new Date().toISOString(), is_completed: isCompleted })
 
-    pendingProgressRef.current = { scrollPosition, isCompleted }
+    pendingProgressRef.current = { scrollPosition: nextReadingProgress.highWaterPosition, isCompleted }
 
     if (isCompleted && !wasCompleted) {
       try {
@@ -605,14 +619,9 @@ export default function ArticlePage() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
 
-  // Rescale maxScrollRef + displayed scroll_position when the article's
-  // scrollable height changes (lazy-loaded images settling, late markdown
-  // re-parse, etc.). Without this, an early handleScroll computed against a
-  // tiny scrollHeight locks in an inflated ratio; subsequent scrolls hit the
-  // monotonic guard until the user crosses that ratio in the new (much
-  // larger) layout — at which point progress visibly "jumps" (e.g. 20→50%
-  // on image-only articles). Rescaling preserves the pixel-position the
-  // user actually reached.
+  // Re-measure only the current viewport position when layout height changes.
+  // The historical high-water mark must remain stable; it advances only when
+  // the user actually scrolls beyond it.
   useEffect(() => {
     const el = contentRef.current
     if (!el) return
@@ -621,40 +630,16 @@ export default function ArticlePage() {
       const newHeight = el.scrollHeight
       if (newHeight <= 0 || newHeight === lastHeight) return
       const vh = window.innerHeight
-      const lastDenom = lastHeight - vh
-      const newDenom = newHeight - vh
-      // Skip when either side isn't really scrollable; nothing meaningful to
-      // rescale and we'd divide by zero / negative.
-      if (lastDenom < 1 || newDenom < 1) {
-        lastHeight = newHeight
-        return
-      }
-      const factor = lastDenom / newDenom
-      maxScrollRef.current = Math.min(1, Math.max(0, maxScrollRef.current * factor))
-      setProgress((prev) =>
-        prev
-          ? { ...prev, scroll_position: Math.min(1, Math.max(0, prev.scroll_position * factor)) }
-          : prev,
-      )
+      setCurrentScrollPosition(computeViewportProgress(window.scrollY, newHeight, vh))
       lastHeight = newHeight
     })
     ro.observe(el)
     return () => ro.disconnect()
   }, [article?.id])
 
-  // Reset confetti state when navigating between articles.
-  useEffect(() => {
-    setConfettiFired(false)
-    setShowCelebration(false)
-    if (celebrationTimerRef.current) {
-      clearTimeout(celebrationTimerRef.current)
-      celebrationTimerRef.current = null
-    }
-  }, [id])
-
   // Measure where the AI summary card ends, expressed as a 0..1 fraction of
-  // total scrollable height. Re-measure after the summary or content changes,
-  // and on a short delay to catch late-loading images/markdown.
+  // total scrollable height. This only drives the bulb marker; it does not
+  // participate in reading-progress persistence or current-progress display.
   useEffect(() => {
     const hasSummary = !!(article?.summary_brief || article?.summary_detailed)
     if (!hasSummary || streamPhase !== 'idle') {
@@ -682,37 +667,6 @@ export default function ArticlePage() {
       window.removeEventListener('resize', recompute)
     }
   }, [article?.id, article?.summary_brief, article?.summary_detailed, article?.content, streamPhase])
-
-  // Fire confetti the first time the user scrolls past the AI marker. If the
-  // page is already past the marker on mount (scroll-restored), mark as fired
-  // silently — no retroactive celebration.
-  useEffect(() => {
-    if (aiMarkerPos === null || confettiFired) return
-    const content = contentRef.current
-    if (!content) return
-    const maxScroll = content.scrollHeight - window.innerHeight
-    if (maxScroll <= 0) return
-    if (window.scrollY / maxScroll >= aiMarkerPos) {
-      setConfettiFired(true)
-      return
-    }
-    const onScroll = () => {
-      const m = contentRef.current
-      if (!m) return
-      const ms = m.scrollHeight - window.innerHeight
-      if (ms <= 0) return
-      if (window.scrollY / ms >= aiMarkerPos) {
-        setConfettiFired(true)
-        if (reader.confettiEnabled) {
-          setShowCelebration(true)
-          if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current)
-          celebrationTimerRef.current = setTimeout(() => setShowCelebration(false), 1900)
-        }
-      }
-    }
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [aiMarkerPos, confettiFired, reader.confettiEnabled])
 
   useEffect(() => {
     const onVisibility = () => { if (document.hidden) flushProgress() }
@@ -895,6 +849,7 @@ export default function ArticlePage() {
     const newProgress = await updateProgress(article.id, 1.0, true)
     setProgress(newProgress)
     maxScrollRef.current = 1.0
+    setCurrentScrollPosition(1.0)
     try {
       const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
       if (!read.includes(article.id)) {
@@ -910,6 +865,7 @@ export default function ArticlePage() {
     await resetProgress(article.id)
     setProgress(null)
     maxScrollRef.current = 0
+    setCurrentScrollPosition(0)
     try {
       const read: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
       sessionStorage.setItem('readArticles', JSON.stringify(read.filter(id => id !== article.id)))
@@ -988,7 +944,10 @@ export default function ArticlePage() {
     return new Date(dateStr).toLocaleString('zh-CN')
   }
 
-  const progressPercent = progress?.scroll_position ? Math.min(100, Math.round(progress.scroll_position * 100)) : 0
+  const progressDisplay = deriveProgressDisplay({
+    currentPosition: currentScrollPosition,
+    historicalHighWater: deriveHistoricalHighWater(progress?.scroll_position, maxScrollRef.current),
+  })
 
   if (loading && !article) return (
     <div className="card">
@@ -1033,35 +992,11 @@ export default function ArticlePage() {
 
   return (
     <div ref={contentRef}>
-      {/* Sticky progress bar at top of viewport — always visible so the
-          AI marker shows up from the moment the article opens. */}
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 4,
-        backgroundColor: '#e0e0e0',
-        zIndex: 1000,
-      }}>
-        <div style={{
-          height: '100%',
-          width: `${progressPercent}%`,
-          backgroundColor: '#0066cc',
-          transition: 'width 0.3s ease',
-        }} />
-        {aiMarkerPos !== null && (
-          <div
-            className={`ai-marker${showCelebration ? ' pulse' : ''}`}
-            style={{ left: `${aiMarkerPos * 100}%` }}
-            title="AI 总结结束"
-            aria-label="AI summary end"
-          >
-            💡
-            {showCelebration && reader.confettiEnabled && <ConfettiBurst />}
-          </div>
-        )}
-      </div>
+      <ArticleProgressBar
+        historicalPercent={progressDisplay.historicalPercent}
+        currentPercent={progressDisplay.currentPercent}
+        aiMarkerPercent={aiMarkerPos === null ? null : Math.min(100, Math.max(0, aiMarkerPos * 100))}
+      />
 
       {hidden && (
         <div
@@ -1119,7 +1054,7 @@ export default function ArticlePage() {
           <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
           <span>·</span>
           <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
-          {progressPercent > 0 && <span>· 阅读进度 {progressPercent}%</span>}
+          {progressDisplay.currentPercent > 0 && <span>· 阅读进度 {progressDisplay.currentPercent}%</span>}
         </div>
 
         <TagBar articleId={article.id} />

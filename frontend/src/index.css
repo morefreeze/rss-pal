@@ -491,6 +491,34 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
   transition: width 0.3s ease;
 }
 
+.article-progress-track {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--border);
+  z-index: 1000;
+}
+
+.article-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.article-progress-fill-history {
+  z-index: 1;
+  background: #93c5fd;
+}
+
+.article-progress-fill-current {
+  z-index: 2;
+  background: #0066cc;
+}
+
 /* === Markdown === */
 .markdown-body { line-height: 1.75; font-size: 15px; color: var(--fg); }
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
@@ -681,6 +709,7 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
 /* === AI marker + confetti === */
 .ai-marker {
   position: absolute;
+  z-index: 3;
   top: 4px;
   font-size: 14px;
   line-height: 1;
