@@ -1,10 +1,10 @@
-# Reading Progress Dual Bar Implementation Plan
+# Reading Progress Historical Bar Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Split article-page reading progress into a persisted historical high-water mark and a local current viewport position, then render them as light-blue and dark-blue progress layers.
+**Goal:** Render a single light-blue article progress bar that represents only the persisted historical high-water reading position.
 
-**Architecture:** Keep the backend progress API unchanged. Add pure helpers for scroll-progress math and stable display derivation, use them from `ArticlePage`, and keep persistence monotonic by writing only when current progress exceeds the high-water mark. Render the top bar through a dedicated `ArticleProgressBar` component instead of inline legacy progress DOM.
+**Architecture:** Keep the backend progress API unchanged. Use pure helpers for scroll-progress math and stable display derivation, use them from `ArticlePage`, and keep persistence monotonic by writing only when current progress exceeds the high-water mark. Render the top bar through a dedicated `ArticleProgressBar` component that only accepts the saved historical percent.
 
 **Follow-up implementation note:** A later bug report showed the historical
 layer still jumped because the first implementation retained layout-height
@@ -13,11 +13,10 @@ entirely: content height changes only re-measure the current viewport layer;
 the historical layer changes only when the user scrolls beyond the saved
 high-water mark or explicitly marks read/unread.
 
-**Temporary disablement note:** Both top progress-bar layers are currently
-not mounted in `ArticlePage`. The app still records and restores reading
-progress; only the visual bar is hidden. `frontend/test/articleProgressBarDisabled.test.cjs`
-guards this temporary state, including removal of the old AI-marker/confetti
-visual path from the article page.
+**Current implementation note:** The top progress UI is a single light-blue
+historical high-water bar. The dark-blue current-position layer and old
+AI-marker/confetti visual path are not mounted. `frontend/test/articleHistoricalProgressBar.test.cjs`
+guards this state.
 
 **Tech Stack:** React 18, TypeScript, Vite, no additional runtime dependencies.
 
@@ -28,10 +27,9 @@ visual path from the article page.
 - Create `frontend/src/utils/readingProgress.ts`: pure progress helpers for clamping, viewport progress, high-water updates, and stable display derivation.
 - Create `frontend/test/readingProgress.test.ts`: no-dependency TypeScript assertions for the helper.
 - Modify `frontend/src/pages/ArticlePage.tsx`: maintain `currentScrollPosition` separately from `progress.scroll_position`; wire helper into scroll, restore, mark-read, mark-unread, and resize paths.
-- Create `frontend/src/components/ArticleProgressBar.tsx`: isolated progress-bar rendering for historical/current fills and the AI marker.
-- Modify `frontend/src/index.css`: add progress-track and two-fill classes.
-- Temporarily disable the `ArticleProgressBar` mount in `ArticlePage` and add
-  `frontend/test/articleProgressBarDisabled.test.cjs`.
+- Create `frontend/src/components/ArticleProgressBar.tsx`: isolated progress-bar rendering for the historical high-water fill.
+- Modify `frontend/src/index.css`: add progress-track and single light-blue historical fill classes.
+- Add `frontend/test/articleHistoricalProgressBar.test.cjs` to ensure the article page mounts only the historical bar and does not pass current viewport progress into it.
 
 ## Task 1: Progress Math Test
 
@@ -283,41 +281,34 @@ In mark-unread:
 setCurrentScrollPosition(0)
 ```
 
-In the ResizeObserver callback, replace the manual rescale factor with:
+In the ResizeObserver callback, re-measure only the local current viewport
+metadata. Do not rescale `maxScrollRef.current` or `progress.scroll_position`:
 
 ```ts
-const nextHighWater = rescaleProgressForHeightChange(maxScrollRef.current, lastHeight, newHeight, vh)
-maxScrollRef.current = nextHighWater
 setCurrentScrollPosition(computeViewportProgress(window.scrollY, newHeight, vh))
-setProgress((prev) => prev ? { ...prev, scroll_position: nextHighWater } : prev)
 ```
 
-- [ ] **Step 5: Render two progress layers**
+- [ ] **Step 5: Render the historical progress layer**
 
-Replace the inline fixed progress bar with a classed track:
+Render the fixed progress bar through `ArticleProgressBar`:
 
 ```tsx
-<div className="article-progress-track">
-  <div
-    className="article-progress-fill article-progress-fill-history"
-    style={{ width: `${historicalProgressPercent}%` }}
-  />
-  <div
-    className="article-progress-fill article-progress-fill-current"
-    style={{ width: `${currentProgressPercent}%` }}
-  />
-  {aiMarkerPos !== null && (...)}
-</div>
+<ArticleProgressBar
+  historicalPercent={progressDisplay.historicalPercent}
+/>
 ```
 
-Use:
+Use `deriveProgressDisplay` so the top bar reads only from the saved
+high-water mark:
 
 ```ts
-const historicalProgressPercent = progress?.scroll_position ? Math.min(100, Math.round(progress.scroll_position * 100)) : 0
-const currentProgressPercent = currentScrollPosition ? Math.min(100, Math.round(currentScrollPosition * 100)) : 0
+const progressDisplay = deriveProgressDisplay({
+  currentPosition: currentScrollPosition,
+  historicalHighWater: progress?.scroll_position ?? maxScrollRef.current,
+})
 ```
 
-The metadata text should read `currentProgressPercent`.
+The metadata text can keep using `progressDisplay.currentPercent`.
 
 - [ ] **Step 6: Add CSS classes**
 
@@ -343,17 +334,9 @@ Add to `frontend/src/index.css`:
 }
 
 .article-progress-fill-history {
-  z-index: 1;
   background: #93c5fd;
 }
-
-.article-progress-fill-current {
-  z-index: 2;
-  background: #0066cc;
-}
 ```
-
-Update `.ai-marker` with `z-index: 3;`.
 
 - [ ] **Step 7: Run focused test and full build**
 
@@ -401,11 +384,11 @@ Run:
 
 ```bash
 git push -u origin feat/reading-progress-dual-bar
-gh pr create --title "fix: show current and saved reading progress" --body "$(cat <<'EOF'
+gh pr create --title "fix: show saved reading progress" --body "$(cat <<'EOF'
 ## Summary
-- split article progress display into historical high-water and current viewport progress
-- render light-blue saved progress behind dark-blue current progress
-- keep progress persistence monotonic with focused helper coverage
+- render a single light-blue top bar for saved historical high-water progress
+- keep progress persistence monotonic and server-backed
+- remove the dark-blue current progress layer from the top bar
 
 ## Test Plan
 - npm run build

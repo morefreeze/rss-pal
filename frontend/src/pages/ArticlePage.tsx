@@ -28,6 +28,7 @@ import TagBar from '../components/TagBar'
 import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
+import ArticleProgressBar from '../components/ArticleProgressBar'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 import {
   computeViewportProgress,
@@ -953,6 +954,10 @@ export default function ArticlePage() {
 
   return (
     <div ref={contentRef}>
+      <ArticleProgressBar
+        historicalPercent={progressDisplay.historicalPercent}
+      />
+
       {hidden && (
         <div
           className="p-3 rounded-md mb-4 text-sm flex items-center gap-3"
