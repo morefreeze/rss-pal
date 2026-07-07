@@ -510,7 +510,13 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 }
 
 .article-progress-fill-history {
+  z-index: 1;
   background: #93c5fd;
+}
+
+.article-progress-fill-current {
+  z-index: 2;
+  background: #0066cc;
 }
 
 /* === Markdown === */
