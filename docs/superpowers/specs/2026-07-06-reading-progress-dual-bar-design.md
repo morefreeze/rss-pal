@@ -66,6 +66,9 @@ change to frontend display behavior.
 - If the current fraction is greater than the high-water mark, update
   `maxScrollRef.current`, local `progress`, and schedule the existing progress
   flush as today.
+- The historical display uses the maximum of the latest server-backed progress
+  and the local high-water ref. This prevents an older in-flight save response
+  from briefly pulling the light-blue bar backward.
 - If the current fraction is less than or equal to the high-water mark, update
   only the current-position layer; do not persist a lower progress.
 - The metadata text "reading progress" should use the current viewport percent

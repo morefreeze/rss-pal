@@ -44,6 +44,13 @@ export function deriveProgressDisplay(input: ProgressDisplayInput): ProgressDisp
   }
 }
 
+export function deriveHistoricalHighWater(
+  persistedHighWater: number | null | undefined,
+  localHighWater: number,
+): number {
+  return Math.max(clampProgress(persistedHighWater ?? 0), clampProgress(localHighWater))
+}
+
 export function computeViewportProgress(
   scrollTop: number,
   contentScrollHeight: number,

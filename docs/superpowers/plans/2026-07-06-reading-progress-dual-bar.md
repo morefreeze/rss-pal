@@ -18,6 +18,11 @@ historical high-water bar and a dark-blue current-position bar. The old
 AI-marker/confetti visual path is not mounted. `frontend/test/articleProgressBar.test.cjs`
 guards this state.
 
+**Stale-response fix note:** The light-blue historical display derives from
+`max(serverProgress, localHighWaterRef)`. This keeps older in-flight save
+responses from briefly shrinking the visual high-water mark before a newer
+response or optimistic state restores it.
+
 **Tech Stack:** React 18, TypeScript, Vite, no additional runtime dependencies.
 
 ---
