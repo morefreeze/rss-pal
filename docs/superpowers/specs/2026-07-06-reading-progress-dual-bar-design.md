@@ -1,4 +1,4 @@
-# Article Reading Progress Historical Bar
+# Article Reading Progress Dual Bar
 
 Date: 2026-07-06
 Status: Approved for implementation approach
@@ -6,11 +6,13 @@ Scope: `frontend/src/pages/ArticlePage.tsx`, `frontend/src/index.css`
 
 ## Current Scope
 
-After testing the dual-bar UI, the current implementation uses only one top
-progress layer: a light-blue historical high-water bar. It represents the
-farthest reading progress saved for the article on the server. The dark-blue
-current-position layer, AI marker, and confetti path are intentionally not
-mounted.
+The current implementation uses two top progress layers:
+
+- Light blue: the farthest reading progress saved for the article on the
+  server.
+- Dark blue: the user's current viewport progress in this article view.
+
+The AI marker and confetti path are intentionally not mounted.
 
 ## Problem
 
@@ -28,14 +30,16 @@ current viewport position is different from the saved farthest position.
 
 ## Goal
 
-Show one visual meaning in the top progress bar:
+Show two visual meanings in the top progress bar:
 
 - Light blue: historical farthest reading progress saved for this article on
   the server.
+- Dark blue: current viewport reading progress for this article view.
 
 When the user scrolls beyond the historical farthest point, the light-blue bar
 advances and the existing progress API persists the new high-water mark. When
-the user scrolls above the saved point, the top bar stays at the farthest point.
+the user scrolls above the saved point, the light-blue bar stays at the farthest
+point while the dark-blue bar follows the actual scroll position.
 
 ## Chosen Approach
 
@@ -43,37 +47,39 @@ Keep the backend API unchanged and split the state only in the article page:
 
 - `progress.scroll_position` and `maxScrollRef.current` remain the saved
   high-water mark used for persistence and read completion.
-- A local current-scroll state can still feed metadata text, but it must not
-  drive the top progress bar.
+- A local current-scroll state derived from `window.scrollY` drives the dark
+  blue current-position layer and metadata text.
 - Render the top bar through a dedicated progress-bar component so the UI no
   longer depends on legacy inline progress DOM.
-- Render the fixed progress bar with one fill: historical width from the
-  high-water mark.
+- Render the fixed progress bar with two fills:
+  - historical width from the server-backed high-water mark
+  - current width from the current viewport progress
 
 This preserves the existing monotonic persistence contract and limits the
 change to frontend display behavior.
 
 ## Behavior Details
 
-- On article load, initialize the top bar from saved server progress.
+- On article load, initialize both layers from saved server progress until the
+  restored scroll position is measured.
 - On every scroll, compute the current viewport fraction from current pixels.
 - If the current fraction is greater than the high-water mark, update
   `maxScrollRef.current`, local `progress`, and schedule the existing progress
   flush as today.
-- If the current fraction is less than or equal to the high-water mark, do not
-  move the top bar and do not persist a lower progress.
+- If the current fraction is less than or equal to the high-water mark, update
+  only the current-position layer; do not persist a lower progress.
 - The metadata text "reading progress" should use the current viewport percent
   so it matches where the user is now.
-- Mark-as-read sets the saved high-water display to 100%.
-- Mark-as-unread resets the saved high-water display to 0%.
+- Mark-as-read sets both display layers to 100%.
+- Mark-as-unread resets both display layers to 0%.
 - Content height changes never rescale the historical high-water mark. They
-  only re-measure local current viewport metadata from current pixels.
+  only re-measure local current viewport display from current pixels.
 
 ## Styling
 
-Use the existing fixed top 4px progress track with a single light-blue
-historical layer. The removed dark-blue current layer and AI summary marker must
-not be rendered by `ArticleProgressBar`.
+Use the existing fixed top 4px progress track with a light-blue historical layer
+and a dark-blue current-position layer above it. The AI summary marker must not
+be rendered by `ArticleProgressBar`.
 
 ## Testing And Verification
 
@@ -82,7 +88,7 @@ therefore be:
 
 - type/build check with `npm run build` in `frontend`
 - static regression check with
-  `node frontend/test/articleHistoricalProgressBar.test.cjs`
+  `node frontend/test/articleProgressBar.test.cjs`
 - code-path review against these cases:
   - reload article with saved progress and scroll upward
   - scroll beyond saved progress

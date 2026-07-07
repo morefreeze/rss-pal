@@ -20,22 +20,22 @@ function assertExcludes(source, pattern, message) {
 assertIncludes(
   articlePage,
   "import ArticleProgressBar from '../components/ArticleProgressBar'",
-  'ArticlePage should import the historical progress bar',
+  'ArticlePage should import the progress bar',
 )
 assertIncludes(
   articlePage,
   '<ArticleProgressBar',
-  'ArticlePage should render the historical progress bar',
+  'ArticlePage should render the progress bar',
 )
 assertIncludes(
   articlePage,
   'historicalPercent={progressDisplay.historicalPercent}',
-  'ArticlePage should drive the top bar from saved high-water progress',
+  'ArticlePage should drive the light-blue bar from saved high-water progress',
 )
-assertExcludes(
+assertIncludes(
   articlePage,
-  'currentPercent=',
-  'ArticlePage should not pass current viewport progress into the top bar',
+  'currentPercent={progressDisplay.currentPercent}',
+  'ArticlePage should drive the dark-blue bar from current viewport progress',
 )
 assertExcludes(
   articlePage,
@@ -46,33 +46,38 @@ assertExcludes(
 assertIncludes(
   progressBar,
   'historicalPercent: number',
-  'ArticleProgressBar should expose a single historical progress prop',
+  'ArticleProgressBar should expose a historical progress prop',
+)
+assertIncludes(
+  progressBar,
+  'currentPercent: number',
+  'ArticleProgressBar should expose a current progress prop',
 )
 assertIncludes(
   progressBar,
   'article-progress-fill-history',
   'ArticleProgressBar should render the light-blue historical fill',
 )
-assertExcludes(
-  progressBar,
-  'currentPercent',
-  'ArticleProgressBar should not render a current-position layer',
-)
-assertExcludes(
+assertIncludes(
   progressBar,
   'article-progress-fill-current',
-  'ArticleProgressBar should not render the dark-blue current-position fill',
+  'ArticleProgressBar should render the dark-blue current-position fill',
 )
 assertExcludes(
   progressBar,
   'ConfettiBurst',
-  'ArticleProgressBar should not include confetti while it is a historical-only bar',
+  'ArticleProgressBar should not include confetti',
 )
 
-assertExcludes(
+assertIncludes(
+  styles,
+  '.article-progress-fill-history',
+  'Progress styles should define the light-blue historical layer',
+)
+assertIncludes(
   styles,
   '.article-progress-fill-current',
-  'Progress styles should not define the removed dark-blue current layer',
+  'Progress styles should define the dark-blue current layer',
 )
 
-console.log('articleHistoricalProgressBar test passed')
+console.log('articleProgressBar test passed')

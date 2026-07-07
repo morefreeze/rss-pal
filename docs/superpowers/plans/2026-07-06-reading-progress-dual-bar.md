@@ -1,10 +1,10 @@
-# Reading Progress Historical Bar Implementation Plan
+# Reading Progress Dual Bar Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Render a single light-blue article progress bar that represents only the persisted historical high-water reading position.
+**Goal:** Render article progress as a light-blue saved high-water layer plus a dark-blue current viewport layer.
 
-**Architecture:** Keep the backend progress API unchanged. Use pure helpers for scroll-progress math and stable display derivation, use them from `ArticlePage`, and keep persistence monotonic by writing only when current progress exceeds the high-water mark. Render the top bar through a dedicated `ArticleProgressBar` component that only accepts the saved historical percent.
+**Architecture:** Keep the backend progress API unchanged. Use pure helpers for scroll-progress math and stable display derivation, use them from `ArticlePage`, and keep persistence monotonic by writing only when current progress exceeds the high-water mark. Render the top bar through a dedicated `ArticleProgressBar` component that accepts saved historical percent and current viewport percent separately.
 
 **Follow-up implementation note:** A later bug report showed the historical
 layer still jumped because the first implementation retained layout-height
@@ -13,9 +13,9 @@ entirely: content height changes only re-measure the current viewport layer;
 the historical layer changes only when the user scrolls beyond the saved
 high-water mark or explicitly marks read/unread.
 
-**Current implementation note:** The top progress UI is a single light-blue
-historical high-water bar. The dark-blue current-position layer and old
-AI-marker/confetti visual path are not mounted. `frontend/test/articleHistoricalProgressBar.test.cjs`
+**Current implementation note:** The top progress UI has a light-blue
+historical high-water bar and a dark-blue current-position bar. The old
+AI-marker/confetti visual path is not mounted. `frontend/test/articleProgressBar.test.cjs`
 guards this state.
 
 **Tech Stack:** React 18, TypeScript, Vite, no additional runtime dependencies.
@@ -27,9 +27,9 @@ guards this state.
 - Create `frontend/src/utils/readingProgress.ts`: pure progress helpers for clamping, viewport progress, high-water updates, and stable display derivation.
 - Create `frontend/test/readingProgress.test.ts`: no-dependency TypeScript assertions for the helper.
 - Modify `frontend/src/pages/ArticlePage.tsx`: maintain `currentScrollPosition` separately from `progress.scroll_position`; wire helper into scroll, restore, mark-read, mark-unread, and resize paths.
-- Create `frontend/src/components/ArticleProgressBar.tsx`: isolated progress-bar rendering for the historical high-water fill.
-- Modify `frontend/src/index.css`: add progress-track and single light-blue historical fill classes.
-- Add `frontend/test/articleHistoricalProgressBar.test.cjs` to ensure the article page mounts only the historical bar and does not pass current viewport progress into it.
+- Create `frontend/src/components/ArticleProgressBar.tsx`: isolated progress-bar rendering for historical high-water and current viewport fills.
+- Modify `frontend/src/index.css`: add progress-track, light-blue historical fill, and dark-blue current fill classes.
+- Add `frontend/test/articleProgressBar.test.cjs` to ensure the article page mounts both progress layers and does not restore the old AI-marker/confetti path.
 
 ## Task 1: Progress Math Test
 
@@ -384,11 +384,11 @@ Run:
 
 ```bash
 git push -u origin feat/reading-progress-dual-bar
-gh pr create --title "fix: show saved reading progress" --body "$(cat <<'EOF'
+gh pr create --title "fix: show current and saved reading progress" --body "$(cat <<'EOF'
 ## Summary
-- render a single light-blue top bar for saved historical high-water progress
+- render light-blue saved high-water progress and dark-blue current viewport progress
 - keep progress persistence monotonic and server-backed
-- remove the dark-blue current progress layer from the top bar
+- keep the old AI-marker/confetti visual path out of the top bar
 
 ## Test Plan
 - npm run build

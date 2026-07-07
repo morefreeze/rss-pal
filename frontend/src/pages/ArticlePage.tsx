@@ -956,6 +956,7 @@ export default function ArticlePage() {
     <div ref={contentRef}>
       <ArticleProgressBar
         historicalPercent={progressDisplay.historicalPercent}
+        currentPercent={progressDisplay.currentPercent}
       />
 
       {hidden && (
