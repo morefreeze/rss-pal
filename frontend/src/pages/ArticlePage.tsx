@@ -146,12 +146,16 @@ export default function ArticlePage() {
   const [disliked, setDisliked] = useState(false)
   const [saved, setSaved] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
+  const summaryRef = useRef<HTMLDivElement>(null)
   const readStartTime = useRef<number>(Date.now())
   // Tracks which article id has already had its scroll position restored, so
   // later progress updates don't yank the user back to the saved position.
   const scrollRestoredForRef = useRef<number | null>(null)
   // High-water mark so scrolling up (e.g. to nav buttons) can't regress saved progress.
   const maxScrollRef = useRef<number>(0)
+  // Progress (0..1) at which the AI summary card has just exited the viewport.
+  // null while we can't measure (no summary content, layout not ready).
+  const [aiMarkerPos, setAiMarkerPos] = useState<number | null>(null)
 
   // Template selector state
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
@@ -633,6 +637,37 @@ export default function ArticlePage() {
     return () => ro.disconnect()
   }, [article?.id])
 
+  // Measure where the AI summary card ends, expressed as a 0..1 fraction of
+  // total scrollable height. This only drives the bulb marker; it does not
+  // participate in reading-progress persistence or current-progress display.
+  useEffect(() => {
+    const hasSummary = !!(article?.summary_brief || article?.summary_detailed)
+    if (!hasSummary || streamPhase !== 'idle') {
+      setAiMarkerPos(null)
+      return
+    }
+    const recompute = () => {
+      const summary = summaryRef.current
+      const content = contentRef.current
+      if (!summary || !content) { setAiMarkerPos(null); return }
+      const maxScroll = content.scrollHeight - window.innerHeight
+      if (maxScroll <= 0) { setAiMarkerPos(null); return }
+      const summaryBottom = summary.offsetTop + summary.offsetHeight
+      const scrollAtPast = Math.max(0, summaryBottom - window.innerHeight)
+      const pos = scrollAtPast / maxScroll
+      setAiMarkerPos(pos > 0.01 && pos < 0.99 ? pos : null)
+    }
+    recompute()
+    const t1 = setTimeout(recompute, 300)
+    const t2 = setTimeout(recompute, 1200)
+    window.addEventListener('resize', recompute)
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+      window.removeEventListener('resize', recompute)
+    }
+  }, [article?.id, article?.summary_brief, article?.summary_detailed, article?.content, streamPhase])
+
   useEffect(() => {
     const onVisibility = () => { if (document.hidden) flushProgress() }
     const onBeforeUnload = () => { flushProgress() }
@@ -960,6 +995,7 @@ export default function ArticlePage() {
       <ArticleProgressBar
         historicalPercent={progressDisplay.historicalPercent}
         currentPercent={progressDisplay.currentPercent}
+        aiMarkerPercent={aiMarkerPos === null ? null : Math.min(100, Math.max(0, aiMarkerPos * 100))}
       />
 
       {hidden && (
@@ -1141,7 +1177,7 @@ export default function ArticlePage() {
       )}
 
       {/* Summary section — shown before content */}
-      <div className="card">
+      <div ref={summaryRef} className="card">
         <div className="flex-between mb-2">
           <h3>AI 总结</h3>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

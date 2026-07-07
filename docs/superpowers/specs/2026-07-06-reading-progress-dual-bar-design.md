@@ -12,7 +12,8 @@ The current implementation uses two top progress layers:
   server.
 - Dark blue: the user's current viewport progress in this article view.
 
-The AI marker and confetti path are intentionally not mounted.
+The AI summary marker bulb is mounted as a visual waypoint. The confetti path
+is intentionally not mounted.
 
 ## Problem
 
@@ -54,6 +55,9 @@ Keep the backend API unchanged and split the state only in the article page:
 - Render the fixed progress bar with two fills:
   - historical width from the server-backed high-water mark
   - current width from the current viewport progress
+- Render the AI summary marker from a separately measured summary-card end
+  position. It must not participate in reading-progress persistence or either
+  progress fill width.
 
 This preserves the existing monotonic persistence contract and limits the
 change to frontend display behavior.
@@ -81,8 +85,9 @@ change to frontend display behavior.
 ## Styling
 
 Use the existing fixed top 4px progress track with a light-blue historical layer
-and a dark-blue current-position layer above it. The AI summary marker must not
-be rendered by `ArticleProgressBar`.
+and a dark-blue current-position layer above it. The AI summary marker is a
+small bulb positioned above the track at the point where the summary card has
+just exited the viewport.
 
 ## Testing And Verification
 

@@ -37,10 +37,35 @@ assertIncludes(
   'currentPercent={progressDisplay.currentPercent}',
   'ArticlePage should drive the dark-blue bar from current viewport progress',
 )
-assertExcludes(
+assertIncludes(
+  articlePage,
+  'const summaryRef = useRef<HTMLDivElement>(null)',
+  'ArticlePage should keep a ref for measuring the AI summary card',
+)
+assertIncludes(
+  articlePage,
+  '<div ref={summaryRef} className="card">\n        <div className="flex-between mb-2">\n          <h3>AI 总结</h3>',
+  'ArticlePage should attach summaryRef to the AI summary card',
+)
+assertIncludes(
+  articlePage,
+  'aiMarkerPercent={aiMarkerPos === null ? null : Math.min(100, Math.max(0, aiMarkerPos * 100))}',
+  'ArticlePage should pass the AI summary marker position to the progress bar',
+)
+assertIncludes(
   articlePage,
   'aiMarker',
-  'ArticlePage should not restore the old AI marker visual path',
+  'ArticlePage should restore the AI marker visual path',
+)
+assertExcludes(
+  articlePage,
+  'showCelebration',
+  'ArticlePage should not restore the old confetti celebration state',
+)
+assertExcludes(
+  articlePage,
+  'confettiEnabled',
+  'ArticlePage should not pass confetti settings to the progress bar',
 )
 
 assertIncludes(
@@ -55,6 +80,11 @@ assertIncludes(
 )
 assertIncludes(
   progressBar,
+  'aiMarkerPercent: number | null',
+  'ArticleProgressBar should expose an AI summary marker prop',
+)
+assertIncludes(
+  progressBar,
   'article-progress-fill-history',
   'ArticleProgressBar should render the light-blue historical fill',
 )
@@ -63,10 +93,20 @@ assertIncludes(
   'article-progress-fill-current',
   'ArticleProgressBar should render the dark-blue current-position fill',
 )
+assertIncludes(
+  progressBar,
+  '💡',
+  'ArticleProgressBar should render the AI summary marker bulb',
+)
 assertExcludes(
   progressBar,
   'ConfettiBurst',
   'ArticleProgressBar should not include confetti',
+)
+assertExcludes(
+  progressBar,
+  'showCelebration',
+  'ArticleProgressBar should not include old celebration state',
 )
 
 assertIncludes(
