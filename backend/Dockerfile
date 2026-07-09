@@ -18,6 +18,7 @@ FROM alpine:latest
 
 # KEEP IN SYNC WITH backend/Dockerfile.worker runtime packages.
 RUN apk --no-cache add ca-certificates tzdata \
+    yt-dlp \
     poppler-utils \
     tesseract-ocr \
     tesseract-ocr-data-eng \

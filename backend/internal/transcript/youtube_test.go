@@ -74,6 +74,45 @@ func TestYouTubeCC_FetchesTranscript(t *testing.T) {
 	}
 }
 
+func TestYouTubeCC_FetchesTranscriptFromArticleURLWhenMediaURLMissing(t *testing.T) {
+	htmlBytes, err := os.ReadFile(filepath.Join("testdata", "youtube_watch_with_cc.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trackBytes, err := os.ReadFile(filepath.Join("testdata", "youtube_track.json3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/watch"):
+			html := strings.ReplaceAll(string(htmlBytes), "http://CAPTION_SERVER", "http://"+r.Host)
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(html))
+		case strings.Contains(r.URL.Path, "/api/timedtext"):
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(trackBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	f := &YouTubeCC{WatchURLBase: srv.URL + "/watch?v="}
+
+	got, err := f.Fetch(context.Background(), &model.Article{
+		URL:       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+		MediaType: "video/youtube",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || !strings.Contains(got.Text, "Hello world.") {
+		t.Fatalf("expected transcript from article URL, got %+v", got)
+	}
+}
+
 func TestYouTubeCC_NoCaptions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("<html><body><p>nothing here</p></body></html>"))

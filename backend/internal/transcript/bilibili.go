@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/rss"
 )
 
 // BilibiliCC fetches captions from Bilibili using the player/v2 API
@@ -20,13 +20,11 @@ type BilibiliCC struct {
 	HTTPClient     *http.Client
 }
 
-var bvidQueryRe = regexp.MustCompile(`bvid=(BV[A-Za-z0-9]{10})`)
-
 func (f *BilibiliCC) Fetch(ctx context.Context, article *model.Article) (*Result, error) {
 	if article == nil || article.MediaType != "video/bilibili" {
 		return nil, nil
 	}
-	bvid := extractBvid(article.MediaURL)
+	bvid := extractBvid(article)
 	if bvid == "" {
 		return nil, nil
 	}
@@ -118,10 +116,12 @@ func (f *BilibiliCC) Fetch(ctx context.Context, article *model.Article) (*Result
 	return &Result{Text: text, Source: "Bilibili CC"}, nil
 }
 
-func extractBvid(mediaURL string) string {
-	m := bvidQueryRe.FindStringSubmatch(mediaURL)
-	if len(m) < 2 {
-		return ""
+func extractBvid(article *model.Article) string {
+	for _, raw := range []string{article.MediaURL, article.URL} {
+		v, ok := rss.ExtractVideo(raw)
+		if ok && v.Platform == "bilibili" {
+			return v.ID
+		}
 	}
-	return m[1]
+	return ""
 }

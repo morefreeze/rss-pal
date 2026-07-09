@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/rss"
 )
 
 // YouTubeCC fetches captions from a YouTube watch page by parsing
@@ -28,9 +29,6 @@ type YouTubeCC struct {
 
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-// embedIDRe matches the 11-char video ID inside a youtube-nocookie embed URL.
-var embedIDRe = regexp.MustCompile(`/embed/([A-Za-z0-9_-]{11})`)
-
 // playerResponseRe locates the start of ytInitialPlayerResponse so we can
 // then do a balanced-brace scan to extract the JSON object.
 var playerResponseRe = regexp.MustCompile(`(?s)ytInitialPlayerResponse\s*=\s*(\{)`)
@@ -39,7 +37,7 @@ func (f *YouTubeCC) Fetch(ctx context.Context, article *model.Article) (*Result,
 	if article == nil || article.MediaType != "video/youtube" {
 		return nil, nil
 	}
-	id := extractYouTubeID(article.MediaURL)
+	id := extractYouTubeID(article)
 	if id == "" {
 		return nil, nil
 	}
@@ -87,12 +85,14 @@ func (f *YouTubeCC) Fetch(ctx context.Context, article *model.Article) (*Result,
 	return &Result{Text: text, Source: sourceLabel(chosen)}, nil
 }
 
-func extractYouTubeID(mediaURL string) string {
-	m := embedIDRe.FindStringSubmatch(mediaURL)
-	if len(m) < 2 {
-		return ""
+func extractYouTubeID(article *model.Article) string {
+	for _, raw := range []string{article.MediaURL, article.URL} {
+		v, ok := rss.ExtractVideo(raw)
+		if ok && v.Platform == "youtube" {
+			return v.ID
+		}
 	}
-	return m[1]
+	return ""
 }
 
 type captionTrack struct {

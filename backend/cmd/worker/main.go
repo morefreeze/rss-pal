@@ -62,6 +62,7 @@ func main() {
 		Strategies: []transcript.Fetcher{
 			&transcript.YouTubeCC{},
 			&transcript.BilibiliCC{},
+			&transcript.YTDLP{},
 			&transcript.HTMLPageScraper{Docs: contentFetcher},
 		},
 	}
@@ -485,7 +486,7 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				log.Printf("Failed to create article: %v", err)
 			} else {
 				atomic.AddInt64(&newCount, 1)
-				if summarizer != nil {
+				if summarizer != nil && shouldAsyncSummarizeAfterCreate(article.MediaType) {
 					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
 				}
 			}
@@ -494,6 +495,10 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 
 	wg.Wait()
 	log.Printf("Feed %s fetched, %d new articles", feed.URL, newCount)
+}
+
+func shouldAsyncSummarizeAfterCreate(mediaType string) bool {
+	return !strings.HasPrefix(mediaType, "video/") && !strings.HasPrefix(mediaType, "audio/")
 }
 
 func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, feed model.Feed) {

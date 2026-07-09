@@ -68,6 +68,48 @@ func TestBilibiliCC_FetchesTranscript(t *testing.T) {
 	}
 }
 
+func TestBilibiliCC_FetchesTranscriptFromArticleURLWhenMediaURLMissing(t *testing.T) {
+	viewBytes, _ := os.ReadFile(filepath.Join("testdata", "bilibili_view.json"))
+	playerBytes, _ := os.ReadFile(filepath.Join("testdata", "bilibili_player_v2.json"))
+	subBytes, _ := os.ReadFile(filepath.Join("testdata", "bilibili_subtitle.json"))
+
+	var subURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/x/web-interface/view"):
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(viewBytes)
+		case strings.Contains(r.URL.Path, "/x/player/v2"):
+			body := strings.Replace(string(playerBytes), "//PLACEHOLDER/sub.json", subURL, 1)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(body))
+		case strings.HasSuffix(r.URL.Path, "/sub.json"):
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(subBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	subURL = srv.URL + "/sub.json"
+
+	f := &BilibiliCC{
+		ViewURLBase:    srv.URL + "/x/web-interface/view?bvid=",
+		PlayerV2URLFmt: srv.URL + "/x/player/v2?cid=%d&bvid=%s",
+	}
+
+	got, err := f.Fetch(context.Background(), &model.Article{
+		URL:       "https://www.bilibili.com/video/BV1xx411c7mD",
+		MediaType: "video/bilibili",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || !strings.Contains(got.Text, "你好") {
+		t.Fatalf("expected transcript from article URL, got %+v", got)
+	}
+}
+
 func TestBilibiliCC_NoSubtitles(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

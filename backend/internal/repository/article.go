@@ -330,7 +330,6 @@ func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bo
 	}
 	joins, whereFrags, args, nextArg := buildArticleFilterSQL(filter, "articles", 1)
 
-
 	query := `SELECT articles.id, articles.feed_id, articles.title, articles.url, articles.content, articles.published_at, articles.summary_brief, articles.summary_detailed, articles.fetched_at, articles.word_count, articles.reading_minutes, articles.media_url, articles.media_type, articles.media_duration_seconds, feeds.title as feed_title, COALESCE(rp.is_completed, false) as is_read, articles.links_extendable, articles.parent_article_id, articles.processing_state, COALESCE(articles.processing_error, '') as processing_error, articles.prerank_score, articles.editor_note, articles.kind
 FROM articles
 JOIN feeds ON articles.feed_id = feeds.id` + joins
@@ -762,6 +761,11 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 		FROM articles
 		WHERE (summary_brief IS NULL OR summary_brief = '')
 		AND LENGTH(content) > 100
+		AND NOT (
+		    media_type IS NOT NULL
+		    AND (media_type LIKE 'video/%' OR media_type LIKE 'audio/%')
+		    AND transcript_fetched_at IS NULL
+		)
 		ORDER BY fetched_at DESC
 		LIMIT $1
 	`
@@ -917,7 +921,7 @@ const (
 // interest_categories.weight (falling back to article count for cold-start
 // users); within each group articles are ranked by the same preference
 // score formula that GetTopArticlesInRange uses. Unclassified articles
-// (category IS NULL OR '') always come back in their own bucket. Category
+// (category IS NULL OR ”) always come back in their own bucket. Category
 // groups that don't make the top-N are not returned.
 //
 // The response JSON keeps the "topic" key for backward compat with the v1
@@ -1267,7 +1271,6 @@ func (r *ArticleRepository) GetTopTopicVocabulary(limit int) ([]string, error) {
 	}
 	return out, nil
 }
-
 
 // FindParentsNeedingExpansion is kept for backward compat but is no longer
 // called by the worker (replaced by FindArticlesNeedingLinkCheck).

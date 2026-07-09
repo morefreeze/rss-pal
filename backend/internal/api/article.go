@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -17,19 +18,21 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
+	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/gin-gonic/gin"
 )
 
 type ArticleHandler struct {
-	articleRepo    *repository.ArticleRepository
-	bindRepo       *repository.ArticleUserTagRepository
-	progressRepo   *repository.ProgressRepository
-	prefRepo       *repository.PreferenceRepository
-	hiddenRepo     *repository.HiddenArticleRepository
-	summarizer     *service.SummarizerService
-	templateRepo   *repository.TemplateRepository
-	cfg            *config.Config
-	contentFetcher *rss.ContentFetcher
+	articleRepo       *repository.ArticleRepository
+	bindRepo          *repository.ArticleUserTagRepository
+	progressRepo      *repository.ProgressRepository
+	prefRepo          *repository.PreferenceRepository
+	hiddenRepo        *repository.HiddenArticleRepository
+	summarizer        *service.SummarizerService
+	templateRepo      *repository.TemplateRepository
+	cfg               *config.Config
+	contentFetcher    *rss.ContentFetcher
+	transcriptFetcher transcript.Fetcher
 }
 
 func (h *ArticleHandler) GetUnreadCount(c *gin.Context) {
@@ -99,6 +102,12 @@ func NewArticleHandler(articleRepo *repository.ArticleRepository, bindRepo *repo
 func (h *ArticleHandler) SetTemplateRepo(templateRepo *repository.TemplateRepository, cfg *config.Config) {
 	h.templateRepo = templateRepo
 	h.cfg = cfg
+}
+
+// SetTranscriptFetcher lets the summary endpoint opportunistically enrich
+// video/audio articles with captions before building the AI prompt.
+func (h *ArticleHandler) SetTranscriptFetcher(fetcher transcript.Fetcher) {
+	h.transcriptFetcher = fetcher
 }
 
 // GetGrouped returns the /articles 分组 view: top-N category buckets plus
@@ -362,13 +371,7 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	if h.templateRepo != nil && h.cfg != nil {
 		aiCfg, err := h.templateRepo.WithCtx(c).GetUserAIConfig(userID)
 		if err == nil && aiCfg != nil && aiCfg.APIKey != "" {
-			// Build a temporary summarizer from the user's own key/url/model
-			baseURL := aiCfg.BaseURL
-			if baseURL == "" {
-				baseURL = h.cfg.Claude.BaseURL
-			}
-			userSummarizer := ai.NewSummarizerWithModel(aiCfg.APIKey, baseURL, aiCfg.Model)
-			summarizerToUse = service.NewSummarizerService(userSummarizer)
+			summarizerToUse = newUserSummarizerService(aiCfg, h.cfg)
 		}
 	}
 
@@ -381,6 +384,21 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		if templateIDStr := c.Query("template_id"); bodyReq.TemplateID == 0 && templateIDStr != "" {
 			bodyReq.TemplateID, _ = strconv.Atoi(templateIDStr)
 		}
+	}
+
+	if content, ok, ferr := fetchTranscriptContentForSummary(c.Request.Context(), h.transcriptFetcher, article); ferr != nil {
+		log.Printf("summary transcript fetch article=%d: %v", article.ID, ferr)
+	} else if ok {
+		wc, rm := rss.ComputeMetrics(content)
+		if err := articleRepo.UpdateContentAndResetSummary(id, content, wc, rm); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		article.Content = content
+	}
+	if lacksSummarizableMediaContent(article) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "未找到可用于总结的字幕或正文"})
+		return
 	}
 
 	if c.Query("stream") == "1" {
@@ -771,6 +789,65 @@ func derefIntPtr(p *int) any {
 		return "nil"
 	}
 	return *p
+}
+
+func newUserSummarizerService(aiCfg *model.UserAIConfig, cfg *config.Config) *service.SummarizerService {
+	if aiCfg == nil || aiCfg.APIKey == "" {
+		return nil
+	}
+	baseURL := aiCfg.BaseURL
+	if baseURL == "" && cfg != nil {
+		baseURL = cfg.Claude.BaseURL
+	}
+	userSummarizer := ai.NewSummarizerWithModel(aiCfg.APIKey, baseURL, aiCfg.Model)
+	if cfg != nil && cfg.AI.Vision.Model != "" {
+		userSummarizer.SetVisionModel(cfg.AI.Vision.Model)
+	}
+	return service.NewSummarizerService(userSummarizer)
+}
+
+func fetchTranscriptContentForSummary(ctx context.Context, fetcher transcript.Fetcher, article *model.Article) (string, bool, error) {
+	if fetcher == nil || article == nil || !isTranscriptBackedMedia(article.MediaType) || articleHasTranscript(article.Content) {
+		return "", false, nil
+	}
+	result, err := fetcher.Fetch(ctx, article)
+	if err != nil {
+		return "", false, err
+	}
+	if result == nil || strings.TrimSpace(result.Text) == "" {
+		return "", false, nil
+	}
+	return appendTranscriptToContent(article.Content, result), true, nil
+}
+
+func isTranscriptBackedMedia(mediaType string) bool {
+	return strings.HasPrefix(mediaType, "video/") || strings.HasPrefix(mediaType, "audio/")
+}
+
+func lacksSummarizableMediaContent(article *model.Article) bool {
+	return article != nil && isTranscriptBackedMedia(article.MediaType) && strings.TrimSpace(article.Content) == ""
+}
+
+func articleHasTranscript(content string) bool {
+	content = strings.TrimSpace(content)
+	return strings.HasPrefix(content, "## 字幕") || strings.Contains(content, "\n## 字幕")
+}
+
+func appendTranscriptToContent(existing string, r *transcript.Result) string {
+	existing = strings.TrimSpace(existing)
+	var b strings.Builder
+	if existing != "" {
+		b.WriteString(existing)
+		b.WriteString("\n\n---\n\n")
+	}
+	b.WriteString("## 字幕\n\n")
+	if r.Source != "" {
+		b.WriteString("> 来源：")
+		b.WriteString(r.Source)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(strings.TrimSpace(r.Text))
+	return b.String()
 }
 
 // filterCandidateImageURLsForAPI is the api-side equivalent of the worker's
