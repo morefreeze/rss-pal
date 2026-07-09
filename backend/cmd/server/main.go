@@ -10,6 +10,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
+	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/bytedance/rss-pal/internal/version"
 	gingzip "github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
@@ -58,12 +59,21 @@ func main() {
 	backupRunner := backup.NewRunner(adminDB, cfg.Backup.Dir)
 
 	contentFetcher := rss.NewContentFetcher()
+	transcriptFetcher := &transcript.MultiFetcher{
+		Strategies: []transcript.Fetcher{
+			&transcript.YouTubeCC{},
+			&transcript.BilibiliCC{},
+			&transcript.YTDLP{},
+			&transcript.HTMLPageScraper{Docs: contentFetcher},
+		},
+	}
 
 	authHandler := api.NewAuthHandler(cfg, userRepo, refreshTokenRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(adminDB, backupRunner, cfg)
 	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, hiddenRepo, summarizerService, contentFetcher)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
+	articleHandler.SetTranscriptFetcher(transcriptFetcher)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
 	progressHandler := api.NewProgressHandler(progressRepo, eventRepo)
 	rssFetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
