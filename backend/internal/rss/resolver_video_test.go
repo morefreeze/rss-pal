@@ -10,7 +10,10 @@ func TestResolveFeedURLVideoPlatforms(t *testing.T) {
 		{name: "bilibili_non_numeric", input: "https://space.bilibili.com/not-a-uid", rsshubBase: base, want: "https://space.bilibili.com/not-a-uid"},
 		{name: "bilibili_dynamic", input: "https://space.bilibili.com/14064034/dynamic", rsshubBase: base, want: "https://space.bilibili.com/14064034/dynamic"},
 
-		{name: "youtube_channel_native", input: "https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q/videos", rsshubBase: base, want: "https://www.youtube.com/feeds/videos.xml?channel_id=UCsXVk37bltHxD1rDPwtNM8Q"},
+		{name: "youtube_channel_root_native", input: "https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q", rsshubBase: base, want: "https://www.youtube.com/feeds/videos.xml?channel_id=UCsXVk37bltHxD1rDPwtNM8Q"},
+		{name: "youtube_channel_videos_native", input: "https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q/videos", rsshubBase: base, want: "https://www.youtube.com/feeds/videos.xml?channel_id=UCsXVk37bltHxD1rDPwtNM8Q"},
+		{name: "youtube_channel_live_passthrough", input: "https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q/live", rsshubBase: base, want: "https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q/live"},
+		{name: "youtube_channel_about_passthrough", input: "https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q/about", rsshubBase: base, want: "https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q/about"},
 		{name: "youtube_playlist_native", input: "https://youtube.com/playlist?list=PL123&utm_source=test", rsshubBase: base, want: "https://www.youtube.com/feeds/videos.xml?playlist_id=PL123"},
 		{name: "youtube_handle", input: "https://youtube.com/@Fireship/videos?view=0", rsshubBase: base, want: base + "/youtube/user/@Fireship"},
 		{name: "youtube_user", input: "https://m.youtube.com/user/GoogleDevelopers", rsshubBase: base, want: base + "/youtube/user/GoogleDevelopers"},
