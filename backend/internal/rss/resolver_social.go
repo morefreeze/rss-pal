@@ -34,7 +34,7 @@ func resolveZhihu(u *url.URL) (string, bool) {
 			return "/zhihu/people/" + parts[2] + "/" + id, true
 		}
 	}
-	if len(parts) == 2 && (parts[0] == "question" || parts[0] == "topic") {
+	if len(parts) == 2 && (parts[0] == "question" || parts[0] == "topic") && isDigits(parts[1]) {
 		id, ok := safePathSegment(parts[1])
 		if ok {
 			return "/zhihu/" + parts[0] + "/" + id, true

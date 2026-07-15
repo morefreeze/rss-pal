@@ -16,6 +16,8 @@ func TestResolveFeedURLSocialPlatforms(t *testing.T) {
 		{name: "zhihu_people_answers", input: "https://www.zhihu.com/people/diygod/answers", rsshubBase: base, want: base + "/zhihu/people/answers/diygod"},
 		{name: "zhihu_question", input: "https://www.zhihu.com/question/123456", rsshubBase: base, want: base + "/zhihu/question/123456"},
 		{name: "zhihu_topic", input: "https://www.zhihu.com/topic/19550517", rsshubBase: base, want: base + "/zhihu/topic/19550517"},
+		{name: "zhihu_question_non_numeric", input: "https://www.zhihu.com/question/waiting", rsshubBase: base, want: "https://www.zhihu.com/question/waiting"},
+		{name: "zhihu_topic_non_numeric", input: "https://www.zhihu.com/topic/not-a-topic-id", rsshubBase: base, want: "https://www.zhihu.com/topic/not-a-topic-id"},
 		{name: "zhihu_answer_passthrough", input: "https://www.zhihu.com/question/123456/answer/789", rsshubBase: base, want: "https://www.zhihu.com/question/123456/answer/789"},
 		{name: "zhihu_article_passthrough", input: "https://zhuanlan.zhihu.com/p/123", rsshubBase: base, want: "https://zhuanlan.zhihu.com/p/123"},
 
