@@ -21,6 +21,11 @@ func TestResolveFeedURLVideoPlatforms(t *testing.T) {
 
 		{name: "douyin_user", input: "https://www.douyin.com/user/MS4wLjABAAAAexample?from_tab_name=main", rsshubBase: base, want: base + "/douyin/user/MS4wLjABAAAAexample"},
 		{name: "douyin_hashtag", input: "https://www.douyin.com/hashtag/123456", rsshubBase: base, want: base + "/douyin/hashtag/123456"},
+		{name: "douyin_vertical_tab_passthrough", input: "https://www.douyin.com/hashtag/%0B", rsshubBase: base, want: "https://www.douyin.com/hashtag/%0B"},
+		{name: "douyin_control_passthrough", input: "https://www.douyin.com/hashtag/%7F", rsshubBase: base, want: "https://www.douyin.com/hashtag/%7F"},
+		{name: "douyin_unicode_whitespace_passthrough", input: "https://www.douyin.com/hashtag/%C2%A0", rsshubBase: base, want: "https://www.douyin.com/hashtag/%C2%A0"},
+		{name: "douyin_dot_segment_passthrough", input: "https://www.douyin.com/hashtag/%2E%2E", rsshubBase: base, want: "https://www.douyin.com/hashtag/%2E%2E"},
+		{name: "douyin_reserved_character_escaped", input: "https://www.douyin.com/hashtag/topic%3Fname", rsshubBase: base, want: base + "/douyin/hashtag/topic%3Fname"},
 		{name: "douyin_live", input: "https://live.douyin.com/987654", rsshubBase: base, want: base + "/douyin/live/987654"},
 		{name: "douyin_video_passthrough", input: "https://www.douyin.com/video/123", rsshubBase: base, want: "https://www.douyin.com/video/123"},
 		{name: "douyin_invalid_user", input: "https://www.douyin.com/user/short-id", rsshubBase: base, want: "https://www.douyin.com/user/short-id"},
