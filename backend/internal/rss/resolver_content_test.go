@@ -19,6 +19,7 @@ func TestResolveFeedURLContentPlatforms(t *testing.T) {
 		{name: "github_repo_empty_after_git_suffix", input: "https://github.com/DIYgod/.git", rsshubBase: base, want: "https://github.com/DIYgod/.git"},
 		{name: "github_repo_subpage", input: "https://github.com/DIYgod/RSSHub/issues/123", rsshubBase: base, want: base + "/github/repo_event/DIYgod/RSSHub"},
 		{name: "github_reserved_settings", input: "https://github.com/settings", rsshubBase: base, want: "https://github.com/settings"},
+		{name: "github_dashboard_passthrough", input: "https://github.com/dashboard", rsshubBase: base, want: "https://github.com/dashboard"},
 		{name: "github_reserved_case_insensitive", input: "https://github.com/Settings", rsshubBase: base, want: "https://github.com/Settings"},
 		{name: "github_reserved_near_match", input: "https://github.com/settings-team", rsshubBase: base, want: base + "/github/activity/settings-team"},
 		{name: "github_reserved_orgs", input: "https://github.com/orgs/openai", rsshubBase: base, want: "https://github.com/orgs/openai"},

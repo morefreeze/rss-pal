@@ -19,6 +19,7 @@ var githubReservedNames = map[string]struct{}{
 	"apps":             {},
 	"collections":      {},
 	"customer-stories": {},
+	"dashboard":        {},
 	"enterprise":       {},
 	"events":           {},
 	"explore":          {},
