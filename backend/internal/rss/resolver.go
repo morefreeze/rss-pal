@@ -3,6 +3,7 @@ package rss
 import (
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 type platformResolver func(*url.URL) (string, bool)
@@ -59,8 +60,13 @@ func pathSegments(u *url.URL) []string {
 }
 
 func safePathSegment(value string) (string, bool) {
-	if value == "" || value == "." || value == ".." || strings.ContainsAny(value, " \t\r\n") {
+	if value == "" || value == "." || value == ".." {
 		return "", false
+	}
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return "", false
+		}
 	}
 	return url.PathEscape(value), true
 }
