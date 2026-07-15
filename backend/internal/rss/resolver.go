@@ -13,6 +13,10 @@ var rssHubResolvers = []platformResolver{
 	resolveYouTube,
 	resolveDouyin,
 	resolveTikTok,
+	resolveWeibo,
+	resolveZhihu,
+	resolveWeChat,
+	resolveXiaohongshu,
 }
 
 // ResolveFeedURL maps a user-facing platform URL to a native Feed or to an
