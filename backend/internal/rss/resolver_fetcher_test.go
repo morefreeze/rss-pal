@@ -40,3 +40,38 @@ func TestFetcherFetchUsesResolvedFeedURL(t *testing.T) {
 		t.Fatalf("unexpected fetch result: %#v", result)
 	}
 }
+
+func TestFetcherFetchHTMLUsesResolvedFeedURL(t *testing.T) {
+	fetcher := NewFetcher("http://rsshub.test:1200")
+	var requestedURL string
+	requestCount := 0
+	fetcher.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		requestedURL = req.URL.String()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body: io.NopCloser(strings.NewReader(`<?xml version="1.0"?><rss version="2.0"><channel><title>CSDN</title>` +
+				`<link>https://blog.csdn.net/csdngeeknews</link><description>feed</description>` +
+				`<item><title>post</title><link>https://example.com/post</link><guid>post</guid></item>` +
+				`</channel></rss>`)),
+		}, nil
+	})}
+
+	feed, err := fetcher.FetchHTML(context.Background(), "https://blog.csdn.net/csdngeeknews")
+	if err != nil {
+		t.Fatalf("FetchHTML() error = %v", err)
+	}
+	if requestedURL != "http://rsshub.test:1200/csdn/blog/csdngeeknews" {
+		t.Fatalf("requested URL = %q", requestedURL)
+	}
+	if requestCount != 1 {
+		t.Fatalf("request count = %d, want 1", requestCount)
+	}
+	if feed == nil || feed.Title != "CSDN" {
+		t.Fatalf("unexpected feed: %#v", feed)
+	}
+	if len(feed.Items) != 1 || feed.Items[0].Title != "post" {
+		t.Fatalf("unexpected items: %#v", feed.Items)
+	}
+}

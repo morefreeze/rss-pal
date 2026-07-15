@@ -10,7 +10,8 @@ func resolveNativeFeed(u *url.URL) (string, bool) {
 		return "", false
 	}
 	parts := pathSegments(u)
-	if len(parts) >= 2 && parts[0] == "channel" && strings.HasPrefix(parts[1], "UC") {
+	if (len(parts) == 2 || (len(parts) == 3 && parts[2] == "videos")) &&
+		parts[0] == "channel" && strings.HasPrefix(parts[1], "UC") {
 		if _, ok := safePathSegment(parts[1]); !ok {
 			return "", false
 		}

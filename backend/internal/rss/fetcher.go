@@ -53,8 +53,8 @@ type PreviewItem struct {
 // PreviewResult is returned by Preview() before the feed is saved
 type PreviewResult struct {
 	FeedTitle        string        `json:"feed_title"`
-	FeedType         string        `json:"feed_type"`             // "rss" or "html"
-	ActualURL        string        `json:"actual_url"`            // may differ from input (RSS found in HTML)
+	FeedType         string        `json:"feed_type"`  // "rss" or "html"
+	ActualURL        string        `json:"actual_url"` // may differ from input (RSS found in HTML)
 	Items            []PreviewItem `json:"items"`
 	DiscoveredRSSURL string        `json:"discovered_rss_url,omitempty"` // sibling/parent RSS feed found via path-walking
 }
@@ -240,7 +240,21 @@ func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, e
 
 // FetchHTML fetches an HTML page and extracts article links as a synthetic feed
 func (f *Fetcher) FetchHTML(ctx context.Context, feedURL string) (*gofeed.Feed, error) {
-	feedURL = ResolveFeedURL(feedURL, f.rsshubBase)
+	resolvedURL := ResolveFeedURL(feedURL, f.rsshubBase)
+	if resolvedURL != feedURL {
+		result, err := f.Fetch(ctx, resolvedURL, "", "")
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return nil, fmt.Errorf("resolved feed fetch returned no result")
+		}
+		if result.Feed == nil {
+			return nil, fmt.Errorf("resolved feed fetch returned no feed")
+		}
+		return result.Feed, nil
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
 	if err != nil {
 		return nil, err
