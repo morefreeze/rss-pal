@@ -219,6 +219,21 @@ func TestBuildItemContentNonWeiboMatchesStripHTML(t *testing.T) {
 	}
 }
 
+func TestBuildItemContentNonWeiboUsesFallbackWhenDescriptionStripsEmpty(t *testing.T) {
+	content, enriched := BuildItemContent(
+		`<div><img src="https://example.com/decoration.png"></div>`,
+		`<p>fallback body</p>`,
+		"https://example.com/articles/42",
+	)
+
+	if enriched {
+		t.Fatal("BuildItemContent() enriched = true, want false")
+	}
+	if content != "fallback body" {
+		t.Errorf("BuildItemContent() = %q, want fallback body", content)
+	}
+}
+
 func TestBuildItemContentUsesFallbackWhenDescriptionBlank(t *testing.T) {
 	fallback := `<div><p>fallback 字段正文</p><p><img src="https://example.com/fallback.png" alt="fallback"></p></div>`
 
