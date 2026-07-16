@@ -455,7 +455,7 @@ export default function FeedListPage() {
             aria-controls="popular-feeds-groups"
             style={{ padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}
           >
-            <span style={{ fontSize: 10 }}>{popularFeedsExpanded ? '▾' : '▸'}</span>
+            <span aria-hidden="true" style={{ fontSize: 10 }}>{popularFeedsExpanded ? '▾' : '▸'}</span>
             <span>热门推荐：</span>
           </button>
           {popularFeedsExpanded && (
