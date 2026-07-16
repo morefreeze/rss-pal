@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,64 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func TestFetcherFetchFallsBackWhenWeiboCommentsRouteFails(t *testing.T) {
+	fetcher := NewFetcher("http://rsshub.test:1200")
+	var requestedPaths []string
+	fetcher.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestedPaths = append(requestedPaths, req.URL.Path)
+		if strings.HasSuffix(req.URL.Path, "/displayComments=1") {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Body:       io.NopCloser(strings.NewReader("bad gateway")),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body: io.NopCloser(strings.NewReader(`<?xml version="1.0"?><rss version="2.0"><channel><title>Weibo</title>` +
+				`<link>https://weibo.com/u/1195230310</link><description>feed</description>` +
+				`<item><title>post</title><link>https://weibo.com/1195230310/post</link><guid>post</guid></item>` +
+				`</channel></rss>`)),
+		}, nil
+	})}
+
+	result, err := fetcher.Fetch(context.Background(), "https://weibo.com/u/1195230310", "", "")
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	wantPaths := []string{
+		"/weibo/user/1195230310/displayComments=1",
+		"/weibo/user/1195230310",
+	}
+	if !reflect.DeepEqual(requestedPaths, wantPaths) {
+		t.Fatalf("requested paths = %#v, want %#v", requestedPaths, wantPaths)
+	}
+	if result == nil || result.Feed == nil || result.Feed.Title != "Weibo" {
+		t.Fatalf("unexpected fetch result: %#v", result)
+	}
+}
+
+func TestFetcherFetchDoesNotFallBackForNonWeiboCommentsSuffix(t *testing.T) {
+	fetcher := NewFetcher("http://rsshub.test:1200")
+	var requestedPaths []string
+	fetcher.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestedPaths = append(requestedPaths, req.URL.Path)
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Body:       io.NopCloser(strings.NewReader("bad gateway")),
+		}, nil
+	})}
+
+	_, err := fetcher.Fetch(context.Background(), "https://example.com/feed/displayComments=1", "", "")
+	if err == nil {
+		t.Fatal("Fetch() error = nil, want non-nil")
+	}
+	wantPaths := []string{"/feed/displayComments=1"}
+	if !reflect.DeepEqual(requestedPaths, wantPaths) {
+		t.Fatalf("requested paths = %#v, want %#v", requestedPaths, wantPaths)
+	}
 }
 
 func TestFetcherFetchUsesResolvedFeedURL(t *testing.T) {

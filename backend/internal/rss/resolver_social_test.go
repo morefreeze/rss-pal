@@ -5,9 +5,9 @@ import "testing"
 func TestResolveFeedURLSocialPlatforms(t *testing.T) {
 	const base = "http://rsshub:1200"
 	runResolveCases(t, []resolveCase{
-		{name: "weibo_desktop", input: "https://weibo.com/u/1195230310", rsshubBase: base, want: base + "/weibo/user/1195230310"},
-		{name: "weibo_mobile_u", input: "https://m.weibo.cn/u/1195230310?jumpfrom=weibocom", rsshubBase: base, want: base + "/weibo/user/1195230310"},
-		{name: "weibo_mobile_profile", input: "https://m.weibo.cn/profile/1195230310", rsshubBase: base, want: base + "/weibo/user/1195230310"},
+		{name: "weibo_desktop", input: "https://weibo.com/u/1195230310", rsshubBase: base, want: base + "/weibo/user/1195230310/displayComments=1"},
+		{name: "weibo_mobile_u", input: "https://m.weibo.cn/u/1195230310?jumpfrom=weibocom", rsshubBase: base, want: base + "/weibo/user/1195230310/displayComments=1"},
+		{name: "weibo_mobile_profile", input: "https://m.weibo.cn/profile/1195230310", rsshubBase: base, want: base + "/weibo/user/1195230310/displayComments=1"},
 		{name: "weibo_non_numeric", input: "https://weibo.com/u/not-a-uid", rsshubBase: base, want: "https://weibo.com/u/not-a-uid"},
 		{name: "weibo_status_passthrough", input: "https://weibo.com/1195230310/P123", rsshubBase: base, want: "https://weibo.com/1195230310/P123"},
 
