@@ -8,6 +8,35 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
 
+type articleRefreshState struct {
+	content                       string
+	wordCount, readingMinutes     int
+	summaryBrief, summaryDetailed sql.NullString
+	refetchAttempts               int
+	parentArticleID               sql.NullInt64
+	isClip                        bool
+}
+
+func readArticleRefreshState(t *testing.T, db *sql.DB, articleID int) articleRefreshState {
+	t.Helper()
+
+	var state articleRefreshState
+	if err := db.QueryRow(`
+		SELECT content, word_count, reading_minutes,
+		       summary_brief, summary_detailed, refetch_attempts,
+		       parent_article_id, is_clip
+		FROM articles
+		WHERE id = $1
+	`, articleID).Scan(
+		&state.content, &state.wordCount, &state.readingMinutes,
+		&state.summaryBrief, &state.summaryDetailed, &state.refetchAttempts,
+		&state.parentArticleID, &state.isClip,
+	); err != nil {
+		t.Fatalf("query article %d: %v", articleID, err)
+	}
+	return state
+}
+
 func TestUpdateEnrichedContentIfChanged(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
@@ -29,17 +58,54 @@ func TestUpdateEnrichedContentIfChanged(t *testing.T) {
 	}
 
 	const articleURL = "https://weibo.com/1234567890/test"
-	if _, err := db.Exec(`
+	var articleID int
+	if err := db.QueryRow(`
 		INSERT INTO articles (
 			feed_id, title, url, content, published_at,
 			summary_brief, summary_detailed,
-			word_count, reading_minutes, refetch_attempts
+			word_count, reading_minutes, refetch_attempts,
+			parent_article_id, is_clip
 		)
 		VALUES ($1, 'Noisy post', $2, 'old noisy content', NOW(),
-			'old brief summary', 'old detailed summary', 3, 1, 4)
-	`, feedID, articleURL); err != nil {
+			'old brief summary', 'old detailed summary', 3, 1, 4,
+			NULL, false)
+		RETURNING id
+	`, feedID, articleURL).Scan(&articleID); err != nil {
 		t.Fatalf("insert article: %v", err)
 	}
+
+	var childArticleID int
+	if err := db.QueryRow(`
+		INSERT INTO articles (
+			feed_id, title, url, content, published_at,
+			summary_brief, summary_detailed,
+			word_count, reading_minutes, refetch_attempts,
+			parent_article_id
+		)
+		VALUES ($1, 'Child duplicate', $2, 'child original content', NOW(),
+			'child brief summary', 'child detailed summary', 5, 2, 7, $3)
+		RETURNING id
+	`, feedID, articleURL, articleID).Scan(&childArticleID); err != nil {
+		t.Fatalf("insert child article: %v", err)
+	}
+
+	var clipArticleID int
+	if err := db.QueryRow(`
+		INSERT INTO articles (
+			feed_id, title, url, content, published_at,
+			summary_brief, summary_detailed,
+			word_count, reading_minutes, refetch_attempts,
+			is_clip
+		)
+		VALUES ($1, 'Clip duplicate', $2, 'clip original content', NOW(),
+			'clip brief summary', 'clip detailed summary', 6, 3, 8, true)
+		RETURNING id
+	`, feedID, articleURL).Scan(&clipArticleID); err != nil {
+		t.Fatalf("insert clip article: %v", err)
+	}
+
+	childBefore := readArticleRefreshState(t, db, childArticleID)
+	clipBefore := readArticleRefreshState(t, db, clipArticleID)
 
 	repo := repository.NewArticleRepository(db)
 	const enrichedContent = "原微博正文\n\n> 博主首评：补充信息"
@@ -61,8 +127,8 @@ func TestUpdateEnrichedContentIfChanged(t *testing.T) {
 		SELECT content, word_count, reading_minutes,
 		       summary_brief, summary_detailed, refetch_attempts
 		FROM articles
-		WHERE feed_id = $1 AND url = $2
-	`, feedID, articleURL).Scan(
+		WHERE id = $1
+	`, articleID).Scan(
 		&content, &wordCount, &readingMinutes,
 		&summaryBrief, &summaryDetailed, &refetchAttempts,
 	); err != nil {
@@ -85,6 +151,12 @@ func TestUpdateEnrichedContentIfChanged(t *testing.T) {
 	}
 	if refetchAttempts != 0 {
 		t.Fatalf("refetch_attempts = %d; want 0", refetchAttempts)
+	}
+	if childAfter := readArticleRefreshState(t, db, childArticleID); childAfter != childBefore {
+		t.Fatalf("child article changed:\n got: %#v\nwant: %#v", childAfter, childBefore)
+	}
+	if clipAfter := readArticleRefreshState(t, db, clipArticleID); clipAfter != clipBefore {
+		t.Fatalf("clip article changed:\n got: %#v\nwant: %#v", clipAfter, clipBefore)
 	}
 
 	changed, err = repo.UpdateEnrichedContentIfChanged(feedID, articleURL, enrichedContent, 12, 2)
