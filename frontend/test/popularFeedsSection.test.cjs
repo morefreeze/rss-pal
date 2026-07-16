@@ -42,4 +42,14 @@ for (const [expected, label] of [
   }
 }
 
+const popularFeedsContainerIndex = feedListPage.indexOf('<div id="popular-feeds-groups">')
+const popularFeedsConditionalIndex = feedListPage.indexOf('{popularFeedsExpanded && (')
+if (
+  popularFeedsContainerIndex < 0 ||
+  popularFeedsConditionalIndex < 0 ||
+  popularFeedsContainerIndex >= popularFeedsConditionalIndex
+) {
+  throw new Error('popular feeds aria-controls target should remain mounted while collapsed')
+}
+
 console.log('popularFeedsSection wiring test passed')
