@@ -33,7 +33,7 @@ func ResolveFeedURL(input, rsshubBase string) string {
 		return input
 	}
 	if isRSSHubURL(u, rsshubBase) {
-		return input
+		return normalizeRSSHubWeiboUserURL(u, rsshubBase)
 	}
 	if native, ok := resolveNativeFeed(u); ok {
 		return native
@@ -44,6 +44,28 @@ func ResolveFeedURL(input, rsshubBase string) string {
 		}
 	}
 	return input
+}
+
+func normalizeRSSHubWeiboUserURL(u *url.URL, rsshubBase string) string {
+	b, err := url.Parse(rsshubBase)
+	if err != nil || b.Host == "" || !strings.EqualFold(u.Scheme, b.Scheme) || !strings.EqualFold(u.Host, b.Host) {
+		return u.String()
+	}
+	basePath := strings.TrimRight(b.Path, "/")
+	path := strings.TrimRight(u.Path, "/")
+	prefix := basePath + "/weibo/user/"
+	if !strings.HasPrefix(path, prefix) {
+		return u.String()
+	}
+	uid := strings.TrimPrefix(path, prefix)
+	if !isDigits(uid) {
+		return u.String()
+	}
+	if strings.HasSuffix(path, weiboCommentsPathSuffix) {
+		return u.String()
+	}
+	u.Path = path + weiboCommentsPathSuffix
+	return u.String()
 }
 
 func canonicalHost(u *url.URL) string {

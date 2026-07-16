@@ -31,3 +31,23 @@ func TestResolveFeedURLSocialPlatforms(t *testing.T) {
 		{name: "xiaohongshu_missing_user", input: "https://www.xiaohongshu.com/user/profile/", rsshubBase: base, want: "https://www.xiaohongshu.com/user/profile/"},
 	})
 }
+
+func TestResolveFeedURLNormalizesExistingRSSHubWeiboUserRoute(t *testing.T) {
+	const base = "http://rsshub:1200"
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "without comments option", input: base + "/weibo/user/2904546111", want: base + "/weibo/user/2904546111/displayComments=1"},
+		{name: "already enabled", input: base + "/weibo/user/2904546111/displayComments=1", want: base + "/weibo/user/2904546111/displayComments=1"},
+		{name: "other rsshub route", input: base + "/weibo/status/abc", want: base + "/weibo/status/abc"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveFeedURL(tt.input, base); got != tt.want {
+				t.Fatalf("ResolveFeedURL(%q, %q) = %q, want %q", tt.input, base, got, tt.want)
+			}
+		})
+	}
+}
