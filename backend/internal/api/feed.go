@@ -305,6 +305,19 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			mediaInfo = rss.ExtractMedia(item)
 		}
 		if exists {
+			content, enriched := rss.BuildItemContent(item.Description, item.Content, item.Link)
+			if enriched {
+				wordCount, readingMinutes := rss.ComputeMetrics(content)
+				updated := false
+				bestEffort(c, "enriched article content", func() error {
+					var err error
+					updated, err = articleRepo.UpdateEnrichedContentIfChanged(feed.ID, item.Link, content, wordCount, readingMinutes)
+					return err
+				})
+				if updated {
+					log.Printf("Refreshed enriched content for: %s", item.Link)
+				}
+			}
 			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedTime(item.PublishedParsed, item.UpdatedParsed))
 			if mediaInfo != nil {
 				if err := articleRepo.UpdateMediaIfNull(feed.ID, item.Link, mediaInfo.URL, mediaInfo.Type, mediaInfo.Duration); err != nil {
@@ -314,13 +327,13 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			continue
 		}
 
-		content := rss.StripHTML(item.Description)
-		if content == "" {
-			content = rss.StripHTML(item.Content)
+		content, _ := rss.BuildItemContent(item.Description, item.Content, item.Link)
+		mediaType := ""
+		if mediaInfo != nil {
+			mediaType = mediaInfo.Type
 		}
 
-		skipDeepFetch := feed.FeedType == "youtube" || feed.FeedType == "podcast"
-		if !skipDeepFetch && item.Link != "" {
+		if rss.ShouldDeepFetchArticle(feed.FeedType, item.Link, mediaType) && item.Link != "" {
 			fullContent, err := h.contentFetcher.FetchContent(c.Request.Context(), item.Link)
 			if err == nil && len(fullContent) > len(content) {
 				content = fullContent
@@ -349,9 +362,9 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":     "fetch completed",
+		"message":      "fetch completed",
 		"new_articles": newCount,
-		"feed_title":  result.Feed.Title,
+		"feed_title":   result.Feed.Title,
 	})
 }
 

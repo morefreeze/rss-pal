@@ -624,9 +624,58 @@ func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed 
 	return err
 }
 
+// UpdateSummaryIfContentUnchanged writes generated summaries only when the
+// article content still matches the snapshot used to generate them.
+func (r *ArticleRepository) UpdateSummaryIfContentUnchanged(id int, expectedContent, summaryBrief, summaryDetailed string) (bool, error) {
+	result, err := r.db.Exec(`
+		UPDATE articles
+		SET summary_brief = $1,
+		    summary_detailed = $2,
+		    processing_state = CASE
+		        WHEN processing_state = 'processing' THEN 'ready'
+		        ELSE processing_state
+		    END
+		WHERE id = $3
+		  AND content IS NOT DISTINCT FROM $4
+	`, summaryBrief, summaryDetailed, id, expectedContent)
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
+}
+
 func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, readingMinutes int) error {
 	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0 WHERE id = $4`, content, wordCount, readingMinutes, id)
 	return err
+}
+
+func (r *ArticleRepository) UpdateEnrichedContentIfChanged(feedID int, articleURL, content string, wordCount, readingMinutes int) (bool, error) {
+	result, err := r.db.Exec(`
+		UPDATE articles
+		SET content = $3,
+		    word_count = $4,
+		    reading_minutes = $5,
+		    summary_brief = NULL,
+		    summary_detailed = NULL,
+		    refetch_attempts = 0
+		WHERE feed_id = $1
+		  AND url = $2
+		  AND parent_article_id IS NULL
+		  AND NOT is_clip
+		  AND content IS DISTINCT FROM $3
+	`, feedID, articleURL, content, wordCount, readingMinutes)
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
 }
 
 // UpdateTitle overwrites the article's title. Used when a bookmarklet

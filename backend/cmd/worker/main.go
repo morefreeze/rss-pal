@@ -177,8 +177,11 @@ func asyncSummarize(summarizer *ai.Summarizer, articleRepo *repository.ArticleRe
 			log.Printf("Failed to summarize article %d: %v", articleID, err)
 			return
 		}
-		if err := articleRepo.UpdateSummary(articleID, result.Brief, result.Detailed); err != nil {
+		updated, err := articleRepo.UpdateSummaryIfContentUnchanged(articleID, content, result.Brief, result.Detailed)
+		if err != nil {
 			log.Printf("Failed to save summary for article %d: %v", articleID, err)
+		} else if !updated {
+			log.Printf("Skipped stale summary for article %d: content changed", articleID)
 		} else {
 			log.Printf("Summarized article %d", articleID)
 		}
@@ -240,8 +243,11 @@ func backfillSummaries(ctx context.Context, cfg *config.Config, articleRepo *rep
 				log.Printf("Failed to backfill summary for article %d: %v", article.ID, err)
 				return
 			}
-			if err := articleRepo.UpdateSummary(article.ID, result.Brief, result.Detailed); err != nil {
+			updated, err := articleRepo.UpdateSummaryIfContentUnchanged(article.ID, article.Content, result.Brief, result.Detailed)
+			if err != nil {
 				log.Printf("Failed to save backfill summary for article %d: %v", article.ID, err)
+			} else if !updated {
+				log.Printf("Skipped stale backfill summary for article %d: content changed", article.ID)
 			} else {
 				log.Printf("Backfilled summary for article %d", article.ID)
 			}
@@ -421,6 +427,16 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 			mediaInfo = rss.ExtractMedia(item)
 		}
 		if exists {
+			content, enriched := rss.BuildItemContent(item.Description, item.Content, item.Link)
+			if enriched {
+				wordCount, readingMinutes := rss.ComputeMetrics(content)
+				updated, err := articleRepo.UpdateEnrichedContentIfChanged(feed.ID, item.Link, content, wordCount, readingMinutes)
+				if err != nil {
+					log.Printf("Failed to refresh enriched content for %s: %v", item.Link, err)
+				} else if updated {
+					log.Printf("Refreshed enriched content for: %s", item.Link)
+				}
+			}
 			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, parsePublishedTime(item.PublishedParsed, item.UpdatedParsed))
 			if mediaInfo != nil {
 				if err := articleRepo.UpdateMediaIfNull(feed.ID, item.Link, mediaInfo.URL, mediaInfo.Type, mediaInfo.Duration); err != nil {
@@ -438,19 +454,13 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			content := rss.StripHTML(item.Description)
-			if content == "" {
-				content = rss.StripHTML(item.Content)
+			content, _ := rss.BuildItemContent(item.Description, item.Content, item.Link)
+			mediaType := ""
+			if mediaInfo != nil {
+				mediaType = mediaInfo.Type
 			}
 
-			// Skip deep-fetch for video articles too — the watch page is
-			// JS-heavy and the scraped content is unusable. The transcript
-			// pipeline (backfillTranscripts) is the right path for these.
-			skipDeepFetch := feed.FeedType == "youtube" || feed.FeedType == "podcast"
-			if mediaInfo != nil && strings.HasPrefix(mediaInfo.Type, "video/") {
-				skipDeepFetch = true
-			}
-			if !skipDeepFetch && item.Link != "" {
+			if rss.ShouldDeepFetchArticle(feed.FeedType, item.Link, mediaType) && item.Link != "" {
 				log.Printf("Fetching full content for: %s", item.Link)
 				fullContent, err := contentFetcher.FetchContent(ctx, item.Link)
 				if err != nil {
@@ -583,6 +593,10 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 
 	for i := range articles {
 		if articles[i].URL == "" {
+			continue
+		}
+		if !rss.ShouldDeepFetchArticle("", articles[i].URL, articles[i].MediaType) {
+			log.Printf("refetchShortContent: skipping article excluded by deep-fetch policy article=%d url=%s", articles[i].ID, articles[i].URL)
 			continue
 		}
 		// Twitter / X captures come from the bookmarklet's tweet-aware
