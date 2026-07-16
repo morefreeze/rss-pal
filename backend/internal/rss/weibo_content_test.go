@@ -32,8 +32,8 @@ func TestBuildItemContentExtractsFirstBloggerCommentAndDirectLinks(t *testing.T)
 		"3784 正文内容",
 		"![海报](https://wx1.sinaimg.cn/large/post.jpg)",
 		"### 博主首评",
-		"https://pan.quark.cn/s/c140bc08bbfa",
-		"https://pan.baidu.com/s/1tg0ec1MDYlS8B0Ph7fVDsA?pwd=ir22",
+		"[夸克](https://pan.quark.cn/s/c140bc08bbfa)",
+		"[百度网盘](https://pan.baidu.com/s/1tg0ec1MDYlS8B0Ph7fVDsA?pwd=ir22)",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("BuildItemContent() missing %q:\n%s", want, content)
@@ -43,6 +43,35 @@ func TestBuildItemContentExtractsFirstBloggerCommentAndDirectLinks(t *testing.T)
 		if strings.Contains(content, unwanted) {
 			t.Errorf("BuildItemContent() contains excluded %q:\n%s", unwanted, content)
 		}
+	}
+}
+
+func TestBuildItemContentCanonicalizesWeiboHosts(t *testing.T) {
+	description := `<div><p>微博正文</p></div>
+	<div class="hot-comments">
+		<h3>热门评论</h3>
+		<p><a href="https://www.weibo.com:443/2904546111">原博主</a>:
+			<a href="https://www.weibo.cn:443/sinaurl?u=https%3A%2F%2Fdownloads.example.com%2Fresource">直接资料</a>
+		</p>
+	</div>`
+	itemURL := "https://www.weibo.com:443/2904546111/R8PkkgPKd"
+
+	content, enriched := BuildItemContent(description, "unused fallback", itemURL)
+
+	if !enriched {
+		t.Fatal("BuildItemContent() enriched = false, want true")
+	}
+	for _, want := range []string{
+		"### 博主首评",
+		"[原博主](https://www.weibo.com:443/2904546111)",
+		"[直接资料](https://downloads.example.com/resource)",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("BuildItemContent() missing canonical-host content %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "weibo.cn:443/sinaurl") {
+		t.Errorf("BuildItemContent() retained canonical redirect wrapper:\n%s", content)
 	}
 }
 
@@ -164,9 +193,14 @@ func TestBuildItemContentPreservesUnsafeOrMalformedRedirects(t *testing.T) {
 	if got := strings.Count(content, "weibo.cn/sinaurl"); got != 4 {
 		t.Errorf("BuildItemContent() preserved redirect count = %d, want 4:\n%s", got, content)
 	}
-	for _, unsafe := range []string{"](javascript:", "](ftp:", "](/relative"} {
-		if strings.Contains(content, unsafe) {
-			t.Errorf("BuildItemContent() unwrapped unsafe target %q:\n%s", unsafe, content)
+	for _, want := range []string{
+		"[malformed](https://weibo.cn/sinaurl?u=%zz)",
+		"[relative](https://weibo.cn/sinaurl?u=%2Frelative)",
+		"[javascript](https://weibo.cn/sinaurl?u=javascript%3Aalert%281%29)",
+		"[ftp](https://weibo.cn/sinaurl?u=ftp%3A%2F%2Ffiles.example.com%2Farchive)",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("BuildItemContent() did not preserve unsafe redirect %q:\n%s", want, content)
 		}
 	}
 }
@@ -209,7 +243,9 @@ func TestShouldDeepFetchArticle(t *testing.T) {
 		want      bool
 	}{
 		{name: "desktop Weibo status", itemURL: "https://weibo.com/2904546111/R8PkkgPKd", want: false},
+		{name: "www desktop Weibo status with default port", itemURL: "https://www.weibo.com:443/2904546111/R8PkkgPKd", want: false},
 		{name: "mobile Weibo status", itemURL: "https://m.weibo.cn/status/5172375334583796", want: false},
+		{name: "mobile Weibo status with default port", itemURL: "https://m.weibo.cn:443/status/5172375334583796", want: false},
 		{name: "youtube feed", feedType: "youtube", itemURL: "https://example.com/watch", want: false},
 		{name: "podcast feed", feedType: "podcast", itemURL: "https://example.com/episode", want: false},
 		{name: "video media", itemURL: "https://example.com/video", mediaType: "video/mp4", want: false},

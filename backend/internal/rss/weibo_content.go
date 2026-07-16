@@ -10,7 +10,8 @@ import (
 const bloggerCommentHeading = "### 博主首评"
 
 // BuildItemContent normalizes an RSS item's description while retaining the
-// existing plain-text behavior for non-Weibo items.
+// existing plain-text behavior for non-Weibo items. The enriched result is
+// true only when a same-author blogger comment was appended.
 func BuildItemContent(description, fallback, itemURL string) (content string, enriched bool) {
 	raw := description
 	if strings.TrimSpace(raw) == "" {
@@ -69,11 +70,11 @@ func ShouldDeepFetchArticle(feedType, itemURL, mediaType string) bool {
 
 func desktopWeiboStatusUID(rawURL string) (string, bool) {
 	u, ok := parseHTTPURL(rawURL)
-	if !ok || u.Scheme != "https" || !strings.EqualFold(u.Host, "weibo.com") {
+	if !ok || u.Scheme != "https" || canonicalHost(u) != "weibo.com" {
 		return "", false
 	}
 	parts := urlPathParts(u.Path)
-	if len(parts) != 2 || !isNumeric(parts[0]) || parts[1] == "" {
+	if len(parts) != 2 || !isDigits(parts[0]) || parts[1] == "" {
 		return "", false
 	}
 	return parts[0], true
@@ -81,7 +82,7 @@ func desktopWeiboStatusUID(rawURL string) (string, bool) {
 
 func isMobileWeiboStatusURL(rawURL string) bool {
 	u, ok := parseHTTPURL(rawURL)
-	if !ok || !strings.EqualFold(u.Host, "m.weibo.cn") {
+	if !ok || canonicalHost(u) != "m.weibo.cn" {
 		return false
 	}
 	parts := urlPathParts(u.Path)
@@ -102,18 +103,6 @@ func urlPathParts(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
-}
-
-func isNumeric(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func findHotCommentsWrappers(root *goquery.Selection) *goquery.Selection {
@@ -142,8 +131,8 @@ func anchorPointsToWeiboUID(anchor *goquery.Selection, uid string) bool {
 	if !exists {
 		return false
 	}
-	u, err := url.Parse(href)
-	if err != nil || u.User != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, "weibo.com") {
+	u, ok := parseHTTPURL(href)
+	if !ok || u.Scheme != "https" || canonicalHost(u) != "weibo.com" {
 		return false
 	}
 	parts := urlPathParts(u.Path)
@@ -153,8 +142,8 @@ func anchorPointsToWeiboUID(anchor *goquery.Selection, uid string) bool {
 func rewriteWeiboRedirectAnchors(root *goquery.Selection) {
 	root.Find("a[href]").Each(func(_ int, anchor *goquery.Selection) {
 		href, _ := anchor.Attr("href")
-		redirect, err := url.Parse(href)
-		if err != nil || redirect.Scheme != "https" || !strings.EqualFold(redirect.Host, "weibo.cn") || redirect.Path != "/sinaurl" {
+		redirect, ok := parseHTTPURL(href)
+		if !ok || redirect.Scheme != "https" || canonicalHost(redirect) != "weibo.cn" || redirect.Path != "/sinaurl" {
 			return
 		}
 
