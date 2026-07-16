@@ -68,6 +68,28 @@ func TestBuildItemContentDropsCommentsWithoutSameAuthor(t *testing.T) {
 	}
 }
 
+func TestBuildItemContentRejectsNestedAuthorAnchor(t *testing.T) {
+	description := `<div><p>需要保留的微博正文</p></div>
+	<div class="hot-comments">
+		<h3>热门评论</h3>
+		<p><span><a href="https://weibo.com/2904546111">嵌套博主链接</a></span>: 不能当作顶层博主评论</p>
+	</div>`
+
+	content, enriched := BuildItemContent(description, "unused fallback", weiboArticleURL)
+
+	if enriched {
+		t.Fatal("BuildItemContent() enriched = true, want false")
+	}
+	if !strings.Contains(content, "需要保留的微博正文") {
+		t.Errorf("BuildItemContent() dropped post body:\n%s", content)
+	}
+	for _, unwanted := range []string{"博主首评", "嵌套博主链接", "不能当作顶层博主评论"} {
+		if strings.Contains(content, unwanted) {
+			t.Errorf("BuildItemContent() contains nested-author comment %q:\n%s", unwanted, content)
+		}
+	}
+}
+
 func TestBuildItemContentKeepsOnlyFirstSameAuthorTopLevelComment(t *testing.T) {
 	description := `<div><p>微博正文</p></div>
 	<div class="hot-comments">
@@ -89,6 +111,36 @@ func TestBuildItemContentKeepsOnlyFirstSameAuthorTopLevelComment(t *testing.T) {
 	}
 	if strings.Count(content, "### 博主首评") != 1 {
 		t.Errorf("BuildItemContent() blogger heading count = %d, want 1:\n%s", strings.Count(content, "### 博主首评"), content)
+	}
+}
+
+func TestBuildItemContentRemovesAllHotCommentWrappers(t *testing.T) {
+	description := `<div><p>微博正文</p></div>
+	<div class="first-hot-comments">
+		<h3>热门评论</h3>
+		<p><a href="https://weibo.com/2904546111">原博主</a>: 第一处博主首评</p>
+	</div>
+	<div class="second-hot-comments">
+		<h3>热门评论</h3>
+		<p><a href="https://weibo.com/99887766">其他用户</a>: 第二处其他评论</p>
+		<p><a href="https://weibo.com/2904546111">原博主</a>: 第二处稍晚博主评论</p>
+	</div>`
+
+	content, enriched := BuildItemContent(description, "unused fallback", weiboArticleURL)
+
+	if !enriched {
+		t.Fatal("BuildItemContent() enriched = false, want true")
+	}
+	if !strings.Contains(content, "第一处博主首评") {
+		t.Errorf("BuildItemContent() missing first qualifying comment:\n%s", content)
+	}
+	if got := strings.Count(content, "### 博主首评"); got != 1 {
+		t.Errorf("BuildItemContent() blogger heading count = %d, want 1:\n%s", got, content)
+	}
+	for _, unwanted := range []string{"热门评论", "第二处其他评论", "第二处稍晚博主评论"} {
+		if strings.Contains(content, unwanted) {
+			t.Errorf("BuildItemContent() contains later wrapper content %q:\n%s", unwanted, content)
+		}
 	}
 }
 

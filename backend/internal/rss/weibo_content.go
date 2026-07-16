@@ -28,13 +28,18 @@ func BuildItemContent(description, fallback, itemURL string) (content string, en
 	}
 
 	rewriteWeiboRedirectAnchors(doc.Selection)
-	wrapper := findHotCommentsWrapper(doc.Selection)
-	if wrapper == nil {
+	wrappers := findHotCommentsWrappers(doc.Selection)
+	if wrappers.Length() == 0 {
 		return cleanContent(ExtractMarkdown(doc.Selection)), false
 	}
 
-	comment := firstBloggerComment(wrapper, uid)
-	wrapper.Remove()
+	var comment *goquery.Selection
+	wrappers.Each(func(_ int, wrapper *goquery.Selection) {
+		if comment == nil {
+			comment = firstBloggerComment(wrapper, uid)
+		}
+	})
+	wrappers.Remove()
 	body := cleanContent(ExtractMarkdown(doc.Selection))
 	if comment == nil {
 		return body, false
@@ -111,16 +116,10 @@ func isNumeric(value string) bool {
 	return true
 }
 
-func findHotCommentsWrapper(root *goquery.Selection) *goquery.Selection {
-	var wrapper *goquery.Selection
-	root.Find("h3").EachWithBreak(func(_ int, heading *goquery.Selection) bool {
-		if strings.TrimSpace(heading.Text()) != "热门评论" {
-			return true
-		}
-		wrapper = heading.Parent()
-		return false
-	})
-	return wrapper
+func findHotCommentsWrappers(root *goquery.Selection) *goquery.Selection {
+	return root.Find("h3").FilterFunction(func(_ int, heading *goquery.Selection) bool {
+		return strings.TrimSpace(heading.Text()) == "热门评论"
+	}).Parent()
 }
 
 func firstBloggerComment(wrapper *goquery.Selection, uid string) *goquery.Selection {
@@ -128,7 +127,7 @@ func firstBloggerComment(wrapper *goquery.Selection, uid string) *goquery.Select
 	wrapper.ChildrenFiltered("p").EachWithBreak(func(_ int, paragraph *goquery.Selection) bool {
 		candidate := paragraph.Clone()
 		candidate.Find("blockquote").Remove()
-		author := candidate.Find("a[href]").First()
+		author := candidate.ChildrenFiltered("a[href]").First()
 		if !anchorPointsToWeiboUID(author, uid) {
 			return true
 		}
