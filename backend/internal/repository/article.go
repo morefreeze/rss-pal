@@ -629,6 +629,29 @@ func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, rea
 	return err
 }
 
+func (r *ArticleRepository) UpdateEnrichedContentIfChanged(feedID int, articleURL, content string, wordCount, readingMinutes int) (bool, error) {
+	result, err := r.db.Exec(`
+		UPDATE articles
+		SET content = $3,
+		    word_count = $4,
+		    reading_minutes = $5,
+		    summary_brief = NULL,
+		    summary_detailed = NULL,
+		    refetch_attempts = 0
+		WHERE feed_id = $1
+		  AND url = $2
+		  AND content IS DISTINCT FROM $3
+	`, feedID, articleURL, content, wordCount, readingMinutes)
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
+}
+
 // UpdateTitle overwrites the article's title. Used when a bookmarklet
 // re-capture refreshes a Twitter article's content — the new title from
 // the tweet's first-clause heuristic should replace whatever stale title
