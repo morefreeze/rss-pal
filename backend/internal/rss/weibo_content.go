@@ -13,14 +13,18 @@ const bloggerCommentHeading = "### 博主首评"
 // existing plain-text behavior for non-Weibo items. The enriched result is
 // true only when a same-author blogger comment was appended.
 func BuildItemContent(description, fallback, itemURL string) (content string, enriched bool) {
+	uid, ok := desktopWeiboStatusUID(itemURL)
+	if !ok {
+		content = StripHTML(description)
+		if content == "" {
+			content = StripHTML(fallback)
+		}
+		return content, false
+	}
+
 	raw := description
 	if strings.TrimSpace(raw) == "" {
 		raw = fallback
-	}
-
-	uid, ok := desktopWeiboStatusUID(itemURL)
-	if !ok {
-		return StripHTML(raw), false
 	}
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(raw))
