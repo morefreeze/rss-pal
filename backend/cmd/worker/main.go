@@ -177,8 +177,11 @@ func asyncSummarize(summarizer *ai.Summarizer, articleRepo *repository.ArticleRe
 			log.Printf("Failed to summarize article %d: %v", articleID, err)
 			return
 		}
-		if err := articleRepo.UpdateSummary(articleID, result.Brief, result.Detailed); err != nil {
+		updated, err := articleRepo.UpdateSummaryIfContentUnchanged(articleID, content, result.Brief, result.Detailed)
+		if err != nil {
 			log.Printf("Failed to save summary for article %d: %v", articleID, err)
+		} else if !updated {
+			log.Printf("Skipped stale summary for article %d: content changed", articleID)
 		} else {
 			log.Printf("Summarized article %d", articleID)
 		}
@@ -240,8 +243,11 @@ func backfillSummaries(ctx context.Context, cfg *config.Config, articleRepo *rep
 				log.Printf("Failed to backfill summary for article %d: %v", article.ID, err)
 				return
 			}
-			if err := articleRepo.UpdateSummary(article.ID, result.Brief, result.Detailed); err != nil {
+			updated, err := articleRepo.UpdateSummaryIfContentUnchanged(article.ID, article.Content, result.Brief, result.Detailed)
+			if err != nil {
 				log.Printf("Failed to save backfill summary for article %d: %v", article.ID, err)
+			} else if !updated {
+				log.Printf("Skipped stale backfill summary for article %d: content changed", article.ID)
 			} else {
 				log.Printf("Backfilled summary for article %d", article.ID)
 			}

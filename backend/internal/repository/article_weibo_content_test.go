@@ -183,3 +183,93 @@ func TestUpdateEnrichedContentIfChanged(t *testing.T) {
 		t.Fatal("missing-URL UpdateEnrichedContentIfChanged changed = true; want false")
 	}
 }
+
+func TestUpdateSummaryIfContentUnchangedRejectsStaleWriter(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+
+	var feedID int
+	if err := db.QueryRow(`
+		INSERT INTO feeds (url, title)
+		VALUES ('https://example.com/cas-feed.xml', 'CAS Feed')
+		RETURNING id
+	`).Scan(&feedID); err != nil {
+		t.Fatalf("insert feed: %v", err)
+	}
+
+	const (
+		articleURL = "https://weibo.com/1234567890/cas-test"
+		oldContent = "old content used by an in-flight summary"
+		newContent = "new enriched content\n\n### 博主首评\n\n补充信息"
+	)
+	var articleID int
+	if err := db.QueryRow(`
+		INSERT INTO articles (
+			feed_id, title, url, content, published_at,
+			summary_brief, summary_detailed, processing_state
+		)
+		VALUES ($1, 'CAS article', $2, $3, NOW(),
+			'old brief', 'old detailed', 'processing')
+		RETURNING id
+	`, feedID, articleURL, oldContent).Scan(&articleID); err != nil {
+		t.Fatalf("insert article: %v", err)
+	}
+
+	repo := repository.NewArticleRepository(db)
+	refreshed, err := repo.UpdateEnrichedContentIfChanged(feedID, articleURL, newContent, 10, 1)
+	if err != nil {
+		t.Fatalf("UpdateEnrichedContentIfChanged: %v", err)
+	}
+	if !refreshed {
+		t.Fatal("UpdateEnrichedContentIfChanged changed = false; want true")
+	}
+
+	updated, err := repo.UpdateSummaryIfContentUnchanged(articleID, oldContent, "stale brief", "stale detailed")
+	if err != nil {
+		t.Fatalf("stale UpdateSummaryIfContentUnchanged: %v", err)
+	}
+	if updated {
+		t.Fatal("stale UpdateSummaryIfContentUnchanged updated = true; want false")
+	}
+
+	var brief, detailed sql.NullString
+	var processingState string
+	if err := db.QueryRow(`
+		SELECT summary_brief, summary_detailed, processing_state
+		FROM articles
+		WHERE id = $1
+	`, articleID).Scan(&brief, &detailed, &processingState); err != nil {
+		t.Fatalf("query after stale summary: %v", err)
+	}
+	if brief.Valid || detailed.Valid {
+		t.Fatalf("stale summary persisted: brief=%q detailed=%q", brief.String, detailed.String)
+	}
+	if processingState != "processing" {
+		t.Fatalf("processing_state after stale summary = %q; want processing", processingState)
+	}
+
+	updated, err = repo.UpdateSummaryIfContentUnchanged(articleID, newContent, "fresh brief", "fresh detailed")
+	if err != nil {
+		t.Fatalf("fresh UpdateSummaryIfContentUnchanged: %v", err)
+	}
+	if !updated {
+		t.Fatal("fresh UpdateSummaryIfContentUnchanged updated = false; want true")
+	}
+
+	if err := db.QueryRow(`
+		SELECT summary_brief, summary_detailed, processing_state
+		FROM articles
+		WHERE id = $1
+	`, articleID).Scan(&brief, &detailed, &processingState); err != nil {
+		t.Fatalf("query after fresh summary: %v", err)
+	}
+	if !brief.Valid || brief.String != "fresh brief" {
+		t.Fatalf("summary_brief = %#v; want fresh brief", brief)
+	}
+	if !detailed.Valid || detailed.String != "fresh detailed" {
+		t.Fatalf("summary_detailed = %#v; want fresh detailed", detailed)
+	}
+	if processingState != "ready" {
+		t.Fatalf("processing_state after fresh summary = %q; want ready", processingState)
+	}
+}
