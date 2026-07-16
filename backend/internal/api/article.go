@@ -349,6 +349,8 @@ func (h *ArticleHandler) GetRecommended(c *gin.Context) {
 	c.JSON(http.StatusOK, articles)
 }
 
+const staleSummaryRetryMessage = "文章内容已更新，请重试总结"
+
 func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -418,8 +420,13 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			if err := articleRepo.UpdateSummary(id, brief, detailed); err != nil {
+			updated, err := articleRepo.UpdateSummaryIfContentUnchanged(id, article.Content, brief, detailed)
+			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if !updated {
+				c.JSON(http.StatusConflict, gin.H{"error": staleSummaryRetryMessage})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{
@@ -437,8 +444,13 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		return
 	}
 
-	if err := articleRepo.UpdateSummary(id, brief, detailed); err != nil {
+	updated, err := articleRepo.UpdateSummaryIfContentUnchanged(id, article.Content, brief, detailed)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !updated {
+		c.JSON(http.StatusConflict, gin.H{"error": staleSummaryRetryMessage})
 		return
 	}
 
@@ -526,13 +538,18 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 		return
 	}
 
-	writeAndFlush(map[string]any{"type": "brief_done", "text": brief})
-	writeAndFlush(map[string]any{"type": "detailed_done", "text": detailed})
-
-	if err := h.articleRepo.WithCtx(c).UpdateSummary(id, brief, detailed); err != nil {
+	updated, err := h.articleRepo.WithCtx(c).UpdateSummaryIfContentUnchanged(id, article.Content, brief, detailed)
+	if err != nil {
 		writeAndFlush(map[string]any{"type": "error", "msg": err.Error()})
 		return
 	}
+	if !updated {
+		writeAndFlush(map[string]any{"type": "error", "msg": staleSummaryRetryMessage})
+		return
+	}
+
+	writeAndFlush(map[string]any{"type": "brief_done", "text": brief})
+	writeAndFlush(map[string]any{"type": "detailed_done", "text": detailed})
 
 	writeAndFlush(map[string]any{"type": "done"})
 }

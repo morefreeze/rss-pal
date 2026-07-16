@@ -624,6 +624,30 @@ func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed 
 	return err
 }
 
+// UpdateSummaryIfContentUnchanged writes generated summaries only when the
+// article content still matches the snapshot used to generate them.
+func (r *ArticleRepository) UpdateSummaryIfContentUnchanged(id int, expectedContent, summaryBrief, summaryDetailed string) (bool, error) {
+	result, err := r.db.Exec(`
+		UPDATE articles
+		SET summary_brief = $1,
+		    summary_detailed = $2,
+		    processing_state = CASE
+		        WHEN processing_state = 'processing' THEN 'ready'
+		        ELSE processing_state
+		    END
+		WHERE id = $3
+		  AND content IS NOT DISTINCT FROM $4
+	`, summaryBrief, summaryDetailed, id, expectedContent)
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
+}
+
 func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, readingMinutes int) error {
 	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0 WHERE id = $4`, content, wordCount, readingMinutes, id)
 	return err
