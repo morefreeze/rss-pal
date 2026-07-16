@@ -71,7 +71,7 @@ func (f *Fetcher) getFeedResponse(ctx context.Context, target string, configure 
 		return resp, err
 	}
 
-	fallbackURL, ok := weiboCommentsFallbackURL(target)
+	fallbackURL, ok := weiboCommentsFallbackURL(target, f.rsshubBase)
 	if !ok {
 		return resp, nil
 	}

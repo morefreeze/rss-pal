@@ -22,14 +22,18 @@ func resolveWeibo(u *url.URL) (string, bool) {
 	return "", false
 }
 
-func weiboCommentsFallbackURL(raw string) (string, bool) {
+func weiboCommentsFallbackURL(raw, rsshubBase string) (string, bool) {
 	u, err := url.Parse(raw)
 	if err != nil || !strings.HasSuffix(u.Path, weiboCommentsPathSuffix) {
 		return "", false
 	}
+	base, err := url.Parse(rsshubBase)
+	if err != nil || base.Host == "" || !strings.EqualFold(u.Scheme, base.Scheme) || !strings.EqualFold(u.Host, base.Host) {
+		return "", false
+	}
 	fallbackPath := strings.TrimSuffix(u.Path, weiboCommentsPathSuffix)
-	parts := strings.Split(strings.Trim(fallbackPath, "/"), "/")
-	if len(parts) < 3 || parts[len(parts)-3] != "weibo" || parts[len(parts)-2] != "user" || !isDigits(parts[len(parts)-1]) {
+	routePrefix := strings.TrimRight(base.Path, "/") + "/weibo/user/"
+	if !strings.HasPrefix(fallbackPath, routePrefix) || !isDigits(strings.TrimPrefix(fallbackPath, routePrefix)) {
 		return "", false
 	}
 	u.Path = fallbackPath
