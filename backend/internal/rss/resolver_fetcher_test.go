@@ -52,7 +52,7 @@ func TestFetcherFetchFallsBackWhenWeiboCommentsRouteFails(t *testing.T) {
 	}
 }
 
-func TestFetcherFetchDoesNotFallBackForNonWeiboCommentsSuffix(t *testing.T) {
+func TestFetcherFetchDoesNotFallBackForExternalWeiboRouteLookalike(t *testing.T) {
 	fetcher := NewFetcher("http://rsshub.test:1200")
 	var requestedPaths []string
 	fetcher.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -63,11 +63,11 @@ func TestFetcherFetchDoesNotFallBackForNonWeiboCommentsSuffix(t *testing.T) {
 		}, nil
 	})}
 
-	_, err := fetcher.Fetch(context.Background(), "https://example.com/feed/displayComments=1", "", "")
+	_, err := fetcher.Fetch(context.Background(), "https://example.com/weibo/user/123/displayComments=1", "", "")
 	if err == nil {
 		t.Fatal("Fetch() error = nil, want non-nil")
 	}
-	wantPaths := []string{"/feed/displayComments=1"}
+	wantPaths := []string{"/weibo/user/123/displayComments=1"}
 	if !reflect.DeepEqual(requestedPaths, wantPaths) {
 		t.Fatalf("requested paths = %#v, want %#v", requestedPaths, wantPaths)
 	}
