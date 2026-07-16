@@ -1,6 +1,11 @@
 package rss
 
-import "net/url"
+import (
+	"net/url"
+	"strings"
+)
+
+const weiboCommentsPathSuffix = "/displayComments=1"
 
 func resolveWeibo(u *url.URL) (string, bool) {
 	host := canonicalHost(u)
@@ -9,12 +14,30 @@ func resolveWeibo(u *url.URL) (string, bool) {
 		return "", false
 	}
 	if host == "weibo.com" && parts[0] == "u" {
-		return "/weibo/user/" + parts[1], true
+		return "/weibo/user/" + parts[1] + weiboCommentsPathSuffix, true
 	}
 	if host == "m.weibo.cn" && (parts[0] == "u" || parts[0] == "profile") {
-		return "/weibo/user/" + parts[1], true
+		return "/weibo/user/" + parts[1] + weiboCommentsPathSuffix, true
 	}
 	return "", false
+}
+
+func weiboCommentsFallbackURL(raw, rsshubBase string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.HasSuffix(u.Path, weiboCommentsPathSuffix) {
+		return "", false
+	}
+	base, err := url.Parse(rsshubBase)
+	if err != nil || base.Host == "" || !strings.EqualFold(u.Scheme, base.Scheme) || !strings.EqualFold(u.Host, base.Host) {
+		return "", false
+	}
+	fallbackPath := strings.TrimSuffix(u.Path, weiboCommentsPathSuffix)
+	routePrefix := strings.TrimRight(base.Path, "/") + "/weibo/user/"
+	if !strings.HasPrefix(fallbackPath, routePrefix) || !isDigits(strings.TrimPrefix(fallbackPath, routePrefix)) {
+		return "", false
+	}
+	u.Path = fallbackPath
+	return u.String(), true
 }
 
 func resolveZhihu(u *url.URL) (string, bool) {

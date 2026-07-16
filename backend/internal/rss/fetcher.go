@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,6 +45,42 @@ type FetchResult struct {
 	LastModified string
 }
 
+type feedRequestCreationError struct {
+	err error
+}
+
+func (e *feedRequestCreationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *feedRequestCreationError) Unwrap() error {
+	return e.err
+}
+
+func (f *Fetcher) getFeedResponse(ctx context.Context, target string, configure func(*http.Request)) (*http.Response, error) {
+	doRequest := func(target string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
+		if err != nil {
+			return nil, &feedRequestCreationError{err: err}
+		}
+		configure(req)
+		return f.client.Do(req)
+	}
+
+	resp, err := doRequest(target)
+	if err != nil || resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotModified {
+		return resp, err
+	}
+
+	fallbackURL, ok := weiboCommentsFallbackURL(target, f.rsshubBase)
+	if !ok {
+		return resp, nil
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	resp.Body.Close()
+	return doRequest(fallbackURL)
+}
+
 // PreviewItem is a lightweight article preview (no DB write yet)
 type PreviewItem struct {
 	Title       string  `json:"title"`
@@ -61,21 +99,20 @@ type PreviewResult struct {
 
 func (f *Fetcher) Fetch(ctx context.Context, feedURL string, etag, lastModified string) (*FetchResult, error) {
 	feedURL = ResolveFeedURL(feedURL, f.rsshubBase)
-	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
+	resp, err := f.getFeedResponse(ctx, feedURL, func(req *http.Request) {
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		if lastModified != "" {
+			req.Header.Set("If-Modified-Since", lastModified)
+		}
+		req.Header.Set("User-Agent", userAgent)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	if etag != "" {
-		req.Header.Set("If-None-Match", etag)
-	}
-	if lastModified != "" {
-		req.Header.Set("If-Modified-Since", lastModified)
-	}
-	req.Header.Set("User-Agent", userAgent)
-
-	resp, err := f.client.Do(req)
-	if err != nil {
+		var requestErr *feedRequestCreationError
+		if errors.As(err, &requestErr) {
+			return nil, fmt.Errorf("failed to create request: %w", requestErr.err)
+		}
 		return nil, fmt.Errorf("failed to fetch feed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -104,16 +141,16 @@ func (f *Fetcher) Fetch(ctx context.Context, feedURL string, etag, lastModified 
 // Tries RSS/Atom first, then auto-discovers RSS link in HTML, then falls back to scraping.
 func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, error) {
 	fetchURL := ResolveFeedURL(rawURL, f.rsshubBase)
-	req, err := http.NewRequestWithContext(ctx, "GET", fetchURL, nil)
+	resp, err := f.getFeedResponse(ctx, fetchURL, func(req *http.Request) {
+		req.Header.Set("User-Agent", userAgent)
+		req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9")
+		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	})
 	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
-	}
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-
-	resp, err := f.client.Do(req)
-	if err != nil {
+		var requestErr *feedRequestCreationError
+		if errors.As(err, &requestErr) {
+			return nil, fmt.Errorf("invalid URL: %w", requestErr.err)
+		}
 		return nil, fmt.Errorf("failed to fetch URL: %w", err)
 	}
 	defer resp.Body.Close()
