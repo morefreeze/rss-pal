@@ -640,6 +640,8 @@ func (r *ArticleRepository) UpdateEnrichedContentIfChanged(feedID int, articleUR
 		    refetch_attempts = 0
 		WHERE feed_id = $1
 		  AND url = $2
+		  AND parent_article_id IS NULL
+		  AND NOT is_clip
 		  AND content IS DISTINCT FROM $3
 	`, feedID, articleURL, content, wordCount, readingMinutes)
 	if err != nil {
