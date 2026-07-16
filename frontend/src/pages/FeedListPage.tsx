@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
+import { getInitialPopularFeedsExpanded } from '../utils/popularFeedsVisibility'
 
 // isPDFURL returns true when the user-supplied URL looks like a PDF.
 // Detection is intentionally URL-only (no HEAD probe) — the backend
@@ -83,6 +84,7 @@ export default function FeedListPage() {
   const [adding, setAdding] = useState(false)
   const [addSuccess, setAddSuccess] = useState('')
   const [importing, setImporting] = useState(false)
+  const [popularFeedsExpanded, setPopularFeedsExpanded] = useState(getInitialPopularFeedsExpanded)
   const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -443,47 +445,61 @@ export default function FeedListPage() {
           </div>
         )}
 
-        {/* Popular feeds — grouped + collapsible */}
+        {/* Popular feeds — whole section auto-collapses after 3 days; groups remain independently collapsible */}
         <div className="mb-2">
-          <div className="text-sm text-muted mb-1">热门推荐：</div>
-          {POPULAR_FEEDS.map(group => {
-            const folded = foldedGroups[group.category] === true
-            return (
-              <div key={group.category} style={{ marginBottom: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => setFoldedGroups(s => ({ ...s, [group.category]: !folded }))}
-                  className="btn-text btn-sm"
-                  style={{
-                    padding: '2px 0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
-                >
-                  <span>{group.emoji}</span>
-                  <span>{group.category}</span>
-                  <span style={{ fontSize: 10 }}>{folded ? '▸' : '▾'}</span>
-                </button>
-                {!folded && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
-                    {group.items.map(f => (
-                      <button
-                        key={f.url}
-                        type="button"
-                        className="secondary"
-                        style={{ fontSize: 12, padding: '3px 10px' }}
-                        title={f.desc}
-                        onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
-                      >
-                        {f.name}
-                      </button>
-                    ))}
+          <button
+            type="button"
+            onClick={() => setPopularFeedsExpanded(expanded => !expanded)}
+            className="btn-text btn-sm text-muted mb-1"
+            aria-expanded={popularFeedsExpanded}
+            aria-controls="popular-feeds-groups"
+            style={{ padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            <span style={{ fontSize: 10 }}>{popularFeedsExpanded ? '▾' : '▸'}</span>
+            <span>热门推荐：</span>
+          </button>
+          {popularFeedsExpanded && (
+            <div id="popular-feeds-groups">
+              {POPULAR_FEEDS.map(group => {
+                const folded = foldedGroups[group.category] === true
+                return (
+                  <div key={group.category} style={{ marginBottom: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setFoldedGroups(s => ({ ...s, [group.category]: !folded }))}
+                      className="btn-text btn-sm"
+                      style={{
+                        padding: '2px 0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <span>{group.emoji}</span>
+                      <span>{group.category}</span>
+                      <span style={{ fontSize: 10 }}>{folded ? '▸' : '▾'}</span>
+                    </button>
+                    {!folded && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                        {group.items.map(f => (
+                          <button
+                            key={f.url}
+                            type="button"
+                            className="secondary"
+                            style={{ fontSize: 12, padding: '3px 10px' }}
+                            title={f.desc}
+                            onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
+                          >
+                            {f.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
-          })}
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
