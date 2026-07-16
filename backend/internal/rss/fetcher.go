@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -75,6 +76,7 @@ func (f *Fetcher) getFeedResponse(ctx context.Context, target string, configure 
 	if !ok {
 		return resp, nil
 	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	resp.Body.Close()
 	return doRequest(fallbackURL)
 }
