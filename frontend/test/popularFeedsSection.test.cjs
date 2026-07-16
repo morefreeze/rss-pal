@@ -17,6 +17,10 @@ for (const [expected, label] of [
     'whole-section button should expose its expanded state',
   ],
   [
+    `<span aria-hidden="true" style={{ fontSize: 10 }}>{popularFeedsExpanded ? '▾' : '▸'}</span>`,
+    'whole-section disclosure glyph should be hidden from the accessible name',
+  ],
+  [
     'setPopularFeedsExpanded(expanded => !expanded)',
     'whole-section button should toggle only session state',
   ],
