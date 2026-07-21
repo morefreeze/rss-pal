@@ -269,11 +269,18 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		"hidden":           hidden,
 	}
 	if article.LinksExtendable != nil && *article.LinksExtendable {
-		children, err := h.articleRepo.WithCtx(c).GetVisibleChildren(article.ID, userID)
+		articleRepo := h.articleRepo.WithCtx(c)
+		children, err := articleRepo.GetVisibleChildren(article.ID, userID)
 		if err == nil {
 			response["children"] = children
 		} else {
 			response["children"] = []model.Article{}
+		}
+		fetchedLinkURLs, err := articleRepo.GetChildURLs(article.ID)
+		if err == nil {
+			response["fetched_link_urls"] = fetchedLinkURLs
+		} else {
+			response["fetched_link_urls"] = []string{}
 		}
 	}
 

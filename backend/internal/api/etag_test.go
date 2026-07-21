@@ -64,10 +64,11 @@ func detailResponse(enabled bool, childState string, progress float64, saved int
 			FetchedAt:       time.Unix(500, 0),
 			LinksExtendable: &enabled,
 		},
-		"children": []model.Article{{ID: 8, ProcessingState: childState}},
-		"progress": gin.H{"scroll_position": progress},
-		"signals":  gin.H{"save": saved},
-		"hidden":   hidden,
+		"children":          []model.Article{{ID: 8, ProcessingState: childState}},
+		"fetched_link_urls": []string{"https://child.example/8"},
+		"progress":          gin.H{"scroll_position": progress},
+		"signals":           gin.H{"save": saved},
+		"hidden":            hidden,
 	}
 }
 
@@ -99,6 +100,11 @@ func TestMarshalDetailResponseETagCoversCompleteRepresentation(t *testing.T) {
 	}{
 		{name: "link flag", response: detailResponse(true, "processing", 0.2, 1, false)},
 		{name: "child state", response: detailResponse(false, "ready", 0.2, 1, false)},
+		{name: "fetched link URLs", response: func() gin.H {
+			response := detailResponse(false, "processing", 0.2, 1, false)
+			response["fetched_link_urls"] = []string{"https://child.example/9"}
+			return response
+		}()},
 		{name: "progress", response: detailResponse(false, "processing", 0.8, 1, false)},
 		{name: "signals", response: detailResponse(false, "processing", 0.2, 0, false)},
 		{name: "hidden", response: detailResponse(false, "processing", 0.2, 1, true)},

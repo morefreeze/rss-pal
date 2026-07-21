@@ -14,7 +14,13 @@ function textOffset(root: HTMLElement, container: Node, offset: number): number 
 }
 
 function anchorTitle(anchor: HTMLAnchorElement, url: string): string {
-  return (anchor.textContent ?? '').trim().replace(/\s+/g, ' ') || url
+  const text = (anchor.textContent ?? '').trim().replace(/\s+/g, ' ')
+  if (text) return text
+  try {
+    return new URL(url).hostname || url
+  } catch {
+    return url
+  }
 }
 
 export function linkTargetFromAnchor(

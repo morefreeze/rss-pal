@@ -20,6 +20,15 @@ export type DraftLink = {
 
 export type DraftTarget = Pick<DraftLink, 'url' | 'title'>
 
+export function buildFetchedURLSet(rawURLs: readonly string[], base?: string): Set<string> {
+	const urls = new Set<string>()
+	for (const rawURL of rawURLs) {
+		const url = normalizeHTTPURL(rawURL, base)
+		if (url) urls.add(url)
+	}
+	return urls
+}
+
 const selectionKey = (articleId: number) => `rsspal_batch_sel_${articleId}`
 
 export function loadSavedURLs(articleId: number): string[] {

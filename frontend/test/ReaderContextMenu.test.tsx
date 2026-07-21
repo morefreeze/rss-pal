@@ -139,6 +139,7 @@ describe('ReaderContextMenu', () => {
     await waitFor(() => expect(screen.getByRole('menu').getAttribute('aria-busy')).toBe('false'))
     expect(onClose).not.toHaveBeenCalled()
     expect(document.body.contains(screen.getByRole('menu'))).toBe(true)
+    expect(screen.getByRole('alert').textContent).toBe('操作失败，请重试')
   })
 
   it('clamps its fixed position inside the viewport', async () => {

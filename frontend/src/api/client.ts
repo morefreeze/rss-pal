@@ -406,6 +406,7 @@ export interface ArticleDetailResponse {
   from_bookmarklet?: boolean
   hidden?: boolean
   children?: Article[]
+  fetched_link_urls?: string[]
 }
 
 // Feeds

@@ -17,6 +17,7 @@ import type { ReaderActionContextValue } from '../reader/types'
 import { normalizeHTTPURL } from '../utils/url'
 import {
   addDraftTargets,
+  buildFetchedURLSet,
   enrichDraftLinks,
   loadDraftLinks,
   removeDraftURLs,
@@ -189,6 +190,7 @@ export default function ArticlePage() {
 
   // LinkSet children
   const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(null)
+  const [fetchedLinkURLs, setFetchedLinkURLs] = useState<string[]>([])
 
   // Ordered per-article scratchpad used by both reader modes. It is available
   // for every article; the first successful batch implicitly enables link_set.
@@ -206,19 +208,16 @@ export default function ArticlePage() {
     [draftLinks],
   )
 
-  const fetchedURLSet = useMemo(() => {
-    const urls = new Set<string>()
-    for (const child of linkSetChildren ?? []) {
-      const url = normalizeHTTPURL(child.url, articleURL)
-      if (url) urls.add(url)
-    }
-    return urls
-  }, [articleURL, linkSetChildren])
+  const fetchedURLSet = useMemo(
+    () => buildFetchedURLSet(fetchedLinkURLs, articleURL),
+    [articleURL, fetchedLinkURLs],
+  )
 
   // Load drafts for the route immediately, regardless of link_set state.
   useEffect(() => {
     const articleID = Number(id)
     setConfirmOpen(false)
+    setFetchedLinkURLs([])
     setDraftLinks(Number.isFinite(articleID) ? loadDraftLinks(articleID) : [])
   }, [id])
 
@@ -304,6 +303,7 @@ export default function ArticlePage() {
       setFromBookmarklet(Boolean(data.from_bookmarklet))
       setHidden(Boolean(data.hidden))
       setLinkSetChildren(data.children ?? null)
+      setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
       if (data.signals) {
         setLiked((data.signals['like'] ?? 0) > 0)
         setDisliked((data.signals['dislike'] ?? 0) > 0)
@@ -433,6 +433,7 @@ export default function ArticlePage() {
           if (data.article.processing_state === 'ready' || data.article.processing_state === 'failed') {
             setArticle(data.article)
             setLinkSetChildren(data.children ?? null)
+            setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
             if (intervalId) clearInterval(intervalId)
           } else {
             setArticle(data.article)
@@ -977,6 +978,7 @@ export default function ArticlePage() {
         if (Number(id) !== articleID) return
         setArticle(data.article)
         setLinkSetChildren(data.children ?? null)
+        setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
       })
       .catch((error) => {
         console.warn('refresh after batch_fetch failed', error)
@@ -1229,6 +1231,7 @@ export default function ArticlePage() {
                 const data = await getArticle(article.id)
                 setArticle(data.article)
                 setLinkSetChildren(data.children ?? null)
+                setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
               } catch (e) {
                 console.warn('retry failed', e)
               }
