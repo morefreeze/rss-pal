@@ -35,3 +35,13 @@ export function normalizeURL(href: string, base?: string): string {
     return href
   }
 }
+
+export function normalizeHTTPURL(href: string, base?: string): string | null {
+  const normalized = normalizeURL(href, base)
+  try {
+    const url = new URL(normalized)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? normalized : null
+  } catch {
+    return null
+  }
+}
