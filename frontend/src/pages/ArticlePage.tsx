@@ -20,6 +20,7 @@ import {
   buildFetchedURLSet,
   enrichDraftLinks,
   loadDraftLinks,
+  mergeFetchedLinkURLs,
   removeDraftURLs,
   saveDraftLinks,
   type DraftLink,
@@ -1398,7 +1399,10 @@ export default function ArticlePage() {
         <LinkSetChildren
           parentId={article.id}
           children={linkSetChildren ?? []}
-          onChildrenUpdated={(updated) => setLinkSetChildren(updated)}
+          onChildrenUpdated={(updated, fetchedURLs) => {
+            setLinkSetChildren(updated)
+            setFetchedLinkURLs((current) => mergeFetchedLinkURLs(current, fetchedURLs, updated))
+          }}
         />
       )}
       {/* Bottom nav so readers don't have to scroll back up to switch articles.

@@ -35,7 +35,7 @@ type PendingLongPress = {
 
 type GeneratedEventSuppression = {
   anchor: HTMLAnchorElement
-  timerID: number
+  timerID: number | null
 }
 
 function immutableRect(rect: DOMRect): DOMRect {
@@ -77,31 +77,39 @@ export function ReaderInteractionSurface({
 
   const clearClickSuppression = useCallback(() => {
     const suppression = clickSuppressionRef.current
-    if (suppression) window.clearTimeout(suppression.timerID)
+    if (suppression?.timerID !== null && suppression?.timerID !== undefined) {
+      window.clearTimeout(suppression.timerID)
+    }
     clickSuppressionRef.current = null
   }, [])
 
   const clearContextMenuSuppression = useCallback(() => {
     const suppression = contextMenuSuppressionRef.current
-    if (suppression) window.clearTimeout(suppression.timerID)
+    if (suppression?.timerID !== null && suppression?.timerID !== undefined) {
+      window.clearTimeout(suppression.timerID)
+    }
     contextMenuSuppressionRef.current = null
   }, [])
 
-  const armClickSuppression = useCallback((anchor: HTMLAnchorElement) => {
+  const armClickSuppression = useCallback((anchor: HTMLAnchorElement, expires = true) => {
     clearClickSuppression()
-    const suppression: GeneratedEventSuppression = { anchor, timerID: 0 }
-    suppression.timerID = window.setTimeout(() => {
-      if (clickSuppressionRef.current === suppression) clickSuppressionRef.current = null
-    }, GENERATED_EVENT_TTL_MS)
+    const suppression: GeneratedEventSuppression = { anchor, timerID: null }
+    if (expires) {
+      suppression.timerID = window.setTimeout(() => {
+        if (clickSuppressionRef.current === suppression) clickSuppressionRef.current = null
+      }, GENERATED_EVENT_TTL_MS)
+    }
     clickSuppressionRef.current = suppression
   }, [clearClickSuppression])
 
-  const armContextMenuSuppression = useCallback((anchor: HTMLAnchorElement) => {
+  const armContextMenuSuppression = useCallback((anchor: HTMLAnchorElement, expires = true) => {
     clearContextMenuSuppression()
-    const suppression: GeneratedEventSuppression = { anchor, timerID: 0 }
-    suppression.timerID = window.setTimeout(() => {
-      if (contextMenuSuppressionRef.current === suppression) contextMenuSuppressionRef.current = null
-    }, GENERATED_EVENT_TTL_MS)
+    const suppression: GeneratedEventSuppression = { anchor, timerID: null }
+    if (expires) {
+      suppression.timerID = window.setTimeout(() => {
+        if (contextMenuSuppressionRef.current === suppression) contextMenuSuppressionRef.current = null
+      }, GENERATED_EVENT_TTL_MS)
+    }
     contextMenuSuppressionRef.current = suppression
   }, [clearContextMenuSuppression])
 
@@ -176,8 +184,11 @@ export function ReaderInteractionSurface({
       anchorRect: immutableRect(anchor.getBoundingClientRect()),
     })
     if (shown) {
-      armClickSuppression(anchor)
-      armContextMenuSuppression(anchor)
+      // A successful long press may remain held for an arbitrary duration.
+      // Keep both suppressions alive until its matching pointerup, then start
+      // the short grace period for browser-generated click/contextmenu events.
+      armClickSuppression(anchor, false)
+      armContextMenuSuppression(anchor, false)
     }
   }, [actionContext, armClickSuppression, armContextMenuSuppression, showTarget])
 
@@ -212,7 +223,20 @@ export function ReaderInteractionSurface({
     const finishPointerSelection = (event: PointerEvent) => {
       pointerSelectingRef.current = false
       const pending = longPressRef.current
-      if (pending && pending.pointerID === event.pointerId) cancelLongPress()
+      if (!pending || pending.pointerID !== event.pointerId) return
+      const longPressTriggered = pending.timerID === null
+      if (event.type === 'pointerup' && longPressTriggered) {
+        if (clickSuppressionRef.current?.anchor === pending.anchor) {
+          armClickSuppression(pending.anchor)
+        }
+        if (contextMenuSuppressionRef.current?.anchor === pending.anchor) {
+          armContextMenuSuppression(pending.anchor)
+        }
+      } else if (event.type === 'pointercancel') {
+        clearClickSuppression()
+        clearContextMenuSuppression()
+      }
+      cancelLongPress()
     }
     window.addEventListener('pointerup', finishPointerSelection, true)
     window.addEventListener('pointercancel', finishPointerSelection, true)
@@ -220,7 +244,13 @@ export function ReaderInteractionSurface({
       window.removeEventListener('pointerup', finishPointerSelection, true)
       window.removeEventListener('pointercancel', finishPointerSelection, true)
     }
-  }, [cancelLongPress])
+  }, [
+    armClickSuppression,
+    armContextMenuSuppression,
+    cancelLongPress,
+    clearClickSuppression,
+    clearContextMenuSuppression,
+  ])
 
   useEffect(() => () => {
     cancelLongPress()

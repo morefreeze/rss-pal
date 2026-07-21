@@ -29,6 +29,22 @@ export function buildFetchedURLSet(rawURLs: readonly string[], base?: string): S
 	return urls
 }
 
+export function mergeFetchedLinkURLs(
+	current: readonly string[],
+	serverURLs: readonly string[] | undefined,
+	visibleChildren: ReadonlyArray<{ url: string }>,
+): string[] {
+	if (serverURLs) return [...serverURLs]
+	const merged = [...current]
+	const seen = new Set(current)
+	for (const child of visibleChildren) {
+		if (seen.has(child.url)) continue
+		seen.add(child.url)
+		merged.push(child.url)
+	}
+	return merged
+}
+
 const selectionKey = (articleId: number) => `rsspal_batch_sel_${articleId}`
 
 export function loadSavedURLs(articleId: number): string[] {

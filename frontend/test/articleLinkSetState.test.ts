@@ -3,6 +3,7 @@ import {
   addDraftTargets,
   buildFetchedURLSet,
   enrichDraftLinks,
+  mergeFetchedLinkURLs,
   removeDraftURLs,
   type DraftLink,
 } from '../src/utils/linkSetSelection'
@@ -20,6 +21,19 @@ describe('article link draft transitions', () => {
       'https://visible.example/path',
       'https://hidden.example/',
     ])
+  })
+
+  it('keeps hidden fetched URLs when an older polling response only returns visible children', () => {
+    expect(mergeFetchedLinkURLs(
+      ['https://hidden.example/'],
+      undefined,
+      [{ url: 'https://visible.example/' }],
+    )).toEqual(['https://hidden.example/', 'https://visible.example/'])
+    expect(mergeFetchedLinkURLs(
+      ['https://stale.example/'],
+      ['https://authoritative.example/'],
+      [{ url: 'https://visible.example/' }],
+    )).toEqual(['https://authoritative.example/'])
   })
 
   it('adds normalized targets in order while ignoring fetched and duplicate URLs', () => {

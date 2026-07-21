@@ -6,7 +6,7 @@ interface Props {
   parentId: number
   // eslint-disable-next-line react/no-unused-prop-types
   children: Article[]
-  onChildrenUpdated?: (children: Article[]) => void
+  onChildrenUpdated?: (children: Article[], fetchedLinkURLs?: string[]) => void
 }
 
 function hostOf(url: string): string {
@@ -40,7 +40,7 @@ export function LinkSetChildren({ parentId, children, onChildrenUpdated }: Props
         if (data.children) {
           const sorted = [...data.children].sort((a, b) => a.id - b.id)
           setItems(sorted)
-          onChildrenUpdated?.(data.children)
+          onChildrenUpdated?.(data.children, data.fetched_link_urls)
           // Stop polling once none are processing
           const stillProcessing = sorted.some((c) => c.processing_state === 'processing')
           if (!stillProcessing) {

@@ -186,6 +186,19 @@ describe('ReaderInteractionSurface touch long press', () => {
     expect(fireEvent.contextMenu(anchor, { pointerType: 'mouse' })).toBe(true)
   })
 
+  it('still suppresses the generated click when the user holds past the initial TTL', () => {
+    vi.useFakeTimers()
+    const clicked = vi.fn()
+    subject(<p><a href="/a" onClick={clicked}>Alpha readable link</a></p>)
+    const anchor = screen.getByRole('link')
+    fireEvent.pointerDown(anchor, { pointerType: 'touch', pointerId: 7, clientX: 10, clientY: 20 })
+    act(() => vi.advanceTimersByTime(500 + 801))
+    expect(screen.getByRole('menu')).toBeTruthy()
+    fireEvent.pointerUp(anchor, { pointerType: 'touch', pointerId: 7 })
+    expect(fireEvent.click(anchor)).toBe(false)
+    expect(clicked).not.toHaveBeenCalled()
+  })
+
   it('does not suppress click or touch contextmenu on another link', () => {
     vi.useFakeTimers()
     const secondClick = vi.fn((event: React.MouseEvent) => event.preventDefault())
