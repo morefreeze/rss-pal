@@ -160,7 +160,7 @@ export function ReaderContextMenu({
         padding: 6,
         border: '1px solid var(--border, #d8d8d8)',
         borderRadius: 10,
-        background: 'var(--card-bg, #fff)',
+        background: 'var(--surface, #fff)',
         boxShadow: '0 10px 30px rgba(0, 0, 0, 0.16)',
       }}
     >
@@ -181,7 +181,7 @@ export function ReaderContextMenu({
             border: 0,
             borderRadius: 7,
             background: 'transparent',
-            color: 'var(--text, #222)',
+            color: 'var(--fg, #222)',
             textAlign: 'left',
             cursor: action.disabled || busyActionID ? 'default' : 'pointer',
             opacity: action.disabled ? 0.45 : 1,
