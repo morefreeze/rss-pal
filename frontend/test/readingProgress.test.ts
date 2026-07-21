@@ -4,6 +4,7 @@ import {
   deriveProgressDisplay,
   evaluateReadingProgress,
 } from '../src/utils/readingProgress'
+import { describe, it } from 'vitest'
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -17,6 +18,8 @@ function assertClose(actual: number, expected: number, label: string) {
   }
 }
 
+describe('reading progress', () => {
+it('preserves the existing progress contracts', () => {
 assertClose(computeViewportProgress(250, 1500, 500), 0.25, 'viewport progress')
 assertClose(computeViewportProgress(-50, 1500, 500), 0, 'viewport clamps low')
 assertClose(computeViewportProgress(2000, 1500, 500), 1, 'viewport clamps high')
@@ -87,4 +90,5 @@ assertClose(
   'display history accepts newer server high-water',
 )
 
-console.log('readingProgress tests passed')
+})
+})
