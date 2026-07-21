@@ -3,6 +3,7 @@ import {
   POPULAR_FEEDS_AUTO_COLLAPSE_MS,
   POPULAR_FEEDS_FIRST_SEEN_KEY,
 } from '../src/utils/popularFeedsVisibility'
+import { describe, it } from 'vitest'
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -28,6 +29,8 @@ class MemoryStorage {
   }
 }
 
+describe('popular feeds visibility', () => {
+it('preserves the existing visibility contracts', () => {
 const now = 2_000_000_000_000
 
 const newBrowserStorage = new MemoryStorage()
@@ -109,4 +112,5 @@ assertEqual(
   'storage write failure expands popular feeds',
 )
 
-console.log('popularFeedsVisibility tests passed')
+})
+})
