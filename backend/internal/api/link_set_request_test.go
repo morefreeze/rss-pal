@@ -3,6 +3,9 @@ package api
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/bytedance/rss-pal/internal/model"
 )
 
 func TestValidateBatchFetchCandidatesNormalizesAndDedupes(t *testing.T) {
@@ -15,6 +18,23 @@ func TestValidateBatchFetchCandidatesNormalizesAndDedupes(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].URL != "https://example.com/a" || got[0].Title != "First" {
 		t.Fatalf("unexpected candidates: %+v", got)
+	}
+}
+
+func TestLinkSetChildInputsUseParentMetadata(t *testing.T) {
+	published := time.Unix(123, 0)
+	parent := &model.Article{ID: 9, FeedID: 4, PublishedAt: &published}
+	got := linkSetChildInputs(parent, []BatchFetchCandidate{{
+		Title:      "A",
+		URL:        "https://example.com/a",
+		EditorNote: "note",
+	}})
+	if len(got) != 1 {
+		t.Fatalf("got %d inputs", len(got))
+	}
+	input := got[0]
+	if input.ParentArticleID != 9 || input.FeedID != 4 || input.ProcessingState != "processing" || input.PublishedAt != &published || input.EditorNote != "note" {
+		t.Fatalf("unexpected input: %+v", input)
 	}
 }
 
