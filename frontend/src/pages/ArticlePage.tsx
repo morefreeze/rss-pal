@@ -5,15 +5,24 @@ import {
   getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
-  confirmLinkSetSuggestion, hideArticle, unhideArticle, getArticleCandidates,
-  Article, ReadingProgress, SummaryTemplate, CandidateView
+  hideArticle, unhideArticle,
+  Article, ReadingProgress, SummaryTemplate
 } from '../api/client'
 import { toast } from '../utils/toast'
 import { LinkSetChildren } from '../components/LinkSetChildren'
 import { BatchFetchConfirmDialog } from '../components/BatchFetchConfirmDialog'
-import { LinkSetContext, type LinkSetContextValue } from '../components/LinkSetContext'
-import { normalizeURL } from '../utils/url'
-import { loadSavedURLs, saveSelectedURLs } from '../utils/linkSetSelection'
+import { ReaderActionContext } from '../reader/ReaderActionContext'
+import { createLinkSetActions } from '../reader/linkSetActions'
+import type { ReaderActionContextValue } from '../reader/types'
+import { normalizeHTTPURL } from '../utils/url'
+import {
+  addDraftTargets,
+  enrichDraftLinks,
+  loadDraftLinks,
+  removeDraftURLs,
+  saveDraftLinks,
+  type DraftLink,
+} from '../utils/linkSetSelection'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
 import TweetCard from '../components/TweetCard'
@@ -181,93 +190,102 @@ export default function ArticlePage() {
   // LinkSet children
   const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(null)
 
-  // Link_set inline marking flow
-  const [candidates, setCandidates] = useState<CandidateView[] | null>(null)
-  const [markedURLs, setMarkedURLs] = useState<Set<string>>(new Set())
+  // Ordered per-article scratchpad used by both reader modes. It is available
+  // for every article; the first successful batch implicitly enables link_set.
+  const [draftLinks, setDraftLinks] = useState<DraftLink[]>([])
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const articleURL = article?.url
   const normalize = useCallback(
-    (href: string) => normalizeURL(href, articleURL),
+    (href: string) => normalizeHTTPURL(href, articleURL),
     [articleURL],
   )
 
-  const candidateURLSet = useMemo(() => {
-    const s = new Set<string>()
-    for (const c of candidates ?? []) s.add(normalize(c.url))
-    return s
-  }, [candidates, normalize])
+  const draftURLSet = useMemo(
+    () => new Set(draftLinks.map((draft) => draft.url)),
+    [draftLinks],
+  )
 
-  const alreadyFetchedURLSet = useMemo(() => {
-    const s = new Set<string>()
-    for (const c of candidates ?? []) {
-      if (c.already_fetched) s.add(normalize(c.url))
+  const fetchedURLSet = useMemo(() => {
+    const urls = new Set<string>()
+    for (const child of linkSetChildren ?? []) {
+      const url = normalizeHTTPURL(child.url, articleURL)
+      if (url) urls.add(url)
     }
-    return s
-  }, [candidates, normalize])
+    return urls
+  }, [articleURL, linkSetChildren])
 
-  const toggleMark = useCallback((url: string) => {
-    setMarkedURLs((prev) => {
-      const next = new Set(prev)
-      if (next.has(url)) next.delete(url)
-      else next.add(url)
-      return next
-    })
+  // Load drafts for the route immediately, regardless of link_set state.
+  useEffect(() => {
+    const articleID = Number(id)
+    setConfirmOpen(false)
+    setDraftLinks(Number.isFinite(articleID) ? loadDraftLinks(articleID) : [])
+  }, [id])
+
+  // Never write old-article state under a newly navigated route key.
+  useEffect(() => {
+    if (!article?.id || article.id !== Number(id)) return
+    saveDraftLinks(article.id, draftLinks)
+  }, [article?.id, draftLinks, id])
+
+  // Server children win over local scratch state after any detail refresh.
+  useEffect(() => {
+    if (!article?.id || article.id !== Number(id) || fetchedURLSet.size === 0) return
+    setDraftLinks((current) => removeDraftURLs(current, fetchedURLSet))
+  }, [article?.id, fetchedURLSet, id])
+
+  const addDrafts = useCallback((links: Array<{ url: string; title: string }>) => {
+    const next = addDraftTargets(draftLinks, links, fetchedURLSet)
+    if (next === draftLinks) return
+    setDraftLinks(next)
+    toast.success(`已加入待抓取（${next.length - draftLinks.length}）`)
+  }, [draftLinks, fetchedURLSet])
+
+  const removeDrafts = useCallback((urls: string[]) => {
+    setDraftLinks((current) => removeDraftURLs(current, new Set(urls)))
   }, [])
 
-  const linkSetCtxValue = useMemo<LinkSetContextValue | null>(() => {
-    if (!article?.links_extendable || !candidates) return null
-    return {
-      candidateURLs: candidateURLSet,
-      markedURLs,
-      alreadyFetchedURLs: alreadyFetchedURLSet,
-      normalize,
-      onToggleMark: toggleMark,
-    }
-  }, [article?.links_extendable, candidates, candidateURLSet, markedURLs, alreadyFetchedURLSet, normalize, toggleMark])
+  const openReaderLink = useCallback((url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }, [])
 
-  // Fetch candidate list whenever the article enters link_set mode.
-  useEffect(() => {
-    if (!article?.id || !article?.links_extendable) {
-      setCandidates(null)
-      setMarkedURLs(new Set())
-      return
+  const copyReaderLink = useCallback(async (url: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+      await navigator.clipboard.writeText(url)
+      toast.success('链接已复制')
+    } catch {
+      toast.error('复制失败，请手动复制链接')
     }
-    let cancelled = false
-    const articleId = article.id
-    const baseURL = article.url
-    getArticleCandidates(articleId)
-      .then((cands) => {
-        if (cancelled) return
-        setCandidates(cands)
-        // Restore inline marks from localStorage. Normalize both sides so a
-        // relative-href mark from a previous session still matches the
-        // absolute candidate URL.
-        const saved = loadSavedURLs(articleId)
-        if (saved.length === 0) {
-          setMarkedURLs(new Set())
-          return
-        }
-        const candSet = new Set<string>()
-        for (const c of cands) candSet.add(normalizeURL(c.url, baseURL))
-        const restored = new Set<string>()
-        for (const u of saved) {
-          const n = normalizeURL(u, baseURL)
-          if (candSet.has(n)) restored.add(n)
-        }
-        setMarkedURLs(restored)
-      })
-      .catch((e) => {
-        console.warn('getArticleCandidates failed', e)
-      })
-    return () => { cancelled = true }
-  }, [article?.id, article?.links_extendable, article?.url])
+  }, [])
 
-  // Persist marks to localStorage on every change.
-  useEffect(() => {
-    if (!article?.id) return
-    saveSelectedURLs(article.id, Array.from(markedURLs))
-  }, [markedURLs, article?.id])
+  const discoverReaderLink = useCallback((link: { url: string; title: string }) => {
+    setDraftLinks((current) => enrichDraftLinks(current, [link]))
+  }, [])
+
+  const readerActionContext = useMemo<ReaderActionContextValue>(() => ({
+    normalizeLink: normalize,
+    getLinkState: (url) => fetchedURLSet.has(url) ? 'fetched' : draftURLSet.has(url) ? 'draft' : null,
+    getActions: (target) => createLinkSetActions({
+      target,
+      draftURLs: draftURLSet,
+      fetchedURLs: fetchedURLSet,
+      onAdd: addDrafts,
+      onRemove: removeDrafts,
+      onOpen: openReaderLink,
+      onCopy: copyReaderLink,
+    }),
+    onLinkDiscovered: discoverReaderLink,
+  }), [
+    addDrafts,
+    copyReaderLink,
+    discoverReaderLink,
+    draftURLSet,
+    fetchedURLSet,
+    normalize,
+    openReaderLink,
+    removeDrafts,
+  ])
 
   const loadArticle = async () => {
     if (!id) return
@@ -949,6 +967,23 @@ export default function ArticlePage() {
     historicalHighWater: deriveHistoricalHighWater(progress?.scroll_position, maxScrollRef.current),
   })
 
+  const handleDraftsFetched = useCallback((submittedURLs: string[], insertedCount: number) => {
+    setDraftLinks((current) => removeDraftURLs(current, new Set(submittedURLs)))
+    toast.success(`已提交 ${submittedURLs.length} 条链接${insertedCount < submittedURLs.length ? `，新增 ${insertedCount} 条` : ''}`)
+    const articleID = article?.id
+    if (!articleID) return
+    void getArticle(articleID)
+      .then((data) => {
+        if (Number(id) !== articleID) return
+        setArticle(data.article)
+        setLinkSetChildren(data.children ?? null)
+      })
+      .catch((error) => {
+        console.warn('refresh after batch_fetch failed', error)
+        toast.error('链接已提交，但详情刷新失败，请手动刷新')
+      })
+  }, [article?.id, id])
+
   if (loading && !article) return (
     <div className="card">
       <ArticleDetailSkeleton />
@@ -962,31 +997,59 @@ export default function ArticlePage() {
     </div>
   )
 
+  const draftControls = (
+    <>
+      {draftLinks.length > 0 && (
+        <CollapsibleFab
+          articleId={article.id}
+          icon="📥"
+          label={`待抓取 ${draftLinks.length}`}
+          variant="primary"
+          title={`${draftLinks.length} 条链接待确认抓取`}
+          onActivate={() => setConfirmOpen(true)}
+        />
+      )}
+      <BatchFetchConfirmDialog
+        open={confirmOpen}
+        articleId={article.id}
+        drafts={draftLinks}
+        fetchedURLs={fetchedURLSet}
+        onRemove={(url) => removeDrafts([url])}
+        onClose={() => setConfirmOpen(false)}
+        onFetched={handleDraftsFetched}
+      />
+    </>
+  )
+
   if (reader.mode === 'reading') {
     return (
-      <ReadingLayout
-        article={{
-          title: article.title,
-          url: article.url,
-          published_at: article.published_at,
-          word_count: article.word_count ?? 0,
-          reading_minutes: article.reading_minutes ?? 0,
-          content: article.content,
-          summary_brief: article.summary_brief,
-          summary_detailed: article.summary_detailed,
-        }}
-        fontSize={reader.fontSize}
-        fontFamily={reader.fontFamily}
-        codeWrap={reader.codeWrap}
-        onExit={() => reader.setMode('normal')}
-        onFontSize={reader.setFontSize}
-        onFontFamily={reader.setFontFamily}
-        onCodeWrap={reader.setCodeWrap}
-        onTapBody={toggleReadingChrome}
-        onPrev={prevId ? goPrev : undefined}
-        onNext={hasNext && !loadingNext ? goNext : undefined}
-        onBack={handleBack}
-      />
+      <>
+        <ReadingLayout
+          article={{
+            title: article.title,
+            url: article.url,
+            published_at: article.published_at,
+            word_count: article.word_count ?? 0,
+            reading_minutes: article.reading_minutes ?? 0,
+            content: article.content,
+            summary_brief: article.summary_brief,
+            summary_detailed: article.summary_detailed,
+          }}
+          fontSize={reader.fontSize}
+          fontFamily={reader.fontFamily}
+          codeWrap={reader.codeWrap}
+          onExit={() => reader.setMode('normal')}
+          onFontSize={reader.setFontSize}
+          onFontFamily={reader.setFontFamily}
+          onCodeWrap={reader.setCodeWrap}
+          onTapBody={toggleReadingChrome}
+          onPrev={prevId ? goPrev : undefined}
+          onNext={hasNext && !loadingNext ? goNext : undefined}
+          onBack={handleBack}
+          readerActionContext={readerActionContext}
+        />
+        {draftControls}
+      </>
     )
   }
 
@@ -1276,9 +1339,9 @@ export default function ArticlePage() {
                   style={{ lineHeight: 1.8, fontSize: 15 }}
                 >
                   <CodeWrapContext.Provider value={reader.codeWrap}>
-                    <LinkSetContext.Provider value={linkSetCtxValue}>
+                    <ReaderActionContext.Provider value={readerActionContext}>
                       <MarkdownArticle source={article.content} imageDimensions={article.image_dimensions} />
-                    </LinkSetContext.Provider>
+                    </ReaderActionContext.Provider>
                   </CodeWrapContext.Provider>
                 </div>
               )
@@ -1327,64 +1390,8 @@ export default function ArticlePage() {
           </div>
         </div>
       </div>
-      {article.links_extendable === true && (
-        <CollapsibleFab
-          articleId={article.id}
-          icon="📥"
-          label="批量抓取"
-          variant="primary"
-          title="检测到多个可抓取链接"
-          onActivate={() => setConfirmOpen(true)}
-        />
-      )}
-      {article.links_extendable !== true && article.link_set_suggested === true && (
-        <CollapsibleFab
-          articleId={article.id}
-          icon="💡"
-          label="转为 link_set"
-          variant="outline"
-          title="文章看起来是一组链接列表，确认后可批量抓取"
-          onActivate={async () => {
-            try {
-              await confirmLinkSetSuggestion(article.id)
-              const data = await getArticle(article.id)
-              setArticle(data.article)
-              setLinkSetChildren(data.children ?? null)
-              // candidate fetch + inline icons kick in via the effect above
-            } catch (e) {
-              console.warn('confirm link_set failed', e)
-              toast.error('转换失败，请稍后重试')
-            }
-          }}
-        />
-      )}
-      <BatchFetchConfirmDialog
-        open={confirmOpen}
-        articleId={article.id}
-        candidates={candidates ?? []}
-        markedURLs={markedURLs}
-        normalize={normalize}
-        onUnmark={(url) => toggleMark(url)}
-        onClose={() => setConfirmOpen(false)}
-        onFetched={async (_n) => {
-          setMarkedURLs(new Set())
-          // Re-fetch candidates so already_fetched flags refresh, then re-fetch
-          // article for new children. Order matters: candidates first so the
-          // marks-clear effect doesn't race with a stale candidate list.
-          try {
-            if (article?.id) {
-              const cands = await getArticleCandidates(article.id)
-              setCandidates(cands)
-              const data = await getArticle(article.id)
-              setArticle(data.article)
-              setLinkSetChildren(data.children ?? null)
-            }
-          } catch (e) {
-            console.warn('refresh after batch_fetch failed', e)
-          }
-        }}
-      />
-      {article?.is_link_set && (
+      {draftControls}
+      {(article.links_extendable === true || (linkSetChildren?.length ?? 0) > 0) && (
         <LinkSetChildren
           parentId={article.id}
           children={linkSetChildren ?? []}

@@ -43,8 +43,8 @@ export function BatchFetchConfirmDialog({
     }
     setCheckedURLs(initial)
     // We intentionally do not depend on `rows` here — that would reset
-    // the user's per-row checkbox edits every time markedURLs/candidates
-    // shift. Only re-init when the dialog re-opens.
+    // the user's per-row checkbox edits whenever draft details shift.
+    // Only re-init when the dialog re-opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
