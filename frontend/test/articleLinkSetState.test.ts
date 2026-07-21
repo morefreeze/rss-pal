@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addDraftTargets,
+  buildFetchedURLSet,
   enrichDraftLinks,
   removeDraftURLs,
   type DraftLink,
@@ -10,6 +11,17 @@ const a: DraftLink = { url: 'https://a.example/', title: 'A saved', addedAt: 1 }
 const b: DraftLink = { url: 'https://b.example/', title: 'b.example', addedAt: 2 }
 
 describe('article link draft transitions', () => {
+  it('builds fetched state from the server URL projection, including hidden children', () => {
+    const result = buildFetchedURLSet(
+      ['https://visible.example/path/', 'https://hidden.example/?utm_source=rss'],
+      'https://parent.example/article',
+    )
+    expect([...result]).toEqual([
+      'https://visible.example/path',
+      'https://hidden.example/',
+    ])
+  })
+
   it('adds normalized targets in order while ignoring fetched and duplicate URLs', () => {
     const result = addDraftTargets(
       [a],

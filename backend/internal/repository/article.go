@@ -1390,6 +1390,33 @@ func (r *ArticleRepository) GetVisibleChildren(parentID, userID int) ([]model.Ar
 	return r.scanArticleNoFeedTitle(rows)
 }
 
+// GetChildURLs returns every child URL, including children hidden by a user.
+// The article detail endpoint uses this projection for fetched-state dedup;
+// hiding a child removes it from display but must not make its URL fetchable
+// again. Ordering by id keeps the response and its ETag deterministic.
+func (r *ArticleRepository) GetChildURLs(parentID int) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT url
+		FROM articles
+		WHERE parent_article_id = $1
+		ORDER BY id ASC
+	`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	urls := make([]string, 0)
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			return nil, err
+		}
+		urls = append(urls, url)
+	}
+	return urls, rows.Err()
+}
+
 // UpdateProcessingState transitions an article's processing_state.
 // Returns rowsAffected so callers can detect "already in target state".
 func (r *ArticleRepository) UpdateProcessingState(id int, from, to string) (int64, error) {

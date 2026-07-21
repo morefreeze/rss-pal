@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -16,6 +17,7 @@ import type { ReaderContextTarget, ReaderLinkTarget } from './types'
 
 const LONG_PRESS_MS = 500
 const LONG_PRESS_MOVE_TOLERANCE = 8
+const GENERATED_EVENT_TTL_MS = 800
 
 type ReaderInteractionSurfaceProps = {
   articleKey: string | number
@@ -29,6 +31,11 @@ type PendingLongPress = {
   startY: number
   anchor: HTMLAnchorElement
   timerID: number | null
+}
+
+type GeneratedEventSuppression = {
+  anchor: HTMLAnchorElement
+  timerID: number
 }
 
 function immutableRect(rect: DOMRect): DOMRect {
@@ -62,9 +69,41 @@ export function ReaderInteractionSurface({
   const rootRef = useRef<HTMLDivElement>(null)
   const targetRef = useRef<ReaderContextTarget | null>(null)
   const longPressRef = useRef<PendingLongPress | null>(null)
-  const suppressNextClickRef = useRef(false)
-  const suppressTouchContextMenuRef = useRef(false)
+  const pointerSelectingRef = useRef(false)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  const clickSuppressionRef = useRef<GeneratedEventSuppression | null>(null)
+  const contextMenuSuppressionRef = useRef<GeneratedEventSuppression | null>(null)
   const [target, setTarget] = useState<ReaderContextTarget | null>(null)
+
+  const clearClickSuppression = useCallback(() => {
+    const suppression = clickSuppressionRef.current
+    if (suppression) window.clearTimeout(suppression.timerID)
+    clickSuppressionRef.current = null
+  }, [])
+
+  const clearContextMenuSuppression = useCallback(() => {
+    const suppression = contextMenuSuppressionRef.current
+    if (suppression) window.clearTimeout(suppression.timerID)
+    contextMenuSuppressionRef.current = null
+  }, [])
+
+  const armClickSuppression = useCallback((anchor: HTMLAnchorElement) => {
+    clearClickSuppression()
+    const suppression: GeneratedEventSuppression = { anchor, timerID: 0 }
+    suppression.timerID = window.setTimeout(() => {
+      if (clickSuppressionRef.current === suppression) clickSuppressionRef.current = null
+    }, GENERATED_EVENT_TTL_MS)
+    clickSuppressionRef.current = suppression
+  }, [clearClickSuppression])
+
+  const armContextMenuSuppression = useCallback((anchor: HTMLAnchorElement) => {
+    clearContextMenuSuppression()
+    const suppression: GeneratedEventSuppression = { anchor, timerID: 0 }
+    suppression.timerID = window.setTimeout(() => {
+      if (contextMenuSuppressionRef.current === suppression) contextMenuSuppressionRef.current = null
+    }, GENERATED_EVENT_TTL_MS)
+    contextMenuSuppressionRef.current = suppression
+  }, [clearContextMenuSuppression])
 
   const removeTargetClasses = useCallback(() => {
     targetRef.current?.links.forEach((link) => {
@@ -73,10 +112,15 @@ export function ReaderInteractionSurface({
   }, [])
 
   const close = useCallback(() => {
+    clearClickSuppression()
+    clearContextMenuSuppression()
     removeTargetClasses()
     targetRef.current = null
     setTarget(null)
-  }, [removeTargetClasses])
+    const returnFocus = returnFocusRef.current
+    returnFocusRef.current = null
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true })
+  }, [clearClickSuppression, clearContextMenuSuppression, removeTargetClasses])
 
   const cancelLongPress = useCallback(() => {
     const pending = longPressRef.current
@@ -86,46 +130,56 @@ export function ReaderInteractionSurface({
     longPressRef.current = null
   }, [])
 
-  const showTarget = useCallback((next: ReaderContextTarget) => {
+  const showTarget = useCallback((next: ReaderContextTarget): boolean => {
     if (!actionContext || actionContext.getActions(next).length === 0) {
       close()
-      return
+      return false
     }
     removeTargetClasses()
+    const root = rootRef.current
+    const active = document.activeElement
+    returnFocusRef.current = active instanceof HTMLElement && root?.contains(active)
+      ? active
+      : next.links[0]?.element ?? root
     next.links.forEach((link) => {
       link.element.classList.add('reader-context-target')
       actionContext.onLinkDiscovered?.({ url: link.url, title: link.title })
     })
     targetRef.current = next
     setTarget(next)
+    return true
   }, [actionContext, close, removeTargetClasses])
 
-  const openSelection = useCallback(() => {
+  const openSelection = useCallback((clickAnchor?: HTMLAnchorElement | null) => {
     const root = rootRef.current
     const selection = window.getSelection()
     if (!root || !selection || !actionContext) return close()
     const links = resolveSelectionLinks(root, selection, actionContext.normalizeLink)
     if (links.length === 0) return close()
-    suppressNextClickRef.current = true
-    showTarget({
+    const shown = showTarget({
       kind: 'selection-links',
       links: [...links],
       anchorRect: selectionBounds(selection, links),
     })
-  }, [actionContext, close, showTarget])
+    if (shown && clickAnchor && links.some((link) => link.element === clickAnchor)) {
+      armClickSuppression(clickAnchor)
+    }
+  }, [actionContext, armClickSuppression, close, showTarget])
 
   const openLongPress = useCallback((anchor: HTMLAnchorElement) => {
     if (!actionContext) return
     const link = linkTargetFromAnchor(anchor, actionContext.normalizeLink)
     if (!link) return
-    suppressNextClickRef.current = true
-    suppressTouchContextMenuRef.current = true
-    showTarget({
+    const shown = showTarget({
       kind: 'long-press-link',
       links: [link],
       anchorRect: immutableRect(anchor.getBoundingClientRect()),
     })
-  }, [actionContext, showTarget])
+    if (shown) {
+      armClickSuppression(anchor)
+      armContextMenuSuppression(anchor)
+    }
+  }, [actionContext, armClickSuppression, armContextMenuSuppression, showTarget])
 
   useEffect(() => close(), [articleKey, close])
 
@@ -138,10 +192,42 @@ export function ReaderInteractionSurface({
     return () => window.removeEventListener('scroll', handleScroll, true)
   }, [cancelLongPress, close])
 
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      if (pointerSelectingRef.current) return
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed) {
+        const menuHasFocus = document.activeElement instanceof Element
+          && document.activeElement.closest('.reader-context-menu') !== null
+        if (targetRef.current && !menuHasFocus) close()
+        return
+      }
+      openSelection()
+    }
+    document.addEventListener('selectionchange', handleSelectionChange)
+    return () => document.removeEventListener('selectionchange', handleSelectionChange)
+  }, [close, openSelection])
+
+  useEffect(() => {
+    const finishPointerSelection = (event: PointerEvent) => {
+      pointerSelectingRef.current = false
+      const pending = longPressRef.current
+      if (pending && pending.pointerID === event.pointerId) cancelLongPress()
+    }
+    window.addEventListener('pointerup', finishPointerSelection, true)
+    window.addEventListener('pointercancel', finishPointerSelection, true)
+    return () => {
+      window.removeEventListener('pointerup', finishPointerSelection, true)
+      window.removeEventListener('pointercancel', finishPointerSelection, true)
+    }
+  }, [cancelLongPress])
+
   useEffect(() => () => {
     cancelLongPress()
+    clearClickSuppression()
+    clearContextMenuSuppression()
     removeTargetClasses()
-  }, [cancelLongPress, removeTargetClasses])
+  }, [cancelLongPress, clearClickSuppression, clearContextMenuSuppression, removeTargetClasses])
 
   const actions = useMemo(
     () => target && actionContext ? actionContext.getActions(target) : [],
@@ -149,7 +235,11 @@ export function ReaderInteractionSurface({
   )
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== 'touch' || !actionContext) return
+    if (event.pointerType !== 'touch') {
+      pointerSelectingRef.current = event.button === 0
+      return
+    }
+    if (!actionContext) return
     const source = event.target instanceof Element ? event.target : null
     const anchor = source?.closest<HTMLAnchorElement>('a[href]') ?? null
     if (!anchor || !rootRef.current?.contains(anchor)) return
@@ -185,26 +275,51 @@ export function ReaderInteractionSurface({
       cancelLongPress()
       return
     }
-    openSelection()
+    pointerSelectingRef.current = false
+    if (event.button !== 0) return
+    const source = event.target instanceof Element ? event.target : null
+    const clickAnchor = source?.closest<HTMLAnchorElement>('a[href]') ?? null
+    openSelection(clickAnchor)
   }
 
   const handlePointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    pointerSelectingRef.current = false
     if (!longPressRef.current || longPressRef.current.pointerID === event.pointerId) {
       cancelLongPress()
     }
   }
 
+  const handleKeyUp = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.key === 'Shift'
+      || event.key.startsWith('Arrow')
+      || event.key === 'Home'
+      || event.key === 'End'
+      || event.key === 'PageUp'
+      || event.key === 'PageDown'
+    ) openSelection()
+  }
+
   const handleClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!suppressNextClickRef.current) return
-    suppressNextClickRef.current = false
+    const suppression = clickSuppressionRef.current
+    const eventTarget = event.target instanceof Node ? event.target : null
+    if (!suppression || !eventTarget || !suppression.anchor.contains(eventTarget)) return
+    clearClickSuppression()
     event.preventDefault()
     event.stopPropagation()
   }
 
   const handleContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
     const pointerType = (event.nativeEvent as MouseEvent & { pointerType?: string }).pointerType
-    if (!suppressTouchContextMenuRef.current || pointerType === 'mouse') return
-    suppressTouchContextMenuRef.current = false
+    const suppression = contextMenuSuppressionRef.current
+    const eventTarget = event.target instanceof Node ? event.target : null
+    if (
+      !suppression
+      || pointerType === 'mouse'
+      || !eventTarget
+      || !suppression.anchor.contains(eventTarget)
+    ) return
+    clearContextMenuSuppression()
     event.preventDefault()
   }
 
@@ -212,11 +327,13 @@ export function ReaderInteractionSurface({
     <>
       <div
         ref={rootRef}
+        tabIndex={-1}
         className={['reader-interaction-surface', className].filter(Boolean).join(' ')}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
+        onKeyUp={handleKeyUp}
         onClickCapture={handleClickCapture}
         onContextMenu={handleContextMenu}
       >

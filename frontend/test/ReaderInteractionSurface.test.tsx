@@ -59,6 +59,32 @@ describe('ReaderInteractionSurface desktop selection', () => {
     expect(anchor.classList.contains('reader-context-target')).toBe(true)
   })
 
+  it('opens after a keyboard Selection stabilizes', () => {
+    subject()
+    const anchor = screen.getByRole('link', { name: 'Alpha readable link' })
+    select(anchor.firstChild!, 2, anchor.firstChild!, 8)
+    fireEvent.keyUp(anchor, { key: 'Shift' })
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(anchor.classList.contains('reader-context-target')).toBe(true)
+  })
+
+  it('replaces a non-collapsed Selection on selectionchange but keeps a snapshot when menu focus collapses it', () => {
+    subject()
+    const [first, second] = screen.getAllByRole('link')
+    select(first.firstChild!, 1, first.firstChild!, 4)
+    fireEvent.pointerUp(first, { pointerType: 'mouse' })
+
+    select(second.firstChild!, 1, second.firstChild!, 4)
+    fireEvent(document, new Event('selectionchange'))
+    expect(first.classList.contains('reader-context-target')).toBe(false)
+    expect(second.classList.contains('reader-context-target')).toBe(true)
+
+    window.getSelection()!.removeAllRanges()
+    fireEvent(document, new Event('selectionchange'))
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(second.classList.contains('reader-context-target')).toBe(true)
+  })
+
   it('stays closed for pure text and highlights every selected link', () => {
     subject()
     const spans = document.querySelectorAll('span')
@@ -91,6 +117,21 @@ describe('ReaderInteractionSurface desktop selection', () => {
     expect(clicked).toHaveBeenCalledTimes(1)
   })
 
+  it('does not suppress an unrelated link click and clears suppression when closed', () => {
+    const firstClick = vi.fn((event: React.MouseEvent) => event.preventDefault())
+    const secondClick = vi.fn((event: React.MouseEvent) => event.preventDefault())
+    subject(<p><a href="/a" onClick={firstClick}>First link</a> <a href="/b" onClick={secondClick}>Second link</a></p>)
+    const [first, second] = screen.getAllByRole('link')
+    select(first.firstChild!, 1, first.firstChild!, 4)
+    fireEvent.pointerUp(first, { pointerType: 'mouse' })
+    fireEvent.click(second)
+    expect(secondClick).toHaveBeenCalledTimes(1)
+
+    fireEvent.keyDown(screen.getByRole('menuitem'), { key: 'Escape' })
+    fireEvent.click(first)
+    expect(firstClick).toHaveBeenCalledTimes(1)
+  })
+
   it('allows an ordinary link click when there was no selection', () => {
     const clicked = vi.fn((event: React.MouseEvent) => event.preventDefault())
     subject(<p><a href="/a" onClick={clicked}>Alpha readable link</a></p>)
@@ -106,6 +147,7 @@ describe('ReaderInteractionSurface desktop selection', () => {
     fireEvent.keyDown(screen.getByRole('menuitem'), { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
     expect(anchor.classList.contains('reader-context-target')).toBe(false)
+    expect(document.activeElement).toBe(anchor)
 
     select(anchor.firstChild!, 0, anchor.firstChild!, 3)
     fireEvent.pointerUp(anchor, { pointerType: 'mouse' })
@@ -144,6 +186,20 @@ describe('ReaderInteractionSurface touch long press', () => {
     expect(fireEvent.contextMenu(anchor, { pointerType: 'mouse' })).toBe(true)
   })
 
+  it('does not suppress click or touch contextmenu on another link', () => {
+    vi.useFakeTimers()
+    const secondClick = vi.fn((event: React.MouseEvent) => event.preventDefault())
+    subject(<p><a href="/a">First link</a> <a href="/b" onClick={secondClick}>Second link</a></p>)
+    const [first, second] = screen.getAllByRole('link')
+    fireEvent.pointerDown(first, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
+    act(() => vi.advanceTimersByTime(500))
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(fireEvent.click(second)).toBe(false)
+    expect(secondClick).toHaveBeenCalledTimes(1)
+    expect(fireEvent.contextMenu(second, { pointerType: 'touch' })).toBe(true)
+    expect(fireEvent.contextMenu(first, { pointerType: 'touch' })).toBe(false)
+  })
+
   it.each([
     ['movement', (anchor: HTMLElement) => fireEvent.pointerMove(anchor, { pointerType: 'touch', pointerId: 1, clientX: 19, clientY: 20 })],
     ['pointer cancellation', (anchor: HTMLElement) => fireEvent.pointerCancel(anchor, { pointerType: 'touch', pointerId: 1 })],
@@ -155,6 +211,16 @@ describe('ReaderInteractionSurface touch long press', () => {
     const anchor = screen.getByRole('link', { name: 'Alpha readable link' })
     fireEvent.pointerDown(anchor, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
     cancel(anchor)
+    act(() => vi.advanceTimersByTime(500))
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('cancels when the touch is released outside the reader surface', () => {
+    vi.useFakeTimers()
+    subject()
+    const anchor = screen.getByRole('link', { name: 'Alpha readable link' })
+    fireEvent.pointerDown(anchor, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
+    fireEvent.pointerUp(window, { pointerType: 'touch', pointerId: 1 })
     act(() => vi.advanceTimersByTime(500))
     expect(screen.queryByRole('menu')).toBeNull()
   })

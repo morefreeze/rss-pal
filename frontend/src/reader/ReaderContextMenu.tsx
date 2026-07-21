@@ -46,6 +46,7 @@ export function ReaderContextMenu({
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const [activeIndex, setActiveIndex] = useState(-1)
   const [busyActionID, setBusyActionID] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [position, setPosition] = useState<Position>({ left: VIEWPORT_MARGIN, top: VIEWPORT_MARGIN })
 
   const enabledIndices = actions.flatMap((action, index) => action.disabled ? [] : [index])
@@ -71,10 +72,12 @@ export function ReaderContextMenu({
     if (!open) {
       setActiveIndex(-1)
       setBusyActionID(null)
+      setActionError(null)
       return
     }
     const first = enabledIndices[0] ?? -1
     setActiveIndex(first)
+    setActionError(null)
   }, [open, actions]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -94,12 +97,14 @@ export function ReaderContextMenu({
   const execute = useCallback(async (action: ReaderContextAction) => {
     if (action.disabled || busyActionID) return
     setBusyActionID(action.id)
+    setActionError(null)
     try {
       await action.run()
       setBusyActionID(null)
       onClose()
     } catch {
       setBusyActionID(null)
+      setActionError('操作失败，请重试')
     }
   }, [busyActionID, onClose])
 
@@ -190,6 +195,14 @@ export function ReaderContextMenu({
           {action.label}
         </button>
       ))}
+      {actionError && (
+        <div
+          role="alert"
+          style={{ padding: '6px 12px 4px', color: '#b42318', fontSize: 12 }}
+        >
+          {actionError}
+        </div>
+      )}
     </div>,
     document.body,
   )

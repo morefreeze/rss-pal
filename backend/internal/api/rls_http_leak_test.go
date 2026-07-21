@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,12 +23,12 @@ import (
 // enforces — the bypass DSN option used by testdb.New() is NOT inherited
 // by NewAsApp.
 type httpLeakFixture struct {
-	privDB                  *sql.DB
-	appDB                   *sql.DB
-	router                  *gin.Engine
-	cfg                     *config.Config
-	userA, userB            int
-	privateFeedA, articleA  int
+	privDB                 *sql.DB
+	appDB                  *sql.DB
+	router                 *gin.Engine
+	cfg                    *config.Config
+	userA, userB           int
+	privateFeedA, articleA int
 }
 
 const httpTestJWTSecret = "test-secret-for-rls-http-leak"
@@ -173,6 +174,45 @@ func TestRLSHTTP_ArticleGetByID_ScopedByFeedOwner(t *testing.T) {
 	w = f.do(t, http.MethodGet, "/api/articles/"+itoa(f.articleA), f.userB)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("userB GET userA's article: status %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestArticleGetByID_HiddenLinkSetChildRemainsFetched(t *testing.T) {
+	f, cleanup := newHTTPLeakFixture(t)
+	defer cleanup()
+
+	if _, err := f.privDB.Exec(`UPDATE articles SET links_extendable = TRUE WHERE id = $1`, f.articleA); err != nil {
+		t.Fatalf("enable link set: %v", err)
+	}
+	var childID int
+	const childURL = "https://hidden.example/article"
+	if err := f.privDB.QueryRow(`
+		INSERT INTO articles (feed_id, title, url, published_at, parent_article_id)
+		VALUES ($1, 'hidden child', $2, NOW(), $3)
+		RETURNING id
+	`, f.privateFeedA, childURL, f.articleA).Scan(&childID); err != nil {
+		t.Fatalf("seed link-set child: %v", err)
+	}
+	if _, err := f.privDB.Exec(`INSERT INTO hidden_articles (user_id, article_id) VALUES ($1, $2)`, f.userA, childID); err != nil {
+		t.Fatalf("hide link-set child: %v", err)
+	}
+
+	w := f.do(t, http.MethodGet, "/api/articles/"+itoa(f.articleA), f.userA)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET link-set parent: status %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Children        []json.RawMessage `json:"children"`
+		FetchedLinkURLs []string          `json:"fetched_link_urls"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode article detail: %v", err)
+	}
+	if len(response.Children) != 0 {
+		t.Fatalf("hidden child leaked into visible children: %s", w.Body.String())
+	}
+	if len(response.FetchedLinkURLs) != 1 || response.FetchedLinkURLs[0] != childURL {
+		t.Fatalf("fetched_link_urls = %#v, want [%q]", response.FetchedLinkURLs, childURL)
 	}
 }
 
