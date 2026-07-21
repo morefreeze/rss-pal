@@ -18,6 +18,8 @@ export type DraftLink = {
   addedAt: number
 }
 
+export type DraftTarget = Pick<DraftLink, 'url' | 'title'>
+
 const selectionKey = (articleId: number) => `rsspal_batch_sel_${articleId}`
 
 export function loadSavedURLs(articleId: number): string[] {
@@ -112,4 +114,62 @@ export function enrichDraftLinkTitle(link: DraftLink, discoveredTitle: string): 
 		return link
 	}
 	return title === link.title ? link : { ...link, title }
+}
+
+export function addDraftTargets(
+	existing: DraftLink[],
+	targets: DraftTarget[],
+	fetchedURLs: ReadonlySet<string>,
+	now: number = Date.now(),
+): DraftLink[] {
+	const seen = new Set(existing.map((link) => link.url))
+	const fetched = new Set<string>()
+	for (const rawURL of fetchedURLs) {
+		const url = normalizeHTTPURL(rawURL)
+		if (url) fetched.add(url)
+	}
+	let next: DraftLink[] | null = null
+	for (const target of targets) {
+		const url = normalizeHTTPURL(target.url)
+		if (!url || seen.has(url) || fetched.has(url)) continue
+		seen.add(url)
+		const title = target.title.trim().replace(/\s+/g, ' ') || fallbackTitle(url)
+		if (!next) next = [...existing]
+		next.push({ url, title, addedAt: now })
+	}
+	return next ?? existing
+}
+
+export function removeDraftURLs(
+	existing: DraftLink[],
+	removedURLs: ReadonlySet<string>,
+): DraftLink[] {
+	const removed = new Set<string>()
+	for (const rawURL of removedURLs) {
+		const url = normalizeHTTPURL(rawURL)
+		if (url) removed.add(url)
+	}
+	if (!existing.some((link) => removed.has(link.url))) return existing
+	return existing.filter((link) => !removed.has(link.url))
+}
+
+export function enrichDraftLinks(
+	existing: DraftLink[],
+	discoveredLinks: DraftTarget[],
+): DraftLink[] {
+	const titles = new Map<string, string>()
+	for (const discovered of discoveredLinks) {
+		const url = normalizeHTTPURL(discovered.url)
+		if (url && !titles.has(url)) titles.set(url, discovered.title)
+	}
+	let next: DraftLink[] | null = null
+	existing.forEach((link, index) => {
+		const discoveredTitle = titles.get(link.url)
+		if (discoveredTitle === undefined) return
+		const enriched = enrichDraftLinkTitle(link, discoveredTitle)
+		if (enriched === link) return
+		if (!next) next = [...existing]
+		next[index] = enriched
+	})
+	return next ?? existing
 }
