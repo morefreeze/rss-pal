@@ -255,21 +255,6 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	// no-cache (not no-store) means the browser may keep the body but MUST
-	// revalidate via If-None-Match every time. ETag already hashes the
-	// article content + summaries, so unchanged articles still get a cheap
-	// 304 Not Modified. The previous max-age=300 / stale-while-revalidate=600
-	// strategy meant a re-captured article (⭐ bookmarklet overwrite) was
-	// invisible in the reader for up to 15 minutes even with a hard refresh.
-	c.Header("Cache-Control", "private, no-cache")
-
-	etag := ComputeDetailETag(*article)
-	c.Header("ETag", etag)
-	if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
-		c.Status(http.StatusNotModified)
-		return
-	}
-
 	userID := getUserID(c)
 
 	progress, _ := h.progressRepo.WithCtx(c).GetByArticleAndUser(id, userID)
@@ -291,7 +276,23 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 			response["children"] = []model.Article{}
 		}
 	}
-	c.JSON(http.StatusOK, response)
+
+	// no-cache (not no-store) lets the browser retain large article bodies but
+	// requires revalidation. The validator must represent the whole private
+	// response, not only article content: link-set promotion, children, progress,
+	// signals, and hidden state all change the UI without changing fetched_at.
+	body, etag, err := MarshalDetailResponse(response)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "encode article detail"})
+		return
+	}
+	c.Header("Cache-Control", "private, no-cache")
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
 }
 
 // Hide POST /api/articles/:id/hide — soft-delete an article for the current user.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/api"
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/gin-gonic/gin"
 )
 
 func TestComputeListETagStable(t *testing.T) {
@@ -55,35 +56,59 @@ func TestListETagHeaderIsPresent(t *testing.T) {
 	}
 }
 
-func TestComputeDetailETagStable(t *testing.T) {
-	art := model.Article{
-		ID:              7,
-		FetchedAt:       time.Unix(500, 0),
-		SummaryDetailed: "abc",
-		Content:         "hello world",
-	}
-	a := api.ComputeDetailETag(art)
-	b := api.ComputeDetailETag(art)
-	if a != b {
-		t.Fatalf("detail etag must be stable: %q vs %q", a, b)
+func detailResponse(enabled bool, childState string, progress float64, saved int, hidden bool) gin.H {
+	return gin.H{
+		"article": model.Article{
+			ID:              7,
+			Content:         "body",
+			FetchedAt:       time.Unix(500, 0),
+			LinksExtendable: &enabled,
+		},
+		"children": []model.Article{{ID: 8, ProcessingState: childState}},
+		"progress": gin.H{"scroll_position": progress},
+		"signals":  gin.H{"save": saved},
+		"hidden":   hidden,
 	}
 }
 
-func TestComputeDetailETagChangesOnUpdate(t *testing.T) {
-	art := model.Article{ID: 7, FetchedAt: time.Unix(500, 0), Content: "v1", SummaryDetailed: "s1"}
-	tag1 := api.ComputeDetailETag(art)
-	art.Content = "v2"
-	if tag1 == api.ComputeDetailETag(art) {
-		t.Fatalf("etag must change when content changes")
+func detailTag(t *testing.T, response gin.H) (string, string) {
+	t.Helper()
+	body, tag, err := api.MarshalDetailResponse(response)
+	if err != nil {
+		t.Fatal(err)
 	}
-	art.Content = "v1"
-	art.SummaryDetailed = "s2"
-	if tag1 == api.ComputeDetailETag(art) {
-		t.Fatalf("etag must change when summary_detailed changes")
+	return string(body), tag
+}
+
+func TestMarshalDetailResponseStable(t *testing.T) {
+	body1, tag1 := detailTag(t, detailResponse(false, "processing", 0.2, 1, false))
+	body2, tag2 := detailTag(t, detailResponse(false, "processing", 0.2, 1, false))
+	if body1 != body2 || tag1 != tag2 {
+		t.Fatalf("detail response must be stable: %q/%q vs %q/%q", body1, tag1, body2, tag2)
 	}
-	art.SummaryDetailed = "s1"
-	art.FetchedAt = time.Unix(999, 0)
-	if tag1 == api.ComputeDetailETag(art) {
-		t.Fatalf("etag must change when fetched_at changes")
+	if !strings.HasPrefix(tag1, `W/"`) || !strings.HasSuffix(tag1, `"`) {
+		t.Fatalf("expected weak etag, got %q", tag1)
+	}
+}
+
+func TestMarshalDetailResponseETagCoversCompleteRepresentation(t *testing.T) {
+	_, base := detailTag(t, detailResponse(false, "processing", 0.2, 1, false))
+	tests := []struct {
+		name     string
+		response gin.H
+	}{
+		{name: "link flag", response: detailResponse(true, "processing", 0.2, 1, false)},
+		{name: "child state", response: detailResponse(false, "ready", 0.2, 1, false)},
+		{name: "progress", response: detailResponse(false, "processing", 0.8, 1, false)},
+		{name: "signals", response: detailResponse(false, "processing", 0.2, 0, false)},
+		{name: "hidden", response: detailResponse(false, "processing", 0.2, 1, true)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, got := detailTag(t, tt.response)
+			if got == base {
+				t.Fatalf("etag did not change for %s", tt.name)
+			}
+		})
 	}
 }
