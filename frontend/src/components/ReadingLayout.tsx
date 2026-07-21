@@ -4,6 +4,8 @@ import MarkdownArticle from './MarkdownArticle'
 import ReaderSettingsPanel from './ReaderSettingsPanel'
 import { CodeWrapContext } from './CodeWrapContext'
 import type { ReaderFontFamily } from '../hooks/useReaderSettings'
+import { ReaderActionContext } from '../reader/ReaderActionContext'
+import type { ReaderActionContextValue } from '../reader/types'
 
 type ArticleLite = {
   title: string
@@ -30,6 +32,7 @@ type Props = {
   onPrev?: () => void
   onNext?: () => void
   onBack?: () => void
+  readerActionContext?: ReaderActionContextValue
 }
 
 export default function ReadingLayout(props: Props) {
@@ -91,11 +94,17 @@ export default function ReadingLayout(props: Props) {
         )}
 
         {article.content
-          ? (
+          ? (props.readerActionContext ? (
+            <ReaderActionContext.Provider value={props.readerActionContext}>
+              <CodeWrapContext.Provider value={codeWrap}>
+                <MarkdownArticle source={article.content} />
+              </CodeWrapContext.Provider>
+            </ReaderActionContext.Provider>
+          ) : (
             <CodeWrapContext.Provider value={codeWrap}>
               <MarkdownArticle source={article.content} />
             </CodeWrapContext.Provider>
-          )
+          ))
           : <div className="text-muted">暂无内容</div>
         }
 

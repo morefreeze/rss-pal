@@ -593,6 +593,27 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
   margin: 8px 0;
 }
 .markdown-body a { color: var(--link); }
+.markdown-body a.reader-link-draft {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.markdown-body a.reader-context-target {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+.reader-context-menu button:hover:not(:disabled),
+.reader-context-menu button:focus-visible {
+  background: var(--surface-hover) !important;
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-context-menu { scroll-behavior: auto; }
+}
 .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 .markdown-body table { border-collapse: collapse; margin: 12px 0; }
 .markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 6px 10px; }

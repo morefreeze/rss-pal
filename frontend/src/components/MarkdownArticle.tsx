@@ -1,6 +1,6 @@
-import { createContext, memo, useContext, useMemo, useState } from 'react'
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import type { Components } from 'react-markdown'
+import type { Components, ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkCjkFriendly from 'remark-cjk-friendly'
 import remarkMath from 'remark-math'
@@ -13,8 +13,8 @@ import { flattenImageAltBlankLines } from '../util/imageAlt'
 import VideoEmbed from './VideoEmbed'
 import { parsePlaceholder } from './parseVideoPlaceholder'
 import { CodeWrapContext } from './CodeWrapContext'
-import { LinkSetContext } from './LinkSetContext'
-import { LinkSetMarkIcon } from './LinkSetMarkIcon'
+import { ReaderActionContext } from '../reader/ReaderActionContext'
+import { ReaderInteractionSurface } from '../reader/ReaderInteractionSurface'
 
 type Props = {
   source: string
@@ -89,6 +89,35 @@ function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) 
   )
 }
 
+type ArticleLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraProps
+
+function ArticleLink({ href, children, className, node: _node, ...rest }: ArticleLinkProps) {
+  const actionContext = useContext(ReaderActionContext)
+  const anchorRef = useRef<HTMLAnchorElement>(null)
+  const normalized = href && actionContext ? actionContext.normalizeLink(href) : null
+  const state = normalized && actionContext ? actionContext.getLinkState(normalized) : null
+
+  useEffect(() => {
+    if (!normalized || !actionContext?.onLinkDiscovered || !anchorRef.current) return
+    const title = (anchorRef.current.textContent ?? '').trim().replace(/\s+/g, ' ') || normalized
+    actionContext.onLinkDiscovered({ url: normalized, title })
+  }, [actionContext, children, normalized])
+
+  return (
+    <a
+      ref={anchorRef}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={[className, state === 'draft' ? 'reader-link-draft' : null].filter(Boolean).join(' ') || undefined}
+      data-reader-link-state={state ?? undefined}
+      {...rest}
+    >
+      {children}
+    </a>
+  )
+}
+
 // Module-scoped plugin lists and component overrides. Hoisted out of the
 // render function so their references are stable across re-renders —
 // otherwise ReactMarkdown sees a fresh `components` object each render,
@@ -128,27 +157,7 @@ const COMPONENTS: Components = {
       />
     )
   },
-  a: ({ href, children, ...rest }) => {
-    const ctx = useContext(LinkSetContext)
-    const normalized = href && ctx ? ctx.normalize(href) : null
-    const isCandidate = normalized != null && ctx?.candidateURLs.has(normalized) === true
-    const anchor = (
-      <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
-        {children}
-      </a>
-    )
-    if (!isCandidate || !ctx || normalized == null) return anchor
-    return (
-      <span style={{ display: 'inline' }}>
-        {anchor}
-        <LinkSetMarkIcon
-          marked={ctx.markedURLs.has(normalized)}
-          alreadyFetched={ctx.alreadyFetchedURLs.has(normalized)}
-          onToggle={() => ctx.onToggleMark(normalized)}
-        />
-      </span>
-    )
-  },
+  a: ArticleLink,
   p: ({ children, ...rest }) => {
     const text = extractParagraphText(children)
     if (text) {
@@ -176,7 +185,7 @@ function MarkdownArticle({ source, imageDimensions }: Props) {
   )
   const dims = imageDimensions ?? null
   return (
-    <div className="markdown-body">
+    <ReaderInteractionSurface articleKey={source} className="markdown-body">
       <ImageDimensionsContext.Provider value={dims}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
@@ -186,7 +195,7 @@ function MarkdownArticle({ source, imageDimensions }: Props) {
           {cleaned}
         </ReactMarkdown>
       </ImageDimensionsContext.Provider>
-    </div>
+    </ReaderInteractionSurface>
   )
 }
 
