@@ -3,10 +3,9 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
-
-	"github.com/bytedance/rss-pal/internal/model"
 )
 
 // ComputeListETag builds a weak ETag for an article-list response.
@@ -40,18 +39,17 @@ func ComputeListETag(querySignature string, items []ArticleListItem) string {
 	return `W/"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
 }
 
-// ComputeDetailETag builds a weak ETag for a single-article response.
-// Sensitive to fetched_at, content body, and summary bodies — any of
-// which change when the worker re-fetches or re-summarises the article.
-// Content/summaries are hashed (not just length-counted) so edits that
-// preserve length still bust the cache.
-func ComputeDetailETag(a model.Article) string {
+// MarshalDetailResponse serializes the complete private detail response and
+// derives its weak validator from those exact bytes. This keeps link-set
+// flags, children, progress, signals, hidden state, and article content in the
+// same cache contract as the body sent to the client.
+func MarshalDetailResponse(response any) ([]byte, string, error) {
+	body, err := json.Marshal(response)
+	if err != nil {
+		return nil, "", err
+	}
 	h := sha256.New()
-	fmt.Fprintf(h, "v1|id=%d|fetched=%d|state=%s|", a.ID, a.FetchedAt.UnixNano(), a.ProcessingState)
-	h.Write([]byte(a.Content))
-	h.Write([]byte("|brief="))
-	h.Write([]byte(a.SummaryBrief))
-	h.Write([]byte("|detailed="))
-	h.Write([]byte(a.SummaryDetailed))
-	return `W/"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
+	h.Write([]byte("detail-v2|"))
+	h.Write(body)
+	return body, `W/"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`, nil
 }
