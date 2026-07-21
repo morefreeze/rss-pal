@@ -119,6 +119,51 @@ func (r *ArticleRepository) InsertLinkSetChildren(children []LinkSetChildInput) 
 		return 0, err
 	}
 	defer rollback()
+	inserted, err := insertLinkSetChildren(tx, children)
+	if err != nil {
+		return 0, err
+	}
+	if err := commit(); err != nil {
+		return 0, err
+	}
+	return inserted, nil
+}
+
+// EnableAndInsertLinkSetChildren promotes a parent and inserts its selected
+// children in one transaction. When r is already bound to the request
+// transaction, the outer RLS middleware owns the final commit/rollback.
+func (r *ArticleRepository) EnableAndInsertLinkSetChildren(parentID int, children []LinkSetChildInput) (int, error) {
+	tx, commit, rollback, err := txOrBegin(r.db)
+	if err != nil {
+		return 0, err
+	}
+	defer rollback()
+
+	result, err := tx.Exec(`UPDATE articles SET links_extendable = true WHERE id = $1`, parentID)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if affected != 1 {
+		return 0, fmt.Errorf("parent article %d not found", parentID)
+	}
+	inserted, err := insertLinkSetChildren(tx, children)
+	if err != nil {
+		return 0, err
+	}
+	if err := commit(); err != nil {
+		return 0, err
+	}
+	return inserted, nil
+}
+
+func insertLinkSetChildren(q Querier, children []LinkSetChildInput) (int, error) {
+	if len(children) == 0 {
+		return 0, nil
+	}
 
 	var (
 		placeholders []string
@@ -146,7 +191,7 @@ func (r *ArticleRepository) InsertLinkSetChildren(children []LinkSetChildInput) 
 		RETURNING id
 	`, strings.Join(placeholders, ", "))
 
-	rows, err := tx.Query(query, args...)
+	rows, err := q.Query(query, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -160,7 +205,7 @@ func (r *ArticleRepository) InsertLinkSetChildren(children []LinkSetChildInput) 
 		inserted++
 	}
 	rows.Close()
-	if err := commit(); err != nil {
+	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 	return inserted, nil
