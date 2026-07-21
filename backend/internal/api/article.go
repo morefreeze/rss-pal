@@ -711,15 +711,6 @@ func (h *ArticleHandler) GetCandidates(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"candidates": out, "from_cache": false})
 }
 
-// BatchFetchRequest is what the modal posts on confirm.
-type BatchFetchRequest struct {
-	Candidates []struct {
-		Title      string `json:"title"`
-		URL        string `json:"url"`
-		EditorNote string `json:"editor_note"`
-	} `json:"candidates"`
-}
-
 // BatchFetch creates child article rows for the user-selected candidates
 // and queues them for content fetching (processing_state='processing').
 func (h *ArticleHandler) BatchFetch(c *gin.Context) {

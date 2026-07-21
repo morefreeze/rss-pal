@@ -1,6 +1,7 @@
 package rss
 
 import (
+	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -162,6 +163,19 @@ func normaliseLinkSetURL(u *url.URL) string {
 		out.Path = strings.TrimRight(out.Path, "/")
 	}
 	return out.String()
+}
+
+// NormalizeLinkSetURL validates and canonicalizes one absolute HTTP(S) URL
+// using the same rules as link-set extraction.
+func NormalizeLinkSetURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", fmt.Errorf("URL must be absolute http(s)")
+	}
+	return normaliseLinkSetURL(u), nil
 }
 
 func extractEditorNote(s *goquery.Selection, linkText string) string {

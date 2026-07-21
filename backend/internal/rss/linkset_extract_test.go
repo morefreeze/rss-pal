@@ -59,6 +59,22 @@ func TestExtractCandidates_NormalisesURL(t *testing.T) {
 	}
 }
 
+func TestNormalizeLinkSetURL(t *testing.T) {
+	got, err := NormalizeLinkSetURL("https://Example.COM/a/?utm_source=x&b=2&a=1#part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://example.com/a?a=1&b=2" {
+		t.Fatalf("got %q", got)
+	}
+
+	for _, raw := range []string{"mailto:a@b.com", "javascript:void(0)", "/relative"} {
+		if _, err := NormalizeLinkSetURL(raw); err == nil {
+			t.Fatalf("expected %q to fail", raw)
+		}
+	}
+}
+
 func TestExtractCandidates_ExcludesParentHost(t *testing.T) {
 	html := `
         <a href="/internal-link">internal</a>
