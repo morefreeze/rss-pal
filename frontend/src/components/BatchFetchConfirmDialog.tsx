@@ -1,46 +1,30 @@
-// Confirm-only dialog for the link_set inline marking flow.
-//
-// Selection happens in the article body via <LinkSetMarkIcon>; this dialog
-// shows what the user already chose and lets them: (1) uncheck rows for
-// this round without giving them up entirely, (2) ✕ to remove a candidate
-// from the inline marks, (3) confirm and dispatch a batch_fetch.
-//
-// Toolbar 全选/反选/取消全选 operate ONLY on the displayed rows — the dialog
-// cannot expand beyond what the user marked in-page. To add more, close
-// and click more icons.
+// Confirmation for the ordered per-article link draft list. Checkbox state
+// is only for the current submission; the remove button edits the draft list.
 
-import { useEffect, useMemo, useState } from 'react'
-import {
-  CandidateView,
-  batchFetchCandidates,
-} from '../api/client'
+import { useEffect, useState } from 'react'
+import { batchFetchCandidates } from '../api/client'
+import type { DraftLink } from '../utils/linkSetSelection'
 
 interface Props {
   open: boolean
   articleId: number
-  candidates: CandidateView[]               // full candidate list (already fetched from API)
-  markedURLs: Set<string>                    // normalized URLs the user marked in-page
-  normalize: (href: string) => string        // same normalizer used by the icon context
-  onUnmark: (normalizedURL: string) => void  // ✕ → parent removes from markedURLs
+  drafts: DraftLink[]
+  fetchedURLs: ReadonlySet<string>
+  onRemove: (url: string) => void
   onClose: () => void
-  onFetched?: (insertedCount: number) => void
+  onFetched?: (submittedURLs: string[], insertedCount: number) => void
 }
 
 export function BatchFetchConfirmDialog({
   open,
   articleId,
-  candidates,
-  markedURLs,
-  normalize,
-  onUnmark,
+  drafts,
+  fetchedURLs,
+  onRemove,
   onClose,
   onFetched,
 }: Props) {
-  // Filter + order: keep candidates' original order (= position from API)
-  const rows = useMemo(
-    () => candidates.filter((c) => markedURLs.has(normalize(c.url))),
-    [candidates, markedURLs, normalize],
-  )
+  const rows = drafts
 
   // Per-row "include in this fetch" state. Identified by normalized URL so
   // it survives rows shifting in/out as the user ✕s things.
@@ -54,8 +38,8 @@ export function BatchFetchConfirmDialog({
     setError(null)
     setSubmitting(false)
     const initial = new Set<string>()
-    for (const c of rows) {
-      if (!c.already_fetched) initial.add(normalize(c.url))
+    for (const draft of rows) {
+      if (!fetchedURLs.has(draft.url)) initial.add(draft.url)
     }
     setCheckedURLs(initial)
     // We intentionally do not depend on `rows` here — that would reset
@@ -68,7 +52,9 @@ export function BatchFetchConfirmDialog({
   useEffect(() => {
     if (!open) return
     setCheckedURLs((prev) => {
-      const validURLs = new Set(rows.map((c) => normalize(c.url)))
+      const validURLs = new Set(
+        rows.filter((draft) => !fetchedURLs.has(draft.url)).map((draft) => draft.url),
+      )
       let changed = false
       const next = new Set<string>()
       for (const u of prev) {
@@ -77,7 +63,7 @@ export function BatchFetchConfirmDialog({
       }
       return changed ? next : prev
     })
-  }, [rows, open, normalize])
+  }, [rows, fetchedURLs, open])
 
   // Lock body scroll while open + ESC to close
   useEffect(() => {
@@ -105,8 +91,8 @@ export function BatchFetchConfirmDialog({
 
   function selectAll() {
     const all = new Set<string>()
-    for (const c of rows) {
-      if (!c.already_fetched) all.add(normalize(c.url))
+    for (const draft of rows) {
+      if (!fetchedURLs.has(draft.url)) all.add(draft.url)
     }
     setCheckedURLs(all)
   }
@@ -116,9 +102,9 @@ export function BatchFetchConfirmDialog({
   function invertSelection() {
     setCheckedURLs((prev) => {
       const next = new Set<string>()
-      for (const c of rows) {
-        if (c.already_fetched) continue
-        const url = normalize(c.url)
+      for (const draft of rows) {
+        if (fetchedURLs.has(draft.url)) continue
+        const url = draft.url
         if (!prev.has(url)) next.add(url)
       }
       return next
@@ -132,14 +118,13 @@ export function BatchFetchConfirmDialog({
     try {
       // Submit in display order to preserve user intent.
       const chosen = rows
-        .filter((c) => !c.already_fetched && checkedURLs.has(normalize(c.url)))
-        .map((c) => ({
-          title: c.title,
-          url: c.url,
-          editor_note: c.editor_note,
+        .filter((draft) => !fetchedURLs.has(draft.url) && checkedURLs.has(draft.url))
+        .map((draft) => ({
+          title: draft.title,
+          url: draft.url,
         }))
       const result = await batchFetchCandidates(articleId, chosen)
-      onFetched?.(result.inserted)
+      onFetched?.(chosen.map((draft) => draft.url), result.inserted)
       onClose()
     } catch (e: any) {
       setError(e?.response?.data?.error || '抓取失败')
@@ -152,7 +137,7 @@ export function BatchFetchConfirmDialog({
     try { return new URL(url).host } catch { return url }
   }
 
-  const totalSelectable = rows.filter((c) => !c.already_fetched).length
+  const totalSelectable = rows.filter((draft) => !fetchedURLs.has(draft.url)).length
   const confirmDisabled = submitting || checkedURLs.size === 0
 
   return (
@@ -170,6 +155,9 @@ export function BatchFetchConfirmDialog({
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="batch-fetch-dialog-title"
         onClick={(e) => e.stopPropagation()}
         style={{
           background: 'var(--bg)',
@@ -191,7 +179,7 @@ export function BatchFetchConfirmDialog({
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>确认要抓取的链接</h3>
+          <h3 id="batch-fetch-dialog-title" style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>确认要抓取的链接</h3>
           <button
             type="button"
             onClick={onClose}
@@ -233,18 +221,19 @@ export function BatchFetchConfirmDialog({
           )}
           {rows.length === 0 && !error && (
             <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>
-              还没有标记任何链接。回到正文，点击候选链接旁的小图标进行标记。
+              还没有待抓取链接。回到正文，选中链接文字或长按链接后加入。
             </div>
           )}
           {rows.length > 0 && (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-              {rows.map((c) => {
-                const url = normalize(c.url)
-                const disabled = c.already_fetched
+              {rows.map((draft) => {
+                const url = draft.url
+                const disabled = fetchedURLs.has(url)
                 const checked = checkedURLs.has(url)
                 return (
                   <li
                     key={url}
+                    data-testid="draft-row"
                     style={{
                       display: 'grid',
                       gridTemplateColumns: '20px minmax(0, 1fr) auto auto',
@@ -264,6 +253,7 @@ export function BatchFetchConfirmDialog({
                       type="checkbox"
                       checked={checked}
                       disabled={disabled}
+                      aria-label={`本次抓取 ${draft.title}`}
                       onChange={() => !disabled && toggleChecked(url)}
                       style={{ marginTop: 3, cursor: disabled ? 'not-allowed' : 'pointer' }}
                     />
@@ -275,7 +265,7 @@ export function BatchFetchConfirmDialog({
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
                       }}>
-                        {c.title || '(无标题)'}
+                        {draft.title || '(无标题)'}
                       </div>
                       <div style={{
                         fontSize: 11,
@@ -284,21 +274,8 @@ export function BatchFetchConfirmDialog({
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
                       }}>
-                        {hostOf(c.url)}
+                        {hostOf(draft.url)}
                       </div>
-                      {c.editor_note && (
-                        <div style={{
-                          fontSize: 11,
-                          marginTop: 4,
-                          fontStyle: 'italic',
-                          color: 'var(--fg-muted)',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {c.editor_note}
-                        </div>
-                      )}
                     </div>
                     <div>
                       {disabled && (
@@ -314,9 +291,9 @@ export function BatchFetchConfirmDialog({
                     </div>
                     <button
                       type="button"
-                      onClick={() => onUnmark(url)}
-                      title="从标记中移除"
-                      aria-label="从标记中移除"
+                      onClick={() => onRemove(url)}
+                      title="从草稿移除"
+                      aria-label={`从草稿移除 ${draft.title}`}
                       style={{
                         border: 'none',
                         background: 'transparent',
