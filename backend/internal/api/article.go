@@ -730,31 +730,13 @@ func (h *ArticleHandler) BatchFetch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if len(req.Candidates) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no candidates selected"})
+	candidates, err := validateBatchFetchCandidates(req.Candidates)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	inputs := make([]repository.LinkSetChildInput, 0, len(req.Candidates))
-	for _, cand := range req.Candidates {
-		if cand.URL == "" {
-			continue
-		}
-		title := cand.Title
-		if title == "" {
-			title = cand.URL
-		}
-		inputs = append(inputs, repository.LinkSetChildInput{
-			FeedID:          parent.FeedID,
-			ParentArticleID: parent.ID,
-			Title:           title,
-			URL:             cand.URL,
-			EditorNote:      cand.EditorNote,
-			PrerankScore:    0,
-			ProcessingState: "processing",
-			PublishedAt:     parent.PublishedAt,
-		})
-	}
-	n, err := articleRepo.InsertLinkSetChildren(inputs)
+	inputs := linkSetChildInputs(parent, candidates)
+	n, err := articleRepo.EnableAndInsertLinkSetChildren(parent.ID, inputs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 )
 
@@ -64,4 +66,21 @@ func validateBatchFetchCandidates(input []BatchFetchCandidate) ([]BatchFetchCand
 		return nil, fmt.Errorf("no candidates selected")
 	}
 	return out, nil
+}
+
+func linkSetChildInputs(parent *model.Article, candidates []BatchFetchCandidate) []repository.LinkSetChildInput {
+	inputs := make([]repository.LinkSetChildInput, 0, len(candidates))
+	for _, candidate := range candidates {
+		inputs = append(inputs, repository.LinkSetChildInput{
+			FeedID:          parent.FeedID,
+			ParentArticleID: parent.ID,
+			Title:           candidate.Title,
+			URL:             candidate.URL,
+			EditorNote:      candidate.EditorNote,
+			PrerankScore:    0,
+			ProcessingState: "processing",
+			PublishedAt:     parent.PublishedAt,
+		})
+	}
+	return inputs
 }
