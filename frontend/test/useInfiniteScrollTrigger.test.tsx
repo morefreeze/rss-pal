@@ -3,6 +3,24 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useInfiniteScrollTrigger } from '../src/hooks/useInfiniteScrollTrigger'
 
+let intersectionObserverCallback: IntersectionObserverCallback | undefined
+let intersectionObserverInstance: TestIntersectionObserver | undefined
+
+class TestIntersectionObserver implements IntersectionObserver {
+  readonly root = null
+  readonly rootMargin = '0px'
+  readonly thresholds = [0]
+  observe: IntersectionObserver['observe'] = vi.fn()
+  unobserve: IntersectionObserver['unobserve'] = vi.fn()
+  disconnect: IntersectionObserver['disconnect'] = vi.fn()
+  takeRecords: IntersectionObserver['takeRecords'] = vi.fn(() => [])
+
+  constructor(callback: IntersectionObserverCallback) {
+    intersectionObserverCallback = callback
+    intersectionObserverInstance = this
+  }
+}
+
 function Harness({ onLoadMore }: { onLoadMore: () => Promise<void> }) {
   const targetRef = useRef<HTMLDivElement>(null)
 
@@ -24,6 +42,9 @@ describe('useInfiniteScrollTrigger', () => {
   beforeEach(() => {
     animationFrames = new Map()
     nextFrameId = 1
+    intersectionObserverCallback = undefined
+    intersectionObserverInstance = undefined
+    vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
       const frameId = nextFrameId++
       animationFrames.set(frameId, callback)
@@ -62,6 +83,24 @@ describe('useInfiniteScrollTrigger', () => {
     fireEvent.scroll(window)
     act(flushAnimationFrames)
 
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps IntersectionObserver as the browser prefetch path', async () => {
+    const onLoadMore = vi.fn(async () => {})
+    render(<Harness onLoadMore={onLoadMore} />)
+
+    const observerCallback = intersectionObserverCallback
+    expect(observerCallback).toBeDefined()
+
+    await act(async () => {
+      observerCallback?.(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        intersectionObserverInstance!,
+      )
+    })
+
+    expect(intersectionObserverInstance?.observe).toHaveBeenCalledTimes(1)
     expect(onLoadMore).toHaveBeenCalledTimes(1)
   })
 })
