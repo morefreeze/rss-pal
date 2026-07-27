@@ -313,4 +313,82 @@ describe('ArticleListPage automatic pagination', () => {
       ),
     ).toHaveLength(1)
   })
+
+  it('starts new-generation page two before old page two settles', async () => {
+    const pendingOldPageTwo = deferred<ArticleListItem[]>()
+    const pendingNewPageTwo = deferred<ArticleListItem[]>()
+    const initialArticles = makeArticles(1)
+    const oldPageTwo = makeArticles(21)
+    const newResetArticles = makeArticles(101)
+    const newPageTwo = makeArticles(121)
+
+    apiMocks.getArticles.mockImplementation((params: {
+      offset: number
+      unread?: boolean
+    }) => {
+      if (params.offset === 20 && !params.unread) return pendingOldPageTwo.promise
+      if (params.offset === 20 && params.unread) return pendingNewPageTwo.promise
+      if (params.offset === 0 && params.unread) return Promise.resolve(newResetArticles)
+      if (params.offset === 0) return Promise.resolve(initialArticles)
+      return Promise.resolve([])
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <ArticleListPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('article-1')).toBeTruthy()
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+
+    targetTop = 900
+    fireEvent.scroll(window)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(apiMocks.getArticles).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 20, unread: undefined }),
+    )
+
+    fireEvent.click(screen.getByLabelText('仅未读'))
+    expect(await screen.findByTestId('article-101')).toBeTruthy()
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(
+      apiMocks.getArticles.mock.calls.filter(
+        ([params]) => params.unread && params.offset === 20,
+      ),
+    ).toHaveLength(1)
+
+    await act(async () => {
+      pendingOldPageTwo.resolve(oldPageTwo)
+      await flushPromiseChain()
+    })
+    expect(screen.queryByTestId('article-21')).toBeNull()
+
+    fireEvent.scroll(window)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(
+      apiMocks.getArticles.mock.calls.filter(
+        ([params]) => params.unread && params.offset === 20,
+      ),
+    ).toHaveLength(1)
+
+    await act(async () => {
+      pendingNewPageTwo.resolve(newPageTwo)
+      await flushPromiseChain()
+    })
+    expect(await screen.findByTestId('article-121')).toBeTruthy()
+    expect(screen.queryByTestId('article-21')).toBeNull()
+  })
 })
