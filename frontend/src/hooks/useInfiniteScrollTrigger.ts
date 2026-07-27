@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, type RefObject } from 'react'
 
 interface InfiniteScrollTriggerOptions {
   targetRef: RefObject<HTMLElement>
@@ -15,23 +15,39 @@ export function useInfiniteScrollTrigger({
   rootMarginPx = 200,
   onLoadMore,
 }: InfiniteScrollTriggerOptions) {
+  const inFlightRef = useRef(false)
+
+  const triggerLoad = useCallback(() => {
+    if (!enabled || inFlightRef.current) return
+
+    inFlightRef.current = true
+    void Promise.resolve()
+      .then(onLoadMore)
+      .catch(() => {})
+      .finally(() => {
+        inFlightRef.current = false
+      })
+  }, [enabled, onLoadMore])
+
   useEffect(() => {
     if (!enabled) return
 
     const target = targetRef.current
     if (!target) return
 
+    let active = true
     let animationFrameId: number | null = null
 
     const checkTargetPosition = () => {
       animationFrameId = null
+      if (!active) return
       if (target.getBoundingClientRect().top <= window.innerHeight + rootMarginPx) {
-        void onLoadMore()
+        triggerLoad()
       }
     }
 
     const scheduleCheck = () => {
-      if (animationFrameId !== null) return
+      if (!active || animationFrameId !== null) return
       animationFrameId = window.requestAnimationFrame(checkTargetPosition)
     }
 
@@ -42,8 +58,9 @@ export function useInfiniteScrollTrigger({
 
     const observer = new IntersectionObserver(
       (entries) => {
+        if (!active) return
         if (entries.some((entry) => entry.isIntersecting)) {
-          void onLoadMore()
+          triggerLoad()
         }
       },
       { rootMargin: `${rootMarginPx}px` },
@@ -51,6 +68,7 @@ export function useInfiniteScrollTrigger({
     observer.observe(target)
 
     return () => {
+      active = false
       observer.disconnect()
       window.removeEventListener('scroll', scheduleCheck)
       document.removeEventListener('scroll', scheduleCheck, true)
@@ -59,5 +77,5 @@ export function useInfiniteScrollTrigger({
         window.cancelAnimationFrame(animationFrameId)
       }
     }
-  }, [enabled, onLoadMore, refreshKey, rootMarginPx, targetRef])
+  }, [enabled, refreshKey, rootMarginPx, targetRef, triggerLoad])
 }
