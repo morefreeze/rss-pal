@@ -15,6 +15,7 @@ import OverflowMenu from '../components/OverflowMenu'
 import { usePlayer } from '../player/PlayerContext'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 import { useBreakpoint } from '../hooks/useBreakpoint'
+import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
 
 const PAGE_SIZE = 20
 
@@ -395,27 +396,23 @@ export default function ArticleListPage() {
     }
   }, [selectedFeed, unreadOnly, savedOnly, sortField, sortDir, tagFilter])
 
-  const loadMore = useCallback(() => {
+  const loadMore = useCallback(async () => {
     if (!loadingMore && hasMore) {
-      loadArticles(offset + PAGE_SIZE, false)
+      await loadArticles(offset + PAGE_SIZE, false)
     }
   }, [loadingMore, hasMore, offset, loadArticles])
 
-  // Infinite scroll via IntersectionObserver.
-  // articles.length is in the deps so the effect re-runs after the first
-  // fetch mounts the prefetch-trigger card (without it, the effect runs once
-  // on mount when loadMoreRef.current is still null and never re-attaches).
-  // PREFETCH_OFFSET means the observer hops to a new card each time the list
-  // grows, so we tear the old one down on every re-run.
-  useEffect(() => {
-    if (!loadMoreRef.current) return
-    const observer = new IntersectionObserver(
-      entries => { if (entries[0].isIntersecting) loadMore() },
-      { rootMargin: '200px' }
-    )
-    observer.observe(loadMoreRef.current)
-    return () => observer.disconnect()
-  }, [loadMore, articles.length])
+  useInfiniteScrollTrigger({
+    targetRef: loadMoreRef,
+    enabled: hasMore
+      && !loadingMore
+      && searchQuery.length === 0
+      && !grouped
+      && !isClippingMode,
+    refreshKey: articles.length,
+    rootMarginPx: 200,
+    onLoadMore: loadMore,
+  })
 
   const handleMarkAllRead = async () => {
     setMarkingAllRead(true)
