@@ -224,6 +224,7 @@ export default function ArticleListPage() {
   const [searching, setSearching] = useState(false)
   const [markingAllRead, setMarkingAllRead] = useState(false)
   const loadMoreRef = useRef<HTMLDivElement>(null)
+  const requestGenerationRef = useRef(0)
   const searchRef = useRef<HTMLInputElement>(null)
   const [sessionReadIds, setSessionReadIds] = useState<Set<number>>(() => {
     try {
@@ -339,7 +340,6 @@ export default function ArticleListPage() {
       return
     }
     setOffset(0)
-    setHasMore(true)
     setFocusedIdx(-1)
     loadArticles(0, true)
   }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, sortField, sortDir, tagFilter])
@@ -359,8 +359,17 @@ export default function ArticleListPage() {
   }
 
   const loadArticles = useCallback(async (off: number, reset: boolean) => {
-    if (reset) setLoading(true)
-    else setLoadingMore(true)
+    const generation = reset
+      ? ++requestGenerationRef.current
+      : requestGenerationRef.current
+
+    if (reset) {
+      setLoading(true)
+      setLoadingMore(false)
+      setHasMore(false)
+    } else {
+      setLoadingMore(true)
+    }
 
     try {
       const raw = await getArticles({
@@ -374,6 +383,8 @@ export default function ArticleListPage() {
         sort: sortField,
         order: sortDir,
       })
+      if (generation !== requestGenerationRef.current) return
+
       const data = raw || []
       if (reset) {
         setArticles(data)
@@ -382,7 +393,11 @@ export default function ArticleListPage() {
           const savedScroll = sessionStorage.getItem('articleListScroll')
           if (savedScroll) {
             sessionStorage.removeItem('articleListScroll')
-            setTimeout(() => window.scrollTo(0, Number(savedScroll)), 50)
+            setTimeout(() => {
+              if (generation === requestGenerationRef.current) {
+                window.scrollTo(0, Number(savedScroll))
+              }
+            }, 50)
           }
         } catch {}
       } else {
@@ -390,9 +405,13 @@ export default function ArticleListPage() {
       }
       setHasMore(data.length === PAGE_SIZE)
       setOffset(off)
+    } catch {
+      // Keep the current list in place. Reset requests already gated
+      // pagination at start and only a later successful page zero reopens it.
     } finally {
-      setLoading(false)
-      setLoadingMore(false)
+      if (generation !== requestGenerationRef.current) return
+      if (reset) setLoading(false)
+      else setLoadingMore(false)
     }
   }, [selectedFeed, unreadOnly, savedOnly, sortField, sortDir, tagFilter])
 
