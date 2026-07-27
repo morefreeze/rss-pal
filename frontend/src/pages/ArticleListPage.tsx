@@ -429,6 +429,7 @@ export default function ArticleListPage() {
       && !grouped
       && !isClippingMode,
     refreshKey: articles.length,
+    activationKey: requestGenerationRef.current,
     rootMarginPx: 200,
     onLoadMore: loadMore,
   })

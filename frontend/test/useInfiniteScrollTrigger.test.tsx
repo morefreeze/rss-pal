@@ -29,10 +29,12 @@ function Harness({
   onLoadMore,
   enabled = true,
   refreshKey = 0,
+  activationKey = 0,
 }: {
   onLoadMore: () => Promise<void>
   enabled?: boolean
   refreshKey?: number
+  activationKey?: number
 }) {
   const targetRef = useRef<HTMLDivElement>(null)
 
@@ -40,6 +42,7 @@ function Harness({
     targetRef,
     enabled,
     refreshKey,
+    activationKey,
     rootMarginPx: 200,
     onLoadMore,
   })
@@ -165,6 +168,71 @@ describe('useInfiniteScrollTrigger', () => {
       await pendingLoad
       await flushPromiseChain()
     })
+  })
+
+  it('scopes pending locks to the activation that started them', async () => {
+    let resolveOldLoad: (() => void) | undefined
+    let resolveNewLoad: (() => void) | undefined
+    const oldLoad = new Promise<void>((resolve) => {
+      resolveOldLoad = resolve
+    })
+    const newLoad = new Promise<void>((resolve) => {
+      resolveNewLoad = resolve
+    })
+    const onLoadMore = vi.fn()
+      .mockImplementationOnce(() => oldLoad)
+      .mockImplementationOnce(() => newLoad)
+      .mockResolvedValue(undefined)
+    const { rerender } = render(
+      <Harness activationKey={0} onLoadMore={onLoadMore} />,
+    )
+
+    const target = screen.getByTestId('infinite-scroll-target')
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 900, 100, 100),
+    )
+
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <Harness activationKey={1} enabled={false} onLoadMore={onLoadMore} />,
+    )
+    rerender(
+      <Harness activationKey={1} onLoadMore={onLoadMore} />,
+    )
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(onLoadMore).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      resolveOldLoad?.()
+      await oldLoad
+      await flushPromiseChain()
+    })
+    fireEvent.scroll(window)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(onLoadMore).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      resolveNewLoad?.()
+      await newLoad
+      await flushPromiseChain()
+    })
+    fireEvent.scroll(window)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(onLoadMore).toHaveBeenCalledTimes(3)
   })
 
   it('releases the guard after failure so a later scroll can retry', async () => {
