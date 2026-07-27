@@ -40,7 +40,18 @@ export function useInfiniteScrollTrigger({
     window.addEventListener('resize', scheduleCheck)
     scheduleCheck()
 
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void onLoadMore()
+        }
+      },
+      { rootMargin: `${rootMarginPx}px` },
+    )
+    observer.observe(target)
+
     return () => {
+      observer.disconnect()
       window.removeEventListener('scroll', scheduleCheck)
       document.removeEventListener('scroll', scheduleCheck, true)
       window.removeEventListener('resize', scheduleCheck)
