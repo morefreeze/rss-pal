@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticleListPage from '../src/pages/ArticleListPage'
 import type { ArticleListItem } from '../src/api/client'
@@ -13,20 +13,36 @@ const apiMocks = vi.hoisted(() => ({
   getTagSidebar: vi.fn(),
   likeArticle: vi.fn(),
   markAllRead: vi.fn(),
+  postEvent: vi.fn(async () => undefined),
   searchArticles: vi.fn(),
 }))
 
 vi.mock('../src/api/client', () => apiMocks)
 
+const detailCacheMocks = vi.hoisted(() => ({
+  prefetchArticleDetail: vi.fn(async () => undefined),
+}))
+
+vi.mock('../src/api/articleDetailCache', () => detailCacheMocks)
+
 vi.mock('../src/components/ArticleCard', () => ({
   default: ({
     article,
     prefetchRef,
+    onOpen,
+    onPrefetch,
   }: {
     article: ArticleListItem
     prefetchRef?: React.RefObject<HTMLDivElement>
+    onOpen: (id: number, preview: ArticleListItem) => void
+    onPrefetch?: (id: number) => void
   }) => (
-    <div ref={prefetchRef} data-testid={`article-${article.id}`}>
+    <div
+      ref={prefetchRef}
+      data-testid={`article-${article.id}`}
+      onMouseEnter={() => onPrefetch?.(article.id)}
+      onClick={() => onOpen(article.id, article)}
+    >
       {article.title}
     </div>
   ),
@@ -71,6 +87,18 @@ function makeArticles(startId: number): ArticleListItem[] {
     fetched_at: '2026-07-27T00:00:00Z',
     manual_tags: [],
   }))
+}
+
+function ArticleLocationProbe() {
+  const location = useLocation()
+  const state = location.state as {
+    articlePreview?: ArticleListItem
+  } | null
+  return (
+    <output data-testid="route-preview">
+      {state?.articlePreview?.id ?? 'missing'}
+    </output>
+  )
 }
 
 describe('ArticleListPage automatic pagination', () => {
@@ -119,6 +147,36 @@ describe('ArticleListPage automatic pagination', () => {
     await Promise.resolve()
     await Promise.resolve()
   }
+
+  it('promotes an interacted article into the detail prefetch queue', async () => {
+    apiMocks.getArticles.mockImplementation(({ offset }: { offset: number }) =>
+      Promise.resolve(offset === 0 ? makeArticles(1) : []),
+    )
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <ArticleListPage />
+      </MemoryRouter>,
+    )
+    const first = await screen.findByTestId('article-1')
+    fireEvent.mouseEnter(first)
+    expect(detailCacheMocks.prefetchArticleDetail).toHaveBeenCalledWith(1)
+  })
+
+  it('hands the selected list preview to the article route', async () => {
+    apiMocks.getArticles.mockImplementation(({ offset }: { offset: number }) =>
+      Promise.resolve(offset === 0 ? makeArticles(1) : []),
+    )
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <Routes>
+          <Route path="/articles" element={<ArticleListPage />} />
+          <Route path="/articles/:id" element={<ArticleLocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByTestId('article-1'))
+    expect((await screen.findByTestId('route-preview')).textContent).toBe('1')
+  })
 
   it('waits for reset page zero before rearming automatic page two', async () => {
     const pendingReset = deferred<ArticleListItem[]>()

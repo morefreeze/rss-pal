@@ -66,7 +66,7 @@ interface Props {
   onPlay: (a: ArticleCardItem) => void
   formatDate: (d: string | null) => string
   stripMarkdown: (t: string) => string
-  onOpen: (id: number) => void
+  onOpen: (id: number, preview: ArticleCardItem) => void
   onFocus: (idx: number) => void
   onPrefetch?: (id: number) => void
   showSourceTag?: boolean
@@ -115,7 +115,7 @@ export default function ArticleCard({
   const handleCardClick = () => {
     onFocus(idx)
     reportClick(article.id)
-    onOpen(article.id)
+    onOpen(article.id, article)
   }
   const handlePrefetch = () => onPrefetch?.(article.id)
 
