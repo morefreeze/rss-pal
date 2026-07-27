@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 
 interface InfiniteScrollTriggerOptions {
   targetRef: RefObject<HTMLElement>
@@ -16,18 +16,23 @@ export function useInfiniteScrollTrigger({
   onLoadMore,
 }: InfiniteScrollTriggerOptions) {
   const inFlightRef = useRef(false)
+  const onLoadMoreRef = useRef(onLoadMore)
+
+  useLayoutEffect(() => {
+    onLoadMoreRef.current = onLoadMore
+  }, [onLoadMore])
 
   const triggerLoad = useCallback(() => {
     if (!enabled || inFlightRef.current) return
 
     inFlightRef.current = true
     void Promise.resolve()
-      .then(onLoadMore)
+      .then(() => onLoadMoreRef.current())
       .catch(() => {})
       .finally(() => {
         inFlightRef.current = false
       })
-  }, [enabled, onLoadMore])
+  }, [enabled])
 
   useEffect(() => {
     if (!enabled) return

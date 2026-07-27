@@ -405,7 +405,7 @@ export default function ArticleListPage() {
   useInfiniteScrollTrigger({
     targetRef: loadMoreRef,
     enabled: hasMore
-      && !loadingMore
+      && !loading
       && searchQuery.length === 0
       && !grouped
       && !isClippingMode,
