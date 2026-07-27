@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { logout, getUnreadCount, getServerHealth } from '../api/client'
+import { getUnreadCount, getServerHealth } from '../api/client'
 import Toaster from './Toaster'
 import { PlayerProvider, usePlayer } from '../player/PlayerContext'
 import MiniPlayer from './MiniPlayer'
@@ -165,7 +165,6 @@ export default function Layout({ user, onLogout }: LayoutProps) {
   }, [refreshUnread])
 
   const handleLogout = () => {
-    logout()
     onLogout()
   }
 

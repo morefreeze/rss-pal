@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticlePage from '../src/pages/ArticlePage'
 import {
+  peekArticleDetail,
   putArticleDetail,
   resetArticleDetailCache,
 } from '../src/api/articleDetailCache'
@@ -161,5 +162,23 @@ describe('ArticlePage immediate loading', () => {
 
     expect(screen.getByText('Preview title')).toBeTruthy()
     expect(screen.getByText('Preview brief')).toBeTruthy()
+  })
+
+  it('invalidates the cached detail after a partial article mutation', async () => {
+    const fresh = deferred<ArticleDetailResponse>()
+    apiMocks.getArticle.mockReturnValue(fresh.promise)
+    putArticleDetail(detail(42))
+
+    render(
+      <MemoryRouter initialEntries={['/articles/42']}>
+        <Routes>
+          <Route path="/articles/:id" element={<ArticlePage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '重新抓取' }))
+    await waitFor(() => expect(apiMocks.fetchContent).toHaveBeenCalledWith(42))
+    expect(peekArticleDetail(42)).toBeUndefined()
   })
 })
