@@ -17,7 +17,10 @@ export function useInfiniteScrollTrigger({
   rootMarginPx = 200,
   onLoadMore,
 }: InfiniteScrollTriggerOptions) {
-  const inFlightTokenRef = useRef<number | null>(null)
+  const inFlightRef = useRef<{
+    activationKey: number
+    requestToken: symbol
+  } | null>(null)
   const onLoadMoreRef = useRef(onLoadMore)
 
   useLayoutEffect(() => {
@@ -25,16 +28,16 @@ export function useInfiniteScrollTrigger({
   }, [onLoadMore])
 
   const triggerLoad = useCallback(() => {
-    if (!enabled || inFlightTokenRef.current === activationKey) return
+    if (!enabled || inFlightRef.current?.activationKey === activationKey) return
 
-    const requestToken = activationKey
-    inFlightTokenRef.current = requestToken
+    const requestToken = Symbol('infinite-scroll-request')
+    inFlightRef.current = { activationKey, requestToken }
     void Promise.resolve()
       .then(() => onLoadMoreRef.current())
       .catch(() => {})
       .finally(() => {
-        if (inFlightTokenRef.current === requestToken) {
-          inFlightTokenRef.current = null
+        if (inFlightRef.current?.requestToken === requestToken) {
+          inFlightRef.current = null
         }
       })
   }, [activationKey, enabled])
