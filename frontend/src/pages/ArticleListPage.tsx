@@ -16,6 +16,7 @@ import { usePlayer } from '../player/PlayerContext'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 import { useBreakpoint } from '../hooks/useBreakpoint'
 import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
+import { useArticleDetailPrefetch } from '../hooks/useArticleDetailPrefetch'
 
 const PAGE_SIZE = 20
 
@@ -256,6 +257,9 @@ export default function ArticleListPage() {
   // mark-all-read are hidden because /api/clip doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
   const isClippingMode = selectedFeedObj?.feed_type === 'clip'
+  const promoteArticlePrefetch = useArticleDetailPrefetch(
+    isClippingMode ? [] : articles.slice(0, 6).map(article => article.id),
+  )
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen(o => {
@@ -585,7 +589,7 @@ export default function ArticleListPage() {
         })
       } else if ((e.key === 'o' || e.key === 'Enter') && focusedIdx >= 0) {
         const article = displayedArticles[focusedIdx]
-        if (article) openArticle(article.id)
+        if (article) openArticle(article.id, article)
       }
     }
     window.addEventListener('keydown', handler)
@@ -594,7 +598,10 @@ export default function ArticleListPage() {
 
   const isRead = (article: ArticleListItem | Article) => article.is_read || sessionReadIds.has(article.id)
 
-  const openArticle = (id: number) => {
+  const openArticle = (
+    id: number,
+    articlePreview?: ArticleListItem | Article,
+  ) => {
     reportClick(id)
     try {
       const ids = articles.map(a => a.id)
@@ -625,7 +632,9 @@ export default function ArticleListPage() {
       sessionStorage.setItem('articleListScroll', String(window.scrollY))
       sessionStorage.setItem('articleEntryPath', '/articles')
     } catch {}
-    navigate(`/articles/${id}`, { state: { from: '/articles' } })
+    navigate(`/articles/${id}`, {
+      state: { from: '/articles', articlePreview },
+    })
   }
 
   const formatDate = (dateStr: string | null) => {
@@ -910,7 +919,9 @@ export default function ArticleListPage() {
                   onPlay={player.playArticle}
                   formatDate={formatDate}
                   stripMarkdown={stripMarkdown}
-                  onNavigate={(id) => navigate(`/articles/${id}`)}
+                  onNavigate={(id) => navigate(`/articles/${id}`, {
+                    state: { from: '/articles', articlePreview: article },
+                  })}
                   onFocus={setFocusedIdx}
                   navList={searchResults.map(a => a.id)}
                 />
@@ -974,6 +985,7 @@ export default function ArticleListPage() {
               stripMarkdown={stripMarkdown}
               onOpen={openArticle}
               onFocus={setFocusedIdx}
+              onPrefetch={promoteArticlePrefetch}
               dateField={sortField === 'captured' ? 'captured' : 'published'}
             />
           ))}

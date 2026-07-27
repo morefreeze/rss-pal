@@ -35,8 +35,8 @@ export function useArticleDetailPrefetch(ids: number[]) {
       const idleID = window.requestIdleCallback(start, { timeout: 1000 })
       return () => window.cancelIdleCallback(idleID)
     }
-    const timerID = window.setTimeout(start, 0)
-    return () => window.clearTimeout(timerID)
+    const timerID = globalThis.setTimeout(start, 0)
+    return () => globalThis.clearTimeout(timerID)
   }, [key])
 
   return useCallback((id: number) => {

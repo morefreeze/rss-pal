@@ -2,12 +2,17 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
-  getArticle, fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
+  fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
   hideArticle, unhideArticle,
-  Article, ReadingProgress, SummaryTemplate
+  Article, ReadingProgress, SummaryTemplate,
+  type ArticleDetailResponse, type ArticleListItem,
 } from '../api/client'
+import {
+  fetchArticleDetail,
+  peekArticleDetail,
+} from '../api/articleDetailCache'
 import { toast } from '../utils/toast'
 import { LinkSetChildren } from '../components/LinkSetChildren'
 import { BatchFetchConfirmDialog } from '../components/BatchFetchConfirmDialog'
@@ -32,6 +37,7 @@ import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
 import BackFab from '../components/BackFab'
 import { ArticleDetailSkeleton } from '../components/ArticleDetailSkeleton'
+import ArticleDetailPreview from '../components/ArticleDetailPreview'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
@@ -58,22 +64,41 @@ function isPDFClipArticle(article: { content?: string }): boolean {
   return /^## 第 \d+ 页/m.test(article.content)
 }
 
+type ArticleLocationState = {
+  from?: string
+  articlePreview?: ArticleListItem
+}
+
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  const articleID = Number(id)
+  const locationState = location.state as ArticleLocationState | null
+  const articlePreview =
+    locationState?.articlePreview?.id === articleID
+      ? locationState.articlePreview
+      : undefined
+  const initialDetailRef = useRef<ArticleDetailResponse | undefined>(
+    Number.isFinite(articleID) ? peekArticleDetail(articleID) : undefined,
+  )
+  const initialDetail = initialDetailRef.current
   const reader = useReaderSettings()
   const { toggle: toggleReadingChrome } = useReadingChrome(reader.mode === 'reading')
   const entryPath =
-    (location.state as { from?: string } | null)?.from
+    locationState?.from
     ?? (() => { try { return sessionStorage.getItem('articleEntryPath') } catch { return null } })()
     ?? '/articles'
   const handleBack = useCallback(() => navigate(entryPath), [navigate, entryPath])
-  const [article, setArticle] = useState<Article | null>(null)
-  const [progress, setProgress] = useState<ReadingProgress | null>(null)
-  const [currentScrollPosition, setCurrentScrollPosition] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const [article, setArticle] = useState<Article | null>(() => initialDetail?.article ?? null)
+  const [progress, setProgress] = useState<ReadingProgress | null>(() => initialDetail?.progress ?? null)
+  const [currentScrollPosition, setCurrentScrollPosition] = useState(
+    () => Math.min(1, initialDetail?.progress?.scroll_position ?? 0),
+  )
+  const [loading, setLoading] = useState(() => !initialDetail)
   const [loadError, setLoadError] = useState('')
+  const [refreshError, setRefreshError] = useState('')
+  const loadGenerationRef = useRef(0)
 
   // Prev/next nav. The list page snapshots visible article IDs into
   // sessionStorage; optionally it also stores a fetch context so we can
@@ -153,9 +178,9 @@ export default function ArticlePage() {
     if (prevId) goToArticle(prevId)
   }, [prevId, goToArticle])
   const [fetchingContent, setFetchingContent] = useState(false)
-  const [liked, setLiked] = useState(false)
-  const [disliked, setDisliked] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [liked, setLiked] = useState(() => (initialDetail?.signals?.like ?? 0) > 0)
+  const [disliked, setDisliked] = useState(() => (initialDetail?.signals?.dislike ?? 0) > 0)
+  const [saved, setSaved] = useState(() => (initialDetail?.signals?.save ?? 0) > 0)
   const contentRef = useRef<HTMLDivElement>(null)
   const summaryRef = useRef<HTMLDivElement>(null)
   const readStartTime = useRef<number>(Date.now())
@@ -163,7 +188,9 @@ export default function ArticlePage() {
   // later progress updates don't yank the user back to the saved position.
   const scrollRestoredForRef = useRef<number | null>(null)
   // High-water mark so scrolling up (e.g. to nav buttons) can't regress saved progress.
-  const maxScrollRef = useRef<number>(0)
+  const maxScrollRef = useRef<number>(
+    Math.min(1, initialDetail?.progress?.scroll_position ?? 0),
+  )
   // Progress (0..1) at which the AI summary card has just exited the viewport.
   // null while we can't measure (no summary content, layout not ready).
   const [aiMarkerPos, setAiMarkerPos] = useState<number | null>(null)
@@ -183,15 +210,21 @@ export default function ArticlePage() {
   const [copyLinkText, setCopyLinkText] = useState('复制链接')
 
   // Bookmarklet state
-  const [fromBookmarklet, setFromBookmarklet] = useState(false)
+  const [fromBookmarklet, setFromBookmarklet] = useState(() => Boolean(initialDetail?.from_bookmarklet))
 
   // Soft-delete state: true when the article is hidden for this user. Surface
   // is a banner that offers 恢复 — the article itself still renders normally.
-  const [hidden, setHidden] = useState(false)
+  const [hidden, setHidden] = useState(() => Boolean(initialDetail?.hidden))
 
   // LinkSet children
-  const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(null)
-  const [fetchedLinkURLs, setFetchedLinkURLs] = useState<string[]>([])
+  const [linkSetChildren, setLinkSetChildren] = useState<Article[] | null>(
+    () => initialDetail?.children ?? null,
+  )
+  const [fetchedLinkURLs, setFetchedLinkURLs] = useState<string[]>(
+    () => initialDetail?.fetched_link_urls
+      ?? initialDetail?.children?.map((child) => child.url)
+      ?? [],
+  )
 
   // Ordered per-article scratchpad used by both reader modes. It is available
   // for every article; the first successful batch implicitly enables link_set.
@@ -287,47 +320,75 @@ export default function ArticlePage() {
     removeDrafts,
   ])
 
+  const applyDetailResponse = useCallback((data: ArticleDetailResponse) => {
+    setArticle(data.article)
+    setProgress(data.progress ?? null)
+    // Clamp historical rows written before progress was bounded to 0..1.
+    const savedScrollPosition = Math.min(1, data.progress?.scroll_position ?? 0)
+    maxScrollRef.current = savedScrollPosition
+    setCurrentScrollPosition(savedScrollPosition)
+    setFromBookmarklet(Boolean(data.from_bookmarklet))
+    setHidden(Boolean(data.hidden))
+    setLinkSetChildren(data.children ?? null)
+    setFetchedLinkURLs(
+      data.fetched_link_urls
+      ?? data.children?.map((child) => child.url)
+      ?? [],
+    )
+    setLiked((data.signals?.like ?? 0) > 0)
+    setDisliked((data.signals?.dislike ?? 0) > 0)
+    setSaved((data.signals?.save ?? 0) > 0)
+  }, [])
+
   const loadArticle = async () => {
-    if (!id) return
-    setLoading(true)
+    if (!Number.isFinite(articleID)) return
+
+    const generation = ++loadGenerationRef.current
+    const isCurrent = () =>
+      loadGenerationRef.current === generation && Number(id) === articleID
+    const cached = peekArticleDetail(articleID)
+    const hasVisibleDetail = cached?.article.id === articleID || article?.id === articleID
+
     setLoadError('')
+    setRefreshError('')
+    readStartTime.current = Date.now()
+
+    if (cached) {
+      applyDetailResponse(cached)
+      setLoading(false)
+    } else {
+      setArticle(null)
+      setProgress(null)
+      setLoading(true)
+    }
+
     try {
-      const data = await getArticle(Number(id))
-      setArticle(data.article)
-      setProgress(data.progress)
-      // Clamp: historical rows may have >1 from before write-side clamping,
-      // and without this they'd block all future scroll persistence (handleScroll
-      // requires scrollPosition > maxScrollRef.current to write).
-      const savedScrollPosition = Math.min(1, data.progress?.scroll_position ?? 0)
-      maxScrollRef.current = savedScrollPosition
-      setCurrentScrollPosition(savedScrollPosition)
-      setFromBookmarklet(Boolean(data.from_bookmarklet))
-      setHidden(Boolean(data.hidden))
-      setLinkSetChildren(data.children ?? null)
-      setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
-      if (data.signals) {
-        setLiked((data.signals['like'] ?? 0) > 0)
-        setDisliked((data.signals['dislike'] ?? 0) > 0)
-        setSaved((data.signals['save'] ?? 0) > 0)
-      }
+      const data = await fetchArticleDetail(articleID)
+      if (!isCurrent()) return
+      applyDetailResponse(data)
     } catch (err: any) {
+      if (!isCurrent()) return
+      if (hasVisibleDetail) {
+        setRefreshError('更新失败，正在显示缓存内容')
+        return
+      }
       if (err?.response?.status === 404) {
         setLoadError('文章不存在或无权访问')
       } else {
         setLoadError('加载失败，请稍后重试')
       }
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
-    readStartTime.current = Date.now()
   }
 
   useEffect(() => {
     scrollRestoredForRef.current = null
     setCurrentScrollPosition(0)
-    loadArticle()
+    void loadArticle()
 
     return () => {
+      loadGenerationRef.current += 1
       // Record read duration on unmount
       const duration = (Date.now() - readStartTime.current) / 1000
       if (id && duration > 5) {
@@ -429,7 +490,7 @@ export default function ArticlePage() {
       intervalId = setInterval(async () => {
         if (cancelled) return
         try {
-          const data = await getArticle(article.id)
+          const data = await fetchArticleDetail(article.id)
           if (cancelled) return
           if (data.article.processing_state === 'ready' || data.article.processing_state === 'failed') {
             setArticle(data.article)
@@ -974,7 +1035,7 @@ export default function ArticlePage() {
     toast.success(`已提交 ${submittedURLs.length} 条链接${insertedCount < submittedURLs.length ? `，新增 ${insertedCount} 条` : ''}`)
     const articleID = article?.id
     if (!articleID) return
-    void getArticle(articleID)
+    void fetchArticleDetail(articleID)
       .then((data) => {
         if (Number(id) !== articleID) return
         setArticle(data.article)
@@ -987,18 +1048,29 @@ export default function ArticlePage() {
       })
   }, [article?.id, id])
 
-  if (loading && !article) return (
-    <div className="card">
-      <ArticleDetailSkeleton />
-    </div>
-  )
-  if (loading) return <div className="card">Loading...</div>
-  if (loadError || !article) return (
+  if (loadError && (!article || article.id !== articleID)) return (
     <div className="card" style={{ textAlign: 'center' }}>
-      <div className="text-muted">{loadError || '文章不存在'}</div>
-      <button className="secondary" style={{ marginTop: 12 }} onClick={handleBack}>← 返回</button>
+      <div className="text-muted">{loadError}</div>
+      <div className="flex gap-2" style={{ justifyContent: 'center', marginTop: 12 }}>
+        <button className="secondary" onClick={() => void loadArticle()}>重试</button>
+        <button className="secondary" onClick={handleBack}>← 返回</button>
+      </div>
     </div>
   )
+  if (!article || article.id !== articleID) {
+    if (articlePreview) {
+      return (
+        <div aria-busy={loading}>
+          <ArticleDetailPreview article={articlePreview} />
+        </div>
+      )
+    }
+    return (
+      <div className="card" aria-busy={loading}>
+        <ArticleDetailSkeleton />
+      </div>
+    )
+  }
 
   const draftControls = (
     <>
@@ -1057,12 +1129,29 @@ export default function ArticlePage() {
   }
 
   return (
-    <div ref={contentRef}>
+    <div ref={contentRef} aria-busy={loading}>
       <ArticleProgressBar
         historicalPercent={progressDisplay.historicalPercent}
         currentPercent={progressDisplay.currentPercent}
         aiMarkerPercent={aiMarkerPos === null ? null : Math.min(100, Math.max(0, aiMarkerPos * 100))}
       />
+
+      {refreshError && (
+        <div
+          className="p-3 rounded-md mb-4 text-sm flex items-center gap-3"
+          style={{ border: '1px solid #fde68a', background: '#fffbeb', color: '#92400e' }}
+        >
+          <span>{refreshError}</span>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void loadArticle()}
+            style={{ fontSize: 13, padding: '2px 10px', marginLeft: 'auto' }}
+          >
+            重试
+          </button>
+        </div>
+      )}
 
       {hidden && (
         <div
@@ -1229,7 +1318,7 @@ export default function ArticlePage() {
             onClick={async () => {
               try {
                 await expandLinkSetChild(article.id)
-                const data = await getArticle(article.id)
+                const data = await fetchArticleDetail(article.id)
                 setArticle(data.article)
                 setLinkSetChildren(data.children ?? null)
                 setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
