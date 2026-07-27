@@ -52,10 +52,12 @@ class TestIntersectionObserver implements IntersectionObserver {
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 function makeArticles(startId: number): ArticleListItem[] {
@@ -176,5 +178,139 @@ describe('ArticleListPage automatic pagination', () => {
     ).toEqual([
       [expect.objectContaining({ offset: 20, unread: true })],
     ])
+  })
+
+  it('keeps pagination gated when reset page zero rejects', async () => {
+    const pendingReset = deferred<ArticleListItem[]>()
+    const initialArticles = makeArticles(1)
+
+    apiMocks.getArticles.mockImplementation((params: {
+      offset: number
+      unread?: boolean
+    }) => {
+      if (params.offset === 0 && params.unread) return pendingReset.promise
+      if (params.offset === 0) return Promise.resolve(initialArticles)
+      return Promise.resolve([])
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <ArticleListPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('article-1')).toBeTruthy()
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+
+    targetTop = 900
+    fireEvent.click(screen.getByLabelText('仅未读'))
+    await waitFor(() => {
+      expect(apiMocks.getArticles).toHaveBeenCalledWith(
+        expect.objectContaining({ offset: 0, unread: true }),
+      )
+    })
+
+    await act(async () => {
+      pendingReset.reject(new Error('page zero failed'))
+      await flushPromiseChain()
+    })
+    fireEvent.scroll(window)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+
+    expect(
+      apiMocks.getArticles.mock.calls.filter(
+        ([params]) => params.unread && params.offset > 0,
+      ),
+    ).toHaveLength(0)
+  })
+
+  it('ignores an old page two while a newer filter reset is pending', async () => {
+    const pendingOldPageTwo = deferred<ArticleListItem[]>()
+    const pendingNewReset = deferred<ArticleListItem[]>()
+    const initialArticles = makeArticles(1)
+    const oldPageTwo = makeArticles(21)
+    const newResetArticles = makeArticles(101)
+
+    apiMocks.getArticles.mockImplementation((params: {
+      offset: number
+      unread?: boolean
+    }) => {
+      if (params.offset === 20 && !params.unread) return pendingOldPageTwo.promise
+      if (params.offset === 0 && params.unread) return pendingNewReset.promise
+      if (params.offset === 0) return Promise.resolve(initialArticles)
+      return Promise.resolve([])
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <ArticleListPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('article-1')).toBeTruthy()
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+
+    targetTop = 900
+    fireEvent.scroll(window)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(apiMocks.getArticles).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 20, unread: undefined }),
+    )
+
+    fireEvent.click(screen.getByLabelText('仅未读'))
+    await waitFor(() => {
+      expect(apiMocks.getArticles).toHaveBeenCalledWith(
+        expect.objectContaining({ offset: 0, unread: true }),
+      )
+    })
+
+    await act(async () => {
+      pendingOldPageTwo.resolve(oldPageTwo)
+      await flushPromiseChain()
+    })
+
+    expect(screen.queryByTestId('article-21')).toBeNull()
+    expect(screen.queryByRole('button', { name: '加载更多' })).toBeNull()
+
+    fireEvent.scroll(window)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(
+      apiMocks.getArticles.mock.calls.filter(
+        ([params]) => params.unread && params.offset > 0,
+      ),
+    ).toHaveLength(0)
+
+    await act(async () => {
+      pendingNewReset.resolve(newResetArticles)
+      await flushPromiseChain()
+    })
+    expect(await screen.findByTestId('article-101')).toBeTruthy()
+    expect(screen.queryByTestId('article-1')).toBeNull()
+    expect(screen.queryByTestId('article-21')).toBeNull()
+
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(
+      apiMocks.getArticles.mock.calls.filter(
+        ([params]) => params.unread && params.offset === 20,
+      ),
+    ).toHaveLength(1)
   })
 })
