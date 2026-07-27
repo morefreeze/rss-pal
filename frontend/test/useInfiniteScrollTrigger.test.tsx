@@ -193,6 +193,39 @@ describe('useInfiniteScrollTrigger', () => {
     expect(onLoadMore).toHaveBeenCalledTimes(2)
   })
 
+  it('waits for a later event after failure when the callback identity changes', async () => {
+    const rejectedOnLoadMore = vi.fn().mockRejectedValue(new Error('load failed'))
+    const replacementOnLoadMore = vi.fn(async () => {})
+    const { rerender } = render(<Harness onLoadMore={rejectedOnLoadMore} />)
+
+    const target = screen.getByTestId('infinite-scroll-target')
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 900, 100, 100),
+    )
+
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+    expect(rejectedOnLoadMore).toHaveBeenCalledTimes(1)
+
+    rerender(<Harness onLoadMore={replacementOnLoadMore} />)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+
+    expect(replacementOnLoadMore).not.toHaveBeenCalled()
+
+    fireEvent.scroll(window)
+    await act(async () => {
+      flushAnimationFrames()
+      await flushPromiseChain()
+    })
+
+    expect(replacementOnLoadMore).toHaveBeenCalledTimes(1)
+  })
+
   it('releases the guard after a synchronous throw so a later scroll can retry', async () => {
     let attempt = 0
     const onLoadMore = vi.fn(() => {
