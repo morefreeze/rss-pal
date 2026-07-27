@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { isLoggedIn, getMe, getUser, logout } from './api/client'
+import { isLoggedIn, getMe, getUser } from './api/client'
+import { clearPrivateSessionState } from './api/privateSession'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import FeedListPage from './pages/FeedListPage'
@@ -49,7 +50,7 @@ function App() {
   }, [])
 
   const handleLogout = () => {
-    logout()
+    clearPrivateSessionState()
     setUser(null)
     window.location.href = '/login'
   }

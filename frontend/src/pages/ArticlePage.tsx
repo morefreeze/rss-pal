@@ -11,6 +11,7 @@ import {
 } from '../api/client'
 import {
   fetchArticleDetail,
+  invalidateArticleDetail,
   peekArticleDetail,
 } from '../api/articleDetailCache'
 import { toast } from '../utils/toast'
@@ -507,6 +508,7 @@ export default function ArticlePage() {
     }
 
     if (state === 'stub') {
+      invalidateArticleDetail(article.id)
       expandLinkSetChild(article.id)
         .then(() => { if (!cancelled) startPolling() })
         .catch((err) => console.warn('expand failed', err))
@@ -574,6 +576,7 @@ export default function ArticlePage() {
     }
     try {
       const newProgress = await updateProgress(article.id, pending.scrollPosition, pending.isCompleted)
+      invalidateArticleDetail(article.id)
       const highWaterPosition = deriveHistoricalHighWater(newProgress.scroll_position, maxScrollRef.current)
       maxScrollRef.current = highWaterPosition
       setProgress({ ...newProgress, scroll_position: highWaterPosition })
@@ -793,6 +796,7 @@ export default function ArticlePage() {
           setStreamingDetailed(full)
         },
         onDone: () => {
+          invalidateArticleDetail(article.id)
           setArticle(a => a ? { ...a, summary_brief: finalBrief, summary_detailed: finalDetailed } : a)
           setStreamPhase('idle')
           setStreamingBrief('')
@@ -815,6 +819,7 @@ export default function ArticlePage() {
     setFetchingContent(true)
     try {
       const result = await fetchContent(article.id)
+      invalidateArticleDetail(article.id)
       setArticle({ ...article, content: result.content })
     } catch {
       toast.error('获取内容失败')
@@ -841,6 +846,7 @@ export default function ArticlePage() {
       setLiked(false)
     } else {
       await likeArticle(article.id)
+      invalidateArticleDetail(article.id)
       setLiked(true)
       setDisliked(false)
     }
@@ -852,6 +858,7 @@ export default function ArticlePage() {
       setDisliked(false)
     } else {
       await dislikeArticle(article.id)
+      invalidateArticleDetail(article.id)
       setDisliked(true)
       setLiked(false)
     }
@@ -861,9 +868,11 @@ export default function ArticlePage() {
     if (!article) return
     if (saved) {
       await unsaveArticle(article.id)
+      invalidateArticleDetail(article.id)
       setSaved(false)
     } else {
       await saveArticle(article.id)
+      invalidateArticleDetail(article.id)
       setSaved(true)
     }
   }
@@ -875,6 +884,7 @@ export default function ArticlePage() {
     const goAfter = hasNext ? goNext : handleBack
     try {
       await hideArticle(targetId)
+      invalidateArticleDetail(targetId)
     } catch {
       toast.error('删除失败，请稍后重试')
       return
@@ -894,6 +904,7 @@ export default function ArticlePage() {
         onClick: async () => {
           try {
             await unhideArticle(targetId)
+            invalidateArticleDetail(targetId)
             try {
               const arr: number[] = JSON.parse(sessionStorage.getItem('hiddenArticles') || '[]')
               sessionStorage.setItem('hiddenArticles', JSON.stringify(arr.filter(i => i !== targetId)))
@@ -913,6 +924,7 @@ export default function ArticlePage() {
     if (!article) return
     try {
       await unhideArticle(article.id)
+      invalidateArticleDetail(article.id)
       setHidden(false)
       try {
         const arr: number[] = JSON.parse(sessionStorage.getItem('hiddenArticles') || '[]')
@@ -928,6 +940,7 @@ export default function ArticlePage() {
   const handleMarkRead = async () => {
     if (!article) return
     const newProgress = await updateProgress(article.id, 1.0, true)
+    invalidateArticleDetail(article.id)
     setProgress(newProgress)
     maxScrollRef.current = 1.0
     setCurrentScrollPosition(1.0)
@@ -944,6 +957,7 @@ export default function ArticlePage() {
   const handleMarkUnread = async () => {
     if (!article) return
     await resetProgress(article.id)
+    invalidateArticleDetail(article.id)
     setProgress(null)
     maxScrollRef.current = 0
     setCurrentScrollPosition(0)
@@ -1035,6 +1049,7 @@ export default function ArticlePage() {
     toast.success(`已提交 ${submittedURLs.length} 条链接${insertedCount < submittedURLs.length ? `，新增 ${insertedCount} 条` : ''}`)
     const articleID = article?.id
     if (!articleID) return
+    invalidateArticleDetail(articleID)
     void fetchArticleDetail(articleID)
       .then((data) => {
         if (Number(id) !== articleID) return
@@ -1317,6 +1332,7 @@ export default function ArticlePage() {
             style={{ border: '1px solid var(--border)', color: 'var(--fg)' }}
             onClick={async () => {
               try {
+                invalidateArticleDetail(article.id)
                 await expandLinkSetChild(article.id)
                 const data = await fetchArticleDetail(article.id)
                 setArticle(data.article)
