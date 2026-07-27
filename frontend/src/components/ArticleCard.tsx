@@ -68,6 +68,7 @@ interface Props {
   stripMarkdown: (t: string) => string
   onOpen: (id: number) => void
   onFocus: (idx: number) => void
+  onPrefetch?: (id: number) => void
   showSourceTag?: boolean
   // Override for the source chip text. /saved passes effective_source.title
   // here so bookmarklet articles show their real host instead of the
@@ -95,6 +96,7 @@ export default function ArticleCard({
   stripMarkdown,
   onOpen,
   onFocus,
+  onPrefetch,
   showSourceTag = true,
   sourceLabel,
   dateField = 'published',
@@ -115,6 +117,7 @@ export default function ArticleCard({
     reportClick(article.id)
     onOpen(article.id)
   }
+  const handlePrefetch = () => onPrefetch?.(article.id)
 
   // Tweets render as TweetCard. We still need the surrounding card chrome
   // for exposure tracking, focus outline, read-state opacity, and the
@@ -134,6 +137,9 @@ export default function ArticleCard({
           outlineOffset: -2,
         }}
         onClick={handleCardClick}
+        onPointerEnter={handlePrefetch}
+        onFocus={handlePrefetch}
+        onTouchStart={handlePrefetch}
       >
         <TweetCard article={article} compact />
       </div>
@@ -153,6 +159,9 @@ export default function ArticleCard({
         outlineOffset: -2,
       }}
       onClick={handleCardClick}
+      onPointerEnter={handlePrefetch}
+      onFocus={handlePrefetch}
+      onTouchStart={handlePrefetch}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         {!isRead && (
