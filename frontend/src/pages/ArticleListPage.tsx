@@ -257,8 +257,9 @@ export default function ArticleListPage() {
   // mark-all-read are hidden because /api/clip doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
   const isClippingMode = selectedFeedObj?.feed_type === 'clip'
-  const promoteArticlePrefetch = useArticleDetailPrefetch(
+  const { promote: promoteArticlePrefetch, registerCard: registerArticlePrefetchCard } = useArticleDetailPrefetch(
     isClippingMode ? [] : articles.slice(0, 6).map(article => article.id),
+    !isClippingMode,
   )
 
   const toggleSidebar = useCallback(() => {
@@ -986,6 +987,7 @@ export default function ArticleListPage() {
               onOpen={openArticle}
               onFocus={setFocusedIdx}
               onPrefetch={promoteArticlePrefetch}
+              observeRef={registerArticlePrefetchCard}
               dateField={sortField === 'captured' ? 'captured' : 'published'}
             />
           ))}

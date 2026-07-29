@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useCallback } from 'react'
 import { Article, ArticleListItem, UserTag } from '../api/client'
 import TweetCard from './TweetCard'
 
@@ -69,6 +69,10 @@ interface Props {
   onOpen: (id: number, preview: ArticleCardItem) => void
   onFocus: (idx: number) => void
   onPrefetch?: (id: number) => void
+  // Registers/unregisters this card's element with the shared viewport
+  // prefetch observer (see useArticleDetailPrefetch). Merged into the same
+  // ref callback as exposureRef/prefetchRef rather than a competing ref.
+  observeRef?: (id: number, el: Element | null) => void
   showSourceTag?: boolean
   // Override for the source chip text. /saved passes effective_source.title
   // here so bookmarklet articles show their real host instead of the
@@ -97,20 +101,28 @@ export default function ArticleCard({
   onOpen,
   onFocus,
   onPrefetch,
+  observeRef,
   showSourceTag = true,
   sourceLabel,
   dateField = 'published',
 }: Props) {
   const exposureRef = useExposureTracking(article.id)
   const effectiveSourceLabel = sourceLabel ?? article.feed_title
+  const articleId = article.id
 
-  // Merge the exposure ref with the optional prefetch (infinite-scroll) ref.
-  const mergedRef = (el: HTMLDivElement | null) => {
+  // Merge the exposure ref with the optional prefetch (infinite-scroll) ref
+  // and the shared viewport-prefetch observer registration. Wrapped in
+  // useCallback so its identity stays stable across re-renders — an inline
+  // function here would make React detach+reattach the ref (call it with
+  // null, then the new element) on every unrelated parent re-render, which
+  // would spuriously reset the viewport observer's dwell timer.
+  const mergedRef = useCallback((el: HTMLDivElement | null) => {
     ;(exposureRef as React.MutableRefObject<HTMLDivElement | null>).current = el
     if (prefetchRef) {
       ;(prefetchRef as React.MutableRefObject<HTMLDivElement | null>).current = el
     }
-  }
+    observeRef?.(articleId, el)
+  }, [exposureRef, prefetchRef, observeRef, articleId])
 
   const handleCardClick = () => {
     onFocus(idx)
