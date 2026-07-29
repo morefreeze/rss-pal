@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ArticleDetailCache,
   type ArticleDetailLoader,
@@ -105,5 +105,168 @@ describe('ArticleDetailCache', () => {
     pending.resolve(detail(8))
     await request
     expect(cache.peek(8)).toBeUndefined()
+  })
+})
+
+describe('ArticleDetailCache with storage', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.clearAllMocks()
+  })
+
+  it('persists entries to localStorage and retrieves them on peek', async () => {
+    const cache = new ArticleDetailCache(async id => detail(id), {
+      useStorage: true,
+    })
+
+    await cache.fetch(1)
+    expect(cache.peek(1)).toEqual(detail(1))
+
+    // Create new cache instance to simulate page reload
+    const cache2 = new ArticleDetailCache(async id => detail(id), {
+      useStorage: true,
+    })
+
+    // Should retrieve from localStorage without network call
+    const peekResult = cache2.peek(1)
+    expect(peekResult).toEqual(detail(1))
+  })
+
+  it('respects TTL when prefetching from hydrated storage', async () => {
+    let now = 1_000
+    const loader = vi.fn(async (id: number) => detail(id))
+    const cache = new ArticleDetailCache(loader, {
+      softTTLms: 100,
+      now: () => now,
+      useStorage: true,
+    })
+
+    await cache.fetch(1)
+
+    // Create new cache instance
+    const cache2 = new ArticleDetailCache(loader, {
+      softTTLms: 100,
+      now: () => now,
+      useStorage: true,
+    })
+
+    // Within TTL: should use hydrated storage without refetch
+    let result = await cache2.prefetch(1)
+    expect(result).toEqual(detail(1))
+    expect(loader).toHaveBeenCalledTimes(1) // Only first fetch
+
+    // Past TTL: should trigger a network refetch
+    now += 101
+    result = await cache2.prefetch(1)
+    expect(result).toEqual(detail(1))
+    expect(loader).toHaveBeenCalledTimes(2) // Second fetch triggered
+  })
+
+  it('removes entries from storage on invalidate', async () => {
+    const cache = new ArticleDetailCache(async id => detail(id), {
+      useStorage: true,
+    })
+
+    await cache.fetch(1)
+    cache.invalidate(1)
+
+    // Create new cache and verify entry is gone
+    const cache2 = new ArticleDetailCache(async id => detail(id), {
+      useStorage: true,
+    })
+    expect(cache2.peek(1)).toBeUndefined()
+  })
+
+  it('clears storage on reset', async () => {
+    const cache = new ArticleDetailCache(async id => detail(id), {
+      useStorage: true,
+    })
+
+    await cache.fetch(1)
+    await cache.fetch(2)
+    cache.reset()
+
+    // Create new cache and verify all entries are gone
+    const cache2 = new ArticleDetailCache(async id => detail(id), {
+      useStorage: true,
+    })
+    expect(cache2.peek(1)).toBeUndefined()
+    expect(cache2.peek(2)).toBeUndefined()
+  })
+
+  it('maintains storage size limit matching in-memory limit', async () => {
+    const cache = new ArticleDetailCache(async id => detail(id), {
+      maxEntries: 2,
+      useStorage: true,
+    })
+
+    await cache.fetch(1)
+    await cache.fetch(2)
+    await cache.fetch(3) // Should evict 1 from both memory and storage
+
+    expect(cache.peek(1)).toBeUndefined()
+    expect(cache.peek(2)).toEqual(detail(2))
+    expect(cache.peek(3)).toEqual(detail(3))
+
+    // Verify storage also lost entry 1
+    const cache2 = new ArticleDetailCache(async id => detail(id), {
+      maxEntries: 2,
+      useStorage: true,
+    })
+    expect(cache2.peek(1)).toBeUndefined()
+    expect(cache2.peek(2)).toEqual(detail(2))
+    expect(cache2.peek(3)).toEqual(detail(3))
+  })
+
+  it('handles storage gracefully when disabled', async () => {
+    const cache = new ArticleDetailCache(async id => detail(id), {
+      useStorage: false,
+    })
+
+    await cache.fetch(1)
+
+    const cache2 = new ArticleDetailCache(async id => detail(id), {
+      useStorage: false,
+    })
+
+    // Should not retrieve from storage when useStorage is false
+    expect(cache2.peek(1)).toBeUndefined()
+  })
+
+  it('handles corrupted storage data silently', async () => {
+    // Set corrupted data
+    localStorage.setItem('rss-pal:article-detail:1', '{invalid json}')
+
+    const cache = new ArticleDetailCache(async id => detail(id), {
+      useStorage: true,
+    })
+
+    // Should not throw and should return undefined
+    expect(cache.peek(1)).toBeUndefined()
+  })
+
+  it('recovers from QuotaExceededError by evicting oldest entry', async () => {
+    const cache = new ArticleDetailCache(async id => detail(id), {
+      useStorage: true,
+    })
+
+    // Mock localStorage.setItem to throw QuotaExceededError on first call
+    const originalSetItem = localStorage.setItem
+    let callCount = 0
+    localStorage.setItem = vi.fn((key, value) => {
+      callCount++
+      if (callCount === 1 && key.startsWith('rss-pal:article-detail:')) {
+        const err = new Error('QuotaExceededError')
+        err.name = 'QuotaExceededError'
+        throw err
+      }
+      originalSetItem.call(localStorage, key, value)
+    })
+
+    // Should handle the quota error gracefully
+    await cache.fetch(1)
+    expect(cache.peek(1)).toEqual(detail(1))
+
+    localStorage.setItem = originalSetItem
   })
 })
