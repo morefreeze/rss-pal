@@ -33,7 +33,10 @@ export default function VideoEmbed(props: VideoEmbedData) {
         title={`${props.platform} video ${props.id}`}
         allow="encrypted-media; picture-in-picture"
         allowFullScreen
-        loading="lazy"
+        // Safari/WKWebView only added lazy iframe loading in 16.4. Keep
+        // Bilibili eager so older WebKit clients do not leave the player
+        // deferred indefinitely; YouTube retains the existing lazy behavior.
+        loading={props.platform === 'youtube' ? 'lazy' : undefined}
         referrerPolicy="no-referrer"
         style={{
           position: 'absolute',
