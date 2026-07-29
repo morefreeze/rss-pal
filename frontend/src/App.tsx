@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { isLoggedIn, getMe, getUser } from './api/client'
 import { clearPrivateSessionState } from './api/privateSession'
+import { useConnectionKeepAlive } from './hooks/useConnectionKeepAlive'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import FeedListPage from './pages/FeedListPage'
@@ -27,7 +28,13 @@ interface User {
 }
 
 function RequireAuth({ user, onLogout }: { user: User | null; onLogout: () => void }) {
-  if (!isLoggedIn()) {
+  const loggedIn = isLoggedIn()
+  // Mounted here rather than on the article list alone: the costliest case is
+  // reading one article for a few minutes, going back, then opening another —
+  // by then an idle connection is long dead, so that second open pays a full
+  // cross-border handshake. Covering every authenticated route keeps it warm.
+  useConnectionKeepAlive(loggedIn)
+  if (!loggedIn) {
     return <Navigate to="/login" replace />
   }
   return <Layout user={user} onLogout={onLogout} />
