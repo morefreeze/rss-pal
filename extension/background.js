@@ -1,10 +1,32 @@
 // MV3 service worker.
 //
 // Classic-script service worker (no "type": "module") so we can use
-// importScripts() to share queue.js with the content-script context.
-// queue.js attaches its API to globalThis.__rssPalQueue, which is the
-// service-worker's global, so it's directly callable below.
-importScripts('queue.js');
+// importScripts() to share classic-script APIs with the content-script
+// context. Each dependency attaches its API to the service-worker global.
+importScripts(
+  'queue.js',
+  'youtube/protocol.js',
+  'youtube/format-selection.js',
+  'youtube/page-capture.js',
+  'youtube/resolver.js',
+);
+
+const youtubeResolver = globalThis.__rssPalCreateYouTubeResolver({
+  chromeApi: chrome,
+  protocol: globalThis.__rssPalYouTubeProtocol,
+  selectPlayback:
+    globalThis.__rssPalYouTubeFormatSelection.selectPlayback,
+  capturePageState: globalThis.__rssPalCaptureYouTubePageState,
+});
+
+function cleanupYouTubeOrphans() {
+  try {
+    const cleanup = youtubeResolver.cleanupOrphans();
+    if (cleanup && typeof cleanup.catch === 'function') {
+      cleanup.catch(() => {});
+    }
+  } catch (_) {}
+}
 
 // Keepalive: chrome.alarms wakes the SW every 30s so Chrome keeps the
 // extension's scaffolding warm and the toolbar popup opens faster.
@@ -16,8 +38,25 @@ function scheduleAlarms() {
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
 }
 
-chrome.runtime.onInstalled.addListener(scheduleAlarms);
-chrome.runtime.onStartup.addListener(scheduleAlarms);
+chrome.runtime.onInstalled.addListener(() => {
+  scheduleAlarms();
+  cleanupYouTubeOrphans();
+});
+chrome.runtime.onStartup.addListener(() => {
+  scheduleAlarms();
+  cleanupYouTubeOrphans();
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  try {
+    const cancellation = youtubeResolver.cancelRequestsForTab(tabId);
+    if (cancellation && typeof cancellation.catch === 'function') {
+      cancellation.catch(() => {});
+    }
+  } catch (_) {}
+});
+
+cleanupYouTubeOrphans();
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
@@ -38,6 +77,31 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Content scripts ask us to flush after pushing new items.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (
+    msg &&
+    (
+      msg.action ===
+        globalThis.__rssPalYouTubeProtocol.RUNTIME_RESOLVE ||
+      msg.action ===
+        globalThis.__rssPalYouTubeProtocol.RUNTIME_CANCEL
+    )
+  ) {
+    Promise.resolve()
+      .then(() => youtubeResolver.handleMessage(msg, sender))
+      .then(
+        (response) => {
+          try {
+            sendResponse(response);
+          } catch (_) {}
+        },
+        () => {
+          try {
+            sendResponse({ ok: false, code: 'INTERNAL_ERROR' });
+          } catch (_) {}
+        },
+      );
+    return true;
+  }
   if (msg && msg.action === 'flushQueue') {
     (async () => {
       try {
