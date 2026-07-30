@@ -126,6 +126,12 @@ function progressivePlayback(): BrowserPlayback {
   }
 }
 
+function dashWithoutProgressive(): BrowserPlayback {
+  const playback = adaptivePlayback()
+  delete playback.progressive
+  return playback
+}
+
 function renderPlayer(start = 30) {
   return render(
     <YouTubeBrowserPlayer
@@ -380,7 +386,7 @@ describe('YouTubeBrowserPlayer', () => {
   })
 
   it('automatically re-resolves a native failure once, then shows a visible error', async () => {
-    const noFallback = adaptivePlayback({ progressive: undefined })
+    const noFallback = dashWithoutProgressive()
     mocks.resolve.mockResolvedValue(noFallback)
 
     renderPlayer()
@@ -525,7 +531,7 @@ describe('YouTubeBrowserPlayer', () => {
   })
 
   it('resets the automatic media-retry guard after a visible retry', async () => {
-    const noFallback = adaptivePlayback({ progressive: undefined })
+    const noFallback = dashWithoutProgressive()
     mocks.resolve.mockResolvedValue(noFallback)
 
     renderPlayer()
@@ -545,7 +551,7 @@ describe('YouTubeBrowserPlayer', () => {
   })
 
   it('ignores a stale DASH error callback after a newer player is attached', async () => {
-    const noFallback = adaptivePlayback({ progressive: undefined })
+    const noFallback = dashWithoutProgressive()
     mocks.resolve.mockResolvedValue(noFallback)
 
     renderPlayer()

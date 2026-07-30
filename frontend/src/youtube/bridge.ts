@@ -261,9 +261,17 @@ function validPlayback(value: unknown): value is BrowserPlayback {
 
   if (value.mode === 'dash') {
     return (
-      hasExactKeys(value, ['mode', 'quality', 'expiresAt', 'video', 'audio']) &&
+      hasExactKeys(
+        value,
+        ['mode', 'quality', 'expiresAt', 'video', 'audio'],
+        ['progressive'],
+      ) &&
       validAdaptiveTrack(value.video, 'video') &&
-      validAdaptiveTrack(value.audio, 'audio')
+      validAdaptiveTrack(value.audio, 'audio') &&
+      (
+        !Reflect.ownKeys(value).includes('progressive') ||
+        validProgressiveTrack(value.progressive)
+      )
     )
   }
 
