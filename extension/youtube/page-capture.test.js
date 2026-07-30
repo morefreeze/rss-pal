@@ -6,8 +6,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const captureYouTubePageState = require('./page-capture');
+const { selectPlayback } = require('./format-selection');
 const TARGET_VIDEO_ID = 'dQw4w9WgXcQ';
 const OTHER_VIDEO_ID = 'aaaaaaaaaaa';
+const NOW_MS = 1_770_000_000_000;
 
 function createClock(start = 0) {
   let current = start;
@@ -385,7 +387,7 @@ test('polls past an empty transient response until target playback metadata is u
   );
 
   assert.equal(result.status, 'OK');
-  assert.equal(responseReads, 3);
+  assert.equal(responseReads, 4);
   assert.deepEqual(clock.sleeps, [250, 250]);
   assert.equal(pauseCalls, 1);
 });
@@ -419,7 +421,7 @@ test('waits for both response and live player data to match the target video', a
   );
 
   assert.equal(result.status, 'OK');
-  assert.equal(responseReads, 3);
+  assert.equal(responseReads, 4);
   assert.deepEqual(clock.sleeps, [250, 250]);
 });
 
@@ -510,6 +512,152 @@ test('waits out ads, clears resource history, and keeps only the latest current-
   ]);
 });
 
+test('rejects same-itag pre-roll requests and accepts only reconfirmed target streams', async () => {
+  const clock = createClock();
+  const adVideoUrl = directUrl(137, '&source=ad');
+  const adAudioUrl = directUrl(140, '&source=ad');
+  const targetVideoUrl = directUrl(137, '&source=target');
+  const targetAudioUrl = directUrl(140, '&source=target');
+  let playbackStarted = false;
+  let clearCalls = 0;
+  let pauseCalls = 0;
+  const player = {
+    getPlayerResponse() {
+      return responseForVideo(TARGET_VIDEO_ID, [
+        videoFormat(),
+        audioFormat(),
+      ]);
+    },
+    getVideoData() {
+      return { video_id: TARGET_VIDEO_ID };
+    },
+    getAdState() {
+      return playbackStarted && clock.now() < 250 ? 1 : 0;
+    },
+    setPlaybackQualityRange() {},
+    playVideo() {
+      playbackStarted = true;
+    },
+    pauseVideo() {
+      pauseCalls += 1;
+    },
+  };
+  const performance = {
+    setResourceTimingBufferSize() {},
+    clearResourceTimings() {
+      clearCalls += 1;
+    },
+    getEntriesByType() {
+      if (clock.now() < 500) {
+        return [{ name: adVideoUrl }, { name: adAudioUrl }];
+      }
+      return [
+        { name: targetVideoUrl },
+        { name: targetAudioUrl },
+      ];
+    },
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000, videoId: TARGET_VIDEO_ID },
+    createEnvironment(player, { clock, performance }),
+  );
+  const selection = selectPlayback(result, NOW_MS);
+
+  assert.equal(result.status, 'OK');
+  assert.deepEqual(result.resourceUrls, [
+    targetVideoUrl,
+    targetAudioUrl,
+  ]);
+  assert.equal(result.resourceUrls.includes(adVideoUrl), false);
+  assert.equal(result.resourceUrls.includes(adAudioUrl), false);
+  assert.equal(clearCalls >= 3, true);
+  assert.equal(selection.ok, true);
+  assert.equal(selection.playback.mode, 'dash');
+  assert.equal(selection.playback.quality, 1080);
+  assert.equal(pauseCalls, 1);
+});
+
+test('times out while a post-play ad remains active and never returns its streams', async () => {
+  const clock = createClock();
+  const adVideoUrl = directUrl(137, '&source=persistent-ad');
+  const adAudioUrl = directUrl(140, '&source=persistent-ad');
+  let playbackStarted = false;
+  let pauseCalls = 0;
+  const player = {
+    getPlayerResponse() {
+      return responseForVideo(TARGET_VIDEO_ID, [
+        videoFormat(),
+        audioFormat(),
+      ]);
+    },
+    getVideoData() {
+      return { video_id: TARGET_VIDEO_ID };
+    },
+    getAdState() {
+      return playbackStarted ? 1 : 0;
+    },
+    setPlaybackQualityRange() {},
+    playVideo() {
+      playbackStarted = true;
+    },
+    pauseVideo() {
+      pauseCalls += 1;
+    },
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000, videoId: TARGET_VIDEO_ID },
+    createEnvironment(player, {
+      clock,
+      performance: {
+        clearResourceTimings() {},
+        getEntriesByType() {
+          return [{ name: adVideoUrl }, { name: adAudioUrl }];
+        },
+      },
+    }),
+  );
+
+  assert.deepEqual(result, {
+    status: 'CAPTURE_TIMEOUT',
+    formats: [],
+    resourceUrls: [],
+  });
+  assert.equal(clock.now(), 1000);
+  assert.equal(pauseCalls, 1);
+});
+
+test('fails closed when an expected video has no positive identity source', async () => {
+  const clock = createClock();
+  let playCalls = 0;
+  const player = {
+    getPlayerResponse() {
+      return okResponse([
+        videoFormat({ url: directUrl(137) }),
+        audioFormat({ url: directUrl(140) }),
+      ]);
+    },
+    playVideo() {
+      playCalls += 1;
+    },
+    pauseVideo() {},
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000, videoId: TARGET_VIDEO_ID },
+    createEnvironment(player, { clock }),
+  );
+
+  assert.deepEqual(result, {
+    status: 'CAPTURE_TIMEOUT',
+    formats: [],
+    resourceUrls: [],
+  });
+  assert.equal(clock.now(), 1000);
+  assert.equal(playCalls, 0);
+});
+
 test('waits for the highest eligible adaptive video instead of a low-resolution pair', async () => {
   const clock = createClock();
   const lowVideoUrl = directUrl(136);
@@ -563,7 +711,7 @@ test('waits for the highest eligible adaptive video instead of a low-resolution 
   ]);
 });
 
-test('does not let a progressive direct URL bypass eligible 1080p adaptive metadata', async () => {
+test('gives eligible 1080p metadata half a short timeout before progressive fallback', async () => {
   const clock = createClock();
   let pauseCalls = 0;
   const player = {
@@ -586,12 +734,12 @@ test('does not let a progressive direct URL bypass eligible 1080p adaptive metad
   );
 
   assert.equal(result.status, 'OK');
-  assert.equal(clock.now(), 1000);
-  assert.deepEqual(clock.sleeps, [250, 250, 250, 250]);
+  assert.equal(clock.now(), 500);
+  assert.deepEqual(clock.sleeps, [250, 250]);
   assert.equal(pauseCalls, 1);
 });
 
-test('accepts a covered 720p adaptive fallback only at the deadline', async () => {
+test('accepts a covered 720p adaptive fallback after a four-second grace', async () => {
   const clock = createClock();
   const lowVideoUrl = directUrl(136);
   const audioUrl = directUrl(140);
@@ -613,7 +761,7 @@ test('accepts a covered 720p adaptive fallback only at the deadline', async () =
   };
 
   const result = await captureYouTubePageState(
-    { timeoutMs: 1000 },
+    { timeoutMs: 15_000 },
     createEnvironment(player, {
       clock,
       performance: {
@@ -625,7 +773,7 @@ test('accepts a covered 720p adaptive fallback only at the deadline', async () =
   );
 
   assert.equal(result.status, 'OK');
-  assert.equal(clock.now(), 1000);
+  assert.equal(clock.now(), 4000);
   assert.deepEqual(result.resourceUrls, [lowVideoUrl, audioUrl]);
 });
 
@@ -796,6 +944,49 @@ test('omits oversized copied strings and resource URLs', async () => {
   assert.equal(Object.hasOwn(boundedFormat, 'audioQuality'), false);
   assert.equal(Object.hasOwn(boundedFormat, 'url'), false);
   assert.deepEqual(result.resourceUrls, []);
+});
+
+test('omits oversized or nonnumeric scalar and range values', async () => {
+  const oversizedDigits = '9'.repeat(1_000_000);
+  const player = {
+    getPlayerResponse() {
+      return okResponse(
+        [
+          videoFormat({
+            itag: 999,
+            width: oversizedDigits,
+            approxDurationMs: oversizedDigits,
+            initRange: {
+              start: oversizedDigits,
+              end: '739',
+            },
+            indexRange: {
+              start: 'not-numeric',
+              end: 1200,
+            },
+          }),
+        ],
+        [progressiveFormat({ url: directUrl(22) })],
+      );
+    },
+    playVideo() {},
+    pauseVideo() {},
+  };
+
+  const result = await captureYouTubePageState(
+    {},
+    createEnvironment(player),
+  );
+  const boundedFormat = result.formats.find(
+    (format) => format.itag === 999,
+  );
+
+  assert.equal(result.status, 'OK');
+  assert.equal(Object.hasOwn(boundedFormat, 'width'), false);
+  assert.equal(Object.hasOwn(boundedFormat, 'approxDurationMs'), false);
+  assert.deepEqual(boundedFormat.initRange, { end: '739' });
+  assert.deepEqual(boundedFormat.indexRange, { end: 1200 });
+  assert.equal(JSON.stringify(result).length < 20_000, true);
 });
 
 test('returns the exact timeout envelope and clamps timeout options', async (t) => {
