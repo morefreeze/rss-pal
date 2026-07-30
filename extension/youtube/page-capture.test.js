@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const captureYouTubePageState = require('./page-capture');
+const TARGET_VIDEO_ID = 'dQw4w9WgXcQ';
+const OTHER_VIDEO_ID = 'aaaaaaaaaaa';
 
 function createClock(start = 0) {
   let current = start;
@@ -104,6 +106,17 @@ function okResponse(adaptiveFormats = [], formats = []) {
     privateAccountData: {
       email: 'private@example.com',
     },
+  };
+}
+
+function responseForVideo(
+  videoId,
+  adaptiveFormats = [],
+  formats = [],
+) {
+  return {
+    ...okResponse(adaptiveFormats, formats),
+    videoDetails: { videoId },
   };
 }
 
@@ -264,12 +277,22 @@ test('falls back to hd720 and the single-quality player method', async () => {
   const calls = [];
   const player = {
     getPlayerResponse() {
-      return okResponse([], [
-        progressiveFormat({ url: directUrl(22) }),
+      return okResponse([
+        videoFormat({
+          itag: 136,
+          width: 1280,
+          height: 720,
+          url: directUrl(136),
+        }),
+        audioFormat({ url: directUrl(140) }),
       ]);
     },
     getAvailableQualityLevels() {
-      return ['large', 'hd720'];
+      return ['large'];
+    },
+    setPlaybackQualityRange(minimum, maximum) {
+      calls.push(['quality-range', minimum, maximum]);
+      throw new Error('private range API failure');
     },
     setPlaybackQuality(quality) {
       calls.push(['quality', quality]);
@@ -292,6 +315,7 @@ test('falls back to hd720 and the single-quality player method', async () => {
 
   assert.equal(result.status, 'OK');
   assert.deepEqual(calls, [
+    ['quality-range', 'hd720', 'hd720'],
     ['quality', 'hd720'],
     ['mute'],
     ['play'],
@@ -329,6 +353,310 @@ test('returns immediately when finalized direct adaptive URLs already form a pai
   assert.equal(pauseCalls, 1);
 });
 
+test('polls past an empty transient response until target playback metadata is usable', async () => {
+  const clock = createClock();
+  let responseReads = 0;
+  let pauseCalls = 0;
+  const player = {
+    getPlayerResponse() {
+      responseReads += 1;
+      if (responseReads === 1) {
+        return {};
+      }
+      if (responseReads === 2) {
+        return okResponse();
+      }
+      return responseForVideo(TARGET_VIDEO_ID, [], [
+        progressiveFormat({ url: directUrl(22) }),
+      ]);
+    },
+    getVideoData() {
+      return { video_id: TARGET_VIDEO_ID };
+    },
+    playVideo() {},
+    pauseVideo() {
+      pauseCalls += 1;
+    },
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000, videoId: TARGET_VIDEO_ID },
+    createEnvironment(player, { clock }),
+  );
+
+  assert.equal(result.status, 'OK');
+  assert.equal(responseReads, 3);
+  assert.deepEqual(clock.sleeps, [250, 250]);
+  assert.equal(pauseCalls, 1);
+});
+
+test('waits for both response and live player data to match the target video', async () => {
+  const clock = createClock();
+  let responseReads = 0;
+  let responseVideoId = OTHER_VIDEO_ID;
+  let playerVideoId = TARGET_VIDEO_ID;
+  const player = {
+    getPlayerResponse() {
+      responseReads += 1;
+      responseVideoId =
+        responseReads === 1 ? OTHER_VIDEO_ID : TARGET_VIDEO_ID;
+      playerVideoId =
+        responseReads === 2 ? OTHER_VIDEO_ID : TARGET_VIDEO_ID;
+      return responseForVideo(responseVideoId, [], [
+        progressiveFormat({ url: directUrl(22) }),
+      ]);
+    },
+    getVideoData() {
+      return { video_id: playerVideoId };
+    },
+    playVideo() {},
+    pauseVideo() {},
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000, videoId: TARGET_VIDEO_ID },
+    createEnvironment(player, { clock }),
+  );
+
+  assert.equal(result.status, 'OK');
+  assert.equal(responseReads, 3);
+  assert.deepEqual(clock.sleeps, [250, 250]);
+});
+
+test('waits out ads, clears resource history, and keeps only the latest current-format URL per itag', async () => {
+  const clock = createClock();
+  const oldVideoUrl = directUrl(137, '&range=old');
+  const oldAudioUrl = directUrl(140, '&range=old');
+  const firstVideoUrl = directUrl(137, '&range=0-999');
+  const latestVideoUrl = directUrl(137, '&range=1000-1999');
+  const audioUrl = directUrl(140, '&range=0-999');
+  const unknownUrl = directUrl(999, '&range=0-999');
+  const events = [];
+  let entries = [{ name: oldVideoUrl }, { name: oldAudioUrl }];
+  let classChecks = 0;
+  const adStates = [1, 0];
+  const player = {
+    getPlayerResponse() {
+      return responseForVideo(TARGET_VIDEO_ID, [
+        videoFormat(),
+        audioFormat(),
+      ]);
+    },
+    getVideoData() {
+      return { video_id: TARGET_VIDEO_ID };
+    },
+    classList: {
+      contains(name) {
+        assert.equal(name, 'ad-showing');
+        classChecks += 1;
+        return classChecks === 1;
+      },
+    },
+    getAdState() {
+      return adStates.shift() ?? 0;
+    },
+    setPlaybackQualityRange(minimum, maximum) {
+      events.push(['quality', minimum, maximum]);
+    },
+    mute() {
+      events.push(['mute']);
+    },
+    playVideo() {
+      events.push(['play']);
+      entries.push(
+        { name: unknownUrl },
+        { name: firstVideoUrl },
+        { name: latestVideoUrl },
+        { name: audioUrl },
+      );
+    },
+    pauseVideo() {
+      events.push(['pause']);
+    },
+  };
+  const performance = {
+    setResourceTimingBufferSize(size) {
+      events.push(['buffer-size', size]);
+    },
+    clearResourceTimings() {
+      events.push(['clear']);
+      entries = [];
+    },
+    getEntriesByType(type) {
+      assert.equal(type, 'resource');
+      return entries;
+    },
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000, videoId: TARGET_VIDEO_ID },
+    createEnvironment(player, { clock, performance }),
+  );
+
+  assert.deepEqual(clock.sleeps, [250, 250]);
+  assert.deepEqual(result.resourceUrls, [latestVideoUrl, audioUrl]);
+  assert.equal(result.resourceUrls.includes(oldVideoUrl), false);
+  assert.equal(result.resourceUrls.includes(oldAudioUrl), false);
+  assert.equal(result.resourceUrls.includes(unknownUrl), false);
+  assert.equal(events.findIndex(([name]) => name === 'clear') <
+    events.findIndex(([name]) => name === 'play'), true);
+  assert.deepEqual(events, [
+    ['buffer-size', 1000],
+    ['clear'],
+    ['quality', 'hd1080', 'hd1080'],
+    ['mute'],
+    ['play'],
+    ['pause'],
+  ]);
+});
+
+test('waits for the highest eligible adaptive video instead of a low-resolution pair', async () => {
+  const clock = createClock();
+  const lowVideoUrl = directUrl(136);
+  const highVideoUrl = directUrl(137);
+  const audioUrl = directUrl(140);
+  const player = {
+    getPlayerResponse() {
+      return okResponse([
+        videoFormat(),
+        videoFormat({
+          itag: 136,
+          width: 1280,
+          height: 720,
+        }),
+        audioFormat(),
+      ]);
+    },
+    getAvailableQualityLevels() {
+      return [];
+    },
+    setPlaybackQualityRange() {},
+    playVideo() {},
+    pauseVideo() {},
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000 },
+    createEnvironment(player, {
+      clock,
+      performance: {
+        getEntriesByType() {
+          const entries = [
+            { name: lowVideoUrl },
+            { name: audioUrl },
+          ];
+          if (clock.now() >= 250) {
+            entries.push({ name: highVideoUrl });
+          }
+          return entries;
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.status, 'OK');
+  assert.deepEqual(clock.sleeps, [250]);
+  assert.deepEqual(result.resourceUrls, [
+    lowVideoUrl,
+    audioUrl,
+    highVideoUrl,
+  ]);
+});
+
+test('does not let a progressive direct URL bypass eligible 1080p adaptive metadata', async () => {
+  const clock = createClock();
+  let pauseCalls = 0;
+  const player = {
+    getPlayerResponse() {
+      return okResponse(
+        [videoFormat(), audioFormat()],
+        [progressiveFormat({ url: directUrl(22) })],
+      );
+    },
+    setPlaybackQualityRange() {},
+    playVideo() {},
+    pauseVideo() {
+      pauseCalls += 1;
+    },
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000 },
+    createEnvironment(player, { clock }),
+  );
+
+  assert.equal(result.status, 'OK');
+  assert.equal(clock.now(), 1000);
+  assert.deepEqual(clock.sleeps, [250, 250, 250, 250]);
+  assert.equal(pauseCalls, 1);
+});
+
+test('accepts a covered 720p adaptive fallback only at the deadline', async () => {
+  const clock = createClock();
+  const lowVideoUrl = directUrl(136);
+  const audioUrl = directUrl(140);
+  const player = {
+    getPlayerResponse() {
+      return okResponse([
+        videoFormat(),
+        videoFormat({
+          itag: 136,
+          width: 1280,
+          height: 720,
+        }),
+        audioFormat(),
+      ]);
+    },
+    setPlaybackQualityRange() {},
+    playVideo() {},
+    pauseVideo() {},
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000 },
+    createEnvironment(player, {
+      clock,
+      performance: {
+        getEntriesByType() {
+          return [{ name: lowVideoUrl }, { name: audioUrl }];
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.status, 'OK');
+  assert.equal(clock.now(), 1000);
+  assert.deepEqual(result.resourceUrls, [lowVideoUrl, audioUrl]);
+});
+
+test('returns the exact timeout envelope when no usable format is covered', async () => {
+  const clock = createClock();
+  let pauseCalls = 0;
+  const player = {
+    getPlayerResponse() {
+      return okResponse([videoFormat(), audioFormat()]);
+    },
+    setPlaybackQualityRange() {},
+    playVideo() {},
+    pauseVideo() {
+      pauseCalls += 1;
+    },
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 1000 },
+    createEnvironment(player, { clock }),
+  );
+
+  assert.deepEqual(result, {
+    status: 'CAPTURE_TIMEOUT',
+    formats: [],
+    resourceUrls: [],
+  });
+  assert.equal(clock.now(), 1000);
+  assert.equal(pauseCalls, 1);
+});
+
 test('returns the exact non-OK status envelope without touching playback or private reasons', async () => {
   const forbidden = () => {
     throw new Error('playback method must not be touched');
@@ -360,6 +688,114 @@ test('returns the exact non-OK status envelope without touching playback or priv
       resourceUrls: [],
     },
   );
+});
+
+test('whitelists returned playability statuses and rejects oversized transient statuses', async (t) => {
+  const forbidden = () => {
+    throw new Error('playback method must not be touched');
+  };
+
+  await t.test('unknown status', async () => {
+    const player = {
+      getPlayerResponse() {
+        return {
+          playabilityStatus: {
+            status: 'PRIVATE_INTERNAL_STATUS',
+            reason: 'private account reason',
+          },
+        };
+      },
+      mute: forbidden,
+      playVideo: forbidden,
+      pauseVideo: forbidden,
+    };
+
+    assert.deepEqual(
+      await captureYouTubePageState({}, createEnvironment(player)),
+      {
+        status: 'UNPLAYABLE',
+        formats: [],
+        resourceUrls: [],
+      },
+    );
+  });
+
+  await t.test('oversized status', async () => {
+    const clock = createClock();
+    const player = {
+      getPlayerResponse() {
+        return {
+          playabilityStatus: {
+            status: 'X'.repeat(513),
+          },
+        };
+      },
+      mute: forbidden,
+      playVideo: forbidden,
+      pauseVideo: forbidden,
+    };
+
+    assert.deepEqual(
+      await captureYouTubePageState(
+        { timeoutMs: 1000 },
+        createEnvironment(player, { clock }),
+      ),
+      {
+        status: 'CAPTURE_TIMEOUT',
+        formats: [],
+        resourceUrls: [],
+      },
+    );
+    assert.equal(clock.now(), 1000);
+  });
+});
+
+test('omits oversized copied strings and resource URLs', async () => {
+  const oversizedDirectUrl = directUrl(
+    999,
+    `&private=${'x'.repeat(16_384)}`,
+  );
+  const oversizedResourceUrl = directUrl(
+    22,
+    `&private=${'y'.repeat(16_384)}`,
+  );
+  const player = {
+    getPlayerResponse() {
+      return okResponse(
+        [
+          videoFormat({
+            itag: 999,
+            mimeType: 'v'.repeat(513),
+            audioQuality: 'a'.repeat(513),
+            url: oversizedDirectUrl,
+          }),
+        ],
+        [progressiveFormat({ url: directUrl(22) })],
+      );
+    },
+    playVideo() {},
+    pauseVideo() {},
+  };
+
+  const result = await captureYouTubePageState(
+    {},
+    createEnvironment(player, {
+      performance: {
+        getEntriesByType() {
+          return [{ name: oversizedResourceUrl }];
+        },
+      },
+    }),
+  );
+  const boundedFormat = result.formats.find(
+    (format) => format.itag === 999,
+  );
+
+  assert.equal(result.status, 'OK');
+  assert.equal(Object.hasOwn(boundedFormat, 'mimeType'), false);
+  assert.equal(Object.hasOwn(boundedFormat, 'audioQuality'), false);
+  assert.equal(Object.hasOwn(boundedFormat, 'url'), false);
+  assert.deepEqual(result.resourceUrls, []);
 });
 
 test('returns the exact timeout envelope and clamps timeout options', async (t) => {
@@ -519,7 +955,10 @@ test('accepts only HTTPS GoogleVideo videoplayback resources with positive query
   let pauseCalls = 0;
   const player = {
     getPlayerResponse() {
-      return okResponse([], [progressiveFormat()]);
+      return okResponse(
+        [audioFormat()],
+        [progressiveFormat()],
+      );
     },
     playVideo() {},
     pauseVideo() {
