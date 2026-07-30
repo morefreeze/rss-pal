@@ -204,7 +204,7 @@
     }
 
     if (!hasExpiry) {
-      return { usable: true, expiresAtMs: null };
+      return { usable: true, expiresAtMs: nowMs + 300_000 };
     }
 
     const expirySeconds = parsePositiveInteger(rawExpiry);
@@ -227,6 +227,15 @@
   function hasAdaptiveRanges(format) {
     return (
       format.initRange !== undefined && format.indexRange !== undefined
+    );
+  }
+
+  function hasAdaptivePlaybackMetadata(format) {
+    return (
+      Number.isFinite(format.bitrate) &&
+      format.bitrate > 0 &&
+      Number.isFinite(format.durationMs) &&
+      format.durationMs > 0
     );
   }
 
@@ -378,6 +387,7 @@
           format.mimeType.startsWith('video/') &&
           !format.hasAudio &&
           hasAdaptiveRanges(format) &&
+          hasAdaptivePlaybackMetadata(format) &&
           Number.isInteger(format.height) &&
           format.height >= 720 &&
           format.height <= 1080,
@@ -387,7 +397,8 @@
       .filter(
         (format) =>
           format.mimeType.startsWith('audio/') &&
-          hasAdaptiveRanges(format),
+          hasAdaptiveRanges(format) &&
+          hasAdaptivePlaybackMetadata(format),
       )
       .sort(compareAdaptiveAudio);
 
