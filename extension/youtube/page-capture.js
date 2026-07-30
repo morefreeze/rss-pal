@@ -61,13 +61,11 @@
       const sanitized = {};
       const scalarKeys = [
         'itag',
-        'mimeType',
         'bitrate',
         'width',
         'height',
         'fps',
         'approxDurationMs',
-        'audioQuality',
         'audioSampleRate',
         'audioChannels',
       ];
@@ -87,6 +85,16 @@
           }
         }
 
+        for (const key of ['mimeType', 'audioQuality']) {
+          if (
+            hasOwn(raw, key) &&
+            typeof raw[key] === 'string' &&
+            raw[key].length <= 512
+          ) {
+            sanitized[key] = raw[key];
+          }
+        }
+
         for (const key of ['initRange', 'indexRange']) {
           if (hasOwn(raw, key)) {
             const range = copyRange(raw[key]);
@@ -96,7 +104,11 @@
           }
         }
 
-        if (hasOwn(raw, 'url') && typeof raw.url === 'string') {
+        if (
+          hasOwn(raw, 'url') &&
+          typeof raw.url === 'string' &&
+          raw.url.length <= 16_384
+        ) {
           sanitized.url = raw.url;
         }
       } catch {
@@ -168,7 +180,7 @@
     }
 
     function parseResource(value) {
-      if (typeof value !== 'string') {
+      if (typeof value !== 'string' || value.length > 16_384) {
         return null;
       }
 
@@ -198,39 +210,261 @@
       return itag === null ? null : { url: value, itag };
     }
 
-    function formatCoverageIsReady(formats, resourceItags) {
-      let coveredAdaptiveVideo = false;
-      let coveredAdaptiveAudio = false;
-      let coveredProgressiveVideo = false;
+    function hasMimeKind(format, kind) {
+      return (
+        typeof format.mimeType === 'string' &&
+        format.mimeType.trim().toLowerCase().startsWith(`${kind}/`)
+      );
+    }
+
+    function hasPlaybackMetadata(format) {
+      return (
+        parsePositiveInteger(format.bitrate) !== null &&
+        parsePositiveInteger(format.approxDurationMs) !== null
+      );
+    }
+
+    function hasAdaptiveRanges(format) {
+      return isObject(format.initRange) && isObject(format.indexRange);
+    }
+
+    function isEligibleAdaptiveVideo(format) {
+      const height = parsePositiveInteger(format.height);
+      return (
+        hasMimeKind(format, 'video') &&
+        !hasOwn(format, 'audioQuality') &&
+        height !== null &&
+        height >= 720 &&
+        height <= 1080 &&
+        hasPlaybackMetadata(format) &&
+        hasAdaptiveRanges(format)
+      );
+    }
+
+    function isEligibleAdaptiveAudio(format) {
+      return (
+        hasMimeKind(format, 'audio') &&
+        hasPlaybackMetadata(format) &&
+        hasAdaptiveRanges(format)
+      );
+    }
+
+    function isEligibleProgressive(format) {
+      return (
+        hasMimeKind(format, 'video') &&
+        hasOwn(format, 'audioQuality') &&
+        hasPlaybackMetadata(format)
+      );
+    }
+
+    function buildPlaybackModel(formats) {
+      const adaptiveVideos = [];
+      const adaptiveAudios = [];
+      const progressives = [];
 
       for (const format of formats) {
-        const itag = parsePositiveInteger(format.itag);
-        if (itag === null || typeof format.mimeType !== 'string') {
-          continue;
-        }
-
-        const hasDirectUrl =
-          typeof format.url === 'string' && format.url.length > 0;
-        if (!hasDirectUrl && !resourceItags.has(itag)) {
-          continue;
-        }
-
-        const mimeType = format.mimeType.trim().toLowerCase();
-        if (mimeType.startsWith('audio/')) {
-          coveredAdaptiveAudio = true;
-        } else if (mimeType.startsWith('video/')) {
-          if (format.audioQuality) {
-            coveredProgressiveVideo = true;
-          } else {
-            coveredAdaptiveVideo = true;
-          }
+        if (isEligibleAdaptiveVideo(format)) {
+          adaptiveVideos.push(format);
+        } else if (isEligibleAdaptiveAudio(format)) {
+          adaptiveAudios.push(format);
+        } else if (isEligibleProgressive(format)) {
+          progressives.push(format);
         }
       }
 
+      let desiredHeight = null;
+      for (const video of adaptiveVideos) {
+        const height = parsePositiveInteger(video.height);
+        if (
+          height !== null &&
+          (desiredHeight === null || height > desiredHeight)
+        ) {
+          desiredHeight = height;
+        }
+      }
+
+      return {
+        adaptiveVideos,
+        adaptiveAudios,
+        progressives,
+        desiredHeight,
+        desiredQuality:
+          desiredHeight === null
+            ? null
+            : desiredHeight >= 1080
+              ? 'hd1080'
+              : 'hd720',
+        hasAdaptivePair:
+          adaptiveVideos.length > 0 && adaptiveAudios.length > 0,
+      };
+    }
+
+    function formatIsCovered(format, resourcesByItag) {
+      const itag = parsePositiveInteger(format.itag);
       return (
-        coveredProgressiveVideo ||
-        (coveredAdaptiveVideo && coveredAdaptiveAudio)
+        (typeof format.url === 'string' && format.url.length > 0) ||
+        (itag !== null && resourcesByItag.has(itag))
       );
+    }
+
+    function anyCovered(formats, resourcesByItag) {
+      return formats.some((format) =>
+        formatIsCovered(format, resourcesByItag),
+      );
+    }
+
+    function preferredCoverageIsReady(model, resourcesByItag) {
+      if (!model.hasAdaptivePair) {
+        return anyCovered(model.progressives, resourcesByItag);
+      }
+
+      const preferredVideos = model.adaptiveVideos.filter(
+        (format) =>
+          parsePositiveInteger(format.height) === model.desiredHeight,
+      );
+      return (
+        anyCovered(preferredVideos, resourcesByItag) &&
+        anyCovered(model.adaptiveAudios, resourcesByItag)
+      );
+    }
+
+    function fallbackCoverageIsReady(model, resourcesByItag) {
+      return (
+        (anyCovered(model.adaptiveVideos, resourcesByItag) &&
+          anyCovered(model.adaptiveAudios, resourcesByItag)) ||
+        anyCovered(model.progressives, resourcesByItag)
+      );
+    }
+
+    function getPlayabilityStatus(response) {
+      try {
+        const status = response?.playabilityStatus?.status;
+        if (
+          typeof status !== 'string' ||
+          status.trim().length === 0 ||
+          status.length > 128
+        ) {
+          return null;
+        }
+        return status;
+      } catch {
+        return null;
+      }
+    }
+
+    function hasRawFormats(response) {
+      try {
+        const streamingData = response?.streamingData;
+        return (
+          isObject(streamingData) &&
+          ((Array.isArray(streamingData.adaptiveFormats) &&
+            streamingData.adaptiveFormats.length > 0) ||
+            (Array.isArray(streamingData.formats) &&
+              streamingData.formats.length > 0))
+        );
+      } catch {
+        return false;
+      }
+    }
+
+    function isUsableResponse(response) {
+      if (!isObject(response)) {
+        return false;
+      }
+
+      const status = getPlayabilityStatus(response);
+      return status !== null && (status !== 'OK' || hasRawFormats(response));
+    }
+
+    function readUsableResponse(player, pageRoot) {
+      let response = null;
+      try {
+        response = player.getPlayerResponse();
+      } catch {
+        response = null;
+      }
+      if (isUsableResponse(response)) {
+        return response;
+      }
+
+      try {
+        response = pageRoot.ytInitialPlayerResponse;
+      } catch {
+        response = null;
+      }
+      return isUsableResponse(response) ? response : null;
+    }
+
+    function matchesExpectedVideo(player, response, expectedVideoId) {
+      if (expectedVideoId === null) {
+        return true;
+      }
+
+      try {
+        const responseVideoId = response?.videoDetails?.videoId;
+        if (
+          responseVideoId !== undefined &&
+          responseVideoId !== expectedVideoId
+        ) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+
+      try {
+        if (typeof player.getVideoData === 'function') {
+          const videoData = player.getVideoData();
+          if (
+            isObject(videoData) &&
+            hasOwn(videoData, 'video_id') &&
+            videoData.video_id !== expectedVideoId
+          ) {
+            return false;
+          }
+        }
+      } catch {
+        return false;
+      }
+
+      return true;
+    }
+
+    function adIsActive(player) {
+      try {
+        if (
+          player.classList !== undefined &&
+          player.classList !== null &&
+          typeof player.classList.contains === 'function' &&
+          player.classList.contains('ad-showing')
+        ) {
+          return true;
+        }
+      } catch {
+        // Fall through to any available player ad state.
+      }
+
+      try {
+        if (typeof player.getAdState !== 'function') {
+          return false;
+        }
+        const state = player.getAdState();
+        if (state === true) {
+          return true;
+        }
+        if (typeof state === 'number') {
+          return Number.isFinite(state) && state > 0;
+        }
+        if (typeof state === 'string') {
+          return ['1', 'active', 'playing', 'ad-showing'].includes(
+            state.trim().toLowerCase(),
+          );
+        }
+      } catch {
+        return false;
+      }
+
+      return false;
     }
 
     const environment =
@@ -261,6 +495,7 @@
             });
 
     let timeoutMs = 15_000;
+    let expectedVideoId = null;
     try {
       if (
         options !== null &&
@@ -270,8 +505,17 @@
       ) {
         timeoutMs = Math.min(20_000, Math.max(1000, options.timeoutMs));
       }
+      if (
+        options !== null &&
+        typeof options === 'object' &&
+        typeof options.videoId === 'string' &&
+        /^[A-Za-z0-9_-]{11}$/.test(options.videoId)
+      ) {
+        expectedVideoId = options.videoId;
+      }
     } catch {
       timeoutMs = 15_000;
+      expectedVideoId = null;
     }
 
     const timeoutResult = {
@@ -291,6 +535,7 @@
     }
 
     let player = null;
+    let response = null;
     try {
       while (now() < deadline) {
         let candidate = null;
@@ -300,8 +545,23 @@
             candidate !== null &&
             typeof candidate.getPlayerResponse === 'function'
           ) {
-            player = candidate;
-            break;
+            const candidateResponse = readUsableResponse(
+              candidate,
+              pageRoot,
+            );
+            if (
+              candidateResponse !== null &&
+              matchesExpectedVideo(
+                candidate,
+                candidateResponse,
+                expectedVideoId,
+              ) &&
+              !adIsActive(candidate)
+            ) {
+              player = candidate;
+              response = candidateResponse;
+              break;
+            }
           }
         } catch {
           candidate = null;
@@ -315,69 +575,84 @@
       return timeoutResult;
     }
 
-    if (player === null) {
+    if (player === null || response === null) {
       return timeoutResult;
     }
 
-    let response = null;
-    try {
-      response = player.getPlayerResponse();
-    } catch {
-      response = null;
-    }
-    if (!isObject(response)) {
-      try {
-        response = isObject(pageRoot.ytInitialPlayerResponse)
-          ? pageRoot.ytInitialPlayerResponse
-          : null;
-      } catch {
-        response = null;
-      }
-    }
-
-    let playabilityStatus = 'UNPLAYABLE';
-    try {
-      const status = response?.playabilityStatus?.status;
-      if (typeof status === 'string' && status.length > 0) {
-        playabilityStatus = status;
-      }
-    } catch {
-      playabilityStatus = 'UNPLAYABLE';
-    }
+    const playabilityStatus = getPlayabilityStatus(response);
     if (playabilityStatus !== 'OK') {
+      const publicStatuses = [
+        'LOGIN_REQUIRED',
+        'UNPLAYABLE',
+        'ERROR',
+        'LIVE_STREAM_OFFLINE',
+        'AGE_CHECK_REQUIRED',
+        'CONTENT_CHECK_REQUIRED',
+      ];
       return {
-        status: playabilityStatus,
+        status: publicStatuses.includes(playabilityStatus)
+          ? playabilityStatus
+          : 'UNPLAYABLE',
         formats: [],
         resourceUrls: [],
       };
     }
 
     const formats = sanitizeFormats(response);
-
-    let levels = [];
-    try {
-      if (typeof player.getAvailableQualityLevels === 'function') {
-        const available = player.getAvailableQualityLevels();
-        levels = Array.isArray(available) ? available : [];
+    const playbackModel = buildPlaybackModel(formats);
+    const formatItags = new Set();
+    for (const format of formats) {
+      const itag = parsePositiveInteger(format.itag);
+      if (itag !== null && formatItags.size < 256) {
+        formatItags.add(itag);
       }
-    } catch {
-      levels = [];
     }
 
-    const targetQuality = levels.includes('hd1080')
-      ? 'hd1080'
-      : levels.includes('hd720')
-        ? 'hd720'
-        : null;
-    if (targetQuality !== null) {
+    try {
+      if (typeof pagePerformance.setResourceTimingBufferSize === 'function') {
+        pagePerformance.setResourceTimingBufferSize(1000);
+      }
+    } catch {
+      // Enlarging the buffer is best-effort.
+    }
+    try {
+      if (typeof pagePerformance.clearResourceTimings === 'function') {
+        pagePerformance.clearResourceTimings();
+      }
+    } catch {
+      return timeoutResult;
+    }
+
+    try {
+      if (typeof player.getAvailableQualityLevels === 'function') {
+        player.getAvailableQualityLevels();
+      }
+    } catch {
+      // Available quality levels are advisory only.
+    }
+
+    if (playbackModel.desiredQuality !== null) {
+      let rangeApplied = false;
       try {
         if (typeof player.setPlaybackQualityRange === 'function') {
-          player.setPlaybackQualityRange(targetQuality, targetQuality);
-        } else if (typeof player.setPlaybackQuality === 'function') {
-          player.setPlaybackQuality(targetQuality);
+          player.setPlaybackQualityRange(
+            playbackModel.desiredQuality,
+            playbackModel.desiredQuality,
+          );
+          rangeApplied = true;
         }
       } catch {
-        // Quality selection is best-effort.
+        rangeApplied = false;
+      }
+
+      if (!rangeApplied) {
+        try {
+          if (typeof player.setPlaybackQuality === 'function') {
+            player.setPlaybackQuality(playbackModel.desiredQuality);
+          }
+        } catch {
+          // Quality selection is best-effort.
+        }
       }
     }
 
@@ -396,49 +671,61 @@
         await player.playVideo();
       }
 
-      const resourceUrls = [];
-      const seenResourceUrls = new Set();
-      const resourceItags = new Set();
+      const resourcesByItag = new Map();
 
       while (true) {
         const entries = pagePerformance.getEntriesByType('resource');
         if (Array.isArray(entries)) {
           for (const entry of entries) {
-            if (resourceUrls.length >= 256) {
-              break;
-            }
-
             const resource = parseResource(entry?.name);
             if (
               resource === null ||
-              seenResourceUrls.has(resource.url)
+              !formatItags.has(resource.itag)
             ) {
               continue;
             }
 
-            seenResourceUrls.add(resource.url);
-            resourceUrls.push(resource.url);
-            resourceItags.add(resource.itag);
+            if (
+              resourcesByItag.has(resource.itag) ||
+              resourcesByItag.size < 256
+            ) {
+              resourcesByItag.set(resource.itag, resource.url);
+            }
           }
         }
 
         if (
-          formatCoverageIsReady(formats, resourceItags) ||
-          now() >= deadline
+          preferredCoverageIsReady(playbackModel, resourcesByItag)
         ) {
-          break;
+          return {
+            status: 'OK',
+            formats,
+            resourceUrls: [...resourcesByItag.values()],
+          };
+        }
+
+        if (now() >= deadline) {
+          if (fallbackCoverageIsReady(playbackModel, resourcesByItag)) {
+            return {
+              status: 'OK',
+              formats,
+              resourceUrls: [...resourcesByItag.values()],
+            };
+          }
+          return timeoutResult;
         }
 
         if (!(await sleepUntilNextPoll())) {
-          break;
+          if (fallbackCoverageIsReady(playbackModel, resourcesByItag)) {
+            return {
+              status: 'OK',
+              formats,
+              resourceUrls: [...resourcesByItag.values()],
+            };
+          }
+          return timeoutResult;
         }
       }
-
-      return {
-        status: 'OK',
-        formats,
-        resourceUrls,
-      };
     } catch {
       return timeoutResult;
     } finally {
