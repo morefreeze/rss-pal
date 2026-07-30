@@ -385,6 +385,166 @@ describe('YouTubeBrowserPlayer', () => {
     expect(mocks.load).toHaveBeenCalled()
   })
 
+  it('aborts and ignores a pending old identity before requiring a fresh explicit click', async () => {
+    const pending = deferred<BrowserPlayback>()
+    mocks.resolve
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce(progressivePlayback())
+
+    const { rerender } = renderPlayer(30)
+    await clickStart()
+    await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1))
+    const oldSignal = mocks.resolve.mock.calls[0][1] as AbortSignal
+
+    rerender(
+      <YouTubeBrowserPlayer
+        videoId="M7lc1UVf-VE"
+        start={45}
+        originalURL="https://www.youtube.com/watch?v=M7lc1UVf-VE&t=45s"
+      />,
+    )
+
+    await waitFor(() => expect(oldSignal.aborted).toBe(true))
+    expect(mocks.detect).toHaveBeenCalledTimes(2)
+    expect(await screen.findByRole('button', {
+      name: '使用已登录的 Chrome 播放',
+    })).toBeTruthy()
+    expect(mocks.resolve).toHaveBeenCalledTimes(1)
+
+    pending.resolve(adaptivePlayback())
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mocks.createObjectURL).not.toHaveBeenCalled()
+    expect(mocks.create).not.toHaveBeenCalled()
+
+    await clickStart()
+    await waitFor(() => expect(mocks.resolve).toHaveBeenLastCalledWith(
+      'M7lc1UVf-VE',
+      expect.any(AbortSignal),
+    ))
+    const video = await screen.findByLabelText('YouTube 视频播放器')
+    let currentTime = 0
+    const setCurrentTime = vi.fn((value: number) => {
+      currentTime = value
+    })
+    Object.defineProperty(video, 'duration', {
+      configurable: true,
+      value: 120,
+    })
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: setCurrentTime,
+    })
+    fireEvent.loadedMetadata(video)
+    expect(setCurrentTime).toHaveBeenCalledWith(45)
+    expect(screen.getByRole('link', { name: '在 YouTube 打开' }).getAttribute('href'))
+      .toBe('https://www.youtube.com/watch?v=M7lc1UVf-VE&t=45s')
+  })
+
+  it('destroys and revokes a ready old identity without auto-resolving the replacement', async () => {
+    const player = {
+      initialize: vi.fn((video: HTMLVideoElement, manifestURL: string) => {
+        video.setAttribute('src', manifestURL)
+      }),
+      on: vi.fn(),
+      off: vi.fn(),
+      destroy: vi.fn(),
+    }
+    mocks.create.mockImplementationOnce(() => {
+      mocks.players.push(player)
+      return player
+    })
+    mocks.resolve
+      .mockResolvedValueOnce(adaptivePlayback())
+      .mockResolvedValueOnce(progressivePlayback())
+
+    const { rerender } = renderPlayer()
+    await clickStart()
+    await screen.findByText('1080p · 本机 Chrome')
+    const oldVideo = screen.getByLabelText('YouTube 视频播放器')
+    expect(oldVideo.getAttribute('src')).toBe('blob:rss-pal-1')
+
+    rerender(
+      <YouTubeBrowserPlayer
+        videoId="M7lc1UVf-VE"
+        start={5}
+        originalURL="https://www.youtube.com/watch?v=M7lc1UVf-VE&t=5s"
+      />,
+    )
+
+    expect(await screen.findByRole('button', {
+      name: '使用已登录的 Chrome 播放',
+    })).toBeTruthy()
+    expect(player.off).toHaveBeenCalledWith('dash-error', expect.any(Function))
+    expect(player.destroy).toHaveBeenCalledTimes(1)
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith('blob:rss-pal-1')
+    expect(oldVideo.getAttribute('src')).toBeNull()
+    expect(mocks.resolve).toHaveBeenCalledTimes(1)
+    expect(mocks.detect).toHaveBeenCalledTimes(2)
+  })
+
+  it('turns a synchronous DASH initialize error into one automatic retry', async () => {
+    const noFallback = dashWithoutProgressive()
+    let synchronousError: (() => void) | undefined
+    const player = {
+      initialize: vi.fn(() => synchronousError?.()),
+      on: vi.fn((_event: string, handler: () => void) => {
+        synchronousError = handler
+      }),
+      off: vi.fn(),
+      destroy: vi.fn(),
+    }
+    mocks.create.mockImplementationOnce(() => {
+      mocks.players.push(player)
+      return player
+    })
+    mocks.resolve
+      .mockResolvedValueOnce(noFallback)
+      .mockRejectedValueOnce(new YouTubeBridgeError('VIDEO_UNAVAILABLE'))
+
+    renderPlayer()
+    await clickStart()
+
+    await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('视频暂时无法加载')).toBeTruthy()
+    expect(screen.queryByText('1080p · 本机 Chrome')).toBeNull()
+    expect(mocks.resolve).toHaveBeenCalledTimes(2)
+    expect(player.off).toHaveBeenCalledWith(
+      'dash-error',
+      expect.any(Function),
+    )
+    expect(player.destroy).toHaveBeenCalledTimes(1)
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith('blob:rss-pal-1')
+  })
+
+  it('uses the progressive fallback for a synchronous DASH initialize error', async () => {
+    let synchronousError: (() => void) | undefined
+    const player = {
+      initialize: vi.fn(() => synchronousError?.()),
+      on: vi.fn((_event: string, handler: () => void) => {
+        synchronousError = handler
+      }),
+      off: vi.fn(),
+      destroy: vi.fn(),
+    }
+    mocks.create.mockImplementationOnce(() => {
+      mocks.players.push(player)
+      return player
+    })
+    mocks.resolve.mockResolvedValueOnce(adaptivePlayback())
+
+    renderPlayer()
+    await clickStart()
+
+    const video = await screen.findByLabelText('YouTube 视频播放器')
+    await waitFor(() => expect(video.getAttribute('src')).toContain('id=progressive'))
+    expect(screen.getByText('720p · 本机 Chrome · 兼容模式')).toBeTruthy()
+    expect(mocks.resolve).toHaveBeenCalledTimes(1)
+    expect(player.destroy).toHaveBeenCalledTimes(1)
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith('blob:rss-pal-1')
+  })
+
   it('automatically re-resolves a native failure once, then shows a visible error', async () => {
     const noFallback = dashWithoutProgressive()
     mocks.resolve.mockResolvedValue(noFallback)
