@@ -19,6 +19,12 @@ type fakeResolver struct {
 	calls   int
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
 func (r *fakeResolver) Resolve(_ context.Context, _ string) (ResolvedMedia, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -169,6 +175,37 @@ func TestServiceForwardsSingleRangeAndRejectsMultipleRanges(t *testing.T) {
 
 	if _, err := service.Open(context.Background(), http.MethodGet, playback.Ticket, StreamVideo, "bytes=0-1,3-4", ""); !errors.Is(err, ErrInvalidRange) {
 		t.Fatalf("error = %v, want ErrInvalidRange", err)
+	}
+}
+
+func TestServicePreservesUpstreamTimeout(t *testing.T) {
+	var calls int
+	service := NewService(ServiceOptions{
+		Resolver: &fakeResolver{results: []ResolvedMedia{testResolvedMedia("https://rr1.googlevideo.com")}},
+		Client: &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			calls++
+			if calls <= 2 {
+				return &http.Response{
+					StatusCode: http.StatusPartialContent,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(string(indexedMP4Prefix()))),
+				}, nil
+			}
+			return nil, context.DeadlineExceeded
+		})},
+		UpstreamAllowed: func(_ string) bool { return true },
+	})
+	defer service.Close()
+
+	playback, err := service.Start(context.Background(), StartRequest{
+		UserID: 1, ArticleID: 2, VideoID: "dQw4w9WgXcQ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Open(context.Background(), http.MethodGet, playback.Ticket, StreamVideo, "bytes=0-9", "")
+	if !errors.Is(err, ErrUpstream) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want ErrUpstream and context.DeadlineExceeded", err)
 	}
 }
 
