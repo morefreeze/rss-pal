@@ -115,8 +115,6 @@
     RSS_PAL_YOUTUBE_RESOLVE_RESPONSE,
     RUNTIME_RESOLVE,
     RUNTIME_CANCEL,
-    VIDEO_ID_RE,
-    REQUEST_ID_RE,
     isVideoId,
     isRequestId,
     validateRuntimeResolve,
