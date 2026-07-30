@@ -36,6 +36,7 @@
     maxConcurrent = 2,
   } = {}) {
     const activeTabIds = new Set();
+    const retryTabIds = new Set();
     const entriesByVideoId = new Map();
     const requestsById = new Map();
     let persistence = Promise.resolve();
@@ -45,11 +46,32 @@
         .catch(() => {})
         .then(() =>
           chromeApi.storage.session.set({
-            [STORAGE_KEY]: [...activeTabIds],
+            [STORAGE_KEY]: [
+              ...new Set([...activeTabIds, ...retryTabIds]),
+            ],
           }),
         );
       persistence = write.catch(() => {});
       return write;
+    }
+
+    function isMissingTabError(error) {
+      return Boolean(
+        error &&
+        typeof error.message === 'string' &&
+        /^(?:No tab with id|Invalid tab ID)(?::|\s|$)/i.test(
+          error.message,
+        ),
+      );
+    }
+
+    async function closeTab(tabId) {
+      try {
+        await chromeApi.tabs.remove(tabId);
+        return true;
+      } catch (error) {
+        return isMissingTabError(error);
+      }
     }
 
     function waitForTabComplete(tabId) {
@@ -114,6 +136,10 @@
           return INTERNAL_ERROR;
         }
         activeTabIds.add(tabId);
+        await chromeApi.tabs.update(tabId, { muted: true });
+        if (entry.cancelled || entry.requestIds.size === 0) {
+          return INTERNAL_ERROR;
+        }
         await persistActiveTabIds();
         if (entry.cancelled || entry.requestIds.size === 0) {
           return INTERNAL_ERROR;
@@ -168,10 +194,13 @@
         return LOCAL_NETWORK_ERROR;
       } finally {
         if (tabId !== null) {
-          try {
-            await chromeApi.tabs.remove(tabId);
-          } catch {}
+          const closed = await closeTab(tabId);
           activeTabIds.delete(tabId);
+          if (closed) {
+            retryTabIds.delete(tabId);
+          } else {
+            retryTabIds.add(tabId);
+          }
           try {
             await persistActiveTabIds();
           } catch {}
@@ -248,7 +277,14 @@
       }
     }
 
-    async function handleCancel(request) {
+    async function handleCancel(request, requesterTabId) {
+      const existing = requestsById.get(request.requestId);
+      if (
+        !existing ||
+        existing.requesterTabId !== requesterTabId
+      ) {
+        return { ok: true };
+      }
       await cancelRequest(request.requestId);
       return { ok: true };
     }
@@ -273,7 +309,9 @@
       }
       if (message && message.action === protocol.RUNTIME_CANCEL) {
         const request = protocol.validateRuntimeCancel(message);
-        return request === null ? INTERNAL_ERROR : handleCancel(request);
+        return request === null
+          ? INTERNAL_ERROR
+          : handleCancel(request, sender.tab.id);
       }
       return null;
     }
@@ -305,20 +343,20 @@
       } catch {}
 
       const orphanTabIds = new Set(
-        storedTabIds.filter(
-          (tabId) =>
-            Number.isInteger(tabId) &&
-            tabId > 0 &&
-            !activeTabIds.has(tabId),
+        [...storedTabIds, ...retryTabIds].filter(
+          (tabId) => Number.isInteger(tabId) && tabId > 0,
         ),
       );
       for (const tabId of orphanTabIds) {
         if (activeTabIds.has(tabId)) {
           continue;
         }
-        try {
-          await chromeApi.tabs.remove(tabId);
-        } catch {}
+        const closed = await closeTab(tabId);
+        if (closed) {
+          retryTabIds.delete(tabId);
+        } else {
+          retryTabIds.add(tabId);
+        }
       }
 
       try {
