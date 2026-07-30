@@ -21,13 +21,13 @@ export default function ArticlePlayerCard({ article }: { article: Article }) {
     if (!v) return null
     if (v.platform === 'youtube') {
       const start = typeof v.start === 'number' && Number.isFinite(v.start) && v.start > 0
-        ? `&t=${v.start}s`
-        : ''
+        ? v.start
+        : undefined
       return (
         <YouTubeBrowserPlayer
           videoId={v.id}
-          start={v.start}
-          originalURL={`https://www.youtube.com/watch?v=${v.id}${start}`}
+          start={start}
+          originalURL={`https://www.youtube.com/watch?v=${v.id}${start ? `&t=${start}s` : ''}`}
         />
       )
     }

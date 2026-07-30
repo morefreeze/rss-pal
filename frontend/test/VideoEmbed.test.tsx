@@ -50,12 +50,12 @@ describe('VideoEmbed', () => {
     ['negative', -5],
     ['not-a-number', Number.NaN],
     ['non-finite', Number.POSITIVE_INFINITY],
-  ])('does not add a %s inline start to the original URL', (_, start) => {
+  ])('normalizes a %s inline start', (_, start) => {
     render(<VideoEmbed platform="youtube" id="dQw4w9WgXcQ" start={start} />)
 
     expect(mocks.browserPlayer).toHaveBeenCalledWith({
       videoId: 'dQw4w9WgXcQ',
-      start,
+      start: undefined,
       originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     })
   })

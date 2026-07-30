@@ -32,12 +32,21 @@ const apiMocks = vi.hoisted(() => ({
   })),
 }))
 
+const markdownMocks = vi.hoisted(() => ({
+  render: vi.fn(),
+}))
+
 vi.mock('../src/api/client', () => apiMocks)
 
 vi.mock('../src/components/MarkdownArticle', () => ({
-  default: ({ source }: { source: string }) => (
-    <div data-testid="article-body">{source}</div>
-  ),
+  default: (props: {
+    source: string
+    imageDimensions?: Record<string, [number, number]>
+    suppressVideo?: { platform: 'youtube' | 'bilibili'; id: string }
+  }) => {
+    markdownMocks.render(props)
+    return <div data-testid="article-body">{props.source}</div>
+  },
 }))
 vi.mock('../src/components/TagBar', () => ({ default: () => null }))
 vi.mock('../src/components/ArticlePlayerCard', () => ({ default: () => null }))
@@ -162,6 +171,33 @@ describe('ArticlePage immediate loading', () => {
 
     expect(screen.getByText('Preview title')).toBeTruthy()
     expect(screen.getByText('Preview brief')).toBeTruthy()
+  })
+
+  it('passes the stored primary video identity to article markdown', () => {
+    const fresh = deferred<ArticleDetailResponse>()
+    apiMocks.getArticle.mockReturnValue(fresh.promise)
+    const cached = detail(42)
+    cached.article.media_type = 'video/youtube'
+    cached.article.media_url = 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=45'
+    cached.article.content = '[[video:youtube:dQw4w9WgXcQ?start=90]]'
+    putArticleDetail(cached)
+
+    render(
+      <MemoryRouter initialEntries={['/articles/42']}>
+        <Routes>
+          <Route path="/articles/:id" element={<ArticlePage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(markdownMocks.render).toHaveBeenCalledWith({
+      source: '[[video:youtube:dQw4w9WgXcQ?start=90]]',
+      imageDimensions: undefined,
+      suppressVideo: {
+        platform: 'youtube',
+        id: 'dQw4w9WgXcQ',
+      },
+    })
   })
 
   it('invalidates the cached detail after a partial article mutation', async () => {

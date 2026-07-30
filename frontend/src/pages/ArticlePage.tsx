@@ -42,6 +42,7 @@ import ArticleDetailPreview from '../components/ArticleDetailPreview'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
+import { parseStoredEmbedURL } from '../components/parseVideoPlaceholder'
 import TagBar from '../components/TagBar'
 import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
@@ -233,6 +234,14 @@ export default function ArticlePage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const articleURL = article?.url
+  const primaryVideo = useMemo(
+    () => {
+      if (!article?.media_url || !article.media_type) return undefined
+      const video = parseStoredEmbedURL(article.media_url, article.media_type)
+      return video ? { platform: video.platform, id: video.id } : undefined
+    },
+    [article?.media_type, article?.media_url],
+  )
   const normalize = useCallback(
     (href: string) => normalizeHTTPURL(href, articleURL),
     [articleURL],
@@ -1449,7 +1458,11 @@ export default function ArticlePage() {
                 >
                   <CodeWrapContext.Provider value={reader.codeWrap}>
                     <ReaderActionContext.Provider value={readerActionContext}>
-                      <MarkdownArticle source={article.content} imageDimensions={article.image_dimensions} />
+                      <MarkdownArticle
+                        source={article.content}
+                        imageDimensions={article.image_dimensions}
+                        suppressVideo={primaryVideo}
+                      />
                     </ReaderActionContext.Provider>
                   </CodeWrapContext.Provider>
                 </div>
