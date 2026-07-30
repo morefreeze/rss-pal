@@ -578,6 +578,66 @@ test('rejects same-itag pre-roll requests and accepts only reconfirmed target st
   assert.equal(pauseCalls, 1);
 });
 
+test('starts a fresh quality grace after a five-second pre-roll', async () => {
+  const clock = createClock();
+  const lowVideoUrl = directUrl(136, '&source=target');
+  const highVideoUrl = directUrl(137, '&source=target');
+  const audioUrl = directUrl(140, '&source=target');
+  let playbackStarted = false;
+  const player = {
+    getPlayerResponse() {
+      return responseForVideo(TARGET_VIDEO_ID, [
+        videoFormat(),
+        videoFormat({
+          itag: 136,
+          width: 1280,
+          height: 720,
+        }),
+        audioFormat(),
+      ]);
+    },
+    getVideoData() {
+      return { video_id: TARGET_VIDEO_ID };
+    },
+    getAdState() {
+      return playbackStarted && clock.now() < 5000 ? 1 : 0;
+    },
+    setPlaybackQualityRange() {},
+    playVideo() {
+      playbackStarted = true;
+    },
+    pauseVideo() {},
+  };
+
+  const result = await captureYouTubePageState(
+    { timeoutMs: 15_000, videoId: TARGET_VIDEO_ID },
+    createEnvironment(player, {
+      clock,
+      performance: {
+        clearResourceTimings() {},
+        getEntriesByType() {
+          const entries = [
+            { name: lowVideoUrl },
+            { name: audioUrl },
+          ];
+          if (clock.now() >= 5500) {
+            entries.push({ name: highVideoUrl });
+          }
+          return entries;
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.status, 'OK');
+  assert.equal(clock.now(), 5500);
+  assert.deepEqual(result.resourceUrls, [
+    lowVideoUrl,
+    audioUrl,
+    highVideoUrl,
+  ]);
+});
+
 test('times out while a post-play ad remains active and never returns its streams', async () => {
   const clock = createClock();
   const adVideoUrl = directUrl(137, '&source=persistent-ad');

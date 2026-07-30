@@ -695,9 +695,10 @@
       }
 
       const resourcesByItag = new Map();
-      const fallbackGraceDeadline = Math.min(
+      const preferenceGraceMs = Math.min(4000, timeoutMs / 2);
+      let fallbackGraceDeadline = Math.min(
         deadline,
-        now() + Math.min(4000, timeoutMs / 2),
+        now() + preferenceGraceMs,
       );
       let captureWindowWasUnsafe = false;
 
@@ -733,6 +734,10 @@
             }
             continue;
           }
+          fallbackGraceDeadline = Math.min(
+            deadline,
+            now() + preferenceGraceMs,
+          );
           captureWindowWasUnsafe = false;
 
           if (now() >= deadline || !(await sleepUntilNextPoll())) {
