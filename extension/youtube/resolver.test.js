@@ -1154,6 +1154,73 @@ test('orphan cleanup retries transient failures and filters invalid session IDs'
   assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
 });
 
+test('orphan cleanup aborts without overwriting authoritative state when session read fails', async () => {
+  let getAttempts = 0;
+  const fake = createFakeChrome({
+    initialSessionData: {
+      rssPalYouTubeTabs: [101],
+    },
+    sessionGet: async (_keys, sessionData) => {
+      getAttempts += 1;
+      if (getAttempts === 1) {
+        throw new Error('transient session read failure');
+      }
+      return { ...sessionData };
+    },
+  });
+  const resolver = createResolver(fake);
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, []);
+  assert.deepEqual(fake.calls.sessionSet, []);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, [101]);
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, [101]);
+  assert.deepEqual(fake.calls.sessionSet, [
+    { rssPalYouTubeTabs: [] },
+  ]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+});
+
+test('failed orphan reads preserve in-memory retry IDs for later cleanup', async () => {
+  let getAttempts = 0;
+  let failInitialClose = true;
+  const fake = createFakeChrome({
+    remove: async () => {
+      if (failInitialClose) {
+        failInitialClose = false;
+        throw new Error('transient close failure');
+      }
+    },
+    sessionGet: async () => {
+      getAttempts += 1;
+      if (getAttempts === 1) {
+        throw new Error('transient session read failure');
+      }
+      return { rssPalYouTubeTabs: [] };
+    },
+  });
+  const resolver = createResolver(fake);
+  await resolveAfterCompletingTab(fake, resolver, 'retry-after-read-failure');
+  fake.calls.remove.length = 0;
+  fake.calls.sessionSet.length = 0;
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, []);
+  assert.deepEqual(fake.calls.sessionSet, []);
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, [101]);
+  assert.deepEqual(fake.calls.sessionSet, [
+    { rssPalYouTubeTabs: [] },
+  ]);
+});
+
 test('normal close forgets a tab confirmed missing by Chrome', async () => {
   const fake = createFakeChrome({
     remove: async (tabId, _callNumber, tabs) => {

@@ -12,9 +12,17 @@
   'use strict';
 
   const REQUEST_LOCAL_QUERY_KEYS = ['range', 'rn', 'rbuf', 'ump', 'alr'];
+  const MAX_MEDIA_URL_LENGTH = 16_384;
+  const MAX_MIME_LENGTH = 128;
+  const MAX_CODECS_LENGTH = 256;
+  const MAX_MEDIA_RANGE_OFFSET = 64 * 1024 * 1024 - 1;
+  const MAX_MEDIA_RANGE_SPAN = 16 * 1024 * 1024;
 
   function parseTrustedGoogleVideoUrl(value) {
-    if (typeof value !== 'string') {
+    if (
+      typeof value !== 'string' ||
+      value.length > MAX_MEDIA_URL_LENGTH
+    ) {
       return null;
     }
 
@@ -27,7 +35,12 @@
       if (
         url.protocol !== 'https:' ||
         !trustedHost ||
-        !url.pathname.includes('/videoplayback')
+        url.username !== '' ||
+        url.password !== '' ||
+        (
+          url.pathname !== '/videoplayback' &&
+          !url.pathname.startsWith('/videoplayback/')
+        )
       ) {
         return null;
       }
@@ -109,6 +122,9 @@
     if (match === null) {
       return null;
     }
+    if (match[1].length > MAX_MIME_LENGTH) {
+      return null;
+    }
 
     return {
       mimeType: match[1].toLowerCase(),
@@ -123,7 +139,14 @@
 
     const start = parseNonnegativeInteger(value.start);
     const end = parseNonnegativeInteger(value.end);
-    if (start === null || end === null || end < start) {
+    if (
+      start === null ||
+      end === null ||
+      start > MAX_MEDIA_RANGE_OFFSET ||
+      end > MAX_MEDIA_RANGE_OFFSET ||
+      end < start ||
+      end - start + 1 > MAX_MEDIA_RANGE_SPAN
+    ) {
       return null;
     }
 
@@ -180,7 +203,7 @@
     sanitized.hasAudio = Boolean(raw.audioQuality);
 
     const url = normalizeGoogleVideoUrl(raw.url);
-    if (url !== null) {
+    if (url !== null && parseItag(url) === itag) {
       sanitized.url = url;
     }
 
@@ -235,7 +258,10 @@
       Number.isFinite(format.bitrate) &&
       format.bitrate > 0 &&
       Number.isFinite(format.durationMs) &&
-      format.durationMs > 0
+      format.durationMs > 0 &&
+      typeof format.codecs === 'string' &&
+      format.codecs.length > 0 &&
+      format.codecs.length <= MAX_CODECS_LENGTH
     );
   }
 

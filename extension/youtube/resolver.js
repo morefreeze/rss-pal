@@ -367,7 +367,9 @@
         if (stored && Array.isArray(stored[STORAGE_KEY])) {
           storedTabIds = stored[STORAGE_KEY];
         }
-      } catch {}
+      } catch {
+        return;
+      }
 
       const orphanTabIds = new Set(
         [...storedTabIds, ...retryTabIds].filter(
