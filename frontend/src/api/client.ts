@@ -551,6 +551,23 @@ export const generateSummary = (id: number) =>
 export const fetchContent = (id: number) =>
   api.post<{ content: string }>(`/articles/${id}/content`).then(res => res.data)
 
+export interface YouTubePlayback {
+  manifest_url?: string
+  progressive_url?: string
+  mode: 'dash' | 'progressive'
+  quality: number
+  expires_at: string
+}
+
+export const startYouTubePlayback = (articleId: number) =>
+  api.post<YouTubePlayback>(
+    `/articles/${articleId}/youtube-playback`,
+    undefined,
+    // yt-dlp resolution is bounded to 45s server-side. Give the request
+    // enough time to complete instead of inheriting the API client's 10s.
+    { timeout: 55_000 },
+  ).then(res => res.data)
+
 // Preferences
 export const likeArticle = (articleId: number) =>
   api.post('/preferences/like', { article_id: articleId })

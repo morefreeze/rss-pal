@@ -1,12 +1,6 @@
 import { VideoEmbedData } from './parseVideoPlaceholder'
 
 function buildSrc(d: VideoEmbedData): string {
-  if (d.platform === 'youtube') {
-    let s = `https://www.youtube-nocookie.com/embed/${d.id}?rel=0`
-    if (d.start && d.start > 0) s += `&start=${d.start}`
-    return s
-  }
-  // bilibili
   const page = d.page && d.page > 0 ? d.page : 1
   let s = `https://player.bilibili.com/player.html?bvid=${d.id}&high_quality=1&autoplay=0&page=${page}`
   if (d.start && d.start > 0) s += `&t=${d.start}`
@@ -14,6 +8,34 @@ function buildSrc(d: VideoEmbedData): string {
 }
 
 export default function VideoEmbed(props: VideoEmbedData) {
+  if (props.platform === 'youtube') {
+    const start = props.start && props.start > 0 ? `&t=${props.start}s` : ''
+    return (
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 800,
+          margin: '12px 0',
+          padding: 16,
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          background: 'var(--surface)',
+          color: 'var(--fg-muted)',
+        }}
+      >
+        YouTube 视频请使用文章顶部的北京中转播放器。
+        {' '}
+        <a
+          href={`https://www.youtube.com/watch?v=${props.id}${start}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          在 YouTube 打开
+        </a>
+      </div>
+    )
+  }
+
   const src = buildSrc(props)
   return (
     <div
@@ -33,10 +55,6 @@ export default function VideoEmbed(props: VideoEmbedData) {
         title={`${props.platform} video ${props.id}`}
         allow="encrypted-media; picture-in-picture"
         allowFullScreen
-        // Safari/WKWebView only added lazy iframe loading in 16.4. Keep
-        // Bilibili eager so older WebKit clients do not leave the player
-        // deferred indefinitely; YouTube retains the existing lazy behavior.
-        loading={props.platform === 'youtube' ? 'lazy' : undefined}
         referrerPolicy="no-referrer"
         style={{
           position: 'absolute',

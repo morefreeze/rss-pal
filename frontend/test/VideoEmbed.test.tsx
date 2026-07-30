@@ -11,10 +11,12 @@ describe('VideoEmbed', () => {
     expect(iframe.getAttribute('loading')).toBeNull()
   })
 
-  it('keeps lazy loading for YouTube embeds', () => {
+  it('does not send the browser directly to a YouTube iframe', () => {
     render(<VideoEmbed platform="youtube" id="dQw4w9WgXcQ" />)
 
-    const iframe = screen.getByTitle('youtube video dQw4w9WgXcQ')
-    expect(iframe.getAttribute('loading')).toBe('lazy')
+    expect(screen.queryByTitle('youtube video dQw4w9WgXcQ')).toBeNull()
+    expect(screen.getByRole('link', { name: '在 YouTube 打开' }).getAttribute('href')).toBe(
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    )
   })
 })

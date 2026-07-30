@@ -2,6 +2,7 @@ import { Article } from '../api/client'
 import { usePlayer } from '../player/PlayerContext'
 import Spinner from './Spinner'
 import VideoEmbed from './VideoEmbed'
+import YouTubeRelayPlayer from './YouTubeRelayPlayer'
 import { parseStoredEmbedURL } from './parseVideoPlaceholder'
 
 function fmtMinSec(sec: number): string {
@@ -18,6 +19,9 @@ export default function ArticlePlayerCard({ article }: { article: Article }) {
   if (article.media_type && article.media_type.startsWith('video/')) {
     const v = parseStoredEmbedURL(article.media_url, article.media_type)
     if (!v) return null
+    if (v.platform === 'youtube') {
+      return <YouTubeRelayPlayer articleId={article.id} originalURL={article.url} />
+    }
     return <VideoEmbed {...v} />
   }
 
