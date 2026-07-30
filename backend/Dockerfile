@@ -24,6 +24,14 @@ RUN apk --no-cache add ca-certificates tzdata \
     tesseract-ocr-data-eng \
     tesseract-ocr-data-chi_sim
 
+ARG BGUTIL_PROVIDER_VERSION=1.3.1
+ARG BGUTIL_PROVIDER_SHA256=b8ceec7f76143da172aaf5ebeec0c2d218e5680c063b931586bca48567069b38
+RUN mkdir -p /root/.config/yt-dlp/plugins \
+    && wget -qO /root/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip \
+        "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/${BGUTIL_PROVIDER_VERSION}/bgutil-ytdlp-pot-provider.zip" \
+    && echo "${BGUTIL_PROVIDER_SHA256}  /root/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip" \
+        | sha256sum -c -
+
 WORKDIR /app
 
 COPY --from=builder /app/server .
