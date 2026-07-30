@@ -69,11 +69,13 @@ function cancelMessage(requestId) {
 function createFakeChrome(options = {}) {
   const calls = {
     create: [],
+    update: [],
     get: [],
     remove: [],
     executeScript: [],
     sessionGet: [],
     sessionSet: [],
+    order: [],
   };
   const onUpdated = createEvent();
   const onRemoved = createEvent();
@@ -89,6 +91,7 @@ function createFakeChrome(options = {}) {
       onRemoved,
       async create(details) {
         calls.create.push(details);
+        calls.order.push('create');
         const created = options.create
           ? await options.create(details, calls.create.length)
           : { id: nextTabId++, status: 'loading' };
@@ -97,8 +100,27 @@ function createFakeChrome(options = {}) {
         }
         return created;
       },
+      async update(tabId, updateProperties) {
+        calls.update.push({ tabId, updateProperties });
+        calls.order.push('update');
+        if (options.update) {
+          return options.update(
+            tabId,
+            updateProperties,
+            calls.update.length,
+            tabs,
+          );
+        }
+        const tab = tabs.get(tabId);
+        if (!tab) {
+          throw new Error('tab not found during update');
+        }
+        Object.assign(tab, updateProperties);
+        return { ...tab };
+      },
       async get(tabId) {
         calls.get.push(tabId);
+        calls.order.push('get');
         if (options.get) {
           return options.get(tabId, tabs);
         }
@@ -110,8 +132,13 @@ function createFakeChrome(options = {}) {
       },
       async remove(tabId) {
         calls.remove.push(tabId);
+        calls.order.push('remove');
         if (options.remove) {
-          await options.remove(tabId, calls.remove.length);
+          await options.remove(
+            tabId,
+            calls.remove.length,
+            tabs,
+          );
         }
         tabs.delete(tabId);
         onRemoved.emit(tabId, { isWindowClosing: false });
@@ -120,6 +147,7 @@ function createFakeChrome(options = {}) {
     scripting: {
       async executeScript(details) {
         calls.executeScript.push(details);
+        calls.order.push('executeScript');
         if (options.executeScript) {
           return options.executeScript(details, calls.executeScript.length);
         }
@@ -313,6 +341,99 @@ test('resolves through one canonical inactive tab and always cleans it up', asyn
   ]);
   assert.equal(fake.events.onUpdated.listenerCount(), 0);
   assert.equal(fake.events.onRemoved.listenerCount(), 0);
+});
+
+test('mutes the temporary tab immediately before load wait and injection', async () => {
+  const fake = createFakeChrome();
+  const resolver = createResolver(fake);
+  const resolution = resolver.handleMessage(
+    resolveMessage('tab-level-mute'),
+    sender(),
+  );
+  await waitFor(
+    () => fake.events.onUpdated.listenerCount() === 1,
+    'muted tab load listener',
+  );
+  fake.completeTab(101);
+  await resolution;
+
+  assert.deepEqual(fake.calls.update, [{
+    tabId: 101,
+    updateProperties: { muted: true },
+  }]);
+  const createIndex = fake.calls.order.indexOf('create');
+  const updateIndex = fake.calls.order.indexOf('update');
+  const getIndex = fake.calls.order.indexOf('get');
+  const injectionIndex = fake.calls.order.indexOf('executeScript');
+  assert.equal(
+    createIndex < updateIndex &&
+      updateIndex < getIndex &&
+      getIndex < injectionIndex,
+    true,
+  );
+});
+
+test('mute failure closes the tab without waiting or injecting', async () => {
+  const fake = createFakeChrome({
+    update: async () => {
+      throw new Error(
+        'private mute failure https://www.youtube.com/watch?v=secret',
+      );
+    },
+  });
+  const resolver = createResolver(fake);
+
+  const result = await resolver.handleMessage(
+    resolveMessage('mute-failure'),
+    sender(),
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'LOCAL_NETWORK_ERROR',
+  });
+  assert.deepEqual(fake.calls.update, [{
+    tabId: 101,
+    updateProperties: { muted: true },
+  }]);
+  assert.deepEqual(fake.calls.get, []);
+  assert.deepEqual(fake.calls.executeScript, []);
+  assert.deepEqual(fake.calls.remove, [101]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+  assert.equal(JSON.stringify(result).includes('secret'), false);
+});
+
+test('cancellation during muting closes without load wait or injection', async () => {
+  const muteStarted = deferred();
+  const releaseMute = deferred();
+  const fake = createFakeChrome({
+    update: async () => {
+      muteStarted.resolve();
+      await releaseMute.promise;
+      return { id: 101, muted: true };
+    },
+  });
+  const resolver = createResolver(fake);
+  const resolution = resolver.handleMessage(
+    resolveMessage('cancel-during-mute'),
+    sender(7),
+  );
+  await muteStarted.promise;
+
+  assert.deepEqual(
+    await resolver.handleMessage(
+      cancelMessage('cancel-during-mute'),
+      sender(7),
+    ),
+    { ok: true },
+  );
+  releaseMute.resolve();
+  await resolution;
+
+  assert.deepEqual(fake.calls.get, []);
+  assert.deepEqual(fake.calls.executeScript, []);
+  assert.equal(fake.calls.remove.includes(101), true);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
 });
 
 test('returns LOGIN_REQUIRED and selection failures exactly', async (t) => {
@@ -706,6 +827,52 @@ test('cancelled unresolved entries retain both slots until their runs settle', a
   });
 });
 
+test('only the requester tab can cancel its request ID', async () => {
+  const fake = createFakeChrome();
+  const resolver = createResolver(fake);
+  const resolution = resolver.handleMessage(
+    resolveMessage('requester-owned-cancel'),
+    sender(7),
+  );
+  await waitFor(
+    () => fake.events.onUpdated.listenerCount() === 1,
+    'requester-owned resolution',
+  );
+
+  assert.deepEqual(
+    await resolver.handleMessage(
+      cancelMessage('requester-owned-cancel'),
+      sender(8),
+    ),
+    { ok: true },
+  );
+  assert.deepEqual(
+    await resolver.handleMessage(
+      cancelMessage('unknown-request'),
+      sender(8),
+    ),
+    { ok: true },
+  );
+  assert.deepEqual(fake.calls.remove, []);
+
+  fake.completeTab(101);
+  assert.deepEqual(await resolution, {
+    ok: false,
+    code: 'NO_SUPPORTED_FORMAT',
+  });
+  assert.equal(fake.calls.executeScript.length, 1);
+  assert.deepEqual(fake.calls.remove, [101]);
+
+  assert.deepEqual(
+    await resolver.handleMessage(
+      cancelMessage('requester-owned-cancel'),
+      sender(7),
+    ),
+    { ok: true },
+  );
+  assert.deepEqual(fake.calls.remove, [101]);
+});
+
 test('canceling one shared waiter keeps the temporary tab for the survivor', async () => {
   const fake = createFakeChrome();
   const resolver = createResolver(fake);
@@ -796,6 +963,7 @@ test('cancel before tabs.create resolves closes the later tab without injection'
   await resolution;
 
   assert.deepEqual(fake.calls.executeScript, []);
+  assert.deepEqual(fake.calls.update, []);
   assert.equal(fake.calls.remove.includes(101), true);
   assert.equal(fake.events.onUpdated.listenerCount(), 0);
   assert.equal(fake.events.onRemoved.listenerCount(), 0);
@@ -846,13 +1014,42 @@ test('requester tab removal cancels all its requests but preserves other waiters
   );
 });
 
-test('orphan cleanup removes unique valid session tab IDs best-effort', async () => {
+test('normal close retains a transient failure for later orphan cleanup', async () => {
+  let failNextRemove = true;
+  const fake = createFakeChrome({
+    remove: async (tabId) => {
+      if (tabId === 101 && failNextRemove) {
+        failNextRemove = false;
+        throw new Error('temporary tab remove failure');
+      }
+    },
+  });
+  const resolver = createResolver(fake);
+
+  await resolveAfterCompletingTab(
+    fake,
+    resolver,
+    'transient-normal-close',
+  );
+
+  assert.deepEqual(fake.calls.remove, [101]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, [101]);
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, [101, 101]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+});
+
+test('orphan cleanup retries transient failures and filters invalid session IDs', async () => {
+  let failNextRemove = true;
   const fake = createFakeChrome({
     initialSessionData: {
       rssPalYouTubeTabs: [4, 4, 7, 0, -1, 1.5, '8', null],
     },
     remove: async (tabId) => {
-      if (tabId === 7) {
+      if (tabId === 7 && failNextRemove) {
+        failNextRemove = false;
         throw new Error('private remove failure');
       }
     },
@@ -866,9 +1063,55 @@ test('orphan cleanup removes unique valid session tab IDs best-effort', async ()
   ]);
   assert.deepEqual(fake.calls.remove, [4, 7]);
   assert.deepEqual(fake.calls.sessionSet, [
-    { rssPalYouTubeTabs: [] },
+    { rssPalYouTubeTabs: [7] },
   ]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, [7]);
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, [4, 7, 7]);
   assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+});
+
+test('normal close forgets a tab confirmed missing by Chrome', async () => {
+  const fake = createFakeChrome({
+    remove: async (tabId, _callNumber, tabs) => {
+      tabs.delete(tabId);
+      throw new Error(`No tab with id: ${tabId}.`);
+    },
+  });
+  const resolver = createResolver(fake);
+
+  await resolveAfterCompletingTab(fake, resolver, 'missing-normal-close');
+
+  assert.deepEqual(fake.calls.remove, [101]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, [101]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+});
+
+test('orphan cleanup forgets a tab confirmed missing by Chrome', async () => {
+  const fake = createFakeChrome({
+    initialSessionData: {
+      rssPalYouTubeTabs: [9],
+    },
+    remove: async (tabId) => {
+      throw new Error(`Invalid tab ID: ${tabId}.`);
+    },
+  });
+  const resolver = createResolver(fake);
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, [9]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+
+  await resolver.cleanupOrphans();
+
+  assert.deepEqual(fake.calls.remove, [9]);
 });
 
 test('orphan cleanup preserves tabs that become active concurrently', async () => {
