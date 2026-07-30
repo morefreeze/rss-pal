@@ -11,13 +11,13 @@ function buildSrc(d: VideoEmbedData): string {
 export default function VideoEmbed(props: VideoEmbedData) {
   if (props.platform === 'youtube') {
     const start = typeof props.start === 'number' && Number.isFinite(props.start) && props.start > 0
-      ? `&t=${props.start}s`
-      : ''
+      ? props.start
+      : undefined
     return (
       <YouTubeBrowserPlayer
         videoId={props.id}
-        start={props.start}
-        originalURL={`https://www.youtube.com/watch?v=${props.id}${start}`}
+        start={start}
+        originalURL={`https://www.youtube.com/watch?v=${props.id}${start ? `&t=${start}s` : ''}`}
       />
     )
   }

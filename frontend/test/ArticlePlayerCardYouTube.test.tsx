@@ -70,9 +70,9 @@ describe('ArticlePlayerCard YouTube routing', () => {
   })
 
   it.each([
-    ['zero', '0', 0],
-    ['non-finite', '9'.repeat(400), Number.POSITIVE_INFINITY],
-  ])('does not add an invalid %s stored start to the original URL', (_, rawStart, start) => {
+    ['zero', '0'],
+    ['non-finite', '9'.repeat(400)],
+  ])('normalizes an invalid %s stored start', (_, rawStart) => {
     render(<ArticlePlayerCard article={videoArticle({
       media_type: 'video/youtube',
       media_url: `https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=${rawStart}`,
@@ -80,7 +80,7 @@ describe('ArticlePlayerCard YouTube routing', () => {
 
     expect(mocks.browserPlayer).toHaveBeenCalledWith({
       videoId: 'dQw4w9WgXcQ',
-      start,
+      start: undefined,
       originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     })
   })

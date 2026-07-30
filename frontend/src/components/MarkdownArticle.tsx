@@ -11,10 +11,12 @@ import 'katex/dist/katex.min.css'
 import { stripMathShadow, escapeAmbiguousMathDollars } from '../util/mathShadow'
 import { flattenImageAltBlankLines } from '../util/imageAlt'
 import VideoEmbed from './VideoEmbed'
-import { parsePlaceholder } from './parseVideoPlaceholder'
+import { parsePlaceholder, type VideoEmbedData } from './parseVideoPlaceholder'
 import { CodeWrapContext } from './CodeWrapContext'
 import { ReaderActionContext } from '../reader/ReaderActionContext'
 import { ReaderInteractionSurface } from '../reader/ReaderInteractionSurface'
+
+type VideoIdentity = Pick<VideoEmbedData, 'platform' | 'id'>
 
 type Props = {
   source: string
@@ -23,11 +25,15 @@ type Props = {
   // layout space before the bytes arrive — which prevents reading-progress
   // from regressing as lazy-loaded images decode mid-scroll.
   imageDimensions?: Record<string, [number, number]>
+  // The primary stored video is already rendered above the article body.
+  // Suppress only a matching inline placeholder to avoid duplicate players.
+  suppressVideo?: VideoIdentity
 }
 
 // Carries the dimensions map down to the COMPONENTS.img override, which is
 // defined at module scope (hoisted for ref stability — see comment below).
 const ImageDimensionsContext = createContext<Record<string, [number, number]> | null>(null)
+const SuppressedVideoContext = createContext<VideoIdentity | null>(null)
 
 const AVATAR_ATTR_KEYWORDS = [
   'avatar', 'gravatar', 'profile', 'author',
@@ -159,10 +165,20 @@ const COMPONENTS: Components = {
   },
   a: ArticleLink,
   p: ({ children, ...rest }) => {
+    const suppressedVideo = useContext(SuppressedVideoContext)
     const text = extractParagraphText(children)
     if (text) {
       const v = parsePlaceholder(text)
-      if (v) return <VideoEmbed {...v} />
+      if (v) {
+        if (
+          suppressedVideo &&
+          v.platform === suppressedVideo.platform &&
+          v.id === suppressedVideo.id
+        ) {
+          return null
+        }
+        return <VideoEmbed {...v} />
+      }
     }
     return <p {...rest}>{children}</p>
   },
@@ -178,7 +194,7 @@ const COMPONENTS: Components = {
 // Wrapped in React.memo so the parent (ArticlePage) re-rendering on every
 // scroll-progress / activity-tick state change doesn't force a full
 // markdown re-parse and image remount.
-function MarkdownArticle({ source, imageDimensions }: Props) {
+function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
   const cleaned = useMemo(
     () => flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source))),
     [source],
@@ -186,15 +202,17 @@ function MarkdownArticle({ source, imageDimensions }: Props) {
   const dims = imageDimensions ?? null
   return (
     <ReaderInteractionSurface articleKey={source} className="markdown-body">
-      <ImageDimensionsContext.Provider value={dims}>
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={REHYPE_PLUGINS}
-          components={COMPONENTS}
-        >
-          {cleaned}
-        </ReactMarkdown>
-      </ImageDimensionsContext.Provider>
+      <SuppressedVideoContext.Provider value={suppressVideo ?? null}>
+        <ImageDimensionsContext.Provider value={dims}>
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            rehypePlugins={REHYPE_PLUGINS}
+            components={COMPONENTS}
+          >
+            {cleaned}
+          </ReactMarkdown>
+        </ImageDimensionsContext.Provider>
+      </SuppressedVideoContext.Provider>
     </ReaderInteractionSurface>
   )
 }
