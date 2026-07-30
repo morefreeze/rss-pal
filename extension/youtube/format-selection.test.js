@@ -315,6 +315,100 @@ test('prefers 1080p at 30 fps over 1080p60 and 720p and reports truthful quality
   assert.match(result.playback.video.url, /[?&]itag=137(?:&|$)/);
 });
 
+test('returns an exact usable 720p progressive fallback with a 1080p DASH pair', () => {
+  const fallbackUrl = googleVideoUrl(22, {
+    extra: '&range=0-999&rn=7&pot=po-token&n=throttle-token',
+  });
+  const result = selectPlayback(
+    captured([
+      videoFormat(137, 1080),
+      audioFormat(),
+      progressiveFormat({ url: fallbackUrl }),
+    ]),
+    NOW_MS,
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.playback, {
+    mode: 'dash',
+    quality: 1080,
+    expiresAt: new Date(DEFAULT_EXPIRE_SECONDS * 1000).toISOString(),
+    video: {
+      url: googleVideoUrl(137),
+      mimeType: 'video/mp4',
+      codecs: 'avc1.640028',
+      bitrate: 4_500_000,
+      initRange: { start: 0, end: 739 },
+      indexRange: { start: 740, end: 1200 },
+      durationMs: 600_000,
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+    },
+    audio: {
+      url: googleVideoUrl(140),
+      mimeType: 'audio/mp4',
+      codecs: 'mp4a.40.2',
+      bitrate: 129_000,
+      initRange: { start: 0, end: 721 },
+      indexRange: { start: 722, end: 1050 },
+      durationMs: 600_000,
+      audioSampleRate: 48_000,
+    },
+    progressive: {
+      url:
+        `${googleVideoUrl(22)}&pot=po-token&n=throttle-token`,
+      mimeType: 'video/mp4',
+      height: 720,
+    },
+  });
+});
+
+test('omits the DASH progressive fallback when no finalized URL is usable', () => {
+  const unavailableFallback = progressiveFormat();
+  delete unavailableFallback.url;
+
+  const result = selectPlayback(
+    captured([
+      videoFormat(137, 1080),
+      audioFormat(),
+      unavailableFallback,
+    ]),
+    NOW_MS,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.playback.mode, 'dash');
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(result.playback, 'progressive'),
+    false,
+  );
+});
+
+test('bounds a DASH contract by the progressive fallback URL expiry', () => {
+  const fallbackExpiry = Math.floor(NOW_MS / 1000) + 180;
+  const result = selectPlayback(
+    captured([
+      videoFormat(137, 1080, {
+        url: googleVideoUrl(137, { expire: fallbackExpiry + 600 }),
+      }),
+      audioFormat({
+        url: googleVideoUrl(140, { expire: fallbackExpiry + 300 }),
+      }),
+      progressiveFormat({
+        url: googleVideoUrl(22, { expire: fallbackExpiry }),
+      }),
+    ]),
+    NOW_MS,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(
+    result.playback.expiresAt,
+    new Date(fallbackExpiry * 1000).toISOString(),
+  );
+});
+
 test('falls back to a complete 720p adaptive pair', () => {
   const result = selectPlayback(
     captured([

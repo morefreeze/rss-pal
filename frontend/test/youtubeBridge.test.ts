@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createRequire } from 'node:module'
 
 import {
   MIN_YOUTUBE_BRIDGE_VERSION,
@@ -10,6 +11,15 @@ import {
 
 const ORIGIN = window.location.origin
 const VIDEO_ID = 'dQw4w9WgXcQ'
+const require = createRequire(import.meta.url)
+const realFormatSelection = require(
+  '../../extension/youtube/format-selection.js',
+) as {
+  selectPlayback: (
+    captured: unknown,
+    nowMs?: number,
+  ) => { ok: false; code: string } | { ok: true; playback: unknown }
+}
 
 function googleVideoURL(itag: number): string {
   return `https://rr1---sn-a5mekn6z.googlevideo.com/videoplayback?itag=${itag}&sig=test`
@@ -51,6 +61,17 @@ function playbackFixture(): BrowserPlayback {
 
 function clonePlayback(): BrowserPlayback {
   return JSON.parse(JSON.stringify(playbackFixture())) as BrowserPlayback
+}
+
+function dashWithProgressiveFixture(): BrowserPlayback {
+  return {
+    ...playbackFixture(),
+    progressive: {
+      url: googleVideoURL(22),
+      mimeType: 'video/mp4',
+      height: 720,
+    },
+  }
 }
 
 function dispatchBridgeMessage(
@@ -374,6 +395,124 @@ describe('resolveYouTubePlayback', () => {
     await expect(
       resolveYouTubePlayback(VIDEO_ID, undefined, 100),
     ).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    cleanup()
+  })
+
+  it('accepts an exact optional progressive fallback in DASH mode', async () => {
+    const playback = dashWithProgressiveFixture()
+    const cleanup = answerResolveWith({ ok: true, playback })
+
+    await expect(
+      resolveYouTubePlayback(VIDEO_ID, undefined, 100),
+    ).resolves.toEqual(playback)
+    cleanup()
+  })
+
+  it.each([
+    ['an untrusted URL', (fallback: Record<string, unknown>) => {
+      fallback.url = 'https://evil.example/videoplayback?itag=22'
+    }],
+    ['a zero height', (fallback: Record<string, unknown>) => {
+      fallback.height = 0
+    }],
+    ['an extra field', (fallback: Record<string, unknown>) => {
+      fallback.debug = 'must not cross the boundary'
+    }],
+  ])('rejects a malformed DASH progressive fallback with %s', async (_name, mutate) => {
+    const playback = dashWithProgressiveFixture() as BrowserPlayback & {
+      progressive: Record<string, unknown>
+    }
+    mutate(playback.progressive)
+    const cleanup = answerResolveWith({ ok: true, playback })
+
+    await expect(
+      resolveYouTubePlayback(VIDEO_ID, undefined, 100),
+    ).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    cleanup()
+  })
+
+  it('rejects a present-but-undefined DASH progressive fallback', async () => {
+    const playback = {
+      ...playbackFixture(),
+      progressive: undefined,
+    }
+    const cleanup = answerResolveWith({ ok: true, playback })
+
+    await expect(
+      resolveYouTubePlayback(VIDEO_ID, undefined, 100),
+    ).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    cleanup()
+  })
+
+  it('accepts the real extension selector DASH fallback contract', async () => {
+    const nowMs = Date.now()
+    const expire = Math.floor(nowMs / 1000) + 10 * 60
+    const mediaURL = (itag: number) =>
+      `https://rr1---sn-a5mekn6z.googlevideo.com/videoplayback?` +
+      `expire=${expire}&itag=${itag}&sig=real-selector-${itag}`
+    const selection = realFormatSelection.selectPlayback(
+      {
+        status: 'OK',
+        formats: [
+          {
+            itag: 137,
+            mimeType: 'video/mp4; codecs="avc1.640028"',
+            bitrate: 4_500_000,
+            approxDurationMs: '212000',
+            width: 1920,
+            height: 1080,
+            fps: 30,
+            initRange: { start: '0', end: '739' },
+            indexRange: { start: '740', end: '1200' },
+            url: mediaURL(137),
+          },
+          {
+            itag: 140,
+            mimeType: 'audio/mp4; codecs="mp4a.40.2"',
+            bitrate: 128_000,
+            approxDurationMs: '212000',
+            audioSampleRate: '48000',
+            audioQuality: 'AUDIO_QUALITY_MEDIUM',
+            initRange: { start: '0', end: '719' },
+            indexRange: { start: '720', end: '1100' },
+            url: mediaURL(140),
+          },
+          {
+            itag: 22,
+            mimeType: 'video/mp4; codecs="avc1.64001F, mp4a.40.2"',
+            bitrate: 2_500_000,
+            approxDurationMs: '212000',
+            width: 1280,
+            height: 720,
+            fps: 30,
+            audioQuality: 'AUDIO_QUALITY_MEDIUM',
+            url: mediaURL(22),
+          },
+        ],
+        resourceUrls: [],
+      },
+      nowMs,
+    )
+
+    expect(selection.ok).toBe(true)
+    if (!selection.ok) throw new Error('selector did not return playback')
+    expect(selection.playback).toMatchObject({
+      mode: 'dash',
+      quality: 1080,
+      progressive: {
+        url: mediaURL(22),
+        mimeType: 'video/mp4',
+        height: 720,
+      },
+    })
+    const cleanup = answerResolveWith({
+      ok: true,
+      playback: selection.playback,
+    })
+
+    await expect(
+      resolveYouTubePlayback(VIDEO_ID, undefined, 100),
+    ).resolves.toEqual(selection.playback)
     cleanup()
   })
 

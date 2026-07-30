@@ -320,6 +320,14 @@
     return track;
   }
 
+  function makeProgressiveTrack(format) {
+    return {
+      url: format.url,
+      mimeType: format.mimeType,
+      height: format.height,
+    };
+  }
+
   function playbackExpiresAt(selectedFormats, nowMs) {
     const selectedExpiries = selectedFormats
       .map((format) => format.expiresAtMs)
@@ -401,23 +409,6 @@
           hasAdaptivePlaybackMetadata(format),
       )
       .sort(compareAdaptiveAudio);
-
-    if (adaptiveVideos.length > 0 && adaptiveAudios.length > 0) {
-      const video = adaptiveVideos[0];
-      const audio = adaptiveAudios[0];
-
-      return {
-        ok: true,
-        playback: {
-          mode: 'dash',
-          quality: video.height,
-          expiresAt: playbackExpiresAt([video, audio], currentTime),
-          video: makeVideoTrack(video),
-          audio: makeAudioTrack(audio),
-        },
-      };
-    }
-
     const progressiveFormats = usableFormats
       .filter(
         (format) =>
@@ -429,6 +420,33 @@
       )
       .sort(compareProgressive);
 
+    if (adaptiveVideos.length > 0 && adaptiveAudios.length > 0) {
+      const video = adaptiveVideos[0];
+      const audio = adaptiveAudios[0];
+      const progressive = progressiveFormats[0];
+      const selectedFormats = [video, audio];
+      if (progressive !== undefined) {
+        selectedFormats.push(progressive);
+      }
+
+      const playback = {
+        mode: 'dash',
+        quality: video.height,
+        expiresAt: playbackExpiresAt(selectedFormats, currentTime),
+        video: makeVideoTrack(video),
+        audio: makeAudioTrack(audio),
+      };
+
+      if (progressive !== undefined) {
+        playback.progressive = makeProgressiveTrack(progressive);
+      }
+
+      return {
+        ok: true,
+        playback,
+      };
+    }
+
     if (progressiveFormats.length > 0) {
       const progressive = progressiveFormats[0];
       return {
@@ -437,11 +455,7 @@
           mode: 'progressive',
           quality: progressive.height,
           expiresAt: playbackExpiresAt([progressive], currentTime),
-          progressive: {
-            url: progressive.url,
-            mimeType: progressive.mimeType,
-            height: progressive.height,
-          },
+          progressive: makeProgressiveTrack(progressive),
         },
       };
     }
