@@ -59,6 +59,7 @@ describe('YouTubeRelayPlayer', () => {
       progressive_url: '/api/media/youtube/ticket/progressive',
       mode: 'dash',
       quality: 1080,
+      progressive_quality: 720,
       expires_at: '2026-07-30T18:00:00Z',
     })
 
@@ -67,7 +68,7 @@ describe('YouTubeRelayPlayer', () => {
     expect(await screen.findByText('1080p · 北京中转')).toBeTruthy()
     const video = screen.getByLabelText('YouTube 视频播放器')
     expect(video.getAttribute('controls')).not.toBeNull()
-    expect(mocks.start).toHaveBeenCalledWith(2391)
+    expect(mocks.start).toHaveBeenCalledWith(2391, expect.any(AbortSignal))
     expect(mocks.player.on).toHaveBeenCalledWith('error', expect.any(Function))
     expect(mocks.player.initialize).toHaveBeenCalledWith(
       video,
@@ -82,6 +83,7 @@ describe('YouTubeRelayPlayer', () => {
       progressive_url: '/api/media/youtube/ticket/progressive',
       mode: 'dash',
       quality: 720,
+      progressive_quality: 720,
       expires_at: '2026-07-30T18:00:00Z',
     })
 
@@ -90,7 +92,7 @@ describe('YouTubeRelayPlayer', () => {
     const video = await screen.findByLabelText('YouTube 视频播放器')
     await waitFor(() => expect(video.getAttribute('src')).toBe('/api/media/youtube/ticket/progressive'))
     expect(mocks.create).not.toHaveBeenCalled()
-    expect(screen.getByText('兼容模式')).toBeTruthy()
+    expect(screen.getByText('720p · 兼容模式')).toBeTruthy()
   })
 
   it('falls back to progressive playback after a DASH error', async () => {
@@ -99,6 +101,7 @@ describe('YouTubeRelayPlayer', () => {
       progressive_url: '/api/media/youtube/ticket/progressive',
       mode: 'dash',
       quality: 1080,
+      progressive_quality: 720,
       expires_at: '2026-07-30T18:00:00Z',
     })
 
@@ -111,7 +114,7 @@ describe('YouTubeRelayPlayer', () => {
 
     await waitFor(() => expect(video.getAttribute('src')).toBe('/api/media/youtube/ticket/progressive'))
     expect(mocks.player.destroy).toHaveBeenCalled()
-    expect(screen.getByText('兼容模式')).toBeTruthy()
+    expect(screen.getByText('720p · 兼容模式')).toBeTruthy()
   })
 
   it('shows a retry action when session creation fails', async () => {
@@ -131,5 +134,19 @@ describe('YouTubeRelayPlayer', () => {
       '/api/media/youtube/ticket/progressive',
     )
     expect(mocks.start).toHaveBeenCalledTimes(2)
+  })
+
+  it('aborts session creation when the player unmounts', async () => {
+    mocks.start.mockReturnValue(new Promise(() => {}))
+
+    const { unmount } = render(
+      <YouTubeRelayPlayer articleId={2391} originalURL="https://youtube.com/watch?v=abc" />,
+    )
+    await waitFor(() => expect(mocks.start).toHaveBeenCalled())
+    const signal = mocks.start.mock.calls[0][1] as AbortSignal
+
+    unmount()
+
+    expect(signal.aborted).toBe(true)
   })
 })

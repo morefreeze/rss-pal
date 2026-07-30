@@ -24,6 +24,7 @@ export default function YouTubeRelayPlayer({ articleId, originalURL }: Props) {
     let player: MediaPlayerClass | null = null
     let dashErrorHandler: ((event: unknown) => void) | null = null
     let dashErrorEvent = ''
+    const controller = new AbortController()
 
     setPhase('loading')
     setQuality(0)
@@ -32,7 +33,7 @@ export default function YouTubeRelayPlayer({ articleId, originalURL }: Props) {
 
     const start = async () => {
       try {
-        const playback = await startYouTubePlayback(articleId)
+        const playback = await startYouTubePlayback(articleId, controller.signal)
         if (cancelled) return
 
         const video = videoRef.current
@@ -46,6 +47,7 @@ export default function YouTubeRelayPlayer({ articleId, originalURL }: Props) {
         )
         if (!canUseDASH) {
           if (!playback.progressive_url) throw new Error('no compatible playback URL')
+          setQuality(playback.progressive_quality ?? playback.quality)
           setCompatibilityMode(true)
           setProgressiveURL(playback.progressive_url)
           setPhase('ready')
@@ -63,6 +65,7 @@ export default function YouTubeRelayPlayer({ articleId, originalURL }: Props) {
           fallbackUsed = true
           player?.destroy()
           player = null
+          setQuality(playback.progressive_quality ?? 0)
           setCompatibilityMode(true)
           setProgressiveURL(playback.progressive_url)
           setPhase('ready')
@@ -80,6 +83,7 @@ export default function YouTubeRelayPlayer({ articleId, originalURL }: Props) {
     void start()
     return () => {
       cancelled = true
+      controller.abort()
       if (player && dashErrorHandler && dashErrorEvent) {
         player.off(dashErrorEvent, dashErrorHandler)
       }
@@ -156,7 +160,9 @@ export default function YouTubeRelayPlayer({ articleId, originalURL }: Props) {
       >
         <span>
           {compatibilityMode
-            ? '兼容模式'
+            ? quality > 0
+              ? `${quality}p · 兼容模式`
+              : '≤720p · 兼容模式'
             : quality > 0
               ? `${quality}p · 北京中转`
               : '北京中转'}

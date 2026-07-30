@@ -97,7 +97,8 @@ func TestServiceStartsDASHSessionWithoutCompleteDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if playback.Mode != "dash" || playback.Quality != 1080 || !playback.HasProgressive {
+	if playback.Mode != "dash" || playback.Quality != 1080 ||
+		playback.ProgressiveQuality != 720 || !playback.HasProgressive {
 		t.Fatalf("unexpected playback: %+v", playback)
 	}
 	if len(playback.Ticket) != 43 {

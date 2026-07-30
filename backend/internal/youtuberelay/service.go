@@ -32,11 +32,12 @@ type StartRequest struct {
 }
 
 type Playback struct {
-	Ticket         string
-	Mode           string
-	Quality        int
-	ExpiresAt      time.Time
-	HasProgressive bool
+	Ticket             string
+	Mode               string
+	Quality            int
+	ProgressiveQuality int
+	ExpiresAt          time.Time
+	HasProgressive     bool
 }
 
 type StreamKind string
@@ -448,12 +449,17 @@ func (s *Service) selectionAllowed(selection Selection) bool {
 }
 
 func (s *Service) playbackLocked(session *relaySession) Playback {
+	progressiveQuality := 0
+	if session.resolved.Selection.Progressive != nil {
+		progressiveQuality = session.resolved.Selection.Progressive.Height
+	}
 	return Playback{
-		Ticket:         session.ticket,
-		Mode:           session.mode,
-		Quality:        session.quality,
-		ExpiresAt:      session.createdAt.Add(s.absoluteTTL),
-		HasProgressive: session.resolved.Selection.Progressive != nil,
+		Ticket:             session.ticket,
+		Mode:               session.mode,
+		Quality:            session.quality,
+		ProgressiveQuality: progressiveQuality,
+		ExpiresAt:          session.createdAt.Add(s.absoluteTTL),
+		HasProgressive:     session.resolved.Selection.Progressive != nil,
 	}
 }
 

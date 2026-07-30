@@ -52,6 +52,21 @@ func TestSelectFormatsFallsBackTo720When1080ExceedsCap(t *testing.T) {
 	}
 }
 
+func TestSelectFormatsAppliesBitrateCapToProgressiveFallback(t *testing.T) {
+	info := VideoInfo{ID: "dQw4w9WgXcQ", Duration: 212, Formats: []Format{
+		{ID: "22-high", URL: googleURL("p22-high"), Ext: "mp4", VCodec: "avc1.64001F", ACodec: "mp4a.40.2", Height: 720, FPS: 30, TBR: 4500},
+		{ID: "18", URL: googleURL("p18"), Ext: "mp4", VCodec: "avc1.42001E", ACodec: "mp4a.40.2", Height: 360, FPS: 30, TBR: 900},
+	}}
+
+	got, err := SelectFormats(info, 4000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Progressive == nil || got.Progressive.ID != "18" || got.Quality != 360 {
+		t.Fatalf("selection = %+v, want capped progressive format 18", got)
+	}
+}
+
 func TestSelectFormatsRejectsUnsafeAndIncompatibleFormats(t *testing.T) {
 	cases := []struct {
 		name   string
