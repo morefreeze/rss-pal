@@ -30,7 +30,10 @@ func SelectFormats(info VideoInfo, maxCombinedKbps float64) (Selection, error) {
 		case adaptiveAudioCompatible(format):
 			audios = append(audios, format)
 		case progressiveCompatible(format):
-			progressive = append(progressive, format)
+			rate := formatBitrateKbps(format, info.Duration)
+			if rate > 0 && rate <= maxCombinedKbps {
+				progressive = append(progressive, format)
+			}
 		}
 	}
 

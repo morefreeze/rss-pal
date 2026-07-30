@@ -60,11 +60,12 @@ func (s *repositoryYouTubeArticleSource) GetForPlayback(
 }
 
 type youtubePlaybackResponse struct {
-	ManifestURL    string    `json:"manifest_url,omitempty"`
-	ProgressiveURL string    `json:"progressive_url,omitempty"`
-	Mode           string    `json:"mode"`
-	Quality        int       `json:"quality"`
-	ExpiresAt      time.Time `json:"expires_at"`
+	ManifestURL        string    `json:"manifest_url,omitempty"`
+	ProgressiveURL     string    `json:"progressive_url,omitempty"`
+	Mode               string    `json:"mode"`
+	Quality            int       `json:"quality"`
+	ProgressiveQuality int       `json:"progressive_quality,omitempty"`
+	ExpiresAt          time.Time `json:"expires_at"`
 }
 
 func (h *YouTubePlaybackHandler) Start(c *gin.Context) {
@@ -96,9 +97,10 @@ func (h *YouTubePlaybackHandler) Start(c *gin.Context) {
 	}
 	base := "/api/media/youtube/" + playback.Ticket
 	response := youtubePlaybackResponse{
-		Mode:      playback.Mode,
-		Quality:   playback.Quality,
-		ExpiresAt: playback.ExpiresAt,
+		Mode:               playback.Mode,
+		Quality:            playback.Quality,
+		ProgressiveQuality: playback.ProgressiveQuality,
+		ExpiresAt:          playback.ExpiresAt,
 	}
 	if playback.Mode == "dash" {
 		response.ManifestURL = base + "/manifest.mpd"

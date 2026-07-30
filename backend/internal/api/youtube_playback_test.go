@@ -94,8 +94,12 @@ func TestYouTubePlaybackUsesServerOwnedArticleMedia(t *testing.T) {
 	}}
 	expiry := time.Date(2026, 7, 30, 18, 0, 0, 0, time.UTC)
 	relay := &fakeYouTubeRelay{playback: youtuberelay.Playback{
-		Ticket: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		Mode:   "dash", Quality: 1080, ExpiresAt: expiry, HasProgressive: true,
+		Ticket:             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		Mode:               "dash",
+		Quality:            1080,
+		ProgressiveQuality: 720,
+		ExpiresAt:          expiry,
+		HasProgressive:     true,
 	}}
 	handler := NewYouTubePlaybackHandler(source, relay)
 	router := youtubeTestRouter(handler)
@@ -124,7 +128,8 @@ func TestYouTubePlaybackUsesServerOwnedArticleMedia(t *testing.T) {
 	}
 	if body["manifest_url"] != "/api/media/youtube/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/manifest.mpd" ||
 		body["progressive_url"] != "/api/media/youtube/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/progressive" ||
-		body["quality"] != float64(1080) {
+		body["quality"] != float64(1080) ||
+		body["progressive_quality"] != float64(720) {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 	if bytes.Contains(response.Body.Bytes(), []byte("evil.example")) {
