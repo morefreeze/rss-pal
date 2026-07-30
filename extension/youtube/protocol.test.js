@@ -41,6 +41,32 @@ test('freezes the exported protocol API', () => {
   assert.equal(Object.isFrozen(protocol), true);
 });
 
+test('freezes validation patterns against own-property mutation', () => {
+  const alwaysValid = () => true;
+  const videoMutationApplied = Reflect.set(VIDEO_ID_RE, 'test', alwaysValid);
+  const requestMutationApplied = Reflect.set(
+    REQUEST_ID_RE,
+    'test',
+    alwaysValid,
+  );
+
+  try {
+    assert.equal(Object.isFrozen(VIDEO_ID_RE), true);
+    assert.equal(Object.isFrozen(REQUEST_ID_RE), true);
+    assert.equal(videoMutationApplied, false);
+    assert.equal(requestMutationApplied, false);
+    assert.equal(isVideoId('not-a-video-id'), false);
+    assert.equal(isRequestId('unsafe request id'), false);
+  } finally {
+    if (videoMutationApplied) {
+      Reflect.deleteProperty(VIDEO_ID_RE, 'test');
+    }
+    if (requestMutationApplied) {
+      Reflect.deleteProperty(REQUEST_ID_RE, 'test');
+    }
+  }
+});
+
 test('installs the frozen protocol API on the browser global', () => {
   const source = fs.readFileSync(require.resolve('./protocol'), 'utf8');
   const context = vm.createContext({ URL });

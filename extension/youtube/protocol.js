@@ -22,8 +22,8 @@
   const RUNTIME_RESOLVE = 'rssPalYouTubeResolve';
   const RUNTIME_CANCEL = 'rssPalYouTubeCancel';
 
-  const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
-  const REQUEST_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+  const VIDEO_ID_RE = Object.freeze(/^[A-Za-z0-9_-]{11}$/);
+  const REQUEST_ID_RE = Object.freeze(/^[A-Za-z0-9_-]{1,80}$/);
 
   function isVideoId(value) {
     return typeof value === 'string' && VIDEO_ID_RE.test(value);
