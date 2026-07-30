@@ -2,7 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 
+const protocol = require('./protocol');
 const {
   RSS_ORIGIN,
   RSS_PAL_YOUTUBE_BRIDGE_PING,
@@ -19,7 +22,7 @@ const {
   validateRuntimeResolve,
   validateRuntimeCancel,
   isTrustedSender,
-} = require('./protocol');
+} = protocol;
 
 test('exports the fixed YouTube bridge protocol constants', () => {
   assert.equal(RSS_ORIGIN, 'https://rss.morefreeze.top');
@@ -32,6 +35,22 @@ test('exports the fixed YouTube bridge protocol constants', () => {
   assert.equal(RUNTIME_CANCEL, 'rssPalYouTubeCancel');
   assert.equal(VIDEO_ID_RE.source, '^[A-Za-z0-9_-]{11}$');
   assert.equal(REQUEST_ID_RE.source, '^[A-Za-z0-9_-]{1,80}$');
+});
+
+test('freezes the exported protocol API', () => {
+  assert.equal(Object.isFrozen(protocol), true);
+});
+
+test('installs the frozen protocol API on the browser global', () => {
+  const source = fs.readFileSync(require.resolve('./protocol'), 'utf8');
+  const context = vm.createContext({ URL });
+
+  vm.runInContext(source, context);
+
+  const browserProtocol = context.__rssPalYouTubeProtocol;
+  assert.equal(Object.isFrozen(browserProtocol), true);
+  assert.equal(browserProtocol.RSS_ORIGIN, RSS_ORIGIN);
+  assert.equal(typeof browserProtocol.validateRuntimeResolve, 'function');
 });
 
 test('validates the exact runtime resolve message and returns only its payload', () => {
@@ -117,6 +136,9 @@ test('rejects runtime resolve messages with extra keys', () => {
 test('trusts only tab senders from the exact RSS Pal origin', () => {
   assert.equal(
     isTrustedSender({
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/articles/42?view=reader',
+      origin: RSS_ORIGIN,
       tab: {
         id: 17,
         url: 'https://rss.morefreeze.top/articles/42?view=reader',
@@ -127,16 +149,85 @@ test('trusts only tab senders from the exact RSS Pal origin', () => {
 
   for (const sender of [
     {},
-    { tab: { url: 'https://rss.morefreeze.top/' } },
-    { tab: { id: '17', url: 'https://rss.morefreeze.top/' } },
-    { tab: { id: 17 } },
-    { tab: { id: 17, url: 'not a url' } },
-    { tab: { id: 17, url: 'http://rss.morefreeze.top/' } },
-    { tab: { id: 17, url: 'https://evil.example/' } },
-    { tab: { id: 17, url: 'https://rss.morefreeze.top.evil.example/' } },
+    {
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/',
+      tab: { url: 'https://rss.morefreeze.top/' },
+    },
+    {
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/',
+      tab: { id: '17', url: 'https://rss.morefreeze.top/' },
+    },
+    {
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/',
+      tab: { id: 17 },
+    },
+    {
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/',
+      tab: { id: 17, url: 'not a url' },
+    },
+    {
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/',
+      tab: { id: 17, url: 'http://rss.morefreeze.top/' },
+    },
+    {
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/',
+      tab: { id: 17, url: 'https://evil.example/' },
+    },
+    {
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/',
+      tab: { id: 17, url: 'https://rss.morefreeze.top.evil.example/' },
+    },
   ]) {
     assert.equal(isTrustedSender(sender), false);
   }
+});
+
+test('rejects spoofed sender URLs even when the tab URL is trusted', () => {
+  const trustedTab = {
+    id: 17,
+    url: 'https://rss.morefreeze.top/articles/42',
+  };
+
+  assert.equal(
+    isTrustedSender({
+      frameId: 0,
+      url: 'https://evil.example/content-script',
+      origin: RSS_ORIGIN,
+      tab: trustedTab,
+    }),
+    false,
+  );
+  assert.equal(
+    isTrustedSender({
+      frameId: 0,
+      url: 'https://rss.morefreeze.top/articles/42',
+      origin: 'https://evil.example',
+      tab: trustedTab,
+    }),
+    false,
+  );
+});
+
+test('rejects trusted-origin senders from child frames', () => {
+  assert.equal(
+    isTrustedSender({
+      frameId: 7,
+      url: 'https://rss.morefreeze.top/articles/42',
+      origin: RSS_ORIGIN,
+      tab: {
+        id: 17,
+        url: 'https://rss.morefreeze.top/articles/42',
+      },
+    }),
+    false,
+  );
 });
 
 test('validates the exact runtime cancel message', () => {

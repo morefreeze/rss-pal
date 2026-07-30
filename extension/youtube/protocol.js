@@ -75,6 +75,18 @@
     };
   }
 
+  function hasTrustedOrigin(value) {
+    if (typeof value !== 'string') {
+      return false;
+    }
+
+    try {
+      return new URL(value).origin === RSS_ORIGIN;
+    } catch {
+      return false;
+    }
+  }
+
   function isTrustedSender(sender) {
     if (
       sender === null ||
@@ -82,19 +94,19 @@
       sender.tab === null ||
       typeof sender.tab !== 'object' ||
       !Number.isInteger(sender.tab.id) ||
-      typeof sender.tab.url !== 'string'
+      sender.frameId !== 0 ||
+      !hasTrustedOrigin(sender.tab.url) ||
+      !hasTrustedOrigin(sender.url) ||
+      (Object.prototype.hasOwnProperty.call(sender, 'origin') &&
+        sender.origin !== RSS_ORIGIN)
     ) {
       return false;
     }
 
-    try {
-      return new URL(sender.tab.url).origin === RSS_ORIGIN;
-    } catch {
-      return false;
-    }
+    return true;
   }
 
-  return {
+  return Object.freeze({
     RSS_ORIGIN,
     RSS_PAL_YOUTUBE_BRIDGE_PING,
     RSS_PAL_YOUTUBE_BRIDGE_READY,
@@ -110,5 +122,5 @@
     validateRuntimeResolve,
     validateRuntimeCancel,
     isTrustedSender,
-  };
+  });
 });
