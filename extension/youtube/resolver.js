@@ -74,6 +74,42 @@
       }
     }
 
+    async function closeAndTrackEntryTab(entry) {
+      if (
+        !Number.isInteger(entry.tabId) ||
+        entry.tabClosed
+      ) {
+        return;
+      }
+      if (entry.closePromise) {
+        await entry.closePromise;
+        return;
+      }
+
+      const tabId = entry.tabId;
+      const closeAttempt = (async () => {
+        const closed = await closeTab(tabId);
+        activeTabIds.delete(tabId);
+        if (closed) {
+          retryTabIds.delete(tabId);
+          entry.tabClosed = true;
+        } else {
+          retryTabIds.add(tabId);
+        }
+        try {
+          await persistActiveTabIds();
+        } catch {}
+      })();
+      entry.closePromise = closeAttempt;
+      try {
+        await closeAttempt;
+      } finally {
+        if (entry.closePromise === closeAttempt) {
+          entry.closePromise = null;
+        }
+      }
+    }
+
     function waitForTabComplete(tabId) {
       return new Promise((resolve) => {
         let settled = false;
@@ -194,16 +230,7 @@
         return LOCAL_NETWORK_ERROR;
       } finally {
         if (tabId !== null) {
-          const closed = await closeTab(tabId);
-          activeTabIds.delete(tabId);
-          if (closed) {
-            retryTabIds.delete(tabId);
-          } else {
-            retryTabIds.add(tabId);
-          }
-          try {
-            await persistActiveTabIds();
-          } catch {}
+          await closeAndTrackEntryTab(entry);
         }
         if (entriesByVideoId.get(entry.videoId) === entry) {
           entriesByVideoId.delete(entry.videoId);
@@ -239,9 +266,11 @@
 
       const entry = {
         cancelled: false,
+        closePromise: null,
         videoId: request.videoId,
         requestIds: new Set([request.requestId]),
         tabId: null,
+        tabClosed: false,
       };
       entriesByVideoId.set(request.videoId, entry);
       requestsById.set(request.requestId, {
@@ -271,9 +300,7 @@
 
       entry.cancelled = true;
       if (Number.isInteger(entry.tabId)) {
-        try {
-          await chromeApi.tabs.remove(entry.tabId);
-        } catch {}
+        await closeAndTrackEntryTab(entry);
       }
     }
 
