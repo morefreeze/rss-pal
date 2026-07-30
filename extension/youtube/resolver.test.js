@@ -625,6 +625,87 @@ test('allows two different active videos and rejects the third without a tab', a
   );
 });
 
+test('cancelled unresolved entries retain both slots until their runs settle', async () => {
+  const firstCreation = deferred();
+  const secondCreation = deferred();
+  const fake = createFakeChrome({
+    create: async (_details, callNumber) => {
+      if (callNumber === 1) {
+        return firstCreation.promise;
+      }
+      if (callNumber === 2) {
+        return secondCreation.promise;
+      }
+      return {
+        id: 100 + callNumber,
+        status: 'complete',
+      };
+    },
+  });
+  const resolver = createResolver(fake, { maxConcurrent: 2 });
+  const thirdVideoId = 'ThirdVid0_-';
+  const first = resolver.handleMessage(
+    resolveMessage('cancelled-slot-one', VIDEO_ID),
+    sender(7),
+  );
+  const second = resolver.handleMessage(
+    resolveMessage('cancelled-slot-two', OTHER_VIDEO_ID),
+    sender(8),
+  );
+  await waitFor(
+    () => fake.calls.create.length === 2,
+    'two unresolved tab creations',
+  );
+
+  assert.deepEqual(
+    await resolver.handleMessage(
+      cancelMessage('cancelled-slot-one'),
+      sender(7),
+    ),
+    { ok: true },
+  );
+  assert.deepEqual(
+    await resolver.handleMessage(
+      cancelMessage('cancelled-slot-two'),
+      sender(8),
+    ),
+    { ok: true },
+  );
+  const thirdWhileCancelled = await resolver.handleMessage(
+    resolveMessage('blocked-third-slot', thirdVideoId),
+    sender(9),
+  );
+  const sameVideoWhileCancelled = await resolver.handleMessage(
+    resolveMessage('blocked-cancelled-video', VIDEO_ID),
+    sender(10),
+  );
+  const createCountWhileCancelled = fake.calls.create.length;
+
+  firstCreation.resolve({ id: 101, status: 'loading' });
+  secondCreation.resolve({ id: 102, status: 'loading' });
+  await Promise.all([first, second]);
+
+  const retry = await resolver.handleMessage(
+    resolveMessage('retry-after-cancelled-runs', VIDEO_ID),
+    sender(11),
+  );
+
+  assert.deepEqual(thirdWhileCancelled, {
+    ok: false,
+    code: 'INTERNAL_ERROR',
+  });
+  assert.deepEqual(sameVideoWhileCancelled, {
+    ok: false,
+    code: 'INTERNAL_ERROR',
+  });
+  assert.equal(createCountWhileCancelled, 2);
+  assert.equal(fake.calls.create.length, 3);
+  assert.deepEqual(retry, {
+    ok: false,
+    code: 'NO_SUPPORTED_FORMAT',
+  });
+});
+
 test('canceling one shared waiter keeps the temporary tab for the survivor', async () => {
   const fake = createFakeChrome();
   const resolver = createResolver(fake);
@@ -830,6 +911,48 @@ test('orphan cleanup preserves tabs that become active concurrently', async () =
     () => fake.events.onUpdated.listenerCount() === 1,
     'active tab load listener after cleanup',
   );
+  fake.completeTab(101);
+  await resolution;
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+});
+
+test('orphan cleanup rechecks active tabs before every sequential removal', async () => {
+  const removingStoredTab = deferred();
+  const releaseStoredTab = deferred();
+  const fake = createFakeChrome({
+    initialSessionData: {
+      rssPalYouTubeTabs: [9, 101],
+    },
+    remove: async (tabId) => {
+      if (tabId === 9) {
+        removingStoredTab.resolve();
+        await releaseStoredTab.promise;
+      }
+    },
+  });
+  const resolver = createResolver(fake);
+
+  const cleanup = resolver.cleanupOrphans();
+  await removingStoredTab.promise;
+  const resolution = resolver.handleMessage(
+    resolveMessage('active-before-next-remove'),
+    sender(),
+  );
+  await waitFor(
+    () => fake.calls.sessionSet.some(
+      (value) =>
+        value.rssPalYouTubeTabs.length === 1 &&
+        value.rssPalYouTubeTabs[0] === 101,
+    ),
+    'tab 101 active session snapshot',
+  );
+
+  releaseStoredTab.resolve();
+  await cleanup;
+
+  assert.deepEqual(fake.calls.remove, [9]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, [101]);
+
   fake.completeTab(101);
   await resolution;
   assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
