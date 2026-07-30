@@ -614,11 +614,51 @@ test('does not mutate or retain mutable format objects from the player response'
     result.formats[0].initRange,
     response.streamingData.adaptiveFormats[0].initRange,
   );
+  assert.notEqual(
+    result.formats[0].indexRange,
+    response.streamingData.adaptiveFormats[0].indexRange,
+  );
   result.formats[0].initRange.start = 'changed';
   assert.equal(
     response.streamingData.adaptiveFormats[0].initRange.start,
     '0',
   );
+  response.streamingData.adaptiveFormats[0].indexRange.start =
+    'raw-changed';
+  assert.equal(result.formats[0].indexRange.start, '740');
+});
+
+test('omits array, function, primitive, and null range values', async (t) => {
+  for (const scenario of [
+    { name: 'array', value: ['private', 'range'] },
+    { name: 'function', value() {} },
+    { name: 'primitive', value: '0-739' },
+    { name: 'null', value: null },
+  ]) {
+    await t.test(scenario.name, async () => {
+      const player = {
+        getPlayerResponse() {
+          return okResponse([], [
+            progressiveFormat({
+              initRange: scenario.value,
+              indexRange: scenario.value,
+              url: directUrl(22),
+            }),
+          ]);
+        },
+        playVideo() {},
+        pauseVideo() {},
+      };
+
+      const result = await captureYouTubePageState(
+        {},
+        createEnvironment(player),
+      );
+
+      assert.equal(Object.hasOwn(result.formats[0], 'initRange'), false);
+      assert.equal(Object.hasOwn(result.formats[0], 'indexRange'), false);
+    });
+  }
 });
 
 test('falls back to ytInitialPlayerResponse when getPlayerResponse fails', async () => {

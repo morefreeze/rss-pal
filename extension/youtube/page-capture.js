@@ -35,7 +35,7 @@
 
     function copyRange(value) {
       if (!isObject(value)) {
-        return value;
+        return null;
       }
 
       const range = {};
@@ -89,7 +89,10 @@
 
         for (const key of ['initRange', 'indexRange']) {
           if (hasOwn(raw, key)) {
-            sanitized[key] = copyRange(raw[key]);
+            const range = copyRange(raw[key]);
+            if (range !== null) {
+              sanitized[key] = range;
+            }
           }
         }
 
