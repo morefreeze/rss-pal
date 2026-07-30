@@ -193,6 +193,31 @@ test('normalizes GoogleVideo URLs by removing only request-local query keys', ()
   }
 });
 
+test('accepts only bounded credential-free canonical GoogleVideo playback paths', () => {
+  const accepted =
+    'https://googlevideo.com/videoplayback/itag/140?expire=1780000600&sig=ok';
+  assert.equal(normalizeGoogleVideoUrl(accepted), accepted);
+
+  const maxLengthUrl =
+    'https://googlevideo.com/videoplayback?itag=137&sig='.padEnd(
+      16_384,
+      'a',
+    );
+  assert.equal(normalizeGoogleVideoUrl(maxLengthUrl), maxLengthUrl);
+
+  for (const url of [
+    'https://googlevideo.com/foo/videoplayback/bar?itag=137',
+    'https://googlevideo.com/videoplayback-lookalike?itag=137',
+    'https://googlevideo.com/videoplayback%2Fextra?itag=137',
+    'https://googlevideo.com/%76ideoplayback?itag=137',
+    'https://user:pass@googlevideo.com/videoplayback?itag=137',
+    `${maxLengthUrl}a`,
+  ]) {
+    assert.equal(normalizeGoogleVideoUrl(url), null, url.slice(0, 256));
+    assert.equal(parseItag(url), null, url.slice(0, 256));
+  }
+});
+
 test('sanitizes known format fields and strips cipher, headers, reasons, and unknown data', () => {
   const raw = {
     itag: '140',
@@ -291,6 +316,43 @@ test('uses observed resource URLs as the source of truth for each itag', () => {
     'https://rr2---sn-a5mekn6z.googlevideo.com/videoplayback?' +
       'expire=1780000600&itag=140&sig=observed-audio',
   );
+});
+
+test('maps direct URLs only to their declared itag while observed URLs remain authoritative', () => {
+  const mismatchedDirect = googleVideoUrl(136);
+  const missingItagDirect =
+    'https://googlevideo.com/videoplayback?' +
+    'expire=1780000600&sig=missing-itag';
+
+  for (const directUrl of [mismatchedDirect, missingItagDirect]) {
+    assert.deepEqual(
+      selectPlayback(
+        captured([
+          videoFormat(137, 1080, { url: directUrl }),
+          audioFormat(),
+        ]),
+        NOW_MS,
+      ),
+      { ok: false, code: 'NO_SUPPORTED_FORMAT' },
+      directUrl,
+    );
+  }
+
+  const observed =
+    `${googleVideoUrl(137)}&range=0-4095&rn=3`;
+  const result = selectPlayback(
+    captured(
+      [
+        videoFormat(137, 1080, { url: mismatchedDirect }),
+        audioFormat(),
+      ],
+      [observed],
+    ),
+    NOW_MS,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.playback.video.url, googleVideoUrl(137));
 });
 
 test('prefers 1080p at 30 fps over 1080p60 and 720p and reports truthful quality', () => {
@@ -510,6 +572,100 @@ test('skips adaptive video and audio tracks without positive bitrate and duratio
         `${metadataCase.name}: durationMs`,
       );
     }
+  }
+});
+
+test('bounds adaptive codecs and MIME types to the frontend playback contract', () => {
+  const maxMimeType = `video/${'x'.repeat(122)}`;
+  const maxCodecs = 'c'.repeat(256);
+  const boundary = selectPlayback(
+    captured([
+      videoFormat(137, 1080, {
+        mimeType: `${maxMimeType}; codecs="${maxCodecs}"`,
+      }),
+      audioFormat(),
+    ]),
+    NOW_MS,
+  );
+
+  assert.equal(boundary.ok, true);
+  assert.equal(boundary.playback.mode, 'dash');
+  assert.equal(boundary.playback.video.mimeType.length, 128);
+  assert.equal(boundary.playback.video.codecs.length, 256);
+
+  assert.equal(
+    sanitizeFormat(
+      progressiveFormat({
+        mimeType: `video/${'x'.repeat(123)}; codecs="avc1"`,
+      }),
+    ),
+    null,
+  );
+
+  const invalidAdaptiveCases = [
+    {
+      videoMimeType: 'video/mp4; codecs=""',
+      audioMimeType: 'audio/mp4; codecs="mp4a.40.2"',
+    },
+    {
+      videoMimeType: 'video/mp4; codecs="avc1.640028"',
+      audioMimeType: `audio/mp4; codecs="${'a'.repeat(257)}"`,
+    },
+  ];
+  for (const { videoMimeType, audioMimeType } of invalidAdaptiveCases) {
+    const result = selectPlayback(
+      captured([
+        videoFormat(137, 1080, { mimeType: videoMimeType }),
+        audioFormat({ mimeType: audioMimeType }),
+        progressiveFormat(),
+      ]),
+      NOW_MS,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.playback.mode, 'progressive');
+    assert.equal(result.playback.quality, 720);
+  }
+});
+
+test('bounds adaptive byte ranges by offset and inclusive span', () => {
+  const maxOffset = 64 * 1024 * 1024 - 1;
+  const maxSpan = 16 * 1024 * 1024;
+  const boundaryRange = {
+    start: maxOffset - maxSpan + 1,
+    end: maxOffset,
+  };
+  const boundary = selectPlayback(
+    captured([
+      videoFormat(137, 1080, {
+        initRange: boundaryRange,
+        indexRange: boundaryRange,
+      }),
+      audioFormat(),
+    ]),
+    NOW_MS,
+  );
+
+  assert.equal(boundary.ok, true);
+  assert.equal(boundary.playback.quality, 1080);
+  assert.deepEqual(boundary.playback.video.initRange, boundaryRange);
+  assert.deepEqual(boundary.playback.video.indexRange, boundaryRange);
+
+  for (const invalidRange of [
+    { start: maxOffset + 1, end: maxOffset + 1 },
+    { start: 0, end: maxSpan },
+  ]) {
+    const result = selectPlayback(
+      captured([
+        videoFormat(137, 1080, { initRange: invalidRange }),
+        videoFormat(136, 720),
+        audioFormat(),
+      ]),
+      NOW_MS,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.playback.quality, 720);
   }
 });
 
