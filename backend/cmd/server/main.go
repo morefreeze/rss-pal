@@ -12,6 +12,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/service"
 	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/bytedance/rss-pal/internal/version"
+	"github.com/bytedance/rss-pal/internal/youtuberelay"
 	gingzip "github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
@@ -96,6 +97,14 @@ func main() {
 	userTagHandler := api.NewUserTagHandler(userTagRepo, articleUserTagRepo, tagSuggestRepo)
 	clipHandler := api.NewClipHandler(clipRepo, articleUserTagRepo)
 	extensionIngestHandler := api.NewExtensionIngestHandler(feedRepo, articleRepo, userRepo)
+	youtubeRelayService := youtuberelay.NewService(youtuberelay.ServiceOptions{
+		Resolver: youtuberelay.NewYTDLPResolver(),
+	})
+	defer youtubeRelayService.Close()
+	youtubePlaybackHandler := api.NewYouTubePlaybackHandler(
+		api.NewRepositoryYouTubeArticleSource(articleRepo),
+		youtubeRelayService,
+	)
 
 	router := gin.Default()
 	// Compress JSON/text responses for clients that opt in. Defensive
@@ -105,7 +114,10 @@ func main() {
 	router.Use(gingzip.Gzip(
 		gingzip.DefaultCompression,
 		gingzip.WithExcludedExtensions([]string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mp3", ".woff", ".woff2"}),
-		gingzip.WithExcludedPathsRegexs([]string{"/api/articles/.*/summary/stream"}),
+		gingzip.WithExcludedPathsRegexs([]string{
+			"/api/articles/.*/summary/stream",
+			"/api/media/youtube/.*",
+		}),
 	))
 	// Trust only requests from localhost/private networks (running behind nginx)
 	router.SetTrustedProxies([]string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
@@ -147,6 +159,13 @@ func main() {
 
 	// Public image proxy (no auth — <img> tags can't reliably carry auth headers).
 	router.GET("/api/proxy/image", api.NewImageProxy().Handle)
+
+	// YouTube media URLs are protected by high-entropy, short-lived tickets.
+	// They stay outside JWT middleware because browser media requests do not
+	// reliably attach the app's Authorization header.
+	router.GET("/api/media/youtube/:ticket/manifest.mpd", youtubePlaybackHandler.Manifest)
+	router.GET("/api/media/youtube/:ticket/:kind", youtubePlaybackHandler.Media)
+	router.HEAD("/api/media/youtube/:ticket/:kind", youtubePlaybackHandler.Media)
 
 	// PDF clip images. Public for the same <img>-tag-can't-carry-Authorization
 	// reason as /api/proxy/image. The URL itself is the access token:
@@ -232,6 +251,7 @@ func main() {
 		apiGroup.GET("/articles/unread-count", articleHandler.GetUnreadCount)
 		apiGroup.POST("/articles/mark-all-read", articleHandler.MarkAllRead)
 		apiGroup.GET("/articles/:id", articleHandler.GetByID)
+		apiGroup.POST("/articles/:id/youtube-playback", youtubePlaybackHandler.Start)
 		apiGroup.POST("/articles/:id/summary", articleHandler.GenerateSummary)
 		apiGroup.POST("/articles/:id/content", contentHandler.FetchContent)
 		apiGroup.GET("/articles/:id/export/md", contentHandler.ExportMarkdown)

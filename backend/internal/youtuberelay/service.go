@@ -312,7 +312,7 @@ func (s *Service) fetchPrefix(ctx context.Context, format Format, size int64) ([
 	request.Header.Set("Accept-Encoding", "identity")
 	response, err := s.client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUpstream, err)
+		return nil, fmt.Errorf("%w: %w", ErrUpstream, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
@@ -352,7 +352,7 @@ func (s *Service) openUpstream(
 	}
 	response, err := s.client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUpstream, err)
+		return nil, fmt.Errorf("%w: %w", ErrUpstream, err)
 	}
 	return response, nil
 }
