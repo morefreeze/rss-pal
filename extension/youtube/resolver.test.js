@@ -171,6 +171,7 @@ function createFakeChrome(options = {}) {
         },
         async set(values) {
           calls.sessionSet.push(structuredClone(values));
+          calls.order.push('sessionSet');
           if (options.sessionSet) {
             await options.sessionSet(
               values,
@@ -432,8 +433,83 @@ test('cancellation during muting closes without load wait or injection', async (
 
   assert.deepEqual(fake.calls.get, []);
   assert.deepEqual(fake.calls.executeScript, []);
-  assert.equal(fake.calls.remove.includes(101), true);
+  assert.deepEqual(fake.calls.remove, [101]);
+  assert.deepEqual(fake.calls.sessionSet, [{
+    rssPalYouTubeTabs: [],
+  }]);
   assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+});
+
+test('cancellation persists a transient close failure before responding', async () => {
+  const muteStarted = deferred();
+  const releaseMute = deferred();
+  const sessionWriteStarted = deferred();
+  const releaseSessionWrite = deferred();
+  let failNextRemove = true;
+  const fake = createFakeChrome({
+    update: async () => {
+      muteStarted.resolve();
+      await releaseMute.promise;
+      return { id: 101, muted: true };
+    },
+    remove: async (tabId) => {
+      if (tabId === 101 && failNextRemove) {
+        failNextRemove = false;
+        throw new Error('temporary cancellation close failure');
+      }
+    },
+    sessionSet: async (_values, callNumber) => {
+      if (callNumber === 1) {
+        sessionWriteStarted.resolve();
+        await releaseSessionWrite.promise;
+      }
+    },
+  });
+  const resolver = createResolver(fake);
+  const resolution = resolver.handleMessage(
+    resolveMessage('cancel-persist-before-response'),
+    sender(7),
+  );
+  await muteStarted.promise;
+
+  let cancellationSettled = false;
+  const cancellation = resolver.handleMessage(
+    cancelMessage('cancel-persist-before-response'),
+    sender(7),
+  ).then((result) => {
+    cancellationSettled = true;
+    return result;
+  });
+  await waitFor(
+    () => fake.calls.remove.length === 1,
+    'cancellation close attempt',
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(fake.calls.sessionSet, [{
+    rssPalYouTubeTabs: [101],
+  }]);
+  await sessionWriteStarted.promise;
+  assert.equal(cancellationSettled, false);
+  assert.deepEqual(
+    fake.calls.order.slice(
+      fake.calls.order.indexOf('remove'),
+      fake.calls.order.indexOf('sessionSet') + 1,
+    ),
+    ['remove', 'sessionSet'],
+  );
+
+  releaseSessionWrite.resolve();
+  assert.deepEqual(await cancellation, { ok: true });
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, [101]);
+
+  releaseMute.resolve();
+  await resolution;
+
+  assert.deepEqual(fake.calls.remove, [101, 101]);
+  assert.deepEqual(fake.sessionData.rssPalYouTubeTabs, []);
+  assert.deepEqual(fake.calls.get, []);
+  assert.deepEqual(fake.calls.executeScript, []);
 });
 
 test('returns LOGIN_REQUIRED and selection failures exactly', async (t) => {
@@ -932,6 +1008,11 @@ test('canceling the last waiter closes the tab and removes load listeners', asyn
   );
 
   await resolution;
+  assert.deepEqual(fake.calls.remove, [101]);
+  assert.deepEqual(fake.calls.sessionSet, [
+    { rssPalYouTubeTabs: [101] },
+    { rssPalYouTubeTabs: [] },
+  ]);
   assert.deepEqual(fake.calls.executeScript, []);
   assert.equal(fake.events.onUpdated.listenerCount(), 0);
   assert.equal(fake.events.onRemoved.listenerCount(), 0);
