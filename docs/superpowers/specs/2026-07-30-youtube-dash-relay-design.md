@@ -190,9 +190,9 @@ to recreate the playback session.
 
 ## Frontend
 
-`VideoEmbed` continues to render the existing eager Bilibili iframe.
-
-For YouTube it renders a new `YouTubeRelayPlayer`:
+`ArticlePlayerCard` keeps the existing eager `VideoEmbed` iframe for Bilibili.
+For a stored primary YouTube media item it renders a new
+`YouTubeRelayPlayer`, passing the authenticated article ID:
 
 1. request a playback session for the current article;
 2. feature-detect Media Source Extensions;
@@ -204,6 +204,13 @@ For YouTube it renders a new `YouTubeRelayPlayer`:
 If MSE is unavailable, the component uses the returned progressive same-origin
 MP4 relay when present. It does not fall back to the direct YouTube iframe,
 because that would silently reintroduce the client-proxy requirement.
+
+Markdown-body YouTube placeholders do not have an independently authorized
+article/media relationship. They therefore render a link directing the user
+to the article's primary player instead of creating a direct YouTube iframe or
+accepting an arbitrary video ID at the playback API. The normal worker path
+already removes a duplicate body placeholder when it matches the primary
+stored media item.
 
 Autoplay remains disabled. The standard browser controls provide play/pause,
 volume, fullscreen, and seeking.
@@ -261,8 +268,9 @@ fallback playback, or a visible error with retry.
 
 ### Frontend
 
-- Bilibili keeps the eager direct iframe.
-- YouTube creates a relay session and initializes dash.js.
+- `ArticlePlayerCard` keeps the eager direct Bilibili iframe.
+- A primary YouTube article creates a relay session and initializes dash.js.
+- Markdown-body YouTube placeholders never create a direct iframe.
 - Selected quality is displayed accurately.
 - Unmount destroys the player.
 - MSE absence uses progressive fallback.
