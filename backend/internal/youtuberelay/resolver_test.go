@@ -67,6 +67,44 @@ func TestYTDLPResolverUsesSafeDeterministicArguments(t *testing.T) {
 	}
 }
 
+func TestYTDLPResolverUsesConfiguredPOTProvider(t *testing.T) {
+	runner := &fakeCommandRunner{output: resolvedInfoJSON(t)}
+	resolver := YTDLPResolver{
+		Runner:         runner,
+		Binary:         "yt-dlp",
+		Timeout:        time.Second,
+		POTProviderURL: "http://youtube-pot:4416",
+	}
+
+	if _, err := resolver.Resolve(context.Background(), "dQw4w9WgXcQ"); err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := []string{
+		"--no-warnings",
+		"--no-playlist",
+		"--skip-download",
+		"--socket-timeout", "20",
+		"--js-runtimes", "deno",
+		"--extractor-args", "youtube:player_client=mweb",
+		"--extractor-args", "youtubepot-bgutilhttp:base_url=http://youtube-pot:4416",
+		"-J",
+		"https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+	}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args = %q, want %q", runner.args, wantArgs)
+	}
+}
+
+func TestNewYTDLPResolverReadsPOTProviderURL(t *testing.T) {
+	t.Setenv("YOUTUBE_POT_PROVIDER_URL", "http://youtube-pot:4416")
+
+	resolver := NewYTDLPResolver()
+
+	if resolver.POTProviderURL != "http://youtube-pot:4416" {
+		t.Fatalf("POTProviderURL = %q", resolver.POTProviderURL)
+	}
+}
+
 func TestYTDLPResolverRejectsInvalidIDBeforeCommand(t *testing.T) {
 	runner := &fakeCommandRunner{output: resolvedInfoJSON(t)}
 	resolver := YTDLPResolver{Runner: runner, Timeout: time.Second}

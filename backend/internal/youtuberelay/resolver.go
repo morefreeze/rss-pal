@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"time"
@@ -20,16 +21,18 @@ type CommandRunner interface {
 }
 
 type YTDLPResolver struct {
-	Runner  CommandRunner
-	Binary  string
-	Timeout time.Duration
+	Runner         CommandRunner
+	Binary         string
+	Timeout        time.Duration
+	POTProviderURL string
 }
 
 func NewYTDLPResolver() *YTDLPResolver {
 	return &YTDLPResolver{
-		Runner:  execCommandRunner{},
-		Binary:  "yt-dlp",
-		Timeout: 45 * time.Second,
+		Runner:         execCommandRunner{},
+		Binary:         "yt-dlp",
+		Timeout:        45 * time.Second,
+		POTProviderURL: os.Getenv("YOUTUBE_POT_PROVIDER_URL"),
 	}
 }
 
@@ -58,9 +61,17 @@ func (r YTDLPResolver) Resolve(ctx context.Context, videoID string) (ResolvedMed
 		"--skip-download",
 		"--socket-timeout", "20",
 		"--js-runtimes", "deno",
-		"-J",
-		"https://www.youtube.com/watch?v=" + videoID,
 	}
+	if r.POTProviderURL != "" {
+		args = append(args,
+			"--extractor-args", "youtube:player_client=mweb",
+			"--extractor-args", "youtubepot-bgutilhttp:base_url="+r.POTProviderURL,
+		)
+	}
+	args = append(args,
+		"-J",
+		"https://www.youtube.com/watch?v="+videoID,
+	)
 	output, err := runner.Output(ctx, binary, args...)
 	if err != nil {
 		return ResolvedMedia{}, fmt.Errorf("%w: %v", ErrResolveFailed, err)
