@@ -8,6 +8,10 @@ var (
 	ErrInvalidVideoID    = errors.New("invalid youtube video id")
 	ErrResolveFailed     = errors.New("youtube metadata resolution failed")
 	ErrNoCompatibleMedia = errors.New("no compatible youtube media")
+	ErrCapacity          = errors.New("youtube relay capacity reached")
+	ErrSessionNotFound   = errors.New("youtube relay session not found")
+	ErrInvalidRange      = errors.New("invalid byte range")
+	ErrUpstream          = errors.New("youtube media upstream failed")
 )
 
 type Format struct {
