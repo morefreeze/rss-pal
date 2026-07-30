@@ -1,9 +1,17 @@
 {
   "manifest_version": 3,
   "name": "RSS Pal",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "description": "将网页内容捕获并发送到 RSS Pal",
-  "permissions": ["activeTab", "storage", "scripting", "alarms", "tabs", "notifications"],
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "alarms",
+    "tabs",
+    "notifications",
+    "declarativeNetRequestWithHostAccess"
+  ],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
@@ -44,8 +52,24 @@
         "content.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://rss.morefreeze.top/*"],
+      "js": [
+        "youtube/protocol.js",
+        "youtube/bridge-content.js"
+      ]
     }
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "youtube_media_cors",
+        "enabled": true,
+        "path": "rules/youtube-media-cors.json"
+      }
+    ]
+  },
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
