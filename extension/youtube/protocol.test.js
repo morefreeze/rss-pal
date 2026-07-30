@@ -15,8 +15,6 @@ const {
   RSS_PAL_YOUTUBE_RESOLVE_RESPONSE,
   RUNTIME_RESOLVE,
   RUNTIME_CANCEL,
-  VIDEO_ID_RE,
-  REQUEST_ID_RE,
   isVideoId,
   isRequestId,
   validateRuntimeResolve,
@@ -33,38 +31,26 @@ test('exports the fixed YouTube bridge protocol constants', () => {
   assert.equal(RSS_PAL_YOUTUBE_RESOLVE_RESPONSE, 'RSS_PAL_YOUTUBE_RESOLVE_RESPONSE');
   assert.equal(RUNTIME_RESOLVE, 'rssPalYouTubeResolve');
   assert.equal(RUNTIME_CANCEL, 'rssPalYouTubeCancel');
-  assert.equal(VIDEO_ID_RE.source, '^[A-Za-z0-9_-]{11}$');
-  assert.equal(REQUEST_ID_RE.source, '^[A-Za-z0-9_-]{1,80}$');
 });
 
 test('freezes the exported protocol API', () => {
   assert.equal(Object.isFrozen(protocol), true);
 });
 
-test('freezes validation patterns against own-property mutation', () => {
-  const alwaysValid = () => true;
-  const videoMutationApplied = Reflect.set(VIDEO_ID_RE, 'test', alwaysValid);
-  const requestMutationApplied = Reflect.set(
-    REQUEST_ID_RE,
-    'test',
-    alwaysValid,
+test('keeps validation patterns private behind the frozen API', () => {
+  assert.equal(Object.isFrozen(protocol), true);
+  assert.equal(protocol.VIDEO_ID_RE, undefined);
+  assert.equal(protocol.REQUEST_ID_RE, undefined);
+  assert.equal(isVideoId('not-a-video-id'), false);
+  assert.equal(isRequestId('unsafe request id'), false);
+  assert.equal(
+    validateRuntimeResolve({
+      action: RUNTIME_RESOLVE,
+      requestId: 'unsafe request id',
+      videoId: 'not-a-video-id',
+    }),
+    null,
   );
-
-  try {
-    assert.equal(Object.isFrozen(VIDEO_ID_RE), true);
-    assert.equal(Object.isFrozen(REQUEST_ID_RE), true);
-    assert.equal(videoMutationApplied, false);
-    assert.equal(requestMutationApplied, false);
-    assert.equal(isVideoId('not-a-video-id'), false);
-    assert.equal(isRequestId('unsafe request id'), false);
-  } finally {
-    if (videoMutationApplied) {
-      Reflect.deleteProperty(VIDEO_ID_RE, 'test');
-    }
-    if (requestMutationApplied) {
-      Reflect.deleteProperty(REQUEST_ID_RE, 'test');
-    }
-  }
 });
 
 test('installs the frozen protocol API on the browser global', () => {
@@ -77,6 +63,14 @@ test('installs the frozen protocol API on the browser global', () => {
   assert.equal(Object.isFrozen(browserProtocol), true);
   assert.equal(browserProtocol.RSS_ORIGIN, RSS_ORIGIN);
   assert.equal(typeof browserProtocol.validateRuntimeResolve, 'function');
+  assert.equal(browserProtocol.VIDEO_ID_RE, undefined);
+  assert.equal(browserProtocol.REQUEST_ID_RE, undefined);
+  assert.equal(
+    Object.values(browserProtocol).every(
+      (value) => typeof value === 'string' || typeof value === 'function',
+    ),
+    true,
+  );
 });
 
 test('validates the exact runtime resolve message and returns only its payload', () => {
