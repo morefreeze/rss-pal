@@ -1,12 +1,21 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Article } from '../src/api/client'
 
-vi.mock('../src/components/YouTubeRelayPlayer', () => ({
-  default: ({ articleId, originalURL }: { articleId: number; originalURL: string }) => (
-    <div>relay:{articleId}:{originalURL}</div>
-  ),
+const mocks = vi.hoisted(() => ({
+  browserPlayer: vi.fn(),
+}))
+
+vi.mock('../src/components/YouTubeBrowserPlayer', () => ({
+  default: (props: {
+    videoId: string
+    start?: number
+    originalURL: string
+  }) => {
+    mocks.browserPlayer(props)
+    return <div data-testid="youtube-browser-player" />
+  },
 }))
 
 import ArticlePlayerCard from '../src/components/ArticlePlayerCard'
@@ -27,16 +36,53 @@ function videoArticle(overrides: Partial<Article>): Article {
 }
 
 describe('ArticlePlayerCard YouTube routing', () => {
-  it('uses the authenticated relay for a YouTube article', () => {
+  beforeEach(() => {
+    mocks.browserPlayer.mockClear()
+  })
+
+  it('routes a stored YouTube article through the browser player', () => {
     render(<ArticlePlayerCard article={videoArticle({
       media_type: 'video/youtube',
       media_url: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0',
     })} />)
 
-    expect(screen.getByText(
-      'relay:2391:https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    )).toBeTruthy()
+    expect(screen.getByTestId('youtube-browser-player')).toBeTruthy()
+    expect(mocks.browserPlayer).toHaveBeenCalledOnce()
+    expect(mocks.browserPlayer).toHaveBeenCalledWith({
+      videoId: 'dQw4w9WgXcQ',
+      start: undefined,
+      originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    })
     expect(screen.queryByTitle('youtube video dQw4w9WgXcQ')).toBeNull()
+  })
+
+  it('preserves a positive stored YouTube start in the browser player URL', () => {
+    render(<ArticlePlayerCard article={videoArticle({
+      media_type: 'video/youtube',
+      media_url: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=45',
+    })} />)
+
+    expect(mocks.browserPlayer).toHaveBeenCalledWith({
+      videoId: 'dQw4w9WgXcQ',
+      start: 45,
+      originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=45s',
+    })
+  })
+
+  it.each([
+    ['zero', '0', 0],
+    ['non-finite', '9'.repeat(400), Number.POSITIVE_INFINITY],
+  ])('does not add an invalid %s stored start to the original URL', (_, rawStart, start) => {
+    render(<ArticlePlayerCard article={videoArticle({
+      media_type: 'video/youtube',
+      media_url: `https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=${rawStart}`,
+    })} />)
+
+    expect(mocks.browserPlayer).toHaveBeenCalledWith({
+      videoId: 'dQw4w9WgXcQ',
+      start,
+      originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    })
   })
 
   it('keeps Bilibili playback client-direct', () => {
@@ -47,5 +93,6 @@ describe('ArticlePlayerCard YouTube routing', () => {
     })} />)
 
     expect(screen.getByTitle('bilibili video BV1xL3y6cEVv')).toBeTruthy()
+    expect(mocks.browserPlayer).not.toHaveBeenCalled()
   })
 })
