@@ -80,6 +80,8 @@ const MAX_BITRATE = 2_000_000_000
 const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1_000
 const MAX_FRAME_RATE = 240
 const MAX_AUDIO_SAMPLE_RATE = 768_000
+const MAX_MEDIA_RANGE_OFFSET = 64 * 1024 * 1024 - 1
+const MAX_MEDIA_RANGE_SPAN = 16 * 1024 * 1024
 
 type UnknownRecord = Record<PropertyKey, unknown>
 
@@ -155,7 +157,7 @@ function validMediaURL(rawURL: unknown): rawURL is string {
       url.hostname.endsWith('.googlevideo.com')
     const trustedPath =
       url.pathname === '/videoplayback' ||
-      url.pathname.includes('/videoplayback/')
+      url.pathname.startsWith('/videoplayback/')
 
     return (
       url.protocol === 'https:' &&
@@ -173,9 +175,10 @@ function validByteRange(value: unknown): value is ByteRange {
   return (
     isRecord(value) &&
     hasExactKeys(value, ['start', 'end']) &&
-    isBoundedInteger(value.start, Number.MAX_SAFE_INTEGER, 0) &&
-    isBoundedInteger(value.end, Number.MAX_SAFE_INTEGER, 0) &&
-    value.end >= value.start
+    isBoundedInteger(value.start, MAX_MEDIA_RANGE_OFFSET, 0) &&
+    isBoundedInteger(value.end, MAX_MEDIA_RANGE_OFFSET, 0) &&
+    value.end >= value.start &&
+    value.end - value.start + 1 <= MAX_MEDIA_RANGE_SPAN
   )
 }
 
@@ -356,6 +359,7 @@ export async function resolveYouTubePlayback(
 
   return new Promise((resolve, reject) => {
     let settled = false
+    let cancelPosted = false
 
     const cleanup = () => {
       window.clearTimeout(timer)
@@ -375,6 +379,22 @@ export async function resolveYouTubePlayback(
       settled = true
       cleanup()
       reject(error)
+    }
+
+    const postCancel = () => {
+      if (settled || cancelPosted) return
+      cancelPosted = true
+      try {
+        window.postMessage(
+          {
+            type: RESOLVE_CANCEL,
+            requestId,
+          },
+          window.location.origin,
+        )
+      } catch {
+        // Cancellation is best-effort.
+      }
     }
 
     function onMessage(event: MessageEvent) {
@@ -424,21 +444,15 @@ export async function resolveYouTubePlayback(
 
     function onAbort() {
       if (settled) return
-      try {
-        window.postMessage(
-          {
-            type: RESOLVE_CANCEL,
-            requestId,
-          },
-          window.location.origin,
-        )
-      } finally {
-        finishReject(new DOMException('The operation was aborted.', 'AbortError'))
-      }
+      postCancel()
+      finishReject(new DOMException('The operation was aborted.', 'AbortError'))
     }
 
     const timer = window.setTimeout(
-      () => finishReject(new YouTubeBridgeError('EXTENSION_UNAVAILABLE')),
+      () => {
+        postCancel()
+        finishReject(new YouTubeBridgeError('EXTENSION_UNAVAILABLE'))
+      },
       timeoutMs,
     )
     window.addEventListener('message', onMessage)
