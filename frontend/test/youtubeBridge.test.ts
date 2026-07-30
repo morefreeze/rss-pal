@@ -57,6 +57,10 @@ function dispatchBridgeMessage(
   data: unknown,
   options: { origin?: string; source?: MessageEventSource | null } = {},
 ): void {
+  // jsdom 29 delivers native window.postMessage events with source=null and an
+  // empty origin. Requests still use its real asynchronous postMessage flow;
+  // responses synthesize the browser-populated fields so the production
+  // same-window/same-origin guards remain intact. Task 12 covers native Chrome.
   window.dispatchEvent(
     new MessageEvent('message', {
       data,
@@ -175,6 +179,10 @@ describe('resolveYouTubePlayback', () => {
   it('resolves only the matching request and validates GoogleVideo URLs', async () => {
     const playback = playbackFixture()
     let postedRequestId = ''
+    const posted: unknown[] = []
+    const postedListener = (event: MessageEvent) => posted.push(event.data)
+    const clearTimerSpy = vi.spyOn(window, 'clearTimeout')
+    window.addEventListener('message', postedListener)
     const cleanup = answerResolveWith(
       { ok: true, playback },
       request => {
@@ -187,7 +195,12 @@ describe('resolveYouTubePlayback', () => {
     ).resolves.toEqual(playback)
     expect(postedRequestId).toMatch(/^[A-Za-z0-9_]+$/)
     expect(postedRequestId).not.toContain('-')
+    expect(clearTimerSpy).toHaveBeenCalled()
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({ type: 'RSS_PAL_YOUTUBE_RESOLVE_CANCEL' }),
+    )
     cleanup()
+    window.removeEventListener('message', postedListener)
   })
 
   it('ignores a response for a mismatched request ID', async () => {
@@ -272,6 +285,23 @@ describe('resolveYouTubePlayback', () => {
   })
 
   it.each([
+    '/foo/videoplayback/bar?itag=137',
+    '/videoplayback-evil?itag=137',
+    '/videoplayback%2Fitag/137?sig=test',
+    '/%76ideoplayback?itag=137',
+  ])('rejects a GoogleVideo URL outside the DNR path boundary: %s', async pathname => {
+    const playback = clonePlayback()
+    playback.video!.url =
+      `https://rr1---sn-a5mekn6z.googlevideo.com${pathname}`
+    const cleanup = answerResolveWith({ ok: true, playback })
+
+    await expect(
+      resolveYouTubePlayback(VIDEO_ID, undefined, 100),
+    ).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    cleanup()
+  })
+
+  it.each([
     ['NaN bitrate', (value: BrowserPlayback) => {
       value.video!.bitrate = Number.NaN
     }],
@@ -292,6 +322,21 @@ describe('resolveYouTubePlayback', () => {
     }],
     ['reversed range', (value: BrowserPlayback) => {
       value.video!.indexRange = { start: 20, end: 10 }
+    }],
+    ['excessive range start', (value: BrowserPlayback) => {
+      value.video!.initRange = {
+        start: 64 * 1024 * 1024,
+        end: 64 * 1024 * 1024,
+      }
+    }],
+    ['excessive range end', (value: BrowserPlayback) => {
+      value.audio!.indexRange.end = 64 * 1024 * 1024
+    }],
+    ['excessive inclusive range span', (value: BrowserPlayback) => {
+      value.video!.indexRange = {
+        start: 0,
+        end: 16 * 1024 * 1024,
+      }
     }],
   ])('rejects malformed numeric metadata: %s', async (_name, mutate) => {
     const playback = clonePlayback()
@@ -367,6 +412,10 @@ describe('resolveYouTubePlayback', () => {
   })
 
   it('maps allowlisted extension failures to YouTubeBridgeError', async () => {
+    const posted: unknown[] = []
+    const postedListener = (event: MessageEvent) => posted.push(event.data)
+    const clearTimerSpy = vi.spyOn(window, 'clearTimeout')
+    window.addEventListener('message', postedListener)
     const cleanup = answerResolveWith({
       ok: false,
       code: 'LOGIN_REQUIRED',
@@ -375,7 +424,12 @@ describe('resolveYouTubePlayback', () => {
     await expect(
       resolveYouTubePlayback(VIDEO_ID, undefined, 100),
     ).rejects.toEqual(new YouTubeBridgeError('LOGIN_REQUIRED'))
+    expect(clearTimerSpy).toHaveBeenCalled()
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({ type: 'RSS_PAL_YOUTUBE_RESOLVE_CANCEL' }),
+    )
     cleanup()
+    window.removeEventListener('message', postedListener)
   })
 
   it('sanitizes unknown extension failures to INTERNAL_ERROR', async () => {
@@ -390,10 +444,42 @@ describe('resolveYouTubePlayback', () => {
     cleanup()
   })
 
-  it('maps a response timeout to EXTENSION_UNAVAILABLE', async () => {
+  it('posts one cancellation on timeout and ignores a late response', async () => {
+    const posted: unknown[] = []
+    let requestId = ''
+    const listener = (event: MessageEvent) => {
+      posted.push(event.data)
+      if (event.data?.type === 'RSS_PAL_YOUTUBE_RESOLVE_REQUEST') {
+        requestId = event.data.requestId
+      }
+    }
+    window.addEventListener('message', listener)
+
     await expect(
       resolveYouTubePlayback(VIDEO_ID, undefined, 10),
     ).rejects.toEqual(new YouTubeBridgeError('EXTENSION_UNAVAILABLE'))
+    await vi.waitFor(() =>
+      expect(posted).toContainEqual({
+        type: 'RSS_PAL_YOUTUBE_RESOLVE_CANCEL',
+        requestId,
+      }),
+    )
+
+    dispatchBridgeMessage({
+      type: 'RSS_PAL_YOUTUBE_RESOLVE_RESPONSE',
+      requestId,
+      ok: true,
+      playback: playbackFixture(),
+    })
+    await Promise.resolve()
+    expect(
+      posted.filter(
+        message =>
+          (message as { type?: unknown })?.type ===
+          'RSS_PAL_YOUTUBE_RESOLVE_CANCEL',
+      ),
+    ).toHaveLength(1)
+    window.removeEventListener('message', listener)
   })
 
   it('posts cancellation, cleans up, and ignores late settlement when aborted', async () => {
@@ -413,6 +499,7 @@ describe('resolveYouTubePlayback', () => {
     const pending = resolveYouTubePlayback(VIDEO_ID, controller.signal, 1_000)
     await vi.waitFor(() => expect(requestId).not.toBe(''))
     controller.abort()
+    controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     await vi.waitFor(() =>
       expect(posted).toContainEqual({
@@ -422,6 +509,13 @@ describe('resolveYouTubePlayback', () => {
     )
     expect(removeSpy).toHaveBeenCalledWith('message', expect.any(Function))
     expect(clearTimerSpy).toHaveBeenCalled()
+    expect(
+      posted.filter(
+        message =>
+          (message as { type?: unknown })?.type ===
+          'RSS_PAL_YOUTUBE_RESOLVE_CANCEL',
+      ),
+    ).toHaveLength(1)
 
     dispatchBridgeMessage({
       type: 'RSS_PAL_YOUTUBE_RESOLVE_RESPONSE',
