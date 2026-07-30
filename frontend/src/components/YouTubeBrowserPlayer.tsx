@@ -47,6 +47,7 @@ export default function YouTubeBrowserPlayer({
   const autoRetryUsedRef = useRef(false)
   const mountedRef = useRef(true)
   const operationRef = useRef(0)
+  const identityRef = useRef(0)
   const resolvingRef = useRef(false)
   const playbackRef = useRef<BrowserPlayback | null>(null)
   const compatibilityModeRef = useRef(false)
@@ -238,6 +239,9 @@ export default function YouTubeBrowserPlayer({
     let player: MediaPlayerClass | null = null
     let errorHandler: ((event?: unknown) => void) | null = null
     let errorEvent = ''
+    let initializationFinished = false
+    let initializationErrorPending = false
+    let initializationFallbackUsed = false
 
     try {
       const manifest = buildYouTubeMpd(playback)
@@ -271,6 +275,11 @@ export default function YouTubeBrowserPlayer({
             ownedManifestURL,
           )
         ) {
+          initializationFallbackUsed = true
+          return
+        }
+        if (!initializationFinished) {
+          initializationErrorPending = true
           return
         }
         handleMediaFailure(operation)
@@ -282,6 +291,11 @@ export default function YouTubeBrowserPlayer({
       mpdURLRef.current = manifestURL
       player.on(errorEvent, errorHandler)
       player.initialize(video, manifestURL, false)
+      initializationFinished = true
+
+      if (initializationErrorPending) {
+        throw new MediaAttachmentError()
+      }
 
       if (
         !isCurrentOperation(operation) ||
@@ -297,6 +311,15 @@ export default function YouTubeBrowserPlayer({
       setCompatibilityMode(false)
       updatePhase('ready')
     } catch {
+      if (
+        initializationFallbackUsed &&
+        isCurrentOperation(operation) &&
+        playbackRef.current === playback &&
+        compatibilityModeRef.current
+      ) {
+        return
+      }
+
       const isOwned = (
         player !== null &&
         dashRef.current === player &&
@@ -436,10 +459,29 @@ export default function YouTubeBrowserPlayer({
   }
 
   useEffect(() => {
+    const identity = identityRef.current + 1
+    identityRef.current = identity
     mountedRef.current = true
+    operationRef.current += 1
+    resolvingRef.current = false
+    playbackRef.current = null
+    compatibilityModeRef.current = false
+    autoRetryUsedRef.current = false
+    startAppliedRef.current = false
+    setProgressiveURL('')
+    setQuality(0)
+    setCompatibilityMode(false)
+    setErrorMessage('视频暂时无法加载')
+    updatePhase('checking')
+
     void detectYouTubeBridge()
       .then(result => {
-        if (!mountedRef.current) return
+        if (
+          !mountedRef.current ||
+          identityRef.current !== identity
+        ) {
+          return
+        }
         if (!result.available) {
           updatePhase('unavailable')
         } else if (!result.compatible) {
@@ -449,16 +491,23 @@ export default function YouTubeBrowserPlayer({
         }
       })
       .catch(() => {
-        if (mountedRef.current) updatePhase('unavailable')
+        if (
+          mountedRef.current &&
+          identityRef.current === identity
+        ) {
+          updatePhase('unavailable')
+        }
       })
 
     return () => {
+      if (identityRef.current !== identity) return
+      identityRef.current += 1
       mountedRef.current = false
       operationRef.current += 1
       resolvingRef.current = false
       clearPlayback()
     }
-  }, [])
+  }, [videoId, start, originalURL])
 
   const showVideo = (
     phase === 'resolving' ||
