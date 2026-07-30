@@ -33,6 +33,16 @@
       return Number.isSafeInteger(parsed) ? parsed : null;
     }
 
+    function copyNumericValue(value) {
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+      }
+
+      return typeof value === 'string' && /^\d{1,32}$/.test(value)
+        ? value
+        : null;
+    }
+
     function copyRange(value) {
       if (!isObject(value)) {
         return null;
@@ -41,11 +51,8 @@
       const range = {};
       for (const key of ['start', 'end']) {
         if (hasOwn(value, key)) {
-          const field = value[key];
-          if (
-            field === null ||
-            (typeof field !== 'object' && typeof field !== 'function')
-          ) {
+          const field = copyNumericValue(value[key]);
+          if (field !== null) {
             range[key] = field;
           }
         }
@@ -76,11 +83,8 @@
             continue;
           }
 
-          const value = raw[key];
-          if (
-            value === null ||
-            (typeof value !== 'object' && typeof value !== 'function')
-          ) {
+          const value = copyNumericValue(raw[key]);
+          if (value !== null) {
             sanitized[key] = value;
           }
         }
@@ -400,13 +404,14 @@
         return true;
       }
 
+      let identityConfirmed = false;
       try {
         const responseVideoId = response?.videoDetails?.videoId;
-        if (
-          responseVideoId !== undefined &&
-          responseVideoId !== expectedVideoId
-        ) {
-          return false;
+        if (responseVideoId !== undefined) {
+          if (responseVideoId !== expectedVideoId) {
+            return false;
+          }
+          identityConfirmed = true;
         }
       } catch {
         return false;
@@ -415,19 +420,18 @@
       try {
         if (typeof player.getVideoData === 'function') {
           const videoData = player.getVideoData();
-          if (
-            isObject(videoData) &&
-            hasOwn(videoData, 'video_id') &&
-            videoData.video_id !== expectedVideoId
-          ) {
-            return false;
+          if (isObject(videoData) && hasOwn(videoData, 'video_id')) {
+            if (videoData.video_id !== expectedVideoId) {
+              return false;
+            }
+            identityConfirmed = true;
           }
         }
       } catch {
         return false;
       }
 
-      return true;
+      return identityConfirmed;
     }
 
     function adIsActive(player) {
@@ -534,6 +538,21 @@
       return true;
     }
 
+    function clearResourceTimings() {
+      try {
+        if (
+          pagePerformance === null ||
+          typeof pagePerformance.clearResourceTimings !== 'function'
+        ) {
+          return false;
+        }
+        pagePerformance.clearResourceTimings();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     let player = null;
     let response = null;
     try {
@@ -615,11 +634,15 @@
     } catch {
       // Enlarging the buffer is best-effort.
     }
+    let resourceTimingResetFailed = false;
     try {
-      if (typeof pagePerformance.clearResourceTimings === 'function') {
-        pagePerformance.clearResourceTimings();
-      }
+      resourceTimingResetFailed =
+        typeof pagePerformance.clearResourceTimings === 'function' &&
+        !clearResourceTimings();
     } catch {
+      resourceTimingResetFailed = true;
+    }
+    if (resourceTimingResetFailed) {
       return timeoutResult;
     }
 
@@ -672,8 +695,52 @@
       }
 
       const resourcesByItag = new Map();
+      const fallbackGraceDeadline = Math.min(
+        deadline,
+        now() + Math.min(4000, timeoutMs / 2),
+      );
+      let captureWindowWasUnsafe = false;
 
       while (true) {
+        const currentResponse = readUsableResponse(player, pageRoot);
+        const targetIdentityConfirmed =
+          currentResponse !== null &&
+          getPlayabilityStatus(currentResponse) === 'OK' &&
+          matchesExpectedVideo(
+            player,
+            currentResponse,
+            expectedVideoId,
+          );
+        const captureIsSafe =
+          targetIdentityConfirmed && !adIsActive(player);
+
+        if (!captureIsSafe) {
+          resourcesByItag.clear();
+          clearResourceTimings();
+          captureWindowWasUnsafe = true;
+
+          if (now() >= deadline || !(await sleepUntilNextPoll())) {
+            return timeoutResult;
+          }
+          continue;
+        }
+
+        if (captureWindowWasUnsafe) {
+          resourcesByItag.clear();
+          if (!clearResourceTimings()) {
+            if (now() >= deadline || !(await sleepUntilNextPoll())) {
+              return timeoutResult;
+            }
+            continue;
+          }
+          captureWindowWasUnsafe = false;
+
+          if (now() >= deadline || !(await sleepUntilNextPoll())) {
+            return timeoutResult;
+          }
+          continue;
+        }
+
         const entries = pagePerformance.getEntriesByType('resource');
         if (Array.isArray(entries)) {
           for (const entry of entries) {
@@ -704,25 +771,22 @@
           };
         }
 
+        if (
+          now() >= fallbackGraceDeadline &&
+          fallbackCoverageIsReady(playbackModel, resourcesByItag)
+        ) {
+          return {
+            status: 'OK',
+            formats,
+            resourceUrls: [...resourcesByItag.values()],
+          };
+        }
+
         if (now() >= deadline) {
-          if (fallbackCoverageIsReady(playbackModel, resourcesByItag)) {
-            return {
-              status: 'OK',
-              formats,
-              resourceUrls: [...resourcesByItag.values()],
-            };
-          }
           return timeoutResult;
         }
 
         if (!(await sleepUntilNextPoll())) {
-          if (fallbackCoverageIsReady(playbackModel, resourcesByItag)) {
-            return {
-              status: 'OK',
-              formats,
-              resourceUrls: [...resourcesByItag.values()],
-            };
-          }
           return timeoutResult;
         }
       }
