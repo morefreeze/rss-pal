@@ -56,7 +56,8 @@ function videoFormat(
 
 function audioFormat(
   {
-    url = googleVideoUrl(140),
+    itag = 140,
+    url = googleVideoUrl(itag),
     mimeType = 'audio/mp4; codecs="mp4a.40.2"',
     bitrate = 129_000,
     initRange = { start: '0', end: '721' },
@@ -64,7 +65,7 @@ function audioFormat(
   } = {},
 ) {
   return {
-    itag: 140,
+    itag,
     mimeType,
     bitrate,
     approxDurationMs: '600000',
@@ -331,6 +332,105 @@ test('falls back to a complete 720p adaptive pair', () => {
   assert.match(result.playback.video.url, /[?&]itag=136(?:&|$)/);
 });
 
+test('skips adaptive video and audio tracks without positive bitrate and duration', () => {
+  const invalidMetadataCases = [
+    {
+      name: 'missing bitrate',
+      mutate(format) {
+        delete format.bitrate;
+      },
+    },
+    {
+      name: 'zero bitrate',
+      mutate(format) {
+        format.bitrate = 0;
+      },
+    },
+    {
+      name: 'missing duration',
+      mutate(format) {
+        delete format.approxDurationMs;
+      },
+    },
+    {
+      name: 'zero duration',
+      mutate(format) {
+        format.approxDurationMs = 0;
+      },
+    },
+  ];
+
+  for (const metadataCase of invalidMetadataCases) {
+    const invalidVideo = videoFormat(137, 1080);
+    metadataCase.mutate(invalidVideo);
+    const videoFallback = selectPlayback(
+      captured([invalidVideo, videoFormat(136, 720), audioFormat()]),
+      NOW_MS,
+    );
+
+    assert.equal(videoFallback.ok, true, metadataCase.name);
+    assert.equal(videoFallback.playback.quality, 720, metadataCase.name);
+    assert.match(
+      videoFallback.playback.video.url,
+      /[?&]itag=136(?:&|$)/,
+      metadataCase.name,
+    );
+
+    const invalidAudio = audioFormat();
+    metadataCase.mutate(invalidAudio);
+    const audioFallback = selectPlayback(
+      captured([
+        videoFormat(137, 1080),
+        invalidAudio,
+        audioFormat({
+          itag: 251,
+          url: googleVideoUrl(251),
+          mimeType: 'audio/webm; codecs="opus"',
+          bitrate: 120_000,
+        }),
+      ]),
+      NOW_MS,
+    );
+
+    assert.equal(audioFallback.ok, true, metadataCase.name);
+    assert.match(
+      audioFallback.playback.audio.url,
+      /[?&]itag=251(?:&|$)/,
+      metadataCase.name,
+    );
+
+    for (const track of [
+      videoFallback.playback.video,
+      videoFallback.playback.audio,
+      audioFallback.playback.video,
+      audioFallback.playback.audio,
+    ]) {
+      assert.equal(
+        Number.isFinite(track.bitrate) && track.bitrate > 0,
+        true,
+        `${metadataCase.name}: bitrate`,
+      );
+      assert.equal(
+        Number.isFinite(track.durationMs) && track.durationMs > 0,
+        true,
+        `${metadataCase.name}: durationMs`,
+      );
+    }
+  }
+});
+
+test('returns no supported format instead of serializing undefined adaptive metadata', () => {
+  const video = videoFormat(137, 1080);
+  delete video.bitrate;
+  const audio = audioFormat();
+  audio.approxDurationMs = 0;
+
+  assert.deepEqual(selectPlayback(captured([video, audio]), NOW_MS), {
+    ok: false,
+    code: 'NO_SUPPORTED_FORMAT',
+  });
+});
+
 test('uses a progressive 720p format when no complete adaptive pair is usable', () => {
   const result = selectPlayback(
     captured([
@@ -487,6 +587,38 @@ test('uses a five-minute expiry when selected URLs contain no expiry', () => {
     result.playback.expiresAt,
     new Date(NOW_MS + 300_000).toISOString(),
   );
+});
+
+test('gives every selected URL a five-minute effective expiry when explicit expiry is absent', () => {
+  const farFutureExpiry = DEFAULT_EXPIRE_SECONDS + 10_000;
+  const cases = [
+    {
+      videoUrl: googleVideoUrl(137, { expire: farFutureExpiry }),
+      audioUrl: googleVideoUrl(140, { expire: null }),
+    },
+    {
+      videoUrl: googleVideoUrl(137, { expire: null }),
+      audioUrl:
+        'https://rr1---sn-a5mekn6z.googlevideo.com/' +
+        `videoplayback/itag/140/expire/${farFutureExpiry}/?sig=audio`,
+    },
+  ];
+
+  for (const { videoUrl, audioUrl } of cases) {
+    const result = selectPlayback(
+      captured([
+        videoFormat(137, 1080, { url: videoUrl }),
+        audioFormat({ url: audioUrl }),
+      ]),
+      NOW_MS,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(
+      result.playback.expiresAt,
+      new Date(NOW_MS + 300_000).toISOString(),
+    );
+  }
 });
 
 test('does not mutate captured formats, ranges, or observed resource URLs', () => {
