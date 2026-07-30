@@ -193,6 +193,9 @@
 
       const existing = entriesByVideoId.get(request.videoId);
       if (existing) {
+        if (existing.cancelled) {
+          return INTERNAL_ERROR;
+        }
         existing.requestIds.add(request.requestId);
         requestsById.set(request.requestId, {
           videoId: request.videoId,
@@ -238,9 +241,6 @@
       }
 
       entry.cancelled = true;
-      if (entriesByVideoId.get(entry.videoId) === entry) {
-        entriesByVideoId.delete(entry.videoId);
-      }
       if (Number.isInteger(entry.tabId)) {
         try {
           await chromeApi.tabs.remove(entry.tabId);
@@ -313,6 +313,9 @@
         ),
       );
       for (const tabId of orphanTabIds) {
+        if (activeTabIds.has(tabId)) {
+          continue;
+        }
         try {
           await chromeApi.tabs.remove(tabId);
         } catch {}
