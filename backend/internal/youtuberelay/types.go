@@ -4,7 +4,11 @@ import "errors"
 
 const MaxCombinedKbps = 4000.0
 
-var ErrNoCompatibleMedia = errors.New("no compatible youtube media")
+var (
+	ErrInvalidVideoID    = errors.New("invalid youtube video id")
+	ErrResolveFailed     = errors.New("youtube metadata resolution failed")
+	ErrNoCompatibleMedia = errors.New("no compatible youtube media")
+)
 
 type Format struct {
 	ID             string            `json:"format_id"`
@@ -36,4 +40,9 @@ type Selection struct {
 	Audio       *Format
 	Progressive *Format
 	Quality     int
+}
+
+type ResolvedMedia struct {
+	Info      VideoInfo
+	Selection Selection
 }
