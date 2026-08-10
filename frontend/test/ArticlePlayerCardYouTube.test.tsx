@@ -40,33 +40,27 @@ describe('ArticlePlayerCard YouTube routing', () => {
     mocks.browserPlayer.mockClear()
   })
 
-  it('routes a stored YouTube article through the browser player', () => {
+  it('routes a stored YouTube article through the native embed', () => {
     render(<ArticlePlayerCard article={videoArticle({
       media_type: 'video/youtube',
       media_url: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0',
     })} />)
 
-    expect(screen.getByTestId('youtube-browser-player')).toBeTruthy()
-    expect(mocks.browserPlayer).toHaveBeenCalledOnce()
-    expect(mocks.browserPlayer).toHaveBeenCalledWith({
-      videoId: 'dQw4w9WgXcQ',
-      start: undefined,
-      originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    })
-    expect(screen.queryByTitle('youtube video dQw4w9WgXcQ')).toBeNull()
+    const iframe = screen.getByTitle('youtube video dQw4w9WgXcQ')
+    expect(iframe.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0')
+    expect(mocks.browserPlayer).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('youtube-browser-player')).toBeNull()
   })
 
-  it('preserves a positive stored YouTube start in the browser player URL', () => {
+  it('preserves a positive stored YouTube start in the native embed URL', () => {
     render(<ArticlePlayerCard article={videoArticle({
       media_type: 'video/youtube',
       media_url: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=45',
     })} />)
 
-    expect(mocks.browserPlayer).toHaveBeenCalledWith({
-      videoId: 'dQw4w9WgXcQ',
-      start: 45,
-      originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=45s',
-    })
+    const iframe = screen.getByTitle('youtube video dQw4w9WgXcQ')
+    expect(iframe.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&start=45')
+    expect(mocks.browserPlayer).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -78,11 +72,9 @@ describe('ArticlePlayerCard YouTube routing', () => {
       media_url: `https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=${rawStart}`,
     })} />)
 
-    expect(mocks.browserPlayer).toHaveBeenCalledWith({
-      videoId: 'dQw4w9WgXcQ',
-      start: undefined,
-      originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    })
+    const iframe = screen.getByTitle('youtube video dQw4w9WgXcQ')
+    expect(iframe.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0')
+    expect(mocks.browserPlayer).not.toHaveBeenCalled()
   })
 
   it('keeps Bilibili playback client-direct', () => {

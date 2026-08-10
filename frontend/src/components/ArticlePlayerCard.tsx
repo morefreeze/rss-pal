@@ -2,7 +2,6 @@ import { Article } from '../api/client'
 import { usePlayer } from '../player/PlayerContext'
 import Spinner from './Spinner'
 import VideoEmbed from './VideoEmbed'
-import YouTubeBrowserPlayer from './YouTubeBrowserPlayer'
 import { parseStoredEmbedURL } from './parseVideoPlaceholder'
 
 function fmtMinSec(sec: number): string {
@@ -19,18 +18,6 @@ export default function ArticlePlayerCard({ article }: { article: Article }) {
   if (article.media_type && article.media_type.startsWith('video/')) {
     const v = parseStoredEmbedURL(article.media_url, article.media_type)
     if (!v) return null
-    if (v.platform === 'youtube') {
-      const start = typeof v.start === 'number' && Number.isFinite(v.start) && v.start > 0
-        ? v.start
-        : undefined
-      return (
-        <YouTubeBrowserPlayer
-          videoId={v.id}
-          start={start}
-          originalURL={`https://www.youtube.com/watch?v=${v.id}${start ? `&t=${start}s` : ''}`}
-        />
-      )
-    }
     return <VideoEmbed {...v} />
   }
 

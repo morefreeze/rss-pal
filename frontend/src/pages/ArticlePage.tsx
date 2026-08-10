@@ -41,6 +41,7 @@ import { ArticleDetailSkeleton } from '../components/ArticleDetailSkeleton'
 import ArticleDetailPreview from '../components/ArticleDetailPreview'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
 import { parseStoredEmbedURL } from '../components/parseVideoPlaceholder'
 import TagBar from '../components/TagBar'
@@ -101,6 +102,11 @@ export default function ArticlePage() {
   const [loadError, setLoadError] = useState('')
   const [refreshError, setRefreshError] = useState('')
   const loadGenerationRef = useRef(0)
+  const articlePageTitle =
+    article?.title
+    ?? articlePreview?.title
+    ?? (Number.isFinite(articleID) ? `文章 ${articleID}` : '文章详情')
+  useDocumentTitle(articlePageTitle)
 
   // Prev/next nav. The list page snapshots visible article IDs into
   // sessionStorage; optionally it also stores a fetch context so we can

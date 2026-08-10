@@ -1,18 +1,27 @@
 import { VideoEmbedData } from './parseVideoPlaceholder'
-import YouTubeBrowserPlayer from './YouTubeBrowserPlayer'
 import { isPakeWebView } from '../utils/runtimeEnvironment'
 
+function positiveFinite(value: number | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
 function buildSrc(d: VideoEmbedData): string {
+  if (d.platform === 'youtube') {
+    let s = `https://www.youtube-nocookie.com/embed/${d.id}?rel=0`
+    if (positiveFinite(d.start)) s += `&start=${d.start}`
+    return s
+  }
+
   const page = d.page && d.page > 0 ? d.page : 1
   let s = `https://player.bilibili.com/player.html?bvid=${d.id}&high_quality=1&autoplay=0&page=${page}`
-  if (d.start && d.start > 0) s += `&t=${d.start}`
+  if (positiveFinite(d.start)) s += `&t=${d.start}`
   return s
 }
 
 function buildBilibiliURL(d: VideoEmbedData): string {
   const params = new URLSearchParams()
   if (d.page && d.page > 1) params.set('p', String(d.page))
-  if (d.start && d.start > 0) params.set('t', String(d.start))
+  if (positiveFinite(d.start)) params.set('t', String(d.start))
   const query = params.toString()
   return `https://www.bilibili.com/video/${d.id}${query ? `?${query}` : ''}`
 }
@@ -61,19 +70,6 @@ function BilibiliExternalLink(props: VideoEmbedData) {
 }
 
 export default function VideoEmbed(props: VideoEmbedData) {
-  if (props.platform === 'youtube') {
-    const start = typeof props.start === 'number' && Number.isFinite(props.start) && props.start > 0
-      ? props.start
-      : undefined
-    return (
-      <YouTubeBrowserPlayer
-        videoId={props.id}
-        start={start}
-        originalURL={`https://www.youtube.com/watch?v=${props.id}${start ? `&t=${start}s` : ''}`}
-      />
-    )
-  }
-
   if (props.platform === 'bilibili' && isPakeWebView()) {
     return <BilibiliExternalLink {...props} />
   }
