@@ -171,6 +171,7 @@ describe('ArticlePage immediate loading', () => {
 
     expect(screen.getByText('Preview title')).toBeTruthy()
     expect(screen.getByText('Preview brief')).toBeTruthy()
+    expect(document.title).toBe('Preview title - RSS Pal')
   })
 
   it('passes the stored primary video identity to article markdown', () => {

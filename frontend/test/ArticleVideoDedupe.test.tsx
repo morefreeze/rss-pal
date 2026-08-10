@@ -1,22 +1,7 @@
 import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import type { Article } from '../src/api/client'
-
-const mocks = vi.hoisted(() => ({
-  browserPlayer: vi.fn(),
-}))
-
-vi.mock('../src/components/YouTubeBrowserPlayer', () => ({
-  default: (props: {
-    videoId: string
-    start?: number
-    originalURL: string
-  }) => {
-    mocks.browserPlayer(props)
-    return <div data-testid="youtube-browser-player" data-video-id={props.videoId} />
-  },
-}))
 
 import ArticlePlayerCard from '../src/components/ArticlePlayerCard'
 import MarkdownArticle from '../src/components/MarkdownArticle'
@@ -54,10 +39,6 @@ function renderArticleVideo(article: Article) {
 }
 
 describe('article video render deduplication', () => {
-  beforeEach(() => {
-    mocks.browserPlayer.mockClear()
-  })
-
   it('suppresses only the matching inline YouTube player and preserves surrounding content', () => {
     renderArticleVideo(videoArticle({
       media_type: 'video/youtube',
@@ -75,10 +56,10 @@ describe('article video render deduplication', () => {
       ].join('\r\n'),
     }))
 
-    expect(screen.getAllByTestId('youtube-browser-player')).toHaveLength(2)
-    expect(screen.getAllByTestId('youtube-browser-player').map(
-      node => node.getAttribute('data-video-id'),
-    )).toEqual(['dQw4w9WgXcQ', 'M7lc1UVf-VE'])
+    expect(screen.getAllByTitle(/youtube video/)).toHaveLength(2)
+    expect(screen.getAllByTitle(/youtube video/).map(
+      node => node.getAttribute('title'),
+    )).toEqual(['youtube video dQw4w9WgXcQ', 'youtube video M7lc1UVf-VE'])
     expect(screen.getByText('Before')).toBeTruthy()
     expect(screen.getByText('Between')).toBeTruthy()
     expect(screen.getByText('After')).toBeTruthy()

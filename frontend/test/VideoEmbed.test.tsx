@@ -78,18 +78,15 @@ describe('VideoEmbed', () => {
     expectBilibiliExternalLink()
   })
 
-  it('routes an inline YouTube video with a start through the browser player', () => {
+  it('renders an inline YouTube video as the native embed with a start', () => {
     render(<VideoEmbed platform="youtube" id="dQw4w9WgXcQ" start={45} />)
 
-    expect(screen.getByTestId('youtube-browser-player')).toBeTruthy()
-    expect(mocks.browserPlayer).toHaveBeenCalledOnce()
-    expect(mocks.browserPlayer).toHaveBeenCalledWith({
-      videoId: 'dQw4w9WgXcQ',
-      start: 45,
-      originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=45s',
-    })
-    expect(screen.queryByTitle('youtube video dQw4w9WgXcQ')).toBeNull()
-    expect(screen.queryByRole('link', { name: '在 YouTube 打开' })).toBeNull()
+    const iframe = screen.getByTitle('youtube video dQw4w9WgXcQ')
+    expect(iframe.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&start=45')
+    expect(iframe.getAttribute('allow')).toContain('encrypted-media')
+    expect(iframe.getAttribute('allowfullscreen')).not.toBeNull()
+    expect(mocks.browserPlayer).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('youtube-browser-player')).toBeNull()
   })
 
   it.each([
@@ -100,10 +97,8 @@ describe('VideoEmbed', () => {
   ])('normalizes a %s inline start', (_, start) => {
     render(<VideoEmbed platform="youtube" id="dQw4w9WgXcQ" start={start} />)
 
-    expect(mocks.browserPlayer).toHaveBeenCalledWith({
-      videoId: 'dQw4w9WgXcQ',
-      start: undefined,
-      originalURL: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    })
+    const iframe = screen.getByTitle('youtube video dQw4w9WgXcQ')
+    expect(iframe.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0')
+    expect(mocks.browserPlayer).not.toHaveBeenCalled()
   })
 })

@@ -20,6 +20,7 @@ import FeedHealthPage from './pages/FeedHealthPage'
 import ClipPage from './pages/ClipPage'
 import ExtensionConfigPage from './pages/ExtensionConfigPage'
 import Layout from './components/Layout'
+import RoutePageTitle from './components/RoutePageTitle'
 
 interface User {
   id: number
@@ -64,6 +65,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <RoutePageTitle />
       <Routes>
         <Route path="/login" element={<LoginPage onLogin={setUser} />} />
         <Route path="/register" element={<RegisterPage onLogin={setUser} />} />
