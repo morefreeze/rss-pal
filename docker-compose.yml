@@ -28,6 +28,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -74,6 +75,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.worker
+      network: host
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -125,6 +127,7 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      network: host
     ports:
       - "80:80"
       - "8443:443"
