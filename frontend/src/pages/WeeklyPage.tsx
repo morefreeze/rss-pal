@@ -4,6 +4,7 @@ import { getWeeklyDigest, WeeklyDigest } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
 import BriefingTabs from '../components/BriefingTabs'
 import BriefingWCardStrip from '../components/BriefingWCardStrip'
+import SummaryMarkdown from '../components/SummaryMarkdown'
 import { writeNav } from '../utils/articleNav'
 import { toast } from '../utils/toast'
 
@@ -100,7 +101,11 @@ export default function WeeklyPage() {
                     {a.published_at && <span className="text-muted text-sm">{new Date(a.published_at).toLocaleDateString('zh-CN')}</span>}
                     <ReadingMeta wordCount={a.word_count} readingMinutes={a.reading_minutes} />
                   </div>
-                  {a.summary_brief && <div className="text-muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{a.summary_brief}</div>}
+                  {a.summary_brief && (
+                    <div className="summary-markdown text-muted" style={{ fontSize: 13 }}>
+                      <SummaryMarkdown source={a.summary_brief} />
+                    </div>
+                  )}
                 </Link>
               ))}
             </div>

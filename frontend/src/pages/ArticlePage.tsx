@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
 import {
   fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
@@ -33,6 +32,7 @@ import {
 } from '../utils/linkSetSelection'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle from '../components/MarkdownArticle'
+import SummaryMarkdown from '../components/SummaryMarkdown'
 import TweetCard from '../components/TweetCard'
 import ReadingLayout from '../components/ReadingLayout'
 import BackToTopButton from '../components/BackToTopButton'
@@ -1386,18 +1386,12 @@ export default function ArticlePage() {
         {streamPhase !== 'idle' ? (
           <div className="markdown-body">
             {streamingBrief && (
-              <div style={{ whiteSpace: 'pre-wrap' }}>
-                {streamingBrief}
-                {streamPhase === 'brief' && <span className="typing-caret">▍</span>}
-              </div>
+              <SummaryMarkdown source={streamingBrief + (streamPhase === 'brief' ? ' ▍' : '')} />
             )}
             {streamingDetailed && (
               <>
                 <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
-                <div style={{ whiteSpace: 'pre-wrap' }}>
-                  {streamingDetailed}
-                  {streamPhase === 'detailed' && <span className="typing-caret">▍</span>}
-                </div>
+                <SummaryMarkdown source={streamingDetailed + (streamPhase === 'detailed' ? ' ▍' : '')} />
               </>
             )}
             {!streamingBrief && !streamingDetailed && (
@@ -1407,12 +1401,12 @@ export default function ArticlePage() {
         ) : (article.summary_brief || article.summary_detailed) ? (
           <div className="markdown-body">
             {article.summary_brief && (
-              <ReactMarkdown>{article.summary_brief}</ReactMarkdown>
+              <SummaryMarkdown source={article.summary_brief} />
             )}
             {article.summary_detailed && (
               <>
                 <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
-                <ReactMarkdown>{article.summary_detailed}</ReactMarkdown>
+                <SummaryMarkdown source={article.summary_detailed} />
               </>
             )}
           </div>

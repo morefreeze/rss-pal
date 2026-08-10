@@ -1,4 +1,5 @@
 import type { ArticleListItem } from '../api/client'
+import SummaryMarkdown from './SummaryMarkdown'
 
 export default function ArticleDetailPreview({
   article,
@@ -17,7 +18,9 @@ export default function ArticleDetailPreview({
       <h2 style={{ marginTop: 0 }}>{article.title}</h2>
       {metadata && <div className="text-muted text-sm">{metadata}</div>}
       {article.summary_brief && (
-        <p className="text-muted">{article.summary_brief}</p>
+        <div className="summary-markdown text-muted">
+          <SummaryMarkdown source={article.summary_brief} />
+        </div>
       )}
       <div className="text-muted text-sm">正在加载正文…</div>
     </div>

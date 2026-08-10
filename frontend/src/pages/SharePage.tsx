@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import axios from 'axios'
-import ReactMarkdown from 'react-markdown'
+import SummaryMarkdown from '../components/SummaryMarkdown'
 
 interface SharedArticle {
   id: number
@@ -79,11 +79,11 @@ export default function SharePage() {
         <div className="card">
           <h3 style={{ marginBottom: 10 }}>AI 总结</h3>
           <div className="markdown-body">
-            {article.summary_brief && <ReactMarkdown>{article.summary_brief}</ReactMarkdown>}
+            {article.summary_brief && <SummaryMarkdown source={article.summary_brief} />}
             {article.summary_brief && article.summary_detailed && (
               <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
             )}
-            {article.summary_detailed && <ReactMarkdown>{article.summary_detailed}</ReactMarkdown>}
+            {article.summary_detailed && <SummaryMarkdown source={article.summary_detailed} />}
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Article, expandLinkSetChild, getArticle } from '../api/client'
+import SummaryMarkdown from './SummaryMarkdown'
 
 interface Props {
   parentId: number
@@ -125,9 +126,9 @@ export function LinkSetChildren({ parentId, children, onChildrenUpdated }: Props
               </button>
             )}
             {c.processing_state === 'ready' && c.summary_brief && (
-              <p className="text-sm mt-2" style={{ color: 'var(--fg)' }}>
-                {c.summary_brief}
-              </p>
+              <div className="summary-markdown text-sm mt-2" style={{ color: 'var(--fg)' }}>
+                <SummaryMarkdown source={c.summary_brief} />
+              </div>
             )}
           </article>
         ))}

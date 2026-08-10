@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import ReactMarkdown from 'react-markdown'
 import MarkdownArticle from './MarkdownArticle'
+import SummaryMarkdown from './SummaryMarkdown'
 import ReaderSettingsPanel from './ReaderSettingsPanel'
 import { CodeWrapContext } from './CodeWrapContext'
 import type { ReaderFontFamily } from '../hooks/useReaderSettings'
@@ -81,11 +81,11 @@ export default function ReadingLayout(props: Props) {
             </button>
             {summaryOpen && (
               <div className="reading-summary-body">
-                {article.summary_brief && <ReactMarkdown>{article.summary_brief}</ReactMarkdown>}
+                {article.summary_brief && <SummaryMarkdown source={article.summary_brief} />}
                 {article.summary_detailed && (
                   <>
                     <hr />
-                    <ReactMarkdown>{article.summary_detailed}</ReactMarkdown>
+                    <SummaryMarkdown source={article.summary_detailed} />
                   </>
                 )}
               </div>
