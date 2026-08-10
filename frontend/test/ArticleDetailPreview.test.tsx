@@ -22,4 +22,23 @@ describe('ArticleDetailPreview', () => {
     expect(screen.getByText('Brief from the list')).toBeTruthy()
     expect(screen.getByText('正在加载正文…')).toBeTruthy()
   })
+
+  it('renders bullet-style AI summaries as markdown lists', () => {
+    const preview: ArticleListItem = {
+      id: 8,
+      feed_id: 1,
+      feed_title: 'Example Feed',
+      title: 'Prefetched title',
+      url: 'https://example.com/8',
+      published_at: '2026-07-27T00:00:00Z',
+      summary_brief: '• 第一条\n• 第二条',
+      fetched_at: '2026-07-27T00:00:00Z',
+      manual_tags: [],
+    }
+    render(<ArticleDetailPreview article={preview} />)
+    expect(screen.getByRole('list')).toBeTruthy()
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.getByText('第一条')).toBeTruthy()
+    expect(screen.getByText('第二条')).toBeTruthy()
+  })
 })

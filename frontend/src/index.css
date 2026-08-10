@@ -619,6 +619,12 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 6px 10px; }
 .markdown-body th { background: var(--surface-hover); font-weight: 600; }
 
+.summary-markdown { line-height: 1.5; }
+.summary-markdown p { margin: 4px 0; }
+.summary-markdown ul, .summary-markdown ol { padding-left: 1.4em; margin: 4px 0; }
+.summary-markdown li { margin: 2px 0; }
+.summary-markdown li > p { margin: 0; }
+
 /* === Toast === */
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(-12px); }
