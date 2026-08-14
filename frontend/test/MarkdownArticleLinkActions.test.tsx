@@ -34,6 +34,14 @@ function selectText(node: Node, start: number, end: number) {
 }
 
 describe('MarkdownArticle reader link actions', () => {
+  it('marks English-heavy article bodies for browser hyphenation', () => {
+    render(
+      <MarkdownArticle source="Internationalization improves readability for exceptionallylongenglishheadwords near narrow edges." />,
+    )
+    const paragraph = screen.getByText(/Internationalization improves readability/)
+    expect(paragraph.closest('.markdown-body')?.getAttribute('lang')).toBe('en')
+  })
+
   it('renders link state without mailbox buttons and reports full titles', async () => {
     const discovered = vi.fn()
     render(
