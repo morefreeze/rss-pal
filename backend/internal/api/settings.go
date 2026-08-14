@@ -23,7 +23,7 @@ type SettingsHandler struct {
 func NewSettingsHandler(cfg *config.Config, templateRepo *repository.TemplateRepository, userRepo *repository.UserRepository) *SettingsHandler {
 	var summarizer *ai.Summarizer
 	if cfg.Claude.APIKey != "" {
-		summarizer = ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
+		summarizer = ai.NewSummarizerWithModel(cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	}
 	return &SettingsHandler{cfg: cfg, templateRepo: templateRepo, userRepo: userRepo, summarizer: summarizer}
 }

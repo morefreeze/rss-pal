@@ -69,7 +69,7 @@ func main() {
 
 	var summarizer *ai.Summarizer
 	if cfg.Claude.APIKey != "" {
-		summarizer = ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
+		summarizer = ai.NewSummarizerWithModel(cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 		summarizer.SetVisionModel(cfg.AI.Vision.Model)
 		log.Println("AI summarizer initialized")
 	} else {
@@ -84,7 +84,7 @@ func main() {
 			userInsightsRepo: userInsightsRepo,
 			templateRepo:     templateRepo,
 			summarizer:       summarizer,
-			defaultModel:     ai.DefaultModel,
+			defaultModel:     cfg.Claude.Model,
 		})
 		defer stopCron()
 	}

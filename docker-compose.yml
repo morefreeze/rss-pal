@@ -41,6 +41,7 @@ services:
       DB_NAME: rsspal
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}
       CLAUDE_BASE_URL: ${CLAUDE_BASE_URL:-https://api.anthropic.com}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-glm-5.3}
       AI_VISION_MODEL: ${AI_VISION_MODEL:-glm-5v-turbo}
       AI_VISION_MAX_IMAGES: ${AI_VISION_MAX_IMAGES:-6}
       AI_VISION_MAX_LONG_SIDE: ${AI_VISION_MAX_LONG_SIDE:-1024}
@@ -84,6 +85,7 @@ services:
       DB_NAME: rsspal
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}
       CLAUDE_BASE_URL: ${CLAUDE_BASE_URL:-https://api.anthropic.com}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-glm-5.3}
       AI_VISION_MODEL: ${AI_VISION_MODEL:-glm-5v-turbo}
       AI_VISION_MAX_IMAGES: ${AI_VISION_MAX_IMAGES:-6}
       AI_VISION_MAX_LONG_SIDE: ${AI_VISION_MAX_LONG_SIDE:-1024}

@@ -46,6 +46,7 @@ type DatabaseConfig struct {
 type ClaudeConfig struct {
 	APIKey  string
 	BaseURL string
+	Model   string
 }
 
 type AIConfig struct {
@@ -96,6 +97,7 @@ func Load() *Config {
 		Claude: ClaudeConfig{
 			APIKey:  getEnv("CLAUDE_API_KEY", ""),
 			BaseURL: getEnv("CLAUDE_BASE_URL", "https://api.anthropic.com"),
+			Model:   getEnv("CLAUDE_MODEL", "glm-5.3"),
 		},
 		AI: AIConfig{
 			Vision: VisionConfig{

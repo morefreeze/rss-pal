@@ -53,7 +53,7 @@ func main() {
 	clipRepo := repository.NewClipRepository(db)
 	hiddenRepo := repository.NewHiddenArticleRepository(db)
 
-	summarizer := ai.NewSummarizer(cfg.Claude.APIKey, cfg.Claude.BaseURL)
+	summarizer := ai.NewSummarizerWithModel(cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	summarizer.SetVisionModel(cfg.AI.Vision.Model)
 	summarizerService := service.NewSummarizerService(summarizer)
 
