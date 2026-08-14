@@ -125,7 +125,11 @@ func (h *InsightsHandler) chooseSummarizer(c *gin.Context, userID int) *ai.Summa
 	if baseURL == "" {
 		baseURL = h.cfg.Claude.BaseURL
 	}
-	return ai.NewSummarizerWithModel(aiCfg.APIKey, baseURL, aiCfg.Model)
+	model := aiCfg.Model
+	if model == "" && h.cfg != nil {
+		model = h.cfg.Claude.Model
+	}
+	return ai.NewSummarizerWithModel(aiCfg.APIKey, baseURL, model)
 }
 
 // Generate kicks off an async insight job. Returns immediately with the
