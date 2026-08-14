@@ -143,6 +143,26 @@ describe('ArticlePage immediate loading', () => {
     expect(apiMocks.getArticle).toHaveBeenCalledWith(42)
   })
 
+  it('links the detail source to the feed-filtered article list', () => {
+    const fresh = deferred<ArticleDetailResponse>()
+    apiMocks.getArticle.mockReturnValue(fresh.promise)
+    putArticleDetail(detail(42))
+
+    render(
+      <MemoryRouter initialEntries={[{
+        pathname: '/articles/42',
+        state: { from: '/articles?saved=1' },
+      }]}>
+        <Routes>
+          <Route path="/articles/:id" element={<ArticlePage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const source = screen.getByRole('link', { name: '查看 Cached Feed 的文章' })
+    expect(source.getAttribute('href')).toBe('/articles?saved=1&feed_id=1')
+  })
+
   it('renders a matching list preview while a cold request is pending', () => {
     const fresh = deferred<ArticleDetailResponse>()
     apiMocks.getArticle.mockReturnValue(fresh.promise)

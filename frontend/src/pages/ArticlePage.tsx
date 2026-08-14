@@ -50,6 +50,8 @@ import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
 import ArticleProgressBar from '../components/ArticleProgressBar'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
+import FeedSourceLink from '../components/FeedSourceLink'
+import { extractSearchFromPath } from '../utils/feedFilterLink'
 import {
   computeViewportProgress,
   deriveHistoricalHighWater,
@@ -92,7 +94,11 @@ export default function ArticlePage() {
     locationState?.from
     ?? (() => { try { return sessionStorage.getItem('articleEntryPath') } catch { return null } })()
     ?? '/articles'
+  const entrySearch = extractSearchFromPath(entryPath)
   const handleBack = useCallback(() => navigate(entryPath), [navigate, entryPath])
+  const handleSourceFilter = useCallback((_feedId: number, href: string) => {
+    navigate(href)
+  }, [navigate])
   const [article, setArticle] = useState<Article | null>(() => initialDetail?.article ?? null)
   const [progress, setProgress] = useState<ReadingProgress | null>(() => initialDetail?.progress ?? null)
   const [currentScrollPosition, setCurrentScrollPosition] = useState(
@@ -1230,7 +1236,14 @@ export default function ArticlePage() {
             </button>
           </div>
           {article.feed_title && (
-            <div className="text-sm" style={{ color: 'var(--accent)' }}>{article.feed_title}</div>
+            <FeedSourceLink
+              feedId={article.feed_id}
+              label={article.feed_title}
+              search={entrySearch}
+              className="text-sm"
+              style={{ color: 'var(--accent)' }}
+              onNavigate={handleSourceFilter}
+            />
           )}
         </div>
         <h2>{article.title}</h2>

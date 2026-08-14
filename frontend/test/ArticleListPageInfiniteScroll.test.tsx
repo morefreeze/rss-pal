@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticleListPage from '../src/pages/ArticleListPage'
 import type { ArticleListItem, Feed } from '../src/api/client'
@@ -225,6 +225,43 @@ describe('ArticleListPage automatic pagination', () => {
     })
     expect(sessionStorage.getItem('selectedFeed')).toBe('3')
     expect(screen.queryByPlaceholderText('搜索订阅...')).toBeNull()
+  })
+
+  it('syncs feed source links into the mounted article list without resetting other filters', async () => {
+    sessionStorage.setItem('unreadOnly', 'true')
+    sessionStorage.setItem('savedOnly', 'true')
+    apiMocks.getFeeds.mockResolvedValue([
+      makeFeed(3, 'Gamma Notes', 'https://gamma.example/feed'),
+    ])
+    apiMocks.getArticles.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/articles?saved=1']}>
+        <Routes>
+          <Route path="/articles" element={(
+            <>
+              <Link to="/articles?saved=1&feed_id=3">Gamma source</Link>
+              <ArticleListPage />
+            </>
+          )} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(apiMocks.getArticles).toHaveBeenCalledWith(
+        expect.objectContaining({ offset: 0, saved: true, unread: true }),
+      )
+    })
+
+    fireEvent.click(screen.getByRole('link', { name: 'Gamma source' }))
+
+    await waitFor(() => {
+      expect(apiMocks.getArticles).toHaveBeenCalledWith(
+        expect.objectContaining({ feed_id: 3, offset: 0, saved: true, unread: true }),
+      )
+    })
+    expect(sessionStorage.getItem('selectedFeed')).toBe('3')
   })
 
   it('waits for reset page zero before rearming automatic page two', async () => {
