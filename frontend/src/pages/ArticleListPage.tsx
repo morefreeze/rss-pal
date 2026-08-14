@@ -18,6 +18,7 @@ import { useBreakpoint } from '../hooks/useBreakpoint'
 import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
 import { useArticleDetailPrefetch } from '../hooks/useArticleDetailPrefetch'
 import FeedSourceLink from '../components/FeedSourceLink'
+import { pinyinSearchIncludes } from '../utils/pinyinSearch'
 
 const PAGE_SIZE = 20
 
@@ -192,7 +193,7 @@ function FeedPicker({
   const filteredFeeds = useMemo(() => {
     if (!normalizedQuery) return feeds
     return feeds.filter(feed =>
-      `${feed.title || ''} ${feed.url}`.toLocaleLowerCase().includes(normalizedQuery),
+      pinyinSearchIncludes(`${feed.title || ''} ${feed.url}`, normalizedQuery),
     )
   }, [feeds, normalizedQuery])
 

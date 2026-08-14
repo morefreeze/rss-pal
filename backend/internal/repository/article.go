@@ -886,7 +886,68 @@ func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Art
 		return nil, err
 	}
 	defer rows.Close()
-	return r.scanArticle(rows)
+	articles, err := r.scanArticle(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(articles) >= limit {
+		return articles, nil
+	}
+	pinyinMatches, err := r.searchByPinyin(query, userID, limit-len(articles), articles)
+	if err != nil {
+		return nil, err
+	}
+	return append(articles, pinyinMatches...), nil
+}
+
+func (r *ArticleRepository) searchByPinyin(query string, userID, remaining int, existing []model.Article) ([]model.Article, error) {
+	if remaining <= 0 || normalizePinyinToken(query) == "" {
+		return nil, nil
+	}
+	seen := make(map[int]bool, len(existing))
+	for _, article := range existing {
+		seen[article.ID] = true
+	}
+	candidateLimit := remaining * 100
+	if candidateLimit < 1000 {
+		candidateLimit = 1000
+	}
+	if candidateLimit > 5000 {
+		candidateLimit = 5000
+	}
+	sqlStr := `
+		SELECT a.id, a.feed_id, a.title, a.url, '' as content, a.published_at, a.summary_brief, '' as summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title,
+		       COALESCE(rp.is_completed, false) as is_read, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
+		FROM articles a
+		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $1
+		WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+		  AND ha.id IS NULL
+		ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(a.published_at, a.fetched_at), a.fetched_at - INTERVAL '7 days')) DESC,
+		         COALESCE(a.published_at, a.fetched_at) DESC
+		LIMIT $2
+	`
+	rows, err := r.db.Query(sqlStr, userID, candidateLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	candidates, err := r.scanArticle(rows)
+	if err != nil {
+		return nil, err
+	}
+	matches := make([]model.Article, 0, remaining)
+	for _, article := range candidates {
+		if seen[article.ID] || !articleMatchesPinyinSearch(article, query) {
+			continue
+		}
+		matches = append(matches, article)
+		if len(matches) >= remaining {
+			break
+		}
+	}
+	return matches, nil
 }
 
 // GetByIDsForUser fetches the given article IDs in the order they appear in
