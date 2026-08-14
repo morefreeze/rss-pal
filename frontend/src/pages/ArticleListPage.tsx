@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
 import { writeNav, type NavContext } from '../utils/articleNav'
@@ -154,6 +154,123 @@ function SearchArticleRow({
   )
 }
 
+function formatFeedOption(feed: Feed): string {
+  const label = feed.title || feed.url
+  return feed.unread_count > 0 ? `${label} (${feed.unread_count})` : label
+}
+
+function FeedPicker({
+  feeds,
+  selectedFeed,
+  disabled,
+  compact,
+  onSelect,
+}: {
+  feeds: Feed[]
+  selectedFeed: number | null
+  disabled: boolean
+  compact: boolean
+  onSelect: (feedId: number | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const rootRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const selected = feeds.find(feed => feed.id === selectedFeed)
+  const selectedLabel = selected ? formatFeedOption(selected) : '全部订阅'
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filteredFeeds = useMemo(() => {
+    if (!normalizedQuery) return feeds
+    return feeds.filter(feed =>
+      `${feed.title || ''} ${feed.url}`.toLocaleLowerCase().includes(normalizedQuery),
+    )
+  }, [feeds, normalizedQuery])
+
+  useEffect(() => {
+    if (!open) {
+      setQuery('')
+      return
+    }
+    inputRef.current?.focus()
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [open])
+
+  const pick = (feedId: number | null) => {
+    onSelect(feedId)
+    setOpen(false)
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className="feed-picker"
+      style={compact ? { width: '100%' } : undefined}
+    >
+      <button
+        type="button"
+        className="toolbar-control feed-picker-button"
+        aria-label={`订阅筛选：${selectedLabel}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen(value => !value)}
+      >
+        <span className="feed-picker-label">{selectedLabel}</span>
+        <span aria-hidden="true" className="feed-picker-caret">▾</span>
+      </button>
+      {open && (
+        <div className="feed-picker-popover">
+          <input
+            ref={inputRef}
+            type="search"
+            placeholder="搜索订阅..."
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            className="toolbar-control feed-picker-search"
+            onKeyDown={event => {
+              if (event.key === 'Escape') setOpen(false)
+            }}
+          />
+          <div role="listbox" aria-label="订阅列表" className="feed-picker-list">
+            <button
+              type="button"
+              role="option"
+              aria-selected={selectedFeed == null}
+              className="feed-picker-option"
+              onClick={() => pick(null)}
+            >
+              全部订阅
+            </button>
+            {filteredFeeds.map(feed => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={selectedFeed === feed.id}
+                key={feed.id}
+                className="feed-picker-option"
+                onClick={() => pick(feed.id)}
+              >
+                {formatFeedOption(feed)}
+              </button>
+            ))}
+            {filteredFeeds.length === 0 && (
+              <div className="feed-picker-empty">没有匹配的订阅</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ArticleListPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -257,6 +374,16 @@ export default function ArticleListPage() {
   // mark-all-read are hidden because /api/clip doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
   const isClippingMode = selectedFeedObj?.feed_type === 'clip'
+  const handleFeedSelect = useCallback((val: number | null) => {
+    setSelectedFeed(val)
+    try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
+    const pickedClip = val != null && feeds.find(f => f.id === val)?.feed_type === 'clip'
+    if (pickedClip && !wantsClip) {
+      setSearchParams({ view: 'clip' })
+    } else if (!pickedClip && wantsClip) {
+      setSearchParams({})
+    }
+  }, [feeds, wantsClip, setSearchParams])
   const { promote: promoteArticlePrefetch, registerCard: registerArticlePrefetchCard } = useArticleDetailPrefetch(
     isClippingMode ? [] : articles.slice(0, 6).map(article => article.id),
     !isClippingMode,
@@ -677,28 +804,13 @@ export default function ArticleListPage() {
             />
           )
           const feedSelectEl = (
-            <select
-              value={selectedFeed || ''}
-              onChange={e => {
-                const val = e.target.value ? Number(e.target.value) : null
-                setSelectedFeed(val)
-                try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
-                const pickedClip = val != null && feeds.find(f => f.id === val)?.feed_type === 'clip'
-                if (pickedClip && !wantsClip) {
-                  setSearchParams({ view: 'clip' })
-                } else if (!pickedClip && wantsClip) {
-                  setSearchParams({})
-                }
-              }}
-              className="toolbar-control"
+            <FeedPicker
+              feeds={feeds}
+              selectedFeed={selectedFeed}
               disabled={!!searchQuery}
-              style={compactToolbar ? { width: '100%' } : undefined}
-            >
-              <option value="">全部订阅</option>
-              {feeds.map(f => (
-                <option key={f.id} value={f.id}>{f.title || f.url}{f.unread_count > 0 ? ` (${f.unread_count})` : ''}</option>
-              ))}
-            </select>
+              compact={compactToolbar}
+              onSelect={handleFeedSelect}
+            />
           )
           const sortEl = !searchQuery && !grouped && (() => {
             const pick = (field: ArticleSort) => {
