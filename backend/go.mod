@@ -2,6 +2,8 @@ module github.com/bytedance/rss-pal
 
 go 1.25.0
 
+replace github.com/mozillazg/go-pinyin => ./third_party/go-pinyin
+
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.8.0
