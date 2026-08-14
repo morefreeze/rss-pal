@@ -23,6 +23,7 @@ type ReaderInteractionSurfaceProps = {
   articleKey: string | number
   children: ReactNode
   className?: string
+  lang?: string
 }
 
 type PendingLongPress = {
@@ -64,6 +65,7 @@ export function ReaderInteractionSurface({
   articleKey,
   children,
   className,
+  lang,
 }: ReaderInteractionSurfaceProps) {
   const actionContext = useContext(ReaderActionContext)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -359,6 +361,7 @@ export function ReaderInteractionSurface({
         ref={rootRef}
         tabIndex={-1}
         className={['reader-interaction-surface', className].filter(Boolean).join(' ')}
+        lang={lang}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

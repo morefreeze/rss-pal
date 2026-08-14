@@ -42,6 +42,15 @@ const AVATAR_ATTR_KEYWORDS = [
 const AVATAR_URL_KEYWORDS = [
   'gravatar.com', '/avatar/', '/avatars/',
 ]
+const LATIN_LETTER_RE = /[A-Za-z]/g
+const CJK_LETTER_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/g
+
+function detectArticleLang(source: string): string | undefined {
+  const latinCount = source.match(LATIN_LETTER_RE)?.length ?? 0
+  if (latinCount < 24) return undefined
+  const cjkCount = source.match(CJK_LETTER_RE)?.length ?? 0
+  return latinCount >= Math.max(24, cjkCount * 2) ? 'en' : undefined
+}
 
 // isAvatarImg mirrors the server-side detector (Signal 1 only — class/id/width
 // /height attributes don't survive markdown round-trip, so dimension matching
@@ -199,9 +208,10 @@ function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
     () => flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source))),
     [source],
   )
+  const articleLang = useMemo(() => detectArticleLang(cleaned), [cleaned])
   const dims = imageDimensions ?? null
   return (
-    <ReaderInteractionSurface articleKey={source} className="markdown-body">
+    <ReaderInteractionSurface articleKey={source} className="markdown-body" lang={articleLang}>
       <SuppressedVideoContext.Provider value={suppressVideo ?? null}>
         <ImageDimensionsContext.Provider value={dims}>
           <ReactMarkdown
