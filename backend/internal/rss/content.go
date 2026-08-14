@@ -3,6 +3,7 @@ package rss
 import (
 	"context"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -42,6 +43,11 @@ type ContentFetcher struct {
 	jinaAPIKey string
 }
 
+type ContentResult struct {
+	Content string
+	Title   string
+}
+
 func NewContentFetcher() *ContentFetcher {
 	return &ContentFetcher{
 		client: &http.Client{
@@ -55,27 +61,38 @@ func NewContentFetcher() *ContentFetcher {
 // fetch is blocked (non-2xx, e.g. Cloudflare 403) or yields too little text
 // (likely a JS-rendered page), it falls back to Jina Reader (r.jina.ai).
 func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, error) {
-	content, status, err := f.fetchDirect(ctx, url)
+	result, err := f.FetchContentWithMetadata(ctx, url)
+	if err != nil {
+		return "", err
+	}
+	return result.Content, nil
+}
+
+// FetchContentWithMetadata fetches and extracts main content plus lightweight
+// page metadata. The content behavior matches FetchContent; Title is best
+// effort and may be empty when only a fallback reader succeeds.
+func (f *ContentFetcher) FetchContentWithMetadata(ctx context.Context, url string) (ContentResult, error) {
+	result, status, err := f.fetchDirect(ctx, url)
 	if err != nil {
 		// Network-level failure — try Jina before giving up.
 		if jc, jerr := f.fetchViaJina(ctx, url); jerr == nil && jc != "" {
-			return jc, nil
+			return ContentResult{Content: jc}, nil
 		}
-		return "", err
+		return ContentResult{}, err
 	}
 
-	if status == http.StatusOK && len(content) >= jinaFallbackMinChars {
-		return content, nil
+	if status == http.StatusOK && len(result.Content) >= jinaFallbackMinChars {
+		return result, nil
 	}
 
 	// Direct fetch was blocked or extracted too little — try Jina Reader.
 	if jc, jerr := f.fetchViaJina(ctx, url); jerr == nil && jc != "" {
-		return jc, nil
+		return ContentResult{Content: jc, Title: result.Title}, nil
 	} else if jerr != nil {
 		log.Printf("Jina fallback failed for %s: %v", url, jerr)
 	}
 
-	return content, nil
+	return result, nil
 }
 
 // FetchHTMLDocument fetches the URL and returns a parsed goquery document.
@@ -109,11 +126,11 @@ func (f *ContentFetcher) FetchHTMLDocument(ctx context.Context, pageURL string) 
 }
 
 // fetchDirect performs the original direct HTTP scrape. Returns the extracted
-// content, the HTTP status code, and any transport error.
-func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, int, error) {
+// content + metadata, the HTTP status code, and any transport error.
+func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentResult, int, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return "", 0, err
+		return ContentResult{}, 0, err
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -122,19 +139,20 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return "", 0, err
+		return ContentResult{}, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", resp.StatusCode, nil
+		return ContentResult{}, resp.StatusCode, nil
 	}
 
 	// Parse HTML
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return "", resp.StatusCode, err
+		return ContentResult{}, resp.StatusCode, err
 	}
+	title := extractDocumentTitle(doc)
 
 	// Remove unwanted elements. Exclude top-level containers from the
 	// attribute-substring matchers — e.g. WeChat sets
@@ -206,7 +224,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (string, i
 		content = content[:50000] + "..."
 	}
 
-	return content, http.StatusOK, nil
+	return ContentResult{Content: content, Title: title}, http.StatusOK, nil
 }
 
 // fetchViaJina retrieves the article via the Jina Reader proxy
@@ -350,10 +368,21 @@ func cleanContent(content string) string {
 
 // FetchContentFromReader extracts content from an io.Reader (for testing or reuse)
 func (f *ContentFetcher) FetchContentFromReader(r io.Reader) (string, error) {
-	doc, err := goquery.NewDocumentFromReader(r)
+	result, err := f.FetchContentWithMetadataFromReader(r)
 	if err != nil {
 		return "", err
 	}
+	return result.Content, nil
+}
+
+// FetchContentWithMetadataFromReader extracts content and page metadata from
+// an io.Reader (for testing or reuse).
+func (f *ContentFetcher) FetchContentWithMetadataFromReader(r io.Reader) (ContentResult, error) {
+	doc, err := goquery.NewDocumentFromReader(r)
+	if err != nil {
+		return ContentResult{}, err
+	}
+	title := extractDocumentTitle(doc)
 
 	doc.Find("script, style, nav, header, footer, aside").Remove()
 	StripAvatars(doc)
@@ -382,7 +411,31 @@ func (f *ContentFetcher) FetchContentFromReader(r io.Reader) (string, error) {
 		})
 	}
 
-	return cleanContent(content), nil
+	return ContentResult{Content: cleanContent(content), Title: title}, nil
+}
+
+func extractDocumentTitle(doc *goquery.Document) string {
+	selectors := []string{
+		`meta[property="og:title"]`,
+		`meta[name="og:title"]`,
+		`meta[name="twitter:title"]`,
+		`meta[property="twitter:title"]`,
+	}
+	for _, selector := range selectors {
+		if title := cleanTitle(doc.Find(selector).First().AttrOr("content", "")); title != "" {
+			return title
+		}
+	}
+	return cleanTitle(doc.Find("title").First().Text())
+}
+
+func cleanTitle(title string) string {
+	title = html.UnescapeString(title)
+	title = strings.Join(strings.Fields(title), " ")
+	if utf8Len := len([]rune(title)); utf8Len > 500 {
+		title = string([]rune(title)[:500])
+	}
+	return title
 }
 
 // StripHTML removes HTML tags from a string, returning plain text.

@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	maxLinkSetParentsPerCycle     = 10
-	maxLinkSetChildrenPerCycle    = 30
-	maxSuggestionChecksPerCycle   = 10
-	linkSetMinCandidates          = 3
+	maxLinkSetParentsPerCycle   = 10
+	maxLinkSetChildrenPerCycle  = 30
+	maxSuggestionChecksPerCycle = 10
+	linkSetMinCandidates        = 3
 )
 
 // detectLinkSetCandidates inspects articles whose links_extendable is NULL
@@ -205,7 +205,8 @@ func processQueuedChildren(
 				return
 			}
 
-			content, ferr := contentFetcher.FetchContent(cctx, c.URL)
+			result, ferr := contentFetcher.FetchContentWithMetadata(cctx, c.URL)
+			content := result.Content
 			if ferr != nil || content == "" {
 				log.Printf("link_set: child %d (%s) fetch failed: %v", c.ID, c.URL, ferr)
 				if e := articleRepo.IncrementRefetchAttempts(c.ID); e != nil {
@@ -241,6 +242,11 @@ func processQueuedChildren(
 				}
 				atomic.AddInt64(&failed, 1)
 				return
+			}
+			if result.Title != "" && result.Title != c.Title {
+				if e := articleRepo.UpdateTitle(c.ID, result.Title); e != nil {
+					log.Printf("link_set: update title %d: %v", c.ID, e)
+				}
 			}
 			atomic.AddInt64(&success, 1)
 		}()
