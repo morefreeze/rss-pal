@@ -393,6 +393,32 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
   background: var(--accent-soft);
   font-weight: 600;
 }
+.version-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 0 16px;
+  margin-bottom: var(--bottom-chrome, 0px);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  opacity: 0.72;
+}
+.version-footer-meta,
+.version-footer-filings {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.filing-link {
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+.filing-link:hover {
+  color: var(--accent);
+}
 .unread-badge {
   background: var(--accent);
   color: var(--accent-fg);

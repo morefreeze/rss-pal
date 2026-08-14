@@ -8,6 +8,9 @@ import MobileTabBar from './MobileTabBar'
 import { useBreakpoint } from '../hooks/useBreakpoint'
 import { VERSION as FRONTEND_VERSION } from '../version'
 
+const ICP_FILING_NUMBER = '京ICP备2026025766号-2'
+const ICP_FILING_URL = 'https://beian.miit.gov.cn/'
+
 function VersionFooter() {
   const [backend, setBackend] = useState<string>('-')
   useEffect(() => {
@@ -16,17 +19,20 @@ function VersionFooter() {
       .catch(() => setBackend('?'))
   }, [])
   return (
-    <footer
-      className="version-footer text-muted"
-      style={{
-        fontSize: 12,
-        textAlign: 'center',
-        padding: '16px 0',
-        marginBottom: 'var(--bottom-chrome, 0px)',
-        opacity: 0.65,
-      }}
-    >
-      frontend {FRONTEND_VERSION} · backend {backend}
+    <footer className="version-footer text-muted">
+      <div className="version-footer-meta">
+        frontend {FRONTEND_VERSION} · backend {backend}
+      </div>
+      <div className="version-footer-filings">
+        <a
+          className="filing-link"
+          href={ICP_FILING_URL}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {ICP_FILING_NUMBER}
+        </a>
+      </div>
     </footer>
   )
 }
