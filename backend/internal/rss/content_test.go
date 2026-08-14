@@ -36,6 +36,28 @@ func TestFetchContentFromReader_HeadingsAndParagraphs(t *testing.T) {
 	}
 }
 
+func TestFetchContentWithMetadataFromReaderReturnsPageTitle(t *testing.T) {
+	html := `<html><head>
+		<title>Fallback title</title>
+		<meta property="og:title" content="Your Agentic Workflow&#x27;s Cache Keepalive Costs 8x Too Much">
+	</head><body><article>
+		<p>This article body is long enough for the article selector to accept it as useful content.</p>
+		<p>Another paragraph keeps the extraction above the threshold used by reader tests.</p>
+	</article></body></html>`
+
+	f := NewContentFetcher()
+	got, err := f.FetchContentWithMetadataFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("FetchContentWithMetadataFromReader: %v", err)
+	}
+	if got.Title != "Your Agentic Workflow's Cache Keepalive Costs 8x Too Much" {
+		t.Fatalf("title = %q", got.Title)
+	}
+	if !strings.Contains(got.Content, "article body") {
+		t.Fatalf("content was not extracted: %q", got.Content)
+	}
+}
+
 func TestFetchContentFromReader_PreservesImage(t *testing.T) {
 	html := `<html><body><article>
 		<p>Intro paragraph long enough to keep around.</p>
