@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticleListPage from '../src/pages/ArticleListPage'
-import type { ArticleListItem } from '../src/api/client'
+import type { ArticleListItem, Feed } from '../src/api/client'
 
 const apiMocks = vi.hoisted(() => ({
   dislikeArticle: vi.fn(),
@@ -87,6 +87,23 @@ function makeArticles(startId: number): ArticleListItem[] {
     fetched_at: '2026-07-27T00:00:00Z',
     manual_tags: [],
   }))
+}
+
+function makeFeed(id: number, title: string, url: string, unreadCount = 0, feedType = 'rss'): Feed {
+  return {
+    id,
+    url,
+    title,
+    last_fetched_at: null,
+    fetch_interval_minutes: 60,
+    is_active: true,
+    owner_id: 1,
+    feed_type: feedType,
+    created_at: '2026-07-27T00:00:00Z',
+    article_count: 0,
+    unread_count: unreadCount,
+    expand_links: false,
+  }
 }
 
 function ArticleLocationProbe() {
@@ -176,6 +193,38 @@ describe('ArticleListPage automatic pagination', () => {
     )
     fireEvent.click(await screen.findByTestId('article-1'))
     expect((await screen.findByTestId('route-preview')).textContent).toBe('1')
+  })
+
+  it('filters feeds inside the open feed picker before selecting one', async () => {
+    apiMocks.getFeeds.mockResolvedValue([
+      makeFeed(1, 'Alpha Daily', 'https://alpha.example/feed.xml'),
+      makeFeed(2, 'Beta Lab', 'https://beta.example/rss', 3),
+      makeFeed(3, 'Gamma Notes', 'https://gamma.example/feed'),
+    ])
+    apiMocks.getArticles.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <ArticleListPage />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '订阅筛选：全部订阅' }))
+    const feedSearch = screen.getByPlaceholderText('搜索订阅...')
+    expect(screen.getByRole('option', { name: 'Beta Lab (3)' })).toBeTruthy()
+
+    fireEvent.change(feedSearch, { target: { value: 'gamma' } })
+
+    expect(screen.queryByRole('option', { name: 'Alpha Daily' })).toBeNull()
+    fireEvent.click(screen.getByRole('option', { name: 'Gamma Notes' }))
+
+    await waitFor(() => {
+      expect(apiMocks.getArticles).toHaveBeenCalledWith(
+        expect.objectContaining({ feed_id: 3, offset: 0 }),
+      )
+    })
+    expect(sessionStorage.getItem('selectedFeed')).toBe('3')
+    expect(screen.queryByPlaceholderText('搜索订阅...')).toBeNull()
   })
 
   it('waits for reset page zero before rearming automatic page two', async () => {

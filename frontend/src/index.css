@@ -238,6 +238,85 @@ button.secondary:disabled,
 }
 select.toolbar-control { padding-right: 28px; }
 
+.feed-picker {
+  position: relative;
+  width: 220px;
+}
+.toolbar-control.feed-picker-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: 400;
+  text-align: left;
+}
+.toolbar-control.feed-picker-button:hover {
+  background: var(--surface-hover);
+  opacity: 1;
+}
+.feed-picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed-picker-caret {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.feed-picker-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 80;
+  width: min(360px, calc(100vw - 32px));
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+.feed-picker-search {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.feed-picker-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.feed-picker-option {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 32px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font-weight: 400;
+  line-height: 1.3;
+  text-align: left;
+}
+.feed-picker-option:hover {
+  background: var(--surface-hover);
+  opacity: 1;
+}
+.feed-picker-option[aria-selected='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.feed-picker-empty {
+  padding: 10px 8px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
 .toolbar-checkbox {
   display: inline-flex;
   align-items: center;
