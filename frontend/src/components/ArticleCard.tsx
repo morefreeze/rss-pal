@@ -10,6 +10,7 @@ type ArticleCardItem = Article | ArticleListItem
 import ReadingMeta from './ReadingMeta'
 import TagChip from './TagChip'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
+import FeedSourceLink from './FeedSourceLink'
 
 // MediaIndicator shows a per-article badge for media articles. Audio
 // articles get a clickable ▶ play button (starts inline playback); video
@@ -78,6 +79,8 @@ interface Props {
   // here so bookmarklet articles show their real host instead of the
   // shared "⭐ 网摘" bin name.
   sourceLabel?: string
+  sourceSearch?: string
+  onSourceFilter?: (feedId: number, href: string) => void
   // Which timestamp the card shows. Defaults to 'published'. When the list
   // is sorted by capture time, callers pass 'captured' so the user sees the
   // dimension the sort is driven by.
@@ -104,6 +107,8 @@ export default function ArticleCard({
   observeRef,
   showSourceTag = true,
   sourceLabel,
+  sourceSearch = '',
+  onSourceFilter,
   dateField = 'published',
 }: Props) {
   const exposureRef = useExposureTracking(article.id)
@@ -208,7 +213,16 @@ export default function ArticleCard({
           {(showSourceTag && effectiveSourceLabel) || manualTags.length > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4 }}>
               {showSourceTag && effectiveSourceLabel && (
-                <TagChip name={effectiveSourceLabel} variant="source" />
+                onSourceFilter ? (
+                  <FeedSourceLink
+                    feedId={article.feed_id}
+                    label={effectiveSourceLabel}
+                    search={sourceSearch}
+                    onNavigate={onSourceFilter}
+                  />
+                ) : (
+                  <TagChip name={effectiveSourceLabel} variant="source" />
+                )
               )}
               {manualTags.map(t => (
                 <TagChip key={t.id} name={t.name} variant="manual" />

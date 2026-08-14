@@ -17,6 +17,7 @@ import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 import { useBreakpoint } from '../hooks/useBreakpoint'
 import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
 import { useArticleDetailPrefetch } from '../hooks/useArticleDetailPrefetch'
+import FeedSourceLink from '../components/FeedSourceLink'
 
 const PAGE_SIZE = 20
 
@@ -87,6 +88,8 @@ function SearchArticleRow({
   onNavigate,
   onFocus,
   navList,
+  sourceSearch,
+  onSourceFilter,
 }: {
   article: ArticleListItem
   isRead: boolean
@@ -98,6 +101,8 @@ function SearchArticleRow({
   onNavigate: (id: number) => void
   onFocus: (idx: number) => void
   navList: number[]
+  sourceSearch: string
+  onSourceFilter: (feedId: number, href: string) => void
 }) {
   const exposureRef = useExposureTracking(article.id)
 
@@ -143,9 +148,14 @@ function SearchArticleRow({
               <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
             </div>
             {article.feed_title && (
-              <span className="text-sm" style={{ padding: '1px 6px', background: 'var(--accent-soft)', borderRadius: 4, color: 'var(--accent)' }}>
-                {article.feed_title}
-              </span>
+              <FeedSourceLink
+                feedId={article.feed_id}
+                label={article.feed_title}
+                search={sourceSearch}
+                className="text-sm"
+                style={{ padding: '1px 6px', background: 'var(--accent-soft)', borderRadius: 4, color: 'var(--accent)' }}
+                onNavigate={onSourceFilter}
+              />
             )}
           </div>
         </div>
@@ -275,6 +285,8 @@ export default function ArticleListPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const wantsClip = searchParams.get('view') === 'clip'
+  const sourceSearch = searchParams.toString()
+  const articleEntryPath = sourceSearch ? `/articles?${sourceSearch}` : '/articles'
   const player = usePlayer()
   const breakpoint = useBreakpoint()
   // On phone the toolbar tucks non-priority controls (search, feed select,
@@ -378,12 +390,36 @@ export default function ArticleListPage() {
     setSelectedFeed(val)
     try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
     const pickedClip = val != null && feeds.find(f => f.id === val)?.feed_type === 'clip'
+    const nextParams = new URLSearchParams(searchParams)
+    if (val != null) nextParams.set('feed_id', String(val))
+    else nextParams.delete('feed_id')
     if (pickedClip && !wantsClip) {
-      setSearchParams({ view: 'clip' })
+      nextParams.set('view', 'clip')
     } else if (!pickedClip && wantsClip) {
-      setSearchParams({})
+      nextParams.delete('view')
     }
-  }, [feeds, wantsClip, setSearchParams])
+    setSearchParams(nextParams)
+  }, [feeds, wantsClip, searchParams, setSearchParams])
+
+  useEffect(() => {
+    const raw = searchParams.get('feed_id')
+    if (!raw) return
+    const nextFeed = parseInt(raw, 10)
+    if (!Number.isFinite(nextFeed) || nextFeed <= 0 || nextFeed === selectedFeed) return
+    setSelectedFeed(nextFeed)
+    try { sessionStorage.setItem('selectedFeed', JSON.stringify(nextFeed)) } catch {}
+  }, [searchParams, selectedFeed])
+
+  const handleSourceFilter = useCallback((feedId: number) => {
+    if (searchTimeout.current) {
+      clearTimeout(searchTimeout.current)
+      searchTimeout.current = null
+    }
+    setSearchQuery('')
+    setSearchResults(null)
+    setSearching(false)
+    handleFeedSelect(feedId)
+  }, [handleFeedSelect])
   const { promote: promoteArticlePrefetch, registerCard: registerArticlePrefetchCard } = useArticleDetailPrefetch(
     isClippingMode ? [] : articles.slice(0, 6).map(article => article.id),
     !isClippingMode,
@@ -758,10 +794,10 @@ export default function ArticleListPage() {
         : null
       writeNav(ids.slice(start, end), context)
       sessionStorage.setItem('articleListScroll', String(window.scrollY))
-      sessionStorage.setItem('articleEntryPath', '/articles')
+      sessionStorage.setItem('articleEntryPath', articleEntryPath)
     } catch {}
     navigate(`/articles/${id}`, {
-      state: { from: '/articles', articlePreview },
+      state: { from: articleEntryPath, articlePreview },
     })
   }
 
@@ -968,7 +1004,24 @@ export default function ArticleListPage() {
             <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({recommended.length})</span>
           </button>
           {showRecommended && recommended.map(article => (
-            <Link key={article.id} to={`/articles/${article.id}`} className="rec-row">
+            <div
+              key={article.id}
+              className="rec-row"
+              role="link"
+              tabIndex={0}
+              onClick={() => navigate(`/articles/${article.id}`, {
+                state: { from: articleEntryPath, articlePreview: article },
+              })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  navigate(`/articles/${article.id}`, {
+                    state: { from: articleEntryPath, articlePreview: article },
+                  })
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            >
               <div className="flex-between">
                 <div style={{ flex: 1 }}>
                   <div className="text-bold" style={{ display: 'flex', alignItems: 'center' }}>
@@ -978,9 +1031,14 @@ export default function ArticleListPage() {
                   <div className="flex gap-2 mt-1">
                     <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
                     {article.feed_title && (
-                      <span className="text-sm" style={{ padding: '1px 6px', background: 'var(--accent-soft)', borderRadius: 4, color: 'var(--accent)' }}>
-                        {article.feed_title}
-                      </span>
+                      <FeedSourceLink
+                        feedId={article.feed_id}
+                        label={article.feed_title}
+                        search={sourceSearch}
+                        className="text-sm"
+                        style={{ padding: '1px 6px', background: 'var(--accent-soft)', borderRadius: 4, color: 'var(--accent)' }}
+                        onNavigate={handleSourceFilter}
+                      />
                     )}
                   </div>
                 </div>
@@ -1007,7 +1065,7 @@ export default function ArticleListPage() {
                   )}
                 </div>
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}
@@ -1033,10 +1091,12 @@ export default function ArticleListPage() {
                   formatDate={formatDate}
                   stripMarkdown={stripMarkdown}
                   onNavigate={(id) => navigate(`/articles/${id}`, {
-                    state: { from: '/articles', articlePreview: article },
+                    state: { from: articleEntryPath, articlePreview: article },
                   })}
                   onFocus={setFocusedIdx}
                   navList={searchResults.map(a => a.id)}
+                  sourceSearch={sourceSearch}
+                  onSourceFilter={handleSourceFilter}
                 />
               ))}
             </>
@@ -1055,6 +1115,8 @@ export default function ArticleListPage() {
             stripMarkdown={stripMarkdown}
             onOpen={openArticle}
             onPlay={player.playArticle}
+            sourceSearch={sourceSearch}
+            onSourceFilter={handleSourceFilter}
           />
         ) : (
           <div className="card text-muted">加载失败</div>
@@ -1101,6 +1163,8 @@ export default function ArticleListPage() {
               onPrefetch={promoteArticlePrefetch}
               observeRef={registerArticlePrefetchCard}
               dateField={sortField === 'captured' ? 'captured' : 'published'}
+              sourceSearch={sourceSearch}
+              onSourceFilter={handleSourceFilter}
             />
           ))}
           {hasMore ? (

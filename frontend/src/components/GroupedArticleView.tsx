@@ -12,16 +12,18 @@ interface Props {
   stripMarkdown: (t: string) => string
   onOpen: (id: number) => void
   onPlay: (a: Article | ArticleListItem) => void
+  sourceSearch?: string
+  onSourceFilter?: (feedId: number, href: string) => void
 }
 
 function GroupSection({
   group,
   label,
-  isRead, formatDate, stripMarkdown, onOpen, onPlay,
+  isRead, formatDate, stripMarkdown, onOpen, onPlay, sourceSearch, onSourceFilter,
 }: {
   group: TopicGroup
   label: string
-} & Pick<Props, 'isRead' | 'formatDate' | 'stripMarkdown' | 'onOpen' | 'onPlay'>) {
+} & Pick<Props, 'isRead' | 'formatDate' | 'stripMarkdown' | 'onOpen' | 'onPlay' | 'sourceSearch' | 'onSourceFilter'>) {
   const [expanded, setExpanded] = useState(false)
   if (group.articles.length === 0) return null
 
@@ -48,6 +50,8 @@ function GroupSection({
           stripMarkdown={stripMarkdown}
           onOpen={onOpen}
           onFocus={() => {}}
+          sourceSearch={sourceSearch}
+          onSourceFilter={onSourceFilter}
         />
       ))}
       {(hiddenInResponse > 0 || (!expanded && beyondResponse > 0)) && (
@@ -66,7 +70,16 @@ function GroupSection({
   )
 }
 
-export default function GroupedArticleView({ data, isRead, formatDate, stripMarkdown, onOpen, onPlay }: Props) {
+export default function GroupedArticleView({
+  data,
+  isRead,
+  formatDate,
+  stripMarkdown,
+  onOpen,
+  onPlay,
+  sourceSearch = '',
+  onSourceFilter,
+}: Props) {
   const hasAny = data.groups.length > 0 || data.unclassified.articles.length > 0
   if (!hasAny) {
     return <div className="card text-muted">暂无文章。</div>
@@ -83,6 +96,8 @@ export default function GroupedArticleView({ data, isRead, formatDate, stripMark
           stripMarkdown={stripMarkdown}
           onOpen={onOpen}
           onPlay={onPlay}
+          sourceSearch={sourceSearch}
+          onSourceFilter={onSourceFilter}
         />
       ))}
       {data.unclassified.articles.length > 0 && (
@@ -94,6 +109,8 @@ export default function GroupedArticleView({ data, isRead, formatDate, stripMark
           stripMarkdown={stripMarkdown}
           onOpen={onOpen}
           onPlay={onPlay}
+          sourceSearch={sourceSearch}
+          onSourceFilter={onSourceFilter}
         />
       )}
     </div>
