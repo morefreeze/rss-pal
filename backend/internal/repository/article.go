@@ -876,7 +876,7 @@ func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Art
 		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $2
 		WHERE (f.owner_id IS NULL OR f.owner_id = $2)
 		  AND ha.id IS NULL
-		  AND (a.title ILIKE $1 OR a.summary_brief ILIKE $1 OR a.content ILIKE $1)
+		  AND (a.title ILIKE $1 OR a.url ILIKE $1 OR a.summary_brief ILIKE $1 OR a.content ILIKE $1 OR f.title ILIKE $1 OR f.url ILIKE $1)
 		ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(a.published_at, a.fetched_at), a.fetched_at - INTERVAL '7 days')) DESC,
 		         COALESCE(a.published_at, a.fetched_at) DESC
 		LIMIT $3
