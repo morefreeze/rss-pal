@@ -1,0 +1,34 @@
+name: Deploy Tencent
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rss-pal-tencent-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'morefreeze/rss-pal' && github.ref == 'refs/heads/master'
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - rss-pal-tencent
+    timeout-minutes: 30
+
+    steps:
+      - name: Deploy from Tencent host
+        run: sudo /usr/local/sbin/rss-pal-deploy-from-actions
+
+      - name: Verify local API health
+        run: curl --noproxy '*' -fsS http://127.0.0.1:8080/api/health
+
+      - name: Verify Tencent public API health
+        run: curl --noproxy '*' --resolve rss.morefreeze.top:443:192.144.171.125 -fsS https://rss.morefreeze.top/api/health
