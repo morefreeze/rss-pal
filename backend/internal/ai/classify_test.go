@@ -2,6 +2,7 @@ package ai
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -61,5 +62,22 @@ func TestParseClassification(t *testing.T) {
 				t.Errorf("tags = %v; want %v", cls.Tags, tc.wantTags)
 			}
 		})
+	}
+}
+
+func TestBuildClassificationPromptUsesHypotheticalTags(t *testing.T) {
+	prompt := buildClassificationPrompt("标题", "正文", []string{"AI", "编程"})
+
+	for _, want := range []string{
+		"生成最适合文章的候选 tags",
+		"可以是从未见过的新标签",
+		"已有主题示例",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "tags：3-5 个具体关键词") {
+		t.Fatalf("prompt still uses the old direct keyword-tag instruction:\n%s", prompt)
 	}
 }

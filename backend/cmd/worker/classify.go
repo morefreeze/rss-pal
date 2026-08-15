@@ -8,11 +8,14 @@ import (
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/api"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/service"
 )
 
 const (
-	classifyBatchSize = 50
-	classifyTimeout   = 30 * time.Second
+	classifyBatchSize       = 50
+	classifyTimeout         = 30 * time.Second
+	topTagVocabularySize    = 100
+	autoTagLogSampleMaxTags = 3
 )
 
 var seedTopics = []string{"AI", "金融", "编程", "创业", "科技", "时事", "文化", "健康"}
@@ -22,7 +25,8 @@ var seedTopics = []string{"AI", "金融", "编程", "创业", "科技", "时事"
 // every user with a strong signal against that article gets the topic + tags
 // applied to their interest_topics / interest_tags tables.
 func runClassifyCycle(ctx context.Context, articleRepo *repository.ArticleRepository,
-	prefRepo *repository.PreferenceRepository, summarizer *ai.Summarizer) {
+	prefRepo *repository.PreferenceRepository, summarizer *ai.Summarizer,
+	autoTagger *service.AutoTagService) {
 	if summarizer == nil {
 		return
 	}
@@ -37,6 +41,7 @@ func runClassifyCycle(ctx context.Context, articleRepo *repository.ArticleReposi
 	}
 
 	vocab := buildVocab(articleRepo)
+	tagVocab := buildTagVocab(articleRepo)
 	log.Printf("classify: %d articles to classify; vocab=%v", len(candidates), vocab[:min(len(vocab), 5)])
 
 	for i := range candidates {
@@ -72,6 +77,15 @@ func runClassifyCycle(ctx context.Context, articleRepo *repository.ArticleReposi
 			for _, t := range cls.Tags {
 				_ = prefRepo.UpsertTag(u.UserID, t, gw)
 			}
+			if autoTagger != nil {
+				decisions, err := autoTagger.BindGeneratedTags(art.ID, u.UserID, cls.Tags, tagVocab)
+				if err != nil {
+					log.Printf("classify: auto-tag article %d user %d: %v", art.ID, u.UserID, err)
+				} else if len(decisions) > 0 {
+					log.Printf("classify: auto-tag article %d user %d tags=%v",
+						art.ID, u.UserID, decisions[:min(len(decisions), autoTagLogSampleMaxTags)])
+				}
+			}
 		}
 		log.Printf("classify: article %d → topic=%q category=%q tags=%v users=%d",
 			art.ID, cls.Topic, cls.Category, cls.Tags, len(users))
@@ -99,4 +113,13 @@ func buildVocab(articleRepo *repository.ArticleRepository) []string {
 		}
 	}
 	return out
+}
+
+func buildTagVocab(articleRepo *repository.ArticleRepository) []string {
+	top, err := articleRepo.GetTopTagVocabulary(topTagVocabularySize)
+	if err != nil {
+		log.Printf("classify: GetTopTagVocabulary: %v", err)
+		return nil
+	}
+	return top
 }

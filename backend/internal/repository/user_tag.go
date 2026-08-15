@@ -23,7 +23,7 @@ type TagSidebarData struct {
 // For clip-bin (feed_type='clip') articles, it derives from URL host;
 // for normal feeds, it's the feed itself.
 type EffectiveSource struct {
-	Key   string `json:"key"`   // "feed:<id>" or "host:<host>"
+	Key   string `json:"key"` // "feed:<id>" or "host:<host>"
 	Title string `json:"title"`
 }
 
@@ -107,6 +107,32 @@ func (r *UserTagRepository) GetTagsForUser(userID int) ([]model.UserTag, error) 
 		tags = append(tags, t)
 	}
 	return tags, rows.Err()
+}
+
+// GetTagNamesForUser returns the user's manual tag vocabulary ordered by name.
+// It is used by the worker's automatic tag binding pass to reuse the user's
+// existing words before creating new tags.
+func (r *UserTagRepository) GetTagNamesForUser(userID int) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT name
+		FROM user_tags
+		WHERE user_id = $1
+		ORDER BY name ASC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
 }
 
 // GetTagsForSidebar returns tags with dynamic counts under the article

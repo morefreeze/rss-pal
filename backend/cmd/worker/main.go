@@ -16,6 +16,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
+	"github.com/bytedance/rss-pal/internal/service"
 	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/mmcdole/gofeed"
 )
@@ -49,6 +50,8 @@ func main() {
 	articleRepo := repository.NewArticleRepository(db)
 	articleRepo.SetImageBaseDir(cfg.Backup.Dir)
 	prefRepo := repository.NewPreferenceRepository(db)
+	userTagRepo := repository.NewUserTagRepository(db)
+	articleUserTagRepo := repository.NewArticleUserTagRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	templateRepo := repository.NewTemplateRepository(db)
 	userInsightsRepo := repository.NewUserInsightRepository(db)
@@ -102,6 +105,7 @@ func main() {
 	backupRunner := backup.NewRunner(db, cfg.Backup.Dir)
 	stopBackup := backupRunner.ScheduleDaily(context.Background())
 	defer stopBackup()
+	autoTagger := service.NewAutoTagService(userTagRepo, articleUserTagRepo)
 
 	// Async PDF OCR loop: runs every 60s, drains up to maxPDFOCRPerCycle
 	// scanned-PDF clip articles per tick. Lives in its own goroutine so a
@@ -125,14 +129,14 @@ func main() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	runFetchCycle(context.Background(), cfg, feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
+	runFetchCycle(context.Background(), cfg, feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir, autoTagger)
 
 	for range ticker.C {
-		runFetchCycle(context.Background(), cfg, feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir)
+		runFetchCycle(context.Background(), cfg, feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir, autoTagger)
 	}
 }
 
-func runFetchCycle(ctx context.Context, cfg *config.Config, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string) {
+func runFetchCycle(ctx context.Context, cfg *config.Config, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string, autoTagger *service.AutoTagService) {
 	if !cycleMu.TryLock() {
 		log.Println("Previous fetch cycle still running, skipping")
 		return
@@ -149,7 +153,7 @@ func runFetchCycle(ctx context.Context, cfg *config.Config, feedRepo *repository
 	}
 	if summarizer != nil {
 		backfillSummaries(ctx, cfg, articleRepo, summarizer)
-		runClassifyCycle(ctx, articleRepo, prefRepo, summarizer)
+		runClassifyCycle(ctx, articleRepo, prefRepo, summarizer, autoTagger)
 	}
 
 	// AI summary image cache TTL sweep. Cheap walk; safe to call every cycle.
