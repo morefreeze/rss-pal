@@ -57,7 +57,7 @@ if [ "$BEHIND" = "0" ]; then
 fi
 
 log "Behind by $BEHIND commits, pulling..."
-git pull origin master
+git merge --no-edit origin/master
 
 RUNTIME_CHANGED=false
 if [ -n "$CHANGED_FILES" ]; then
