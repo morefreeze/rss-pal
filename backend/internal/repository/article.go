@@ -1382,6 +1382,33 @@ func (r *ArticleRepository) GetTopTopicVocabulary(limit int) ([]string, error) {
 	return out, nil
 }
 
+// GetTopTagVocabulary returns the most-frequent AI-generated article tags.
+// The automatic user-tag binder uses this as a controlled vocabulary so sparse
+// users can still converge on shared tag names instead of accumulating aliases.
+func (r *ArticleRepository) GetTopTagVocabulary(limit int) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT tag
+		FROM articles, unnest(tags) AS tag
+		WHERE tags IS NOT NULL AND tag <> ''
+		GROUP BY tag
+		ORDER BY COUNT(*) DESC, tag ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // FindParentsNeedingExpansion is kept for backward compat but is no longer
 // called by the worker (replaced by FindArticlesNeedingLinkCheck).
 func (r *ArticleRepository) FindParentsNeedingExpansion(limit int) ([]model.Article, error) {
