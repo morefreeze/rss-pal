@@ -49,6 +49,7 @@ log "Current commit: $PREV_COMMIT"
 # 2. Pull latest main
 git fetch origin master
 BEHIND=$(git rev-list HEAD..origin/master --count 2>/dev/null || echo "0")
+CHANGED_FILES=$(git diff --name-only HEAD..origin/master 2>/dev/null || true)
 
 if [ "$BEHIND" = "0" ]; then
   log "Already up to date, nothing to do."
@@ -57,6 +58,25 @@ fi
 
 log "Behind by $BEHIND commits, pulling..."
 git pull origin master
+
+RUNTIME_CHANGED=false
+if [ -n "$CHANGED_FILES" ]; then
+  while IFS= read -r file; do
+    case "$file" in
+      backend/*|frontend/*|status-monitor/*|docker-compose*.yml|certs/*|nginx.prod.conf|rss-pal.nginx)
+        RUNTIME_CHANGED=true
+        break
+        ;;
+    esac
+  done <<EOF_CHANGED
+$CHANGED_FILES
+EOF_CHANGED
+fi
+
+if [ "$RUNTIME_CHANGED" != "true" ]; then
+  log "No runtime changes detected; repository sync complete."
+  exit 0
+fi
 
 # 3. Rebuild and restart
 log "Building and restarting containers..."
