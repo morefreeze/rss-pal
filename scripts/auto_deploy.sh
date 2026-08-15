@@ -7,6 +7,28 @@ LOG_FILE="$PROJECT_DIR/scripts/deploy.log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 
+configure_outbound_proxy() {
+  if [ -n "${https_proxy:-${HTTPS_PROXY:-}}" ]; then
+    log "Using existing outbound proxy settings"
+    return
+  fi
+
+  local proxy="${DEPLOY_PROXY:-http://172.18.0.1:3128}"
+  if curl -fsS --max-time 5 -x "$proxy" https://api.github.com/rate_limit >/dev/null 2>&1; then
+    export http_proxy="$proxy"
+    export https_proxy="$proxy"
+    export HTTP_PROXY="$proxy"
+    export HTTPS_PROXY="$proxy"
+    export no_proxy="${no_proxy:-localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
+    export NO_PROXY="${NO_PROXY:-$no_proxy}"
+    log "Using outbound proxy: $proxy"
+  else
+    log "No outbound proxy configured; continuing with direct network"
+  fi
+}
+
+configure_outbound_proxy
+
 # Pick whichever compose CLI is installed: the legacy docker-compose binary or
 # the v2 plugin subcommand. OCI hosts (Ubuntu 22.04+) only ship the plugin.
 if command -v docker-compose >/dev/null 2>&1; then
