@@ -32,6 +32,15 @@ func main() {
 	}
 	defer adminDB.Close()
 
+	// Bypass-RLS pool for the public audio relay route: browser <audio>
+	// requests carry no JWT, so there is no per-request tx to scope rows
+	// with. The handler only reads (media_url, media_type) by article id.
+	bypassDB, err := repository.NewBypassDB(&cfg.Database)
+	if err != nil {
+		log.Fatalf("Failed to connect to bypass database: %v", err)
+	}
+	defer bypassDB.Close()
+
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
 	articleRepo.SetImageBaseDir(cfg.Backup.Dir)
@@ -105,6 +114,10 @@ func main() {
 		api.NewRepositoryYouTubeArticleSource(articleRepo),
 		youtubeRelayService,
 	)
+	audioRelayHandler := api.NewAudioRelayHandler(
+		repository.NewArticleRepository(bypassDB),
+		cfg.MediaProxyURL,
+	)
 
 	router := gin.Default()
 	// Compress JSON/text responses for clients that opt in. Defensive
@@ -117,6 +130,7 @@ func main() {
 		gingzip.WithExcludedPathsRegexs([]string{
 			"/api/articles/.*/summary/stream",
 			"/api/media/youtube/.*",
+			"/api/media/audio/.*",
 		}),
 	))
 	// Trust only requests from localhost/private networks (running behind nginx)
@@ -166,6 +180,13 @@ func main() {
 	router.GET("/api/media/youtube/:ticket/manifest.mpd", youtubePlaybackHandler.Manifest)
 	router.GET("/api/media/youtube/:ticket/:kind", youtubePlaybackHandler.Media)
 	router.HEAD("/api/media/youtube/:ticket/:kind", youtubePlaybackHandler.Media)
+
+	// Stored-enclosure audio relay (podcast mp3/m4a). Public for the same
+	// <audio>-can't-carry-Authorization reason; the article id in the URL is
+	// the access token, mirroring the PDF clip image route. Streaming and
+	// byte-range passthrough are handled end-to-end (see nginx location).
+	router.GET("/api/media/audio/:id", audioRelayHandler.Serve)
+	router.HEAD("/api/media/audio/:id", audioRelayHandler.Serve)
 
 	// PDF clip images. Public for the same <img>-tag-can't-carry-Authorization
 	// reason as /api/proxy/image. The URL itself is the access token:

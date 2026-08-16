@@ -81,6 +81,7 @@ Backend follows a layered pattern: `api/` (HTTP handlers) → `service/` (busine
 | `AUTH_PASSWORD` | `admin` | Initial admin password |
 | `RSSHUB_BASE_URL` | `http://rsshub:1200` | RSSHub instance URL |
 | `BACKUP_DIR` | `/backups` | Database backup directory |
+| `MEDIA_PROXY_URL` | (empty) | Forward proxy for audio relay upstream fetches (GFW-blocked podcast CDNs); production uses the OCI squid tunnel |
 | `JINA_API_KEY` | (empty) | Jina API key (if used) |
 | `BILIBILI_COOKIE` | (empty) | Bilibili auth cookie for RSSHub |
 
