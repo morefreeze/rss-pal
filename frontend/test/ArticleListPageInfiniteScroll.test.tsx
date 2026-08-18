@@ -25,6 +25,10 @@ const detailCacheMocks = vi.hoisted(() => ({
 
 vi.mock('../src/api/articleDetailCache', () => detailCacheMocks)
 
+const breakpointMock = vi.hoisted(() => ({
+  current: 'desktop' as 'phone' | 'tablet' | 'desktop',
+}))
+
 vi.mock('../src/components/ArticleCard', () => ({
   default: ({
     article,
@@ -53,7 +57,7 @@ vi.mock('../src/player/PlayerContext', () => ({
 }))
 
 vi.mock('../src/hooks/useBreakpoint', () => ({
-  useBreakpoint: () => 'desktop',
+  useBreakpoint: () => breakpointMock.current,
 }))
 
 class TestIntersectionObserver implements IntersectionObserver {
@@ -130,6 +134,7 @@ describe('ArticleListPage automatic pagination', () => {
     sessionStorage.clear()
     localStorage.clear()
     vi.clearAllMocks()
+    breakpointMock.current = 'desktop'
     apiMocks.getFeeds.mockResolvedValue([])
     apiMocks.getRecommended.mockResolvedValue([])
     vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
@@ -262,6 +267,42 @@ describe('ArticleListPage automatic pagination', () => {
       )
     })
     expect(sessionStorage.getItem('selectedFeed')).toBe('3')
+  })
+
+  it('keeps common filters visible and tucks secondary controls away on phone', async () => {
+    breakpointMock.current = 'phone'
+    apiMocks.getFeeds.mockResolvedValue([
+      makeFeed(1, 'Alpha Daily', 'https://alpha.example/feed.xml'),
+    ])
+    apiMocks.getArticles.mockImplementation(({ offset }: { offset: number }) =>
+      Promise.resolve(offset === 0 ? makeArticles(1) : []),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <ArticleListPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('article-1')).toBeTruthy()
+    const header = screen.getByTestId('article-list-header')
+    const toolbar = screen.getByTestId('article-list-toolbar')
+
+    expect(header.className).toContain('article-list-header--compact')
+    expect(toolbar.className).toContain('article-list-toolbar--compact')
+    expect(screen.getByLabelText('仅未读')).toBeTruthy()
+    expect(screen.getByLabelText('已保存')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '全部已读' })).toBeTruthy()
+    expect(screen.queryByPlaceholderText('搜索文章... ( / 聚焦)')).toBeNull()
+    expect(screen.queryByRole('button', { name: '订阅筛选：全部订阅' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '发布' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '⋯' }))
+
+    expect(screen.getByPlaceholderText('搜索文章... ( / 聚焦)')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '订阅筛选：全部订阅' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '发布 ↓' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '📚 分组' })).toBeTruthy()
   })
 
   it('waits for reset page zero before rearming automatic page two', async () => {

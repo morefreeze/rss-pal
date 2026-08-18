@@ -184,10 +184,10 @@ export default function ArticleCard({
         {!isRead && (
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />
         )}
-        <div style={{ flex: 1 }}>
-          <div className={isRead ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="article-card-content" style={{ flex: 1 }}>
+          <div className={`article-card-title-row ${isRead ? 'text-muted' : 'text-bold'}`} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
-            <span>{article.title}</span>
+            <span className="article-card-title">{article.title}</span>
             {article.processing_state === 'processing' && (
               <span
                 style={{ marginLeft: 8, fontSize: '0.85em', color: 'var(--fg-muted)' }}
@@ -206,7 +206,7 @@ export default function ArticleCard({
             )}
           </div>
           {article.summary_brief && (
-            <div className="text-muted text-sm mt-1">
+            <div className="article-card-summary text-muted text-sm mt-1">
               {stripMarkdown(article.summary_brief).slice(0, 120)}...
             </div>
           )}
