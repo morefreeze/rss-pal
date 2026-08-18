@@ -133,13 +133,13 @@ function SearchArticleRow({
         {!isRead && (
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />
         )}
-        <div style={{ flex: 1 }}>
-          <div className={isRead ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
+        <div className="article-card-content" style={{ flex: 1 }}>
+          <div className={`article-card-title-row ${isRead ? 'text-muted' : 'text-bold'}`} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
-            <span>{article.title}</span>
+            <span className="article-card-title">{article.title}</span>
           </div>
           {article.summary_brief && (
-            <div className="text-muted text-sm mt-1">
+            <div className="article-card-summary text-muted text-sm mt-1">
               {stripMarkdown(article.summary_brief).slice(0, 120)}...
             </div>
           )}
@@ -823,8 +823,11 @@ export default function ArticleListPage() {
         <TagSidebar data={tagSidebarData} selection={tagFilter} onSelect={selectTag} />
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
-      <div className="flex-between mb-2">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div
+        data-testid="article-list-header"
+        className={`article-list-header mb-2${compactToolbar ? ' article-list-header--compact' : ''}`}
+      >
+        <div className="article-list-heading">
           {!isClippingMode && <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />}
           <h2 style={{ margin: 0 }}>{isClippingMode ? '网摘' : '文章列表'}</h2>
         </div>
@@ -944,7 +947,10 @@ export default function ArticleListPage() {
           // shed sort and 分组, so the menu can be skipped.
           const hasOverflow = !!(searchEl || feedSelectEl || sortEl || groupEl)
           return (
-            <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+            <div
+              data-testid="article-list-toolbar"
+              className={`article-list-toolbar${compactToolbar ? ' article-list-toolbar--compact' : ''}`}
+            >
               {!compactToolbar && searchEl}
               {!compactToolbar && feedSelectEl}
               {unreadEl}
