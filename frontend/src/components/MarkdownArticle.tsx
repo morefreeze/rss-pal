@@ -44,6 +44,8 @@ const AVATAR_URL_KEYWORDS = [
 ]
 const LATIN_LETTER_RE = /[A-Za-z]/g
 const CJK_LETTER_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/g
+const ESCAPED_VIDEO_PLACEHOLDER_RE = /\\\[\\\[video:(youtube|bilibili):([\w-]+)(?:\?([\w=&]+))?\\?\]\\?\]/g
+const VIDEO_PLACEHOLDER_RE = /\[\[video:(youtube|bilibili):([\w-]+)(?:\?([\w=&]+))?]]/g
 
 function detectArticleLang(source: string): string | undefined {
   const latinCount = source.match(LATIN_LETTER_RE)?.length ?? 0
@@ -67,6 +69,58 @@ function isAvatarImg(src: string | undefined, alt: string | undefined): boolean 
     if (altLower.includes(kw)) return true
   }
   return false
+}
+
+function formatTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = seconds % 60
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  }
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function buildInlineVideoLink(platform: VideoEmbedData['platform'], id: string, rawParams?: string): string {
+  const params = new URLSearchParams(rawParams ?? '')
+  const start = params.get('start')
+  const page = params.get('page')
+  const startSeconds = start && /^\d+$/.test(start) ? parseInt(start, 10) : 0
+  const label = startSeconds > 0
+    ? formatTimestamp(startSeconds)
+    : platform === 'youtube'
+      ? 'YouTube'
+      : 'Bilibili'
+
+  if (platform === 'youtube') {
+    const url = `https://www.youtube.com/watch?v=${id}${startSeconds > 0 ? `&t=${startSeconds}` : ''}`
+    return `[${label}](${url})`
+  }
+
+  const query = new URLSearchParams()
+  if (page && /^\d+$/.test(page) && parseInt(page, 10) > 1) query.set('p', page)
+  if (startSeconds > 0) query.set('t', String(startSeconds))
+  const qs = query.toString()
+  return `[${label}](https://www.bilibili.com/video/${id}${qs ? `?${qs}` : ''})`
+}
+
+export function normalizeVideoPlaceholders(source: string): string {
+  return source
+    .replace(
+      ESCAPED_VIDEO_PLACEHOLDER_RE,
+      (_match, platform: VideoEmbedData['platform'], id: string, params?: string) =>
+        `[[video:${platform}:${id}${params ? `?${params}` : ''}]]`,
+    )
+    .split(/\r?\n/)
+    .map((line) => {
+      if (parsePlaceholder(line.trim())) return line
+      return line.replace(
+        VIDEO_PLACEHOLDER_RE,
+        (_match, platform: VideoEmbedData['platform'], id: string, params?: string) =>
+          buildInlineVideoLink(platform, id, params),
+      )
+    })
+    .join('\n')
 }
 
 // Returns the plain-text content of paragraph children when it consists
@@ -205,7 +259,9 @@ const COMPONENTS: Components = {
 // markdown re-parse and image remount.
 function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
   const cleaned = useMemo(
-    () => flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source))),
+    () => normalizeVideoPlaceholders(
+      flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source))),
+    ),
     [source],
   )
   const articleLang = useMemo(() => detectArticleLang(cleaned), [cleaned])
