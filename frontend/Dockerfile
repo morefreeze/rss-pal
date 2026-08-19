@@ -8,17 +8,15 @@ RUN npm ci --registry=https://registry.npmmirror.com --no-audit --no-fund
 
 COPY frontend/ .
 RUN npm run build
+COPY extension/ ./extension/
+RUN node ./scripts/create-extension-zip.mjs ./extension ./rss-pal-extension.zip
 
 # Runtime stage
 FROM nginx:alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/rss-pal-extension.zip /usr/share/nginx/html/rss-pal-extension.zip
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
-
-# Bundle the browser extension as a downloadable zip
-RUN apk add --no-cache zip
-COPY extension/ /tmp/extension/
-RUN cd /tmp && zip -r /usr/share/nginx/html/rss-pal-extension.zip extension/ && rm -rf /tmp/extension
 
 EXPOSE 80
 
