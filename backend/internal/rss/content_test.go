@@ -75,6 +75,47 @@ func TestFetchContentFromReader_PreservesImage(t *testing.T) {
 	}
 }
 
+func TestFetchContentRemovesPresentationImagePlaceholder(t *testing.T) {
+	html := `<html><body><article>
+		<p>Intro paragraph long enough to keep the article selector active.</p>
+		<img src="https://blog.cloudflare.com/real.webp" alt="network diagram">
+		<img class="pt-image-placeholder" data-image-placeholder aria-hidden="true" src="data:image/bmp;base64,Qk32PLACEHOLDER">
+		<p>The conclusion after the image must remain in the extracted article.</p>
+	</article></body></html>`
+
+	f := NewContentFetcher()
+	got, err := f.FetchContentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("FetchContentFromReader: %v", err)
+	}
+	if !strings.Contains(got, "https://blog.cloudflare.com/real.webp") {
+		t.Fatalf("expected real image URL, got:\n%s", got)
+	}
+	if strings.Contains(got, "data:image") {
+		t.Fatalf("presentation placeholder leaked into markdown:\n%s", got)
+	}
+	if !strings.Contains(got, "conclusion after the image") {
+		t.Fatalf("expected trailing prose, got:\n%s", got)
+	}
+}
+
+func TestFetchContentPreservesUnmarkedDataImage(t *testing.T) {
+	html := `<html><body><article>
+		<p>Intro paragraph long enough to keep the article selector active.</p>
+		<img src="data:image/png;base64,LEGITIMATE" alt="embedded diagram">
+		<p>Trailing paragraph long enough to remain in the extracted article.</p>
+	</article></body></html>`
+
+	f := NewContentFetcher()
+	got, err := f.FetchContentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("FetchContentFromReader: %v", err)
+	}
+	if !strings.Contains(got, "data:image/png;base64,LEGITIMATE") {
+		t.Fatalf("expected unmarked data image to remain, got:\n%s", got)
+	}
+}
+
 func TestFetchContentFromReader_PreservesCodeBlock(t *testing.T) {
 	html := `<html><body><article>
 		<p>Here is some Go code we definitely want to keep:</p>
