@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 
@@ -220,10 +221,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentRe
 	// Clean up content
 	content = cleanContent(content)
 
-	// Limit content length
-	if len(content) > 50000 {
-		content = content[:50000] + "..."
-	}
+	content = limitContent(content, 50000)
 
 	return ContentResult{Content: content, Title: title}, http.StatusOK, nil
 }
@@ -272,10 +270,29 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 	}
 
 	content := escapeAmbiguousMathDollars(flattenImageAltBlankLines(stripJinaMathShadow(strings.TrimSpace(string(body)))))
-	if len(content) > 50000 {
-		content = content[:50000] + "..."
-	}
+	content = limitContent(content, 50000)
 	return content, nil
+}
+
+// limitContent enforces a byte ceiling without splitting a UTF-8 code point or
+// returning a Markdown image whose destination was cut at the boundary.
+func limitContent(content string, maxBytes int) string {
+	if maxBytes < 0 || len(content) <= maxBytes {
+		return content
+	}
+	if maxBytes == 0 {
+		return "..."
+	}
+
+	prefix := content[:maxBytes]
+	for !utf8.ValidString(prefix) {
+		prefix = prefix[:len(prefix)-1]
+	}
+
+	if imageStart := strings.LastIndex(prefix, "!["); imageStart > strings.LastIndex(prefix, ")") {
+		prefix = prefix[:imageStart]
+	}
+	return strings.TrimSpace(prefix) + "..."
 }
 
 // imageAltWithBlankLineRE matches an image whose alt text contains a blank

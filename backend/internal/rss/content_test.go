@@ -3,9 +3,39 @@ package rss
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 )
+
+func TestLimitContent(t *testing.T) {
+	t.Run("below limit unchanged", func(t *testing.T) {
+		if got := limitContent("short article", 100); got != "short article" {
+			t.Fatalf("limitContent = %q", got)
+		}
+	})
+
+	t.Run("keeps valid UTF-8", func(t *testing.T) {
+		got := limitContent(strings.Repeat("中", 10), 8)
+		if !utf8.ValidString(got) {
+			t.Fatalf("limitContent returned invalid UTF-8: %q", got)
+		}
+		if got != "中中..." {
+			t.Fatalf("limitContent = %q, want %q", got, "中中...")
+		}
+	})
+
+	t.Run("drops partial markdown image", func(t *testing.T) {
+		content := "kept paragraph\n\n![](data:image/png;base64," + strings.Repeat("A", 100) + ")\n\nlater"
+		got := limitContent(content, 60)
+		if got != "kept paragraph..." {
+			t.Fatalf("limitContent = %q, want %q", got, "kept paragraph...")
+		}
+		if strings.Contains(got, "data:image") || strings.Contains(got, "![](") {
+			t.Fatalf("partial markdown image remained: %q", got)
+		}
+	})
+}
 
 func TestFetchContentFromReader_HeadingsAndParagraphs(t *testing.T) {
 	html := `<html><body><article>
