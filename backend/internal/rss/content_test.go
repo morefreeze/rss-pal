@@ -146,6 +146,26 @@ func TestFetchContentPreservesUnmarkedDataImage(t *testing.T) {
 	}
 }
 
+func TestFetchContentRemovesPlaceholderMediaDataImage(t *testing.T) {
+	html := `<html><body><article>
+		<p>Intro paragraph long enough to keep the article selector active.</p>
+		<img class="pt-portable-image-media" data-image-placeholder-media src="data:image/png;base64,EMBEDDED">
+		<p>The conclusion after the portable image must remain in the extracted article.</p>
+	</article></body></html>`
+
+	f := NewContentFetcher()
+	got, err := f.FetchContentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("FetchContentFromReader: %v", err)
+	}
+	if strings.Contains(got, "data:image") {
+		t.Fatalf("placeholder media leaked into markdown:\n%s", got)
+	}
+	if !strings.Contains(got, "conclusion after the portable image") {
+		t.Fatalf("expected trailing prose, got:\n%s", got)
+	}
+}
+
 func TestFetchContentFromReader_PreservesCodeBlock(t *testing.T) {
 	html := `<html><body><article>
 		<p>Here is some Go code we definitely want to keep:</p>

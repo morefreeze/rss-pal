@@ -591,9 +591,10 @@ func RemovePresentationImagePlaceholders(doc *goquery.Document) {
 		}
 
 		_, hasPlaceholderAttr := s.Attr("data-image-placeholder")
+		_, hasPlaceholderMediaAttr := s.Attr("data-image-placeholder-media")
 		isPlaceholderClass := s.HasClass("pt-image-placeholder")
 		isAriaHidden := strings.EqualFold(strings.TrimSpace(s.AttrOr("aria-hidden", "")), "true")
-		if hasPlaceholderAttr || isPlaceholderClass || isAriaHidden {
+		if hasPlaceholderAttr || hasPlaceholderMediaAttr || isPlaceholderClass || isAriaHidden {
 			s.Remove()
 		}
 	})
