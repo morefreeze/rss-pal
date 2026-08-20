@@ -161,6 +161,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentRe
 	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
 	StripAvatars(doc)
 	PromoteLazyImages(doc)
+	RemovePresentationImagePlaceholders(doc)
 	ResolveURLs(doc, url)
 
 	// Try to find main content
@@ -387,6 +388,7 @@ func (f *ContentFetcher) FetchContentWithMetadataFromReader(r io.Reader) (Conten
 	doc.Find("script, style, nav, header, footer, aside").Remove()
 	StripAvatars(doc)
 	PromoteLazyImages(doc)
+	RemovePresentationImagePlaceholders(doc)
 
 	selectors := []string{"article", "[role='main']", "main", ".content", ".post", "#content", "body"}
 	var content string
@@ -558,6 +560,25 @@ var lazySrcsetAttrs = []string{
 func PromoteLazyImages(doc *goquery.Document) {
 	doc.Find("img").Each(func(_ int, s *goquery.Selection) {
 		promoteOneImg(s)
+	})
+}
+
+// RemovePresentationImagePlaceholders drops decorative Base64 images that a
+// page explicitly marks as presentation-only placeholders. Unmarked data
+// images are preserved because they may be legitimate embedded content.
+func RemovePresentationImagePlaceholders(doc *goquery.Document) {
+	doc.Find("img[src]").Each(func(_ int, s *goquery.Selection) {
+		src := strings.TrimSpace(s.AttrOr("src", ""))
+		if !strings.HasPrefix(strings.ToLower(src), "data:image/") {
+			return
+		}
+
+		_, hasPlaceholderAttr := s.Attr("data-image-placeholder")
+		isPlaceholderClass := s.HasClass("pt-image-placeholder")
+		isAriaHidden := strings.EqualFold(strings.TrimSpace(s.AttrOr("aria-hidden", "")), "true")
+		if hasPlaceholderAttr || isPlaceholderClass || isAriaHidden {
+			s.Remove()
+		}
 	})
 }
 
