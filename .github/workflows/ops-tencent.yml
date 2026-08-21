@@ -1,0 +1,70 @@
+name: Ops Tencent
+
+# Out-of-band rescue path for the Beijing production host. Use when SSH to
+# 192.144.171.125 is unreachable (mihomo TUN degradation can wedge the login
+# banner script) — the self-hosted runner's outbound connection to GitHub
+# keeps working, so this workflow can still reach the host.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Rescue action'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - tunnel-only
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rss-pal-tencent-ops
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    if: github.repository == 'morefreeze/rss-pal'
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - rss-pal-tencent
+    timeout-minutes: 15
+
+    steps:
+      - name: Restart OCI egress tunnel
+        run: |
+          sudo systemctl restart rss-pal-oci-egress.service
+          sleep 3
+          systemctl is-active rss-pal-oci-egress.service
+
+      - name: Egress proxy smoke test
+        run: |
+          curl -fsS --noproxy '' --max-time 15 -x http://172.18.0.1:3128 \
+            https://www.jvns.ca/atom.xml -o /dev/null \
+            -w 'tunnel HTTP %{http_code}\n'
+
+      - name: Recreate stack with egress override
+        if: inputs.action == 'full'
+        run: |
+          cd /opt/rss-pal
+          EGRESS=$(ls docker-compose.override.oci-egress*.yml | sort -V | tail -1)
+          echo "Using egress override: $EGRESS"
+          sudo docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.override.yml \
+            -f "$EGRESS" up -d
+          sleep 5
+          sudo docker inspect rss-pal-worker-1 \
+            --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | grep -E '^HTTPS?_PROXY=' \
+            || { echo 'ERROR: worker missing proxy env'; exit 1; }
+
+      - name: Worker fetch verification
+        if: inputs.action == 'full'
+        run: |
+          sleep 75
+          sudo docker logs --since 2m rss-pal-worker-1 2>&1 | tail -40
