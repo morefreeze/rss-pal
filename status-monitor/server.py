@@ -281,253 +281,284 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RSS Pal - 站点状态</title>
+<title>RSS Pal Status</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #0d1117; color: #c9d1d9; min-height: 100vh;
-    padding: 2rem 1rem;
+  :root { color-scheme: light; --ink: #20242b; --muted: #5f6875; --line: #d9dee5; --panel: #ffffff; --page: #f5f7f9; --up: #18794e; --down: #c9372c; --none: #73808c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-width: 280px; background: var(--page); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .page { max-width: 1040px; margin: 0 auto; padding: 32px 20px 48px; }
+  .header { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 20px; }
+  h1 { margin: 0 0 6px; font-size: clamp(1.5rem, 4vw, 2rem); letter-spacing: -0.02em; }
+  .updated, .refresh { margin: 0; color: var(--muted); font-size: .875rem; }
+  .refresh { white-space: nowrap; padding-top: 6px; }
+  .banner { border: 1px solid; border-radius: 8px; padding: 14px 16px; font-weight: 650; margin-bottom: 28px; }
+  .banner.loading { border-color: #aab4bf; background: #eef1f4; color: #3e4a57; }
+  .banner.up { border-color: #9bd1b4; background: #edf9f1; color: #0d5a36; }
+  .banner.down { border-color: #efb2ad; background: #fff0ef; color: #9b251d; }
+  .notice { margin: -14px 0 16px; color: #9b251d; font-size: .875rem; }
+  .notice[hidden], .tooltip[hidden] { display: none; }
+  h2 { margin: 0 0 4px; font-size: 1.125rem; }
+  .caption { margin: 0 0 18px; color: var(--muted); font-size: .875rem; }
+  .components { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .component { padding: 16px; border-bottom: 1px solid var(--line); }
+  .component:last-child { border-bottom: 0; }
+  .component-meta { display: grid; grid-template-columns: minmax(160px, 1fr) auto auto; gap: 12px; align-items: center; margin-bottom: 10px; }
+  .component-name { font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+  .current-status { font-size: .8125rem; font-weight: 650; border-radius: 999px; padding: 3px 8px; }
+  .current-status.up { color: #0d5a36; background: #dff5e7; }
+  .current-status.down { color: #9b251d; background: #ffdfdc; }
+  .uptime { color: var(--muted); font-size: .8125rem; text-align: right; white-space: nowrap; }
+  .last-check { color: var(--muted); font-size: .75rem; margin: -4px 0 9px; }
+  .hour-bar { display: grid; grid-template-columns: repeat(72, minmax(0, 1fr)); gap: 2px; height: 26px; }
+  .hour-control { appearance: none; border: 0; border-radius: 2px; min-width: 0; padding: 0; cursor: pointer; }
+  .hour-control.up { background: var(--up); }
+  .hour-control.down { background: var(--down); }
+  .hour-control.no-data { background: var(--none); }
+  .hour-control:hover, .hour-control:focus-visible { outline: 2px solid #1f6feb; outline-offset: 2px; opacity: .82; }
+  .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: .75rem; margin-top: 6px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; color: var(--muted); font-size: .8125rem; }
+  .legend-item::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+  .legend-item.up::before { background: var(--up); }
+  .legend-item.down::before { background: var(--down); }
+  .legend-item.no-data::before { background: var(--none); }
+  .tooltip { position: fixed; z-index: 10; max-width: min(320px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid #454d57; border-radius: 6px; background: #20242b; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.2); font-size: .8125rem; line-height: 1.45; pointer-events: none; }
+  .tooltip-title { font-weight: 650; margin-bottom: 4px; }
+  .tooltip-line { overflow-wrap: anywhere; }
+  @media (max-width: 650px) {
+    .page { padding: 22px 12px 32px; }
+    .header { display: block; }
+    .refresh { padding-top: 8px; }
+    .component { padding: 13px 10px; }
+    .component-meta { grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; }
+    .current-status, .uptime { font-size: .75rem; }
+    .hour-bar { gap: 1px; height: 23px; }
   }
-  .container { max-width: 720px; margin: 0 auto; }
-  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #f0f6fc; }
-  .domain { font-size: 0.85rem; color: #8b949e; margin-bottom: 1.5rem; font-family: monospace; }
-
-  .section { margin-bottom: 2rem; }
-  .section-title {
-    font-size: 1rem; color: #f0f6fc; margin-bottom: 0.75rem;
-    display: flex; align-items: center; gap: 0.5rem;
-  }
-  .section-title .badge {
-    font-size: 0.65rem; padding: 2px 8px; border-radius: 10px;
-    background: #1f6feb33; color: #58a6ff; font-weight: 600;
-  }
-
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1rem; }
-  .stat-card {
-    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-    padding: 1rem; text-align: center;
-  }
-  .stat-card .label { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
-  .stat-card .value { font-size: 1.8rem; font-weight: 700; margin-top: 0.25rem; }
-  .stat-card .detail { font-size: 0.7rem; color: #484f58; margin-top: 0.25rem; }
-  .value.green { color: #3fb950; }
-  .value.red { color: #f85149; }
-  .value.blue { color: #58a6ff; }
-  .value.orange { color: #d29922; }
-
-  .bar-container {
-    display: flex; gap: 2px; height: 32px; border-radius: 4px; overflow: hidden;
-    background: #161b22; border: 1px solid #30363d; padding: 4px;
-  }
-  .bar-segment { flex: 1; min-width: 2px; border-radius: 2px; transition: opacity 0.2s; cursor: pointer; position: relative; }
-  .bar-segment.up { background: #3fb950; }
-  .bar-segment.down { background: #f85149; }
-  .bar-segment:hover { opacity: 0.7; }
-  .bar-segment[title]:hover::after {
-    content: attr(title); position: absolute; bottom: 110%; left: 50%; transform: translateX(-50%);
-    background: #1c2128; border: 1px solid #30363d; padding: 4px 8px; border-radius: 4px;
-    font-size: 0.7rem; white-space: nowrap; z-index: 10; color: #c9d1d9;
-  }
-  .legend { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.75rem; color: #8b949e; }
-  .legend span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
-  .legend .up-legend::before { background: #3fb950; }
-  .legend .down-legend::before { background: #f85149; }
-
-  .incidents { margin-top: 1rem; }
-  .incidents h2 { font-size: 1rem; margin-bottom: 0.75rem; color: #f0f6fc; }
-  .incident {
-    background: #161b22; border: 1px solid #30363d; border-radius: 6px;
-    padding: 0.75rem 1rem; margin-bottom: 0.5rem; font-size: 0.85rem;
-  }
-  .incident .time { color: #8b949e; font-family: monospace; font-size: 0.75rem; }
-  .incident .source-tag { font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; margin-left: 0.5rem; }
-  .incident .source-tag.local { background: #3fb95022; color: #3fb950; }
-  .incident .source-tag.domain { background: #58a6ff22; color: #58a6ff; }
-  .incident .error { color: #f85149; margin-top: 0.25rem; word-break: break-all; }
-  .no-incidents { color: #8b949e; font-size: 0.85rem; }
-
-  .footer { text-align: center; margin-top: 2rem; font-size: 0.75rem; color: #484f58; }
 </style>
 </head>
 <body>
-<div class="container">
-  <h1>📡 RSS Pal 站点状态</h1>
-  <div class="domain" id="domain"></div>
-
-  <!-- Local section -->
-  <div class="section" id="local-section">
-    <div class="section-title">🏠 本地服务 <span class="badge">Docker 内网</span></div>
-    <div class="stats">
-      <div class="stat-card">
-        <div class="label">可用率</div>
-        <div class="value green" id="local-uptime">—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">平均延迟</div>
-        <div class="value blue" id="local-latency">—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">最近状态</div>
-        <div class="value" id="local-status">—</div>
-      </div>
+<main class="page">
+  <header class="header">
+    <div>
+      <h1>RSS Pal Status</h1>
+      <p class="updated">最后更新：<span id="last-update">—</span></p>
     </div>
-    <div class="bar-container" id="local-timeline"></div>
-    <div class="legend">
-      <span class="up-legend">正常</span>
-      <span class="down-legend">故障</span>
+    <p id="refresh-label" class="refresh">每 60 秒刷新</p>
+  </header>
+  <section id="overall-banner" class="banner loading" aria-live="polite">正在加载状态…</section>
+  <p id="refresh-notice" class="notice" role="status" hidden>数据暂时无法刷新</p>
+  <section aria-labelledby="history-title">
+    <h2 id="history-title">过去 72 小时可用情况</h2>
+    <p class="caption">每个方块代表一个自然小时；可聚焦或点按方块查看检测详情。</p>
+    <div id="components" class="components" aria-live="polite"></div>
+    <div class="legend" aria-label="状态图例">
+      <span class="legend-item up">绿色：正常</span>
+      <span class="legend-item down">红色：故障</span>
+      <span class="legend-item no-data">灰色：无数据</span>
     </div>
-  </div>
-
-  <!-- Domain section -->
-  <div class="section" id="domain-section">
-    <div class="section-title">🌐 外部访问 <span class="badge" id="domain-badge">Tailscale Funnel</span></div>
-    <div class="stats">
-      <div class="stat-card">
-        <div class="label">可用率</div>
-        <div class="value green" id="domain-uptime">—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">平均延迟</div>
-        <div class="value blue" id="domain-latency">—</div>
-        <div class="detail" id="domain-latency-detail"></div>
-      </div>
-      <div class="stat-card">
-        <div class="label">最近状态</div>
-        <div class="value" id="domain-status">—</div>
-      </div>
-    </div>
-    <div class="bar-container" id="domain-timeline"></div>
-    <div class="legend">
-      <span class="up-legend">正常</span>
-      <span class="down-legend">故障</span>
-    </div>
-  </div>
-
-  <div class="incidents">
-    <h2>最近故障记录</h2>
-    <div id="incidents-list"></div>
-  </div>
-
-  <div class="footer">
-    自动刷新 · 每 <span id="interval"></span> 秒检测一次
-  </div>
-</div>
-
+  </section>
+</main>
+<div id="status-tooltip" class="tooltip" role="tooltip" hidden></div>
 <script>
-const HOUR = 3600000;
 const HOURS = 72;
+const ERROR_LABELS = Object.freeze({
+  connection_failed: '连接失败',
+  connection_timeout: '连接超时',
+  http_error: 'HTTP 检查失败',
+  invalid_response: '响应无效'
+});
+let inFlight = false;
+let lastSuccessfulData = null;
+let activeTooltipButton = null;
 
-function renderStats(prefix, data) {
-  const uptimeEl = document.getElementById(prefix + '-uptime');
-  uptimeEl.textContent = data.uptime_pct + '%';
-  uptimeEl.className = 'value ' + (data.uptime_pct >= 99 ? 'green' : data.uptime_pct >= 95 ? 'blue' : 'red');
+const tooltip = document.getElementById('status-tooltip');
+const componentsRoot = document.getElementById('components');
+const overallBanner = document.getElementById('overall-banner');
+const refreshNotice = document.getElementById('refresh-notice');
+const refreshLabel = document.getElementById('refresh-label');
 
-  const latencyEl = document.getElementById(prefix + '-latency');
-  latencyEl.textContent = data.avg_latency_ms + 'ms';
-  if (prefix === 'local') {
-    latencyEl.className = 'value ' + (data.avg_latency_ms <= 50 ? 'green' : data.avg_latency_ms <= 200 ? 'blue' : 'orange');
-  } else {
-    latencyEl.className = 'value ' + (data.avg_latency_ms <= 500 ? 'green' : data.avg_latency_ms <= 1000 ? 'orange' : 'red');
+function setText(element, value) {
+  element.textContent = value == null ? '—' : String(value);
+}
+
+function safeErrorLabel(value) {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ERROR_LABELS, value)
+    ? ERROR_LABELS[value]
+    : '检查失败';
+}
+
+function hourStatusText(value) {
+  if (value === 'up') return '正常';
+  if (value === 'down') return '故障';
+  return '无数据';
+}
+
+function formatTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '无数据';
+  return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function formatPercent(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) + '%' : '无数据';
+}
+
+function formatCount(value) {
+  return Number.isInteger(value) && value >= 0 ? String(value) : '0';
+}
+
+function appendTooltipLine(label, value) {
+  const line = document.createElement('div');
+  line.className = 'tooltip-line';
+  setText(line, label + value);
+  tooltip.appendChild(line);
+}
+
+function hourRange(hour) {
+  return formatTimestamp(hour.start) + ' 至 ' + formatTimestamp(hour.end);
+}
+
+function tooltipLabel(component, hour) {
+  return component.name + '，' + hourRange(hour) + '，' + hourStatusText(hour.status)
+    + '，小时可用率 ' + formatPercent(hour.uptime_pct)
+    + '，检测 ' + formatCount(hour.successful_checks) + ' / ' + formatCount(hour.total_checks);
+}
+
+function showTooltip(button, component, hour) {
+  tooltip.replaceChildren();
+  const title = document.createElement('div');
+  title.className = 'tooltip-title';
+  setText(title, component.name);
+  tooltip.appendChild(title);
+  appendTooltipLine('时段：', hourRange(hour));
+  appendTooltipLine('状态：', hourStatusText(hour.status));
+  appendTooltipLine('小时可用率：', formatPercent(hour.uptime_pct));
+  appendTooltipLine('检测：', formatCount(hour.successful_checks) + ' / ' + formatCount(hour.total_checks));
+  appendTooltipLine('平均延迟：', hour.avg_latency_ms == null ? '无数据' : formatCount(hour.avg_latency_ms) + ' ms');
+  if (hour.status === 'down') {
+    appendTooltipLine('最近错误：', safeErrorLabel(hour.last_error));
+    appendTooltipLine('错误时间：', formatTimestamp(hour.last_error_at));
   }
+  const bounds = button.getBoundingClientRect();
+  tooltip.style.left = Math.max(12, Math.min(bounds.left, window.innerWidth - 332)) + 'px';
+  tooltip.style.top = Math.max(12, bounds.top - 8) + 'px';
+  tooltip.hidden = false;
+  activeTooltipButton = button;
+}
 
-  const lastEl = document.getElementById(prefix + '-status');
-  if (data.checks.length > 0) {
-    const last = data.checks[0];
-    lastEl.textContent = last.status === 'up' ? '✅ UP' : '❌ DOWN';
-    lastEl.className = 'value ' + (last.status === 'up' ? 'green' : 'red');
+function dismissTooltip() {
+  tooltip.hidden = true;
+  activeTooltipButton = null;
+}
+
+function createHourButton(component, hour) {
+  const button = document.createElement('button');
+  const statusClass = hour.status === 'up' ? 'up' : hour.status === 'down' ? 'down' : 'no-data';
+  button.type = 'button';
+  button.className = 'hour-control ' + statusClass;
+  button.setAttribute('aria-describedby', 'status-tooltip');
+  button.setAttribute('aria-label', tooltipLabel(component, hour));
+  button.addEventListener('mouseenter', () => showTooltip(button, component, hour));
+  button.addEventListener('mouseleave', dismissTooltip);
+  button.addEventListener('focus', () => showTooltip(button, component, hour));
+  button.addEventListener('blur', dismissTooltip);
+  button.addEventListener('pointerdown', () => {
+    if (activeTooltipButton === button && !tooltip.hidden) dismissTooltip();
+    else showTooltip(button, component, hour);
+  });
+  return button;
+}
+
+function validatePayload(data) {
+  if (!data || !Array.isArray(data.components) || data.components.length !== 6) {
+    throw new Error('invalid component status payload');
   }
-
-  // Detail for domain latency
-  if (prefix === 'domain' && data.checks.length > 0) {
-    const lats = data.checks.filter(c => c.latency_ms != null).map(c => c.latency_ms);
-    if (lats.length > 0) {
-      const mn = Math.min(...lats), mx = Math.max(...lats);
-      document.getElementById('domain-latency-detail').textContent = mn + 'ms ~ ' + mx + 'ms';
+  for (const component of data.components) {
+    if (!component || typeof component.key !== 'string'
+      || !Array.isArray(component.hours) || component.hours.length !== HOURS) {
+      throw new Error('invalid component history');
     }
   }
 }
 
-function renderTimeline(barId, checks) {
-  const bar = document.getElementById(barId);
-  bar.innerHTML = '';
-  const now = Date.now();
-  const buckets = new Array(HOURS).fill(null).map(() => ({up: 0, down: 0}));
-
-  checks.forEach(c => {
-    const t = new Date(c.ts).getTime();
-    const hoursAgo = Math.floor((now - t) / HOUR);
-    if (hoursAgo >= 0 && hoursAgo < HOURS) {
-      const idx = HOURS - 1 - hoursAgo;
-      if (c.status === 'up') buckets[idx].up++;
-      else buckets[idx].down++;
-    }
-  });
-
-  buckets.forEach((b, i) => {
-    const div = document.createElement('div');
-    div.className = 'bar-segment';
-    const total = b.up + b.down;
-    if (total === 0) {
-      div.style.background = '#21262d';
-    } else if (b.down === 0) {
-      div.classList.add('up');
-    } else if (b.up === 0) {
-      div.classList.add('down');
-    } else {
-      div.style.background = 'linear-gradient(to top, #f85149 ' + Math.round(b.down/total*100) + '%, #3fb950 ' + Math.round(b.down/total*100) + '%)';
-    }
-    const hourLabel = new Date(now - (HOURS - 1 - i) * HOUR);
-    const hh = hourLabel.getHours().toString().padStart(2, '0');
-    div.title = hh + ':00 · ' + (total > 0 ? b.up + '/' + total + ' OK' : '无数据');
-    bar.appendChild(div);
-  });
+function renderComponent(component) {
+  const row = document.createElement('article');
+  row.className = 'component';
+  const meta = document.createElement('div');
+  meta.className = 'component-meta';
+  const name = document.createElement('div');
+  name.className = 'component-name';
+  setText(name, component.name);
+  const status = document.createElement('span');
+  const isUp = component.current_status === 'up';
+  status.className = 'current-status ' + (isUp ? 'up' : 'down');
+  setText(status, isUp ? '正常' : '故障');
+  const uptime = document.createElement('div');
+  uptime.className = 'uptime';
+  setText(uptime, '可用率 ' + formatPercent(component.uptime_pct));
+  meta.append(name, status, uptime);
+  row.appendChild(meta);
+  const lastCheck = document.createElement('div');
+  lastCheck.className = 'last-check';
+  setText(lastCheck, '最近检查：' + formatTimestamp(component.last_check));
+  row.appendChild(lastCheck);
+  const bar = document.createElement('div');
+  bar.className = 'hour-bar';
+  component.hours.forEach(hour => bar.appendChild(createHourButton(component, hour)));
+  row.appendChild(bar);
+  const axis = document.createElement('div');
+  axis.className = 'axis';
+  const ago = document.createElement('span');
+  const now = document.createElement('span');
+  setText(ago, '72 小时前');
+  setText(now, '现在');
+  axis.append(ago, now);
+  row.appendChild(axis);
+  return row;
 }
 
 function render(data) {
-  document.getElementById('domain').textContent = data.domain;
-  document.getElementById('interval').textContent = data.check_interval || 60;
+  validatePayload(data);
+  const fragment = document.createDocumentFragment();
+  data.components.forEach(component => fragment.appendChild(renderComponent(component)));
+  componentsRoot.replaceChildren(fragment);
+  setText(document.getElementById('last-update'), formatTimestamp(data.generated_at));
+  setText(refreshLabel, '每 ' + formatCount(data.refresh_interval_seconds) + ' 秒刷新');
+  const isUp = data.overall_status === 'up';
+  overallBanner.className = 'banner ' + (isUp ? 'up' : 'down');
+  setText(overallBanner, isUp ? '所有系统运行正常' : '部分系统故障');
+}
 
-  if (data.local) {
-    renderStats('local', data.local);
-    renderTimeline('local-timeline', data.local.checks);
-  }
-  if (data.domain_stats) {
-    renderStats('domain', data.domain_stats);
-    renderTimeline('domain-timeline', data.domain_stats.checks);
-  }
-
-  // Combined incidents
-  const allChecks = [];
-  if (data.domain_stats) {
-    data.domain_stats.checks.forEach(c => allChecks.push({...c, source: 'domain'}));
-  }
-  if (data.local) {
-    data.local.checks.forEach(c => allChecks.push({...c, source: 'local'}));
-  }
-  allChecks.sort((a, b) => b.ts.localeCompare(a.ts));
-  const incidents = allChecks.filter(c => c.status === 'down').slice(0, 20);
-  const list = document.getElementById('incidents-list');
-  if (incidents.length === 0) {
-    list.innerHTML = '<div class="no-incidents">🎉 暂无故障记录</div>';
-  } else {
-    list.innerHTML = incidents.map(c =>
-      '<div class="incident"><div class="time">' + c.ts +
-      '<span class="source-tag ' + c.source + '">' + (c.source === 'local' ? '本地' : '外部') + '</span></div>' +
-      '<div class="error">' + (c.error || '连接失败') + '</div></div>'
-    ).join('');
+function showRefreshFailure() {
+  refreshNotice.hidden = false;
+  setText(refreshNotice, '数据暂时无法刷新');
+  if (!lastSuccessfulData) {
+    overallBanner.className = 'banner loading';
+    setText(overallBanner, '数据暂时无法刷新');
   }
 }
 
-function loadData() {
-  fetch('/api/status')
-    .then(r => r.json())
-    .then(render)
-    .catch(() => {});
+async function loadData() {
+  if (inFlight) return;
+  inFlight = true;
+  try {
+    const response = await fetch('/api/status');
+    if (!response.ok) throw new Error('status request failed');
+    const data = await response.json();
+    render(data);
+    lastSuccessfulData = data;
+    refreshNotice.hidden = true;
+  } catch (_error) {
+    showRefreshFailure();
+  } finally {
+    inFlight = false;
+  }
 }
 
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') dismissTooltip();
+});
 loadData();
-setInterval(loadData, 30000);
+setInterval(loadData, 60000);
 </script>
 </body>
 </html>"""
