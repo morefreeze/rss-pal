@@ -134,6 +134,12 @@ class AggregationTests(unittest.TestCase):
         self.assertEqual(summary["uptime_pct"], 0)
         self.assertEqual(payload["overall_status"], "down")
 
+    def test_empty_component_configuration_is_down(self):
+        payload = status_payload(self.conn, (), self.now, interval_seconds=60)
+
+        self.assertEqual(payload["components"], [])
+        self.assertEqual(payload["overall_status"], "down")
+
     def test_sqlite_errors_propagate(self):
         component = Component("api", "API", "http://api/private", "json_ok")
         self.conn.close()
