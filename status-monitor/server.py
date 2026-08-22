@@ -320,9 +320,9 @@ HTML_PAGE = """<!DOCTYPE html>
   .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; color: var(--muted); font-size: .8125rem; }
   .legend-item::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
   .legend-item.up::before { background: var(--up); }
-  .legend-item.down::before { background: var(--down); }
-  .legend-item.no-data::before { background: var(--none); }
-  .tooltip { position: fixed; z-index: 10; max-width: min(320px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid #454d57; border-radius: 6px; background: #20242b; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.2); font-size: .8125rem; line-height: 1.45; pointer-events: none; }
+  .legend-item.down::before { background: repeating-linear-gradient(135deg, var(--down), var(--down) 3px, #a8211a 3px, #a8211a 5px); border: 1px solid #7e1914; }
+  .legend-item.no-data::before { background: var(--none); border: 1px dashed #35404a; }
+  .tooltip { position: fixed; z-index: 10; max-width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid #454d57; border-radius: 6px; background: #20242b; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.2); font-size: .8125rem; line-height: 1.45; pointer-events: none; }
   .tooltip-title { font-weight: 650; margin-bottom: 4px; }
   .tooltip-line { overflow-wrap: anywhere; }
   @media (max-width: 650px) {
@@ -333,8 +333,9 @@ HTML_PAGE = """<!DOCTYPE html>
     .component-meta { grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; }
     .current-status, .uptime { font-size: .75rem; }
     .hour-scroller { margin-right: -10px; padding: 2px 10px 6px 0; }
-    .hour-bar { width: max-content; grid-template-columns: repeat(72, 16px); gap: 3px; height: 36px; }
-    .hour-control { width: 16px; height: 36px; }
+    .hour-bar, .axis { width: max-content; min-width: 100%; }
+    .hour-bar { grid-template-columns: repeat(72, 24px); gap: 3px; height: 40px; }
+    .hour-control { width: 24px; height: 40px; }
   }
 </style>
 </head>
@@ -483,6 +484,11 @@ function moveRovingButton(button, key) {
   }
 }
 
+function toggleTooltip(button, component, hour) {
+  if (activeTooltipButton === button && !tooltip.hidden) dismissTooltip();
+  else showTooltip(button, component, hour);
+}
+
 function createHourButton(component, hour, hourIndex) {
   const button = document.createElement('button');
   const statusClass = hour.status === 'up' ? 'up' : hour.status === 'down' ? 'down' : 'no-data';
@@ -495,18 +501,18 @@ function createHourButton(component, hour, hourIndex) {
   button.setAttribute('aria-label', tooltipLabel(component, hour));
   button.addEventListener('mouseenter', () => showTooltip(button, component, hour));
   button.addEventListener('mouseleave', dismissTooltip);
-  button.addEventListener('focus', () => { setRovingButton(button); showTooltip(button, component, hour); });
+  button.addEventListener('focus', () => { setRovingButton(button); if (!button._pointerGesture) showTooltip(button, component, hour); });
   button.addEventListener('blur', dismissTooltip);
-  button.addEventListener('pointerdown', () => {
-    setRovingButton(button);
-    if (activeTooltipButton === button && !tooltip.hidden) dismissTooltip();
-    else showTooltip(button, component, hour);
-  });
+  button.addEventListener('pointerdown', event => { button._pointerGesture = { x: event.clientX, y: event.clientY, dragged: false }; setRovingButton(button); });
+  button.addEventListener('pointermove', event => { const gesture = button._pointerGesture; if (gesture && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 10) gesture.dragged = true; });
+  button.addEventListener('pointerup', () => { const gesture = button._pointerGesture; button._pointerGesture = null; if (gesture && !gesture.dragged) toggleTooltip(button, component, hour); });
+  button.addEventListener('pointercancel', () => { button._pointerGesture = null; });
   button.addEventListener('keydown', event => {
     if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
       moveRovingButton(button, event.key);
     }
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleTooltip(button, component, hour); }
   });
   return button;
 }
@@ -552,7 +558,6 @@ function renderComponent(component) {
   bar.className = 'hour-bar';
   component.hours.forEach((hour, hourIndex) => bar.appendChild(createHourButton(component, hour, hourIndex)));
   scroller.appendChild(bar);
-  row.appendChild(scroller);
   const axis = document.createElement('div');
   axis.className = 'axis';
   const ago = document.createElement('span');
@@ -560,13 +565,15 @@ function renderComponent(component) {
   setText(ago, '72 小时前');
   setText(now, '现在');
   axis.append(ago, now);
-  row.appendChild(axis);
+  scroller.appendChild(axis);
+  row.appendChild(scroller);
   return row;
 }
 
 function render(data) {
   validatePayload(data);
   const active = document.activeElement;
+  const scrollPositions = new Map(Array.from(componentsRoot.children).map(row => [row.getAttribute('data-component-key'), row.children[2].scrollLeft]));
   const focusedHour = active && active.className && active.className.includes('hour-control')
     ? { key: active.getAttribute('data-component-key'), index: Number(active.getAttribute('data-hour-index')) }
     : null;
@@ -574,6 +581,7 @@ function render(data) {
   data.components.forEach(component => fragment.appendChild(renderComponent(component)));
   dismissTooltip();
   componentsRoot.replaceChildren(fragment);
+  for (const row of componentsRoot.children) row.children[2].scrollLeft = scrollPositions.get(row.getAttribute('data-component-key')) || 0;
   if (focusedHour && Number.isInteger(focusedHour.index)) {
     const row = Array.from(componentsRoot.children).find(item => item.getAttribute('data-component-key') === focusedHour.key);
     const restored = row && row.children[2] && row.children[2].children[0].children[focusedHour.index];
