@@ -309,11 +309,12 @@ HTML_PAGE = """<!DOCTYPE html>
   .current-status.down { color: #9b251d; background: #ffdfdc; }
   .uptime { color: var(--muted); font-size: .8125rem; text-align: right; white-space: nowrap; }
   .last-check { color: var(--muted); font-size: .75rem; margin: -4px 0 9px; }
+  .hour-scroller { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
   .hour-bar { display: grid; grid-template-columns: repeat(72, minmax(0, 1fr)); gap: 2px; height: 26px; }
   .hour-control { appearance: none; border: 0; border-radius: 2px; min-width: 0; padding: 0; cursor: pointer; }
   .hour-control.up { background: var(--up); }
-  .hour-control.down { background: var(--down); }
-  .hour-control.no-data { background: var(--none); }
+  .hour-control.down { background: repeating-linear-gradient(135deg, var(--down), var(--down) 3px, #a8211a 3px, #a8211a 5px); border: 1px solid #7e1914; }
+  .hour-control.no-data { background: var(--none); border: 1px dashed #35404a; }
   .hour-control:hover, .hour-control:focus-visible { outline: 2px solid #1f6feb; outline-offset: 2px; opacity: .82; }
   .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: .75rem; margin-top: 6px; }
   .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; color: var(--muted); font-size: .8125rem; }
@@ -331,7 +332,9 @@ HTML_PAGE = """<!DOCTYPE html>
     .component { padding: 13px 10px; }
     .component-meta { grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; }
     .current-status, .uptime { font-size: .75rem; }
-    .hour-bar { gap: 1px; height: 23px; }
+    .hour-scroller { margin-right: -10px; padding: 2px 10px 6px 0; }
+    .hour-bar { width: max-content; grid-template-columns: repeat(72, 16px); gap: 3px; height: 36px; }
+    .hour-control { width: 16px; height: 36px; }
   }
 </style>
 </head>
@@ -349,7 +352,7 @@ HTML_PAGE = """<!DOCTYPE html>
   <section aria-labelledby="history-title">
     <h2 id="history-title">过去 72 小时可用情况</h2>
     <p class="caption">每个方块代表一个自然小时；可聚焦或点按方块查看检测详情。</p>
-    <div id="components" class="components" aria-live="polite"></div>
+    <div id="components" class="components"></div>
     <div class="legend" aria-label="状态图例">
       <span class="legend-item up">绿色：正常</span>
       <span class="legend-item down">红色：故障</span>
@@ -440,10 +443,18 @@ function showTooltip(button, component, hour) {
     appendTooltipLine('最近错误：', safeErrorLabel(hour.last_error));
     appendTooltipLine('错误时间：', formatTimestamp(hour.last_error_at));
   }
-  const bounds = button.getBoundingClientRect();
-  tooltip.style.left = Math.max(12, Math.min(bounds.left, window.innerWidth - 332)) + 'px';
-  tooltip.style.top = Math.max(12, bounds.top - 8) + 'px';
   tooltip.hidden = false;
+  const bounds = button.getBoundingClientRect();
+  const tipBounds = tooltip.getBoundingClientRect();
+  const margin = 12;
+  const tipWidth = tipBounds.width || 320;
+  const tipHeight = tipBounds.height || 120;
+  const triggerBottom = bounds.bottom == null ? bounds.top : bounds.bottom;
+  const left = Math.max(margin, Math.min(bounds.left, window.innerWidth - tipWidth - margin));
+  let top = triggerBottom + 8;
+  if (top + tipHeight > window.innerHeight - margin) top = bounds.top - tipHeight - 8;
+  tooltip.style.left = Math.max(margin, Math.min(left, window.innerWidth - tipWidth - margin)) + 'px';
+  tooltip.style.top = Math.max(margin, Math.min(top, window.innerHeight - tipHeight - margin)) + 'px';
   activeTooltipButton = button;
 }
 
@@ -452,20 +463,50 @@ function dismissTooltip() {
   activeTooltipButton = null;
 }
 
-function createHourButton(component, hour) {
+function setRovingButton(button) {
+  const buttons = button.parentNode.children;
+  for (const candidate of buttons) candidate.tabIndex = candidate === button ? 0 : -1;
+}
+
+function moveRovingButton(button, key) {
+  const buttons = button.parentNode.children;
+  const currentIndex = Array.prototype.indexOf.call(buttons, button);
+  let nextIndex = currentIndex;
+  if (key === 'ArrowLeft') nextIndex = Math.max(0, currentIndex - 1);
+  if (key === 'ArrowRight') nextIndex = Math.min(buttons.length - 1, currentIndex + 1);
+  if (key === 'Home') nextIndex = 0;
+  if (key === 'End') nextIndex = buttons.length - 1;
+  if (nextIndex !== currentIndex || key === 'Home' || key === 'End') {
+    const next = buttons[nextIndex];
+    setRovingButton(next);
+    next.focus();
+  }
+}
+
+function createHourButton(component, hour, hourIndex) {
   const button = document.createElement('button');
   const statusClass = hour.status === 'up' ? 'up' : hour.status === 'down' ? 'down' : 'no-data';
   button.type = 'button';
   button.className = 'hour-control ' + statusClass;
+  button.tabIndex = hourIndex === HOURS - 1 ? 0 : -1;
+  button.setAttribute('data-component-key', component.key);
+  button.setAttribute('data-hour-index', String(hourIndex));
   button.setAttribute('aria-describedby', 'status-tooltip');
   button.setAttribute('aria-label', tooltipLabel(component, hour));
   button.addEventListener('mouseenter', () => showTooltip(button, component, hour));
   button.addEventListener('mouseleave', dismissTooltip);
-  button.addEventListener('focus', () => showTooltip(button, component, hour));
+  button.addEventListener('focus', () => { setRovingButton(button); showTooltip(button, component, hour); });
   button.addEventListener('blur', dismissTooltip);
   button.addEventListener('pointerdown', () => {
+    setRovingButton(button);
     if (activeTooltipButton === button && !tooltip.hidden) dismissTooltip();
     else showTooltip(button, component, hour);
+  });
+  button.addEventListener('keydown', event => {
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      moveRovingButton(button, event.key);
+    }
   });
   return button;
 }
@@ -485,6 +526,7 @@ function validatePayload(data) {
 function renderComponent(component) {
   const row = document.createElement('article');
   row.className = 'component';
+  row.setAttribute('data-component-key', component.key);
   const meta = document.createElement('div');
   meta.className = 'component-meta';
   const name = document.createElement('div');
@@ -503,10 +545,14 @@ function renderComponent(component) {
   lastCheck.className = 'last-check';
   setText(lastCheck, '最近检查：' + formatTimestamp(component.last_check));
   row.appendChild(lastCheck);
+  const scroller = document.createElement('div');
+  scroller.className = 'hour-scroller';
+  scroller.setAttribute('aria-label', component.name + ' 的 72 小时状态，可横向滑动');
   const bar = document.createElement('div');
   bar.className = 'hour-bar';
-  component.hours.forEach(hour => bar.appendChild(createHourButton(component, hour)));
-  row.appendChild(bar);
+  component.hours.forEach((hour, hourIndex) => bar.appendChild(createHourButton(component, hour, hourIndex)));
+  scroller.appendChild(bar);
+  row.appendChild(scroller);
   const axis = document.createElement('div');
   axis.className = 'axis';
   const ago = document.createElement('span');
@@ -520,10 +566,19 @@ function renderComponent(component) {
 
 function render(data) {
   validatePayload(data);
+  const active = document.activeElement;
+  const focusedHour = active && active.className && active.className.includes('hour-control')
+    ? { key: active.getAttribute('data-component-key'), index: Number(active.getAttribute('data-hour-index')) }
+    : null;
   const fragment = document.createDocumentFragment();
   data.components.forEach(component => fragment.appendChild(renderComponent(component)));
   dismissTooltip();
   componentsRoot.replaceChildren(fragment);
+  if (focusedHour && Number.isInteger(focusedHour.index)) {
+    const row = Array.from(componentsRoot.children).find(item => item.getAttribute('data-component-key') === focusedHour.key);
+    const restored = row && row.children[2] && row.children[2].children[0].children[focusedHour.index];
+    if (restored) { setRovingButton(restored); restored.focus(); }
+  }
   setText(document.getElementById('last-update'), formatTimestamp(data.generated_at));
   setText(refreshLabel, '每 ' + formatCount(data.refresh_interval_seconds) + ' 秒刷新');
   const isUp = data.overall_status === 'up';
