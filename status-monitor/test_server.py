@@ -461,21 +461,24 @@ const vm = require('vm');
 const script = fs.readFileSync(0, 'utf8');
 
 class Node {
-  constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this.className = ''; this.hidden = false; this.style = {}; this.attributes = {}; this.listeners = {}; this._text = ''; }
+  constructor(tag = 'div', document = null) { this.tagName = tag.toUpperCase(); this.ownerDocument = document; this.children = []; this.parentNode = null; this.className = ''; this.hidden = false; this.style = {}; this.attributes = {}; this.listeners = {}; this._text = ''; this.tabIndex = -1; this.rect = { left: 20, top: 30, bottom: 48, width: 320, height: 120 }; }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
   appendChild(child) { if (child.tagName === '#FRAGMENT') { [...child.children].forEach(item => this.appendChild(item)); child.children = []; return child; } child.parentNode = this; this.children.push(child); return child; }
   append(...children) { children.forEach(child => this.appendChild(child)); }
-  replaceChildren(...children) { this.children = []; this._text = ''; children.forEach(child => this.appendChild(child)); }
+  contains(node) { return node === this || this.children.some(child => child.contains(node)); }
+  replaceChildren(...children) { if (this.ownerDocument && this.contains(this.ownerDocument.activeElement)) this.ownerDocument.activeElement = null; this.children = []; this._text = ''; children.forEach(child => this.appendChild(child)); }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return this.attributes[name] ?? null; }
   addEventListener(name, handler) { (this.listeners[name] ||= []).push(handler); }
-  dispatch(name, event = {}) { (this.listeners[name] || []).forEach(handler => handler({ type: name, ...event })); }
-  getBoundingClientRect() { return { left: 20, top: 30 }; }
+  dispatch(name, event = {}) { (this.listeners[name] || []).forEach(handler => handler({ type: name, preventDefault() { this.defaultPrevented = true; }, ...event })); }
+  focus() { const prior = this.ownerDocument.activeElement; if (prior && prior !== this) prior.dispatch('blur'); this.ownerDocument.activeElement = this; this.dispatch('focus'); }
+  getBoundingClientRect() { return this.rect; }
 }
 class Document {
-  constructor() { this.byId = {}; this.listeners = {}; }
-  createElement(tag) { return new Node(tag); }
-  createDocumentFragment() { return new Node('#fragment'); }
+  constructor() { this.byId = {}; this.listeners = {}; this.activeElement = null; }
+  createElement(tag) { return new Node(tag, this); }
+  createDocumentFragment() { return new Node('#fragment', this); }
   getElementById(id) { return this.byId[id]; }
   addEventListener(name, handler) { (this.listeners[name] ||= []).push(handler); }
   dispatch(name, event = {}) { (this.listeners[name] || []).forEach(handler => handler({ type: name, ...event })); }
@@ -507,11 +510,12 @@ function makePayload({ nullLastCheck = false, malicious = false } = {}) {
 }
 function page(fetchImpl) {
   const document = new Document();
-  for (const id of ['status-tooltip', 'components', 'overall-banner', 'refresh-notice', 'last-update', 'refresh-label']) document.byId[id] = new Node();
+  for (const id of ['status-tooltip', 'components', 'overall-banner', 'refresh-notice', 'last-update', 'refresh-label']) document.byId[id] = new Node('div', document);
   document.byId['status-tooltip'].hidden = true;
   document.byId['refresh-notice'].hidden = true;
   const timers = []; let fetchCalls = 0;
-  const context = { console, document, window: { innerWidth: 1024 }, AbortController, Date, Number, Object, String, Array, Math, Error, Promise,
+  document.byId['status-tooltip'].rect = { left: 0, top: 0, bottom: 0, width: 320, height: 120 };
+  const context = { console, document, window: { innerWidth: 1024, innerHeight: 640 }, AbortController, Date, Number, Object, String, Array, Math, Error, Promise,
     fetch: (...args) => { fetchCalls += 1; return fetchImpl(...args); },
     setInterval: () => 1,
     setTimeout: callback => { timers.push(callback); return timers.length - 1; },
@@ -524,6 +528,7 @@ function page(fetchImpl) {
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const activeIsClear = context => vm.runInContext('activeTooltipButton === null', context);
 const hasImage = node => node.tagName === 'IMG' || node.children.some(hasImage);
+const barFor = row => row.children[2].children[0];
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
 (async () => {
@@ -536,9 +541,14 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(next.components.slice(1).every(component => component.hours.some((hour, hourIndex) => hour.status !== next.components[0].hours[hourIndex].status)), 'fixture must make every component history differ from component 0');
   assert(root.children.map(row => row.children[0].children[0].textContent).join('|') === 'Component 0|Component 1|Component 2|Component 3|Component 4|Component 5', 'must preserve payload component order');
   assert(root.children.every((row, index) => row.children[0].children[1].textContent === (index % 2 ? '故障' : '正常') && row.children[0].children[2].textContent === `可用率 ${(100 - index).toFixed(2)}%`), 'must render current status and sample-weighted uptime');
-  assert(root.children.every(row => row.children[2].children.length === 72), 'must render 72 buttons per row');
+  assert(root.children.every(row => barFor(row).children.length === 72), 'must render 72 buttons per row');
+  assert(root.children.every(row => barFor(row).children.filter(control => control.tabIndex === 0).length === 1), 'each row must expose one roving tab stop');
+  assert(root.children.flatMap(row => barFor(row).children).filter(control => control.tabIndex === 0).length === 6, 'six rows must expose exactly six sequential tab stops');
+  assert(root.children.every(row => row.children[2].className === 'hour-scroller' && row.children[2].attributes['aria-label'].includes('横向滑动')), 'each status bar must have an accessible horizontal scroll wrapper');
+  const rovingBar = barFor(root.children[0]); const newest = rovingBar.children[71];
+  assert(newest.tabIndex === 0, 'newest hour must be the initial row tab stop'); newest.focus(); newest.dispatch('keydown', { key: 'ArrowLeft' }); assert(live.document.activeElement === rovingBar.children[70] && rovingBar.children[70].tabIndex === 0 && newest.tabIndex === -1, 'ArrowLeft must move row focus and tabindex'); rovingBar.children[70].dispatch('keydown', { key: 'Home' }); assert(live.document.activeElement === rovingBar.children[0] && rovingBar.children[0].tabIndex === 0, 'Home must move to the first hour'); rovingBar.children[0].dispatch('keydown', { key: 'End' }); assert(live.document.activeElement === newest && newest.tabIndex === 0, 'End must restore newest hour focus');
   for (const [componentIndex, row] of root.children.entries()) {
-    const controls = row.children[2].children;
+    const controls = barFor(row).children;
     assert(['down', 'up', 'no-data'].every(statusClass => controls.some(control => control.className.includes(statusClass))), 'must give down/up/no-data hours distinct semantic color classes');
     assert(controls.every(control => control.tagName === 'BUTTON' && control.attributes['aria-describedby'] === 'status-tooltip' && typeof control.attributes['aria-label'] === 'string' && control.attributes['aria-label'].length > 0 && /正常|故障|无数据/.test(control.attributes['aria-label'])), 'every hourly control must be an accessible button with non-color status text');
     next.components[componentIndex].hours.forEach((hour, hourIndex) => {
@@ -549,17 +559,17 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
     assert(row.children[3].textContent.includes('72 小时前') && row.children[3].textContent.includes('现在'), 'each row must show the 72-hour-to-now axis');
   }
   assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'null last_check must be no data');
-  let button = root.children[0].children[2].children[0]; const tooltip = live.document.byId['status-tooltip'];
+  let button = barFor(root.children[0]).children[0]; const tooltip = live.document.byId['status-tooltip'];
   button.dispatch('mouseenter'); assert(!tooltip.hidden && tooltip.textContent.includes('检查失败') && !tooltip.textContent.includes('<img'), 'unsafe error must be mapped safely'); assert(!hasImage(tooltip), 'unsafe error must not create an IMG node');
-  const upButton = root.children[0].children[2].children[1]; upButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：正常') && tooltip.textContent.includes('小时可用率：100.00%') && tooltip.textContent.includes('检测：1 / 1') && tooltip.textContent.includes('平均延迟：12 ms'), 'up tooltip must show normal details');
-  const noDataButton = root.children[0].children[2].children[2]; noDataButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：无数据') && tooltip.textContent.includes('小时可用率：无数据') && tooltip.textContent.includes('检测：0 / 0') && tooltip.textContent.includes('平均延迟：无数据'), 'no-data tooltip must show missing-data details');
-  const safePayload = makePayload(); vm.runInContext('render(safePayloadForTest)', Object.assign(live.context, { safePayloadForTest: safePayload })); const safeDownButton = root.children[0].children[2].children[0]; safeDownButton.dispatch('mouseenter'); const expectedStart = new Date('2025-01-02T03:04:05+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedEnd = new Date('2025-01-02T04:05:06+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedErrorAt = new Date('2025-01-02T03:30:45+08:00').toLocaleString('zh-CN', { hour12: false }); assert(tooltip.textContent.includes('时段：' + expectedStart + ' 至 ' + expectedEnd) && tooltip.textContent.includes('状态：故障') && tooltip.textContent.includes('小时可用率：0.00%') && tooltip.textContent.includes('检测：0 / 1') && tooltip.textContent.includes('平均延迟：12 ms') && tooltip.textContent.includes('最近错误：连接超时') && tooltip.textContent.includes('错误时间：' + expectedErrorAt), 'down tooltip must show the complete mapped failure details with actual timestamps');
+  const upButton = barFor(root.children[0]).children[1]; upButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：正常') && tooltip.textContent.includes('小时可用率：100.00%') && tooltip.textContent.includes('检测：1 / 1') && tooltip.textContent.includes('平均延迟：12 ms'), 'up tooltip must show normal details');
+  const noDataButton = barFor(root.children[0]).children[2]; noDataButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：无数据') && tooltip.textContent.includes('小时可用率：无数据') && tooltip.textContent.includes('检测：0 / 0') && tooltip.textContent.includes('平均延迟：无数据'), 'no-data tooltip must show missing-data details');
+  rovingBar.children[5].focus(); const safePayload = makePayload(); vm.runInContext('render(safePayloadForTest)', Object.assign(live.context, { safePayloadForTest: safePayload })); assert(live.document.activeElement && live.document.activeElement.getAttribute('data-component-key') === 'component-0' && live.document.activeElement.getAttribute('data-hour-index') === '5', 'refresh must restore focused hour by component key and index'); const safeDownButton = barFor(root.children[0]).children[0]; safeDownButton.rect = { left: 900, top: 610, bottom: 628, width: 16, height: 36 }; safeDownButton.dispatch('mouseenter'); const expectedStart = new Date('2025-01-02T03:04:05+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedEnd = new Date('2025-01-02T04:05:06+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedErrorAt = new Date('2025-01-02T03:30:45+08:00').toLocaleString('zh-CN', { hour12: false }); assert(Number.parseFloat(tooltip.style.top) >= 12 && Number.parseFloat(tooltip.style.top) <= 508 && tooltip.textContent.includes('时段：' + expectedStart + ' 至 ' + expectedEnd) && tooltip.textContent.includes('状态：故障') && tooltip.textContent.includes('小时可用率：0.00%') && tooltip.textContent.includes('检测：0 / 1') && tooltip.textContent.includes('平均延迟：12 ms') && tooltip.textContent.includes('最近错误：连接超时') && tooltip.textContent.includes('错误时间：' + expectedErrorAt), 'down tooltip must clamp vertically and show complete mapped failure details with actual timestamps');
   button = safeDownButton;
   button.dispatch('mouseleave'); assert(tooltip.hidden && activeIsClear(live.context), 'mouseleave must dismiss tooltip');
   button.dispatch('focus'); assert(!tooltip.hidden, 'focus must show tooltip'); button.dispatch('blur'); assert(tooltip.hidden, 'blur must dismiss tooltip');
   button.dispatch('pointerdown'); assert(!tooltip.hidden, 'pointerdown must show tooltip'); button.dispatch('pointerdown'); assert(tooltip.hidden, 'second pointerdown must toggle tooltip');
   button.dispatch('focus'); live.document.dispatch('keydown', { key: 'Escape' }); assert(tooltip.hidden && activeIsClear(live.context), 'Escape must dismiss tooltip');
-  button.dispatch('focus'); vm.runInContext('render(makePayloadForTest)', Object.assign(live.context, { makePayloadForTest: makePayload() })); assert(tooltip.hidden && activeIsClear(live.context), 'refresh render must dismiss tooltip');
+  button.focus(); vm.runInContext('render(makePayloadForTest)', Object.assign(live.context, { makePayloadForTest: makePayload() })); assert(live.document.activeElement !== button && live.document.activeElement && live.document.activeElement.getAttribute('data-hour-index') === '0', 'refresh must discard the stale tooltip trigger and restore matching focus');
   const emptyLastCheck = makePayload(); emptyLastCheck.components[0].last_check = ''; vm.runInContext('render(emptyLastCheckForTest)', Object.assign(live.context, { emptyLastCheckForTest: emptyLastCheck })); assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'empty last_check must be no data');
   const missingLastCheck = makePayload(); delete missingLastCheck.components[0].last_check; vm.runInContext('render(missingLastCheckForTest)', Object.assign(live.context, { missingLastCheckForTest: missingLastCheck })); assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'missing last_check must be no data');
   const priorFirstRow = root.children[0]; fetchImpl = () => Promise.reject(new Error('offline')); vm.runInContext('loadData()', live.context); await flush(); await flush(); assert(root.children[0] === priorFirstRow && !live.document.byId['refresh-notice'].hidden, 'refresh failure must retain rows and show notice');
@@ -592,6 +602,12 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn("过去 72 小时可用情况", server.HTML_PAGE)
         self.assertIn("setInterval(loadData, 60000)", server.HTML_PAGE)
         self.assertEqual(server.HTML_PAGE.count('role="tooltip"'), 1)
+        self.assertIn("hour-scroller", server.HTML_PAGE)
+        self.assertNotIn('id="components" class="components" aria-live', server.HTML_PAGE)
+        self.assertIn("width: max-content", server.HTML_PAGE)
+        self.assertIn("repeat(72, 16px)", server.HTML_PAGE)
+        self.assertIn("repeating-linear-gradient", server.HTML_PAGE)
+        self.assertIn("dashed", server.HTML_PAGE)
         self.assertNotIn("innerHTML", server.HTML_PAGE)
         self.assertNotIn("insertAdjacentHTML", server.HTML_PAGE)
 
