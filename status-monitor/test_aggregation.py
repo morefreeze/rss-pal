@@ -56,6 +56,17 @@ class AggregationTests(unittest.TestCase):
         self.assertEqual(bucket["total_checks"], 1)
         self.assertEqual(bucket["status"], "up")
 
+    def test_full_checks_table_row_maps_its_id_and_source_columns_correctly(self):
+        rows = [
+            (7, "2026-08-22T12:00:00+08:00", "api", "down", 500, 37, "http_error"),
+        ]
+
+        bucket = build_hour_buckets(rows, self.now)[-1]
+
+        self.assertEqual(bucket["status"], "down")
+        self.assertEqual(bucket["avg_latency_ms"], 37)
+        self.assertEqual(bucket["last_error"], "http_error")
+
     def test_any_failure_makes_the_hour_down(self):
         rows = [
             ("2026-08-22T12:01:00+08:00", "up", 200, 10, None),
@@ -105,6 +116,28 @@ class AggregationTests(unittest.TestCase):
 
         self.assertEqual(summary["current_status"], "up")
         self.assertEqual(summary["last_check"], (self.now - timedelta(minutes=1)).isoformat())
+
+    def test_component_summary_queries_only_the_cst_history_window_in_timestamp_order(self):
+        window_start = hour_floor(self.now) - timedelta(hours=71)
+        window_end = hour_floor(self.now) + timedelta(hours=1)
+        self.add_check(window_start - timedelta(microseconds=1), status="down", error="old")
+        self.add_check(window_start, status="up")
+        self.add_check(self.now - timedelta(minutes=1), status="up")
+        self.add_check(window_end, status="down", error="future")
+        statements = []
+        self.conn.set_trace_callback(statements.append)
+
+        summary = component_summary(
+            self.conn, Component("api", "API", "http://private.example/health", "json_ok"), self.now
+        )
+        self.conn.set_trace_callback(None)
+
+        select = next(statement for statement in statements if statement.startswith("SELECT"))
+        self.assertIn("source = 'api' AND ts >= '2026-08-19T13:00:00+08:00'", select)
+        self.assertIn("ts < '2026-08-22T13:00:00+08:00' ORDER BY ts ASC", select)
+        self.assertEqual(summary["uptime_pct"], 100.0)
+        self.assertEqual(summary["last_check"], (self.now - timedelta(minutes=1)).isoformat())
+        self.assertEqual(summary["hours"][0]["total_checks"], 1)
 
     def test_payload_preserves_component_order_hides_urls_and_derives_overall_status(self):
         self.add_check(self.now - timedelta(minutes=1), "api", "up")
