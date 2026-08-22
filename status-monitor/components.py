@@ -185,6 +185,8 @@ def probe(component, timeout=10):
         )
         latency_ms = _latency_ms(start)
 
+        if component.kind == "json_ok" and code != 200:
+            return _down(code, latency_ms, "http_error")
         if isinstance(read_error, _BodyLimitReached):
             read_error = None
         if read_error is not None:
@@ -213,6 +215,8 @@ def probe(component, timeout=10):
             exc, deadline, component.kind == "json_ok"
         )
         latency_ms = _latency_ms(start)
+        if component.kind == "json_ok" and code != 200:
+            return _down(code, latency_ms, "http_error")
         if isinstance(read_error, _BodyLimitReached):
             read_error = None
         if read_error is not None:
