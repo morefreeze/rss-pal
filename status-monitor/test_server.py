@@ -481,19 +481,29 @@ class Document {
   dispatch(name, event = {}) { (this.listeners[name] || []).forEach(handler => handler({ type: name, ...event })); }
 }
 function makePayload({ nullLastCheck = false, malicious = false } = {}) {
-  const hours = Array.from({ length: 72 }, (_, index) => ({
-    start: index === 0 ? '2025-01-02T03:04:05+08:00' : `2026-08-20T${String(index % 24).padStart(2, '0')}:00:00+08:00`,
-    end: index === 0 ? '2025-01-02T04:05:06+08:00' : `2026-08-20T${String((index + 1) % 24).padStart(2, '0')}:00:00+08:00`,
-    status: index === 0 ? 'down' : index === 2 ? null : 'up',
-    uptime_pct: index === 2 ? null : index === 0 ? 0 : 100,
-    successful_checks: index === 0 ? 0 : index === 2 ? 0 : 1,
-    total_checks: index === 2 ? 0 : 1,
-    avg_latency_ms: index === 2 ? null : 12,
-    last_error: index === 0 ? (malicious ? '<img src=x onerror=alert(1)>' : 'connection_timeout') : null,
-    last_error_at: index === 0 ? '2025-01-02T03:30:45+08:00' : null
-  }));
+  const statusPatterns = [
+    ['down', 'up', null], ['up', 'down', null], ['down', null, 'up'],
+    ['up', null, 'down'], [null, 'down', 'up'], [null, 'up', 'down'],
+  ];
   return { generated_at: '2026-08-22T12:00:00+08:00', refresh_interval_seconds: 60, overall_status: 'up',
-    components: Array.from({ length: 6 }, (_, index) => ({ key: `component-${index}`, name: `Component ${index}`, current_status: index % 2 ? 'down' : 'up', uptime_pct: 100 - index, last_check: nullLastCheck && index === 0 ? null : '2026-08-22T12:00:00+08:00', hours })) };
+    components: Array.from({ length: 6 }, (_, componentIndex) => {
+      const hours = Array.from({ length: 72 }, (_, hourIndex) => {
+        const status = statusPatterns[componentIndex][hourIndex % statusPatterns[componentIndex].length];
+        const fixedDownHour = componentIndex === 0 && hourIndex === 0;
+        return {
+          start: fixedDownHour ? '2025-01-02T03:04:05+08:00' : `2026-08-${20 + componentIndex}T${String(hourIndex % 24).padStart(2, '0')}:00:00+08:00`,
+          end: fixedDownHour ? '2025-01-02T04:05:06+08:00' : `2026-08-${20 + componentIndex}T${String((hourIndex + 1) % 24).padStart(2, '0')}:00:00+08:00`,
+          status,
+          uptime_pct: status == null ? null : status === 'down' ? 0 : 100,
+          successful_checks: status === 'up' ? 1 : 0,
+          total_checks: status == null ? 0 : 1,
+          avg_latency_ms: status == null ? null : 12 + componentIndex,
+          last_error: status === 'down' ? (fixedDownHour && malicious ? '<img src=x onerror=alert(1)>' : 'connection_timeout') : null,
+          last_error_at: status === 'down' ? (fixedDownHour ? '2025-01-02T03:30:45+08:00' : `2026-08-${20 + componentIndex}T00:30:00+08:00`) : null,
+        };
+      });
+      return { key: `component-${componentIndex}`, name: `Component ${componentIndex}`, current_status: componentIndex % 2 ? 'down' : 'up', uptime_pct: 100 - componentIndex, last_check: nullLastCheck && componentIndex === 0 ? null : '2026-08-22T12:00:00+08:00', hours };
+    }) };
 }
 function page(fetchImpl) {
   const document = new Document();
@@ -523,17 +533,18 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   await flush(); await flush();
   const root = live.document.byId.components;
   assert(root.children.length === 6, 'must render six component rows');
+  assert(next.components.slice(1).every(component => component.hours.some((hour, hourIndex) => hour.status !== next.components[0].hours[hourIndex].status)), 'fixture must make every component history differ from component 0');
   assert(root.children.map(row => row.children[0].children[0].textContent).join('|') === 'Component 0|Component 1|Component 2|Component 3|Component 4|Component 5', 'must preserve payload component order');
   assert(root.children.every((row, index) => row.children[0].children[1].textContent === (index % 2 ? '故障' : '正常') && row.children[0].children[2].textContent === `可用率 ${(100 - index).toFixed(2)}%`), 'must render current status and sample-weighted uptime');
   assert(root.children.every(row => row.children[2].children.length === 72), 'must render 72 buttons per row');
   for (const [componentIndex, row] of root.children.entries()) {
     const controls = row.children[2].children;
-    const [down, up, noData] = controls;
-    assert(down.className.includes('down') && up.className.includes('up') && noData.className.includes('no-data'), 'must give down/up/no-data hours distinct semantic color classes');
+    assert(['down', 'up', 'no-data'].every(statusClass => controls.some(control => control.className.includes(statusClass))), 'must give down/up/no-data hours distinct semantic color classes');
     assert(controls.every(control => control.tagName === 'BUTTON' && control.attributes['aria-describedby'] === 'status-tooltip' && typeof control.attributes['aria-label'] === 'string' && control.attributes['aria-label'].length > 0 && /正常|故障|无数据/.test(control.attributes['aria-label'])), 'every hourly control must be an accessible button with non-color status text');
     next.components[componentIndex].hours.forEach((hour, hourIndex) => {
       const expectedStatus = hour.status === 'up' ? '正常' : hour.status === 'down' ? '故障' : '无数据';
-      assert(controls[hourIndex].attributes['aria-label'].includes(expectedStatus), `hour ${hourIndex} aria-label must match its payload status ${expectedStatus}`);
+      const expectedClass = hour.status === 'up' ? 'up' : hour.status === 'down' ? 'down' : 'no-data';
+      assert(controls[hourIndex].className.includes(expectedClass) && controls[hourIndex].attributes['aria-label'].includes(expectedStatus), `component ${componentIndex} hour ${hourIndex} must match its own payload status ${expectedStatus}`);
     });
     assert(row.children[3].textContent.includes('72 小时前') && row.children[3].textContent.includes('现在'), 'each row must show the 72-hour-to-now axis');
   }
