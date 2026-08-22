@@ -205,6 +205,25 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("exit 1", rollback_body)
         self.assertLess(rollback_body.index("Rollback complete"), rollback_body.index("exit 1"))
 
+    def test_auto_deploy_reexecs_once_after_merging_a_changed_deploy_script(self):
+        script = (REPO_ROOT / "scripts" / "auto_deploy.sh").read_text()
+
+        self.assertIn('AUTO_DEPLOY_REEXEC="${AUTO_DEPLOY_REEXEC:-0}"', script)
+        self.assertIn('AUTO_DEPLOY_PREV_COMMIT="${AUTO_DEPLOY_PREV_COMMIT:-}"', script)
+        self.assertIn('AUTO_DEPLOY_CHANGED_FILES="${AUTO_DEPLOY_CHANGED_FILES:-}"', script)
+        self.assertRegex(
+            script,
+            r"if .*scripts/auto_deploy\.sh.*AUTO_DEPLOY_REEXEC.*!= \"1\"",
+        )
+        self.assertRegex(
+            script,
+            r"exec env AUTO_DEPLOY_REEXEC=1 AUTO_DEPLOY_PREV_COMMIT=.*"
+            r"AUTO_DEPLOY_CHANGED_FILES=.* /bin/bash \"\$PROJECT_DIR/scripts/auto_deploy\.sh\"",
+        )
+        self.assertIn('CONTINUATION="true"', script)
+        self.assertLess(script.index('CONTINUATION="true"'), script.index('BEHIND='))
+        self.assertIn('if [ "$AUTO_DEPLOY_REEXEC" = "1" ]; then', script)
+
 
 class MonitorServiceTests(unittest.TestCase):
     def setUp(self):
