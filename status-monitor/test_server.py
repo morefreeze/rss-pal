@@ -31,8 +31,13 @@ class MonitorServiceTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.db_path = str(Path(self.tempdir.name) / "status.db")
         self.now = datetime(2026, 8, 22, 12, 34, 56, tzinfo=CST)
+        self.services = []
 
     def tearDown(self):
+        for service in reversed(self.services):
+            close = getattr(service, "close", None)
+            if close is not None:
+                close()
         self.tempdir.cleanup()
 
     def service(
@@ -57,6 +62,7 @@ class MonitorServiceTests(unittest.TestCase):
             ),
         )
         server.init_db(service.db_path)
+        self.services.append(service)
         return service
 
     def rows(self):
@@ -103,8 +109,8 @@ class MonitorServiceTests(unittest.TestCase):
                 captured.append(max_workers)
                 super().__init__(max_workers=max_workers, *args, **kwargs)
 
-        service = self.service()
         with patch("server.ThreadPoolExecutor", CapturingExecutor):
+            service = self.service()
             service.sample_once(self.now)
 
         self.assertEqual(captured, [5])
@@ -262,6 +268,46 @@ class MonitorServiceTests(unittest.TestCase):
         finally:
             release_hung_probe.set()
         self.assertTrue(hung_probe_finished.wait(timeout=1))
+
+    def test_repeated_cycles_do_not_resubmit_a_still_running_component(self):
+        release_api = threading.Event()
+        api_finished = threading.Event()
+        calls = {key: 0 for key in EXPECTED_KEYS if key != "status-monitor"}
+        calls_lock = threading.Lock()
+
+        def probe_fn(component):
+            with calls_lock:
+                calls[component.key] += 1
+            if component.key == "api":
+                try:
+                    release_api.wait(timeout=2)
+                finally:
+                    api_finished.set()
+            return ProbeResult("up", 200, 1, None)
+
+        service = self.service(probe_fn=probe_fn, probe_timeout_seconds=0.03)
+        try:
+            for offset in range(3):
+                service.sample_once(self.now + timedelta(minutes=offset))
+
+            self.assertEqual(calls["api"], 1)
+            self.assertEqual(calls["worker"], 3)
+            self.assertEqual(service.inflight_count, 1)
+            api_rows = [row for row in self.rows() if row[0] == "api"]
+            self.assertEqual([row[1] for row in api_rows], ["down"] * 3)
+            self.assertEqual([row[4] for row in api_rows], ["connection_timeout"] * 3)
+
+            release_api.set()
+            self.assertTrue(api_finished.wait(timeout=1))
+            service.sample_once(self.now + timedelta(minutes=3))
+
+            self.assertEqual(calls["api"], 2)
+            self.assertEqual(calls["worker"], 4)
+            self.assertEqual(service.inflight_count, 0)
+            latest_api = [row for row in self.rows() if row[0] == "api"][-1]
+            self.assertEqual(latest_api[1], "up")
+        finally:
+            release_api.set()
 
     def test_status_api_returns_six_ordered_components_with_72_hours_each(self):
         service = self.service()
