@@ -91,7 +91,7 @@ Status Monitor 请求 API 的 `/api/health`。仅当响应为 HTTP 200、JSON �
 
 ### Worker
 
-新增持久化服务心跳，包含组件名和最后心跳时间。Worker 在每轮主抓取循环开始及结束时更新 `worker` 心跳。
+新增持久化服务心跳，包含组件名和最后心跳时间。Worker 启动后立即写入一次心跳，并由独立定时器每 60 秒更新 `worker` 心跳，避免耗时超过 3 分钟的正常抓取循环被误判为故障。
 
 API 提供 `GET /api/internal/health/worker` 只读接口。最后心跳距当前时间不超过 3 分钟时为正常，超过 3 分钟或读取失败时为故障。Status Monitor 通过 Docker 内网直接请求 API；Nginx 对该路径返回 404，避免公网访问。
 
