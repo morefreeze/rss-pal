@@ -179,6 +179,9 @@ class _HealthHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/oversized-http":
             self._send(200, b"x" * (64 * 1024 + 1))
             return
+        if self.path == "/oversized-json-error":
+            self._send(503, b"x" * (64 * 1024 + 1))
+            return
         if self.path == "/drip":
             body = b"abc"
             self.send_response(200)
@@ -249,6 +252,12 @@ class LoopbackProbeTests(unittest.TestCase):
         self.assertEqual(result.status, "up")
         self.assertEqual(result.code, 200)
         self.assertIsNone(result.error)
+
+    def test_real_oversized_non200_json_body_is_http_error(self):
+        result = probe(self.component("/oversized-json-error", "json_ok"))
+        self.assertEqual(result.status, "down")
+        self.assertEqual(result.code, 503)
+        self.assertEqual(result.error, "http_error")
 
     def test_real_drip_body_hits_overall_deadline(self):
         started = time.monotonic()
