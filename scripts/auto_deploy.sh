@@ -29,12 +29,28 @@ configure_outbound_proxy() {
 
 configure_outbound_proxy
 
-# Pick whichever compose CLI is installed: the legacy docker-compose binary or
-# the v2 plugin subcommand. OCI hosts (Ubuntu 22.04+) only ship the plugin.
-if command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE="docker-compose"
-elif docker compose version >/dev/null 2>&1; then
+legacy_compose_supported() {
+  local version="$1"
+  if [[ ! "$version" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    return 1
+  fi
+  local major="${BASH_REMATCH[1]}"
+  local minor="${BASH_REMATCH[2]}"
+  local patch="${BASH_REMATCH[3]}"
+  (( major > 1 || (major == 1 && (minor > 29 || (minor == 29 && patch >= 2))) ))
+}
+
+# Prefer the v2 plugin. Legacy Compose must be at least 1.29.2 because older
+# releases do not support depends_on: condition: service_completed_successfully.
+if docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  LEGACY_COMPOSE_VERSION=$(docker-compose version --short 2>/dev/null || docker-compose version 2>/dev/null || true)
+  if ! legacy_compose_supported "$LEGACY_COMPOSE_VERSION"; then
+    log "ERROR: docker-compose must be version 1.29.2 or newer for status-migrate (found: ${LEGACY_COMPOSE_VERSION:-unknown})"
+    exit 1
+  fi
+  COMPOSE="docker-compose"
 else
   log "ERROR: neither 'docker-compose' nor 'docker compose' is available"
   exit 1
@@ -67,6 +83,49 @@ if [ -n "$EGRESS_FILE" ]; then
   COMPOSE_FILES+=(-f "$EGRESS_FILE")
   log "Including egress override: $EGRESS_FILE"
 fi
+
+check_runtime_services() {
+  local services service container_ids container_id runtime_state runtime_status failed=0
+  if ! services=$($COMPOSE "${COMPOSE_FILES[@]}" config --services 2>/dev/null); then
+    log "ERROR: could not enumerate configured Compose services"
+    return 1
+  fi
+  if [ -z "$services" ]; then
+    log "ERROR: Compose returned no configured services"
+    return 1
+  fi
+
+  while IFS= read -r service; do
+    [ -z "$service" ] && continue
+    if [ "$service" = "status-migrate" ]; then
+      continue
+    fi
+    if ! container_ids=$($COMPOSE "${COMPOSE_FILES[@]}" ps -a -q "$service" 2>/dev/null); then
+      log "ERROR: could not query runtime service $service"
+      return 1
+    fi
+    container_id="${container_ids%%$'\n'*}"
+    if [ -z "$container_id" ]; then
+      log "ERROR: runtime service $service has no container"
+      failed=$((failed + 1))
+      continue
+    fi
+    if ! runtime_state=$(docker inspect -f '{{.State.Status}} {{.State.ExitCode}}' "$container_id" 2>/dev/null); then
+      log "ERROR: could not inspect runtime service $service"
+      return 1
+    fi
+    runtime_status="${runtime_state%% *}"
+    if [ "$runtime_status" != "running" ]; then
+      log "ERROR: runtime service $service is $runtime_state"
+      failed=$((failed + 1))
+    fi
+  done <<< "$services"
+
+  if [ "$failed" -gt 0 ]; then
+    log "ERROR: $failed runtime service(s) are missing or not running"
+    return 1
+  fi
+}
 
 # 1. Save current commit for rollback
 PREV_COMMIT=$(git rev-parse HEAD)
@@ -111,13 +170,18 @@ if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
   log "Build succeeded, running health check..."
   sleep 15
 
-  STATUS_MIGRATE_ID=$($COMPOSE "${COMPOSE_FILES[@]}" ps --all -q status-migrate 2>/dev/null | head -n 1)
-  if [ -z "$STATUS_MIGRATE_ID" ]; then
-    log "⚠️  status-migrate container is missing after compose up, rolling back..."
+  if ! STATUS_MIGRATE_IDS=$($COMPOSE "${COMPOSE_FILES[@]}" ps -a -q status-migrate 2>/dev/null); then
+    log "⚠️  could not query status-migrate after compose up, rolling back..."
     ROLLBACK=true
   else
-    STATUS_MIGRATE_EXIT_CODE=$(docker inspect -f '{{.State.ExitCode}}' "$STATUS_MIGRATE_ID" 2>/dev/null || echo "inspect_failed")
-    if [ "$STATUS_MIGRATE_EXIT_CODE" != "0" ]; then
+    STATUS_MIGRATE_ID="${STATUS_MIGRATE_IDS%%$'\n'*}"
+    if [ -z "$STATUS_MIGRATE_ID" ]; then
+      log "⚠️  status-migrate container is missing after compose up, rolling back..."
+      ROLLBACK=true
+    elif ! STATUS_MIGRATE_EXIT_CODE=$(docker inspect -f '{{.State.ExitCode}}' "$STATUS_MIGRATE_ID" 2>/dev/null); then
+      log "⚠️  could not inspect status-migrate after compose up, rolling back..."
+      ROLLBACK=true
+    elif [ "$STATUS_MIGRATE_EXIT_CODE" != "0" ]; then
       log "⚠️  status-migrate exited with code $STATUS_MIGRATE_EXIT_CODE, rolling back..."
       ROLLBACK=true
     elif $COMPOSE "${COMPOSE_FILES[@]}" rm -f status-migrate 2>&1 | tee -a "$LOG_FILE"; then
@@ -129,9 +193,8 @@ if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
   fi
 
   if [ "${ROLLBACK:-false}" != "true" ]; then
-    FAILED=$($COMPOSE "${COMPOSE_FILES[@]}" ps --filter "status=exited" -q 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$FAILED" -gt 0 ]; then
-      log "⚠️  $FAILED container(s) exited after build, rolling back..."
+    if ! check_runtime_services; then
+      log "⚠️  runtime service check failed after build, rolling back..."
       ROLLBACK=true
     else
       # Try hitting the API to confirm it's alive
@@ -155,7 +218,11 @@ fi
 if [ "${ROLLBACK:-false}" = "true" ]; then
   log "Rolling back to $PREV_COMMIT..."
   git checkout "$PREV_COMMIT"
-  $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"
-  sleep 10
-  log "Rollback complete. Staying on $(git rev-parse --short HEAD)"
+  if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
+    sleep 10
+    log "Rollback complete. Staying on $(git rev-parse --short HEAD)"
+  else
+    log "Rollback rebuild failed. Staying on $(git rev-parse --short HEAD)"
+  fi
+  exit 1
 fi

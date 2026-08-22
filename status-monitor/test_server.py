@@ -146,23 +146,64 @@ class DeploymentConfigTests(unittest.TestCase):
         auto_deploy = (REPO_ROOT / "scripts" / "auto_deploy.sh").read_text()
         oracle_deploy = (REPO_ROOT / "scripts" / "deploy-oracle.sh").read_text()
 
-        for script, compose, failure_marker in (
-            (auto_deploy, r"\$COMPOSE \"\$\{COMPOSE_FILES\[@\]\}\"", "ROLLBACK=true"),
-            (oracle_deploy, r"docker compose", "error"),
+        for script, compose, failure_marker, boundary in (
+            (
+                auto_deploy,
+                r"\$COMPOSE \"\$\{COMPOSE_FILES\[@\]\}\"",
+                "ROLLBACK=true",
+                r"\n\s*if \[ \"\$\{ROLLBACK:-false\}\" != \"true\" \]; then",
+            ),
+            (oracle_deploy, r"docker compose", "error", r"\n# 检查容器状态"),
         ):
             migration_check = re.search(
-                r"STATUS_MIGRATE_ID=.*?(?=\n\s*FAILED=)", script, re.DOTALL
+                rf"STATUS_MIGRATE_ID(?:S)?=.*?(?={boundary})", script, re.DOTALL
             )
             self.assertIsNotNone(migration_check)
             block = migration_check.group(0)
-            self.assertRegex(block, r"ps --all -q status-migrate")
+            self.assertRegex(block, r"ps -a -q status-migrate")
             self.assertRegex(block, r"docker inspect -f '\{\{\.State\.ExitCode\}\}'")
             self.assertRegex(
                 block,
                 rf"(?s)if .*STATUS_MIGRATE_EXIT_CODE.*!= \"0\".*{failure_marker}",
             )
             self.assertRegex(block, rf"{compose}.*rm -f status-migrate")
-            self.assertLess(script.index(migration_check.group(0)), script.index("FAILED="))
+
+    def test_auto_deploy_prefers_v2_and_checks_each_runtime_service_portably(self):
+        script = (REPO_ROOT / "scripts" / "auto_deploy.sh").read_text()
+
+        self.assertLess(script.index("docker compose version"), script.index("command -v docker-compose"))
+        self.assertIn("at least 1.29.2", script)
+        self.assertIn("legacy_compose_supported", script)
+        self.assertIn("config --services", script)
+        self.assertIn('"$service" = "status-migrate"', script)
+        self.assertRegex(script, r"ps -a -q \"\$service\"")
+        self.assertIn(".State.Status", script)
+        self.assertNotIn('ps --filter "status=exited"', script)
+
+    def test_auto_deploy_marks_migration_query_errors_for_rollback_and_exits_after_rollback(self):
+        script = (REPO_ROOT / "scripts" / "auto_deploy.sh").read_text()
+
+        self.assertRegex(
+            script,
+            r"if ! STATUS_MIGRATE_IDS=\$\(\$COMPOSE .*ps -a -q status-migrate",
+        )
+        migration_query_failure = re.search(
+            r"if ! STATUS_MIGRATE_IDS=\$\(\$COMPOSE .*?; then(?P<body>.*?)\n  else",
+            script,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(migration_query_failure)
+        self.assertIn("ROLLBACK=true", migration_query_failure.group("body"))
+        rollback = re.search(
+            r'if \[ "\$\{ROLLBACK:-false\}" = "true" \]; then(?P<body>.*)',
+            script,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(rollback)
+        rollback_body = rollback.group("body")
+        self.assertIn("Rollback complete", rollback_body)
+        self.assertIn("exit 1", rollback_body)
+        self.assertLess(rollback_body.index("Rollback complete"), rollback_body.index("exit 1"))
 
 
 class MonitorServiceTests(unittest.TestCase):

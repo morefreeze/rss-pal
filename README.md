@@ -18,6 +18,8 @@
 
 ### 使用 Docker Compose（推荐）
 
+需要 Docker Compose v2（首选 `docker compose`）。如必须使用旧版 `docker-compose`，版本必须至少为 1.29.2，才能支持 `status-migrate` 所需的完成态依赖条件。
+
 1. 克隆并配置环境变量：
 
 ```bash
@@ -28,7 +30,7 @@ cp .env.example .env
 2. 启动：
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 3. 访问 http://localhost，首次使用会自动创建管理员账号
@@ -279,11 +281,11 @@ rss-pal/
 
 1. **手动应用 migration 028**——`docker-entrypoint-initdb.d` 只在空 volume 上跑一次，已有数据库要手动：
    ```bash
-   docker-compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/028_articles_processing_error.sql
+   docker compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/028_articles_processing_error.sql
    ```
 2. **重建 api + worker + frontend 镜像**——新增依赖、新增路由、前端组件：
    ```bash
-   docker-compose up -d --build api worker frontend
+   docker compose up -d --build api worker frontend
    ```
 3. **重新加载 Chrome 扩展**——`chrome://extensions` → RSS Pal → 刷新；本地 PDF 用户需在「详情」中开启「允许访问文件 URL」。
 4. **存储增长提示**——PDF 抽出的图片落到 `${BACKUP_DIR}/article_images/<article_id>/`，每篇网摘最多 100 张 PNG/JPG（典型 0.5–5 MB）。如果开了大量扫描版 PDF 网摘，注意备份目录磁盘用量。
@@ -331,8 +333,8 @@ This feature adds two new columns:
 Apply locally:
 
 ```bash
-docker-compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/029_articles_kind.sql
-docker-compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/030_feeds_provider_source_id.sql
+docker compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/029_articles_kind.sql
+docker compose exec -T postgres psql -U postgres -d rsspal < backend/migrations/030_feeds_provider_source_id.sql
 ```
 
 The migrations are idempotent (`IF NOT EXISTS` everywhere) and backward-compatible.
@@ -340,7 +342,7 @@ The migrations are idempotent (`IF NOT EXISTS` everywhere) and backward-compatib
 ### Rebuild + reload
 
 ```bash
-docker-compose up -d --build api worker frontend
+docker compose up -d --build api worker frontend
 # then in Chrome: chrome://extensions → reload "RSS Pal"
 ```
 
