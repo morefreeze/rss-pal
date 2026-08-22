@@ -4,6 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PROJECT_DIR="$(pwd)"
 LOG_FILE="$PROJECT_DIR/scripts/deploy.log"
+AUTO_DEPLOY_REEXEC="${AUTO_DEPLOY_REEXEC:-0}"
+AUTO_DEPLOY_PREV_COMMIT="${AUTO_DEPLOY_PREV_COMMIT:-}"
+AUTO_DEPLOY_CHANGED_FILES="${AUTO_DEPLOY_CHANGED_FILES:-}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 
@@ -127,22 +130,39 @@ check_runtime_services() {
   fi
 }
 
-# 1. Save current commit for rollback
-PREV_COMMIT=$(git rev-parse HEAD)
-log "Current commit: $PREV_COMMIT"
+# 1. Save current commit and pull latest main. A continuation keeps the
+# original rollback target and changed-file set after re-execing a new script.
+CONTINUATION="false"
+if [ "$AUTO_DEPLOY_REEXEC" = "1" ]; then
+  if [ -z "$AUTO_DEPLOY_PREV_COMMIT" ]; then
+    log "ERROR: auto-deploy continuation is missing its rollback commit"
+    exit 1
+  fi
+  PREV_COMMIT="$AUTO_DEPLOY_PREV_COMMIT"
+  CHANGED_FILES="$AUTO_DEPLOY_CHANGED_FILES"
+  CONTINUATION="true"
+  log "Continuing deployment after auto_deploy.sh re-exec (rollback=$PREV_COMMIT)"
+else
+  PREV_COMMIT=$(git rev-parse HEAD)
+  log "Current commit: $PREV_COMMIT"
 
-# 2. Pull latest main
-git fetch origin master
-BEHIND=$(git rev-list HEAD..origin/master --count 2>/dev/null || echo "0")
-CHANGED_FILES=$(git diff --name-only HEAD..origin/master 2>/dev/null || true)
+  git fetch origin master
+  BEHIND=$(git rev-list HEAD..origin/master --count 2>/dev/null || echo "0")
+  CHANGED_FILES=$(git diff --name-only HEAD..origin/master 2>/dev/null || true)
 
-if [ "$BEHIND" = "0" ]; then
-  log "Already up to date, nothing to do."
-  exit 0
+  if [ "$BEHIND" = "0" ]; then
+    log "Already up to date, nothing to do."
+    exit 0
+  fi
+
+  log "Behind by $BEHIND commits, pulling..."
+  git merge --no-edit origin/master
+
+  if printf '%s\n' "$CHANGED_FILES" | grep -Fxq 'scripts/auto_deploy.sh' && [ "$AUTO_DEPLOY_REEXEC" != "1" ]; then
+    log "auto_deploy.sh changed; re-execing the merged script once"
+    exec env AUTO_DEPLOY_REEXEC=1 AUTO_DEPLOY_PREV_COMMIT="$PREV_COMMIT" AUTO_DEPLOY_CHANGED_FILES="$CHANGED_FILES" /bin/bash "$PROJECT_DIR/scripts/auto_deploy.sh"
+  fi
 fi
-
-log "Behind by $BEHIND commits, pulling..."
-git merge --no-edit origin/master
 
 RUNTIME_CHANGED=false
 if [ -n "$CHANGED_FILES" ]; then
