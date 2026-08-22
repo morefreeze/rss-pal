@@ -310,7 +310,8 @@ HTML_PAGE = """<!DOCTYPE html>
   .uptime { color: var(--muted); font-size: .8125rem; text-align: right; white-space: nowrap; }
   .last-check { color: var(--muted); font-size: .75rem; margin: -4px 0 9px; }
   .hour-scroller { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
-  .hour-bar { display: grid; grid-template-columns: repeat(72, minmax(0, 1fr)); gap: 2px; height: 26px; }
+  .timeline-track { width: 100%; min-width: 100%; }
+  .hour-bar { display: grid; width: 100%; grid-template-columns: repeat(72, minmax(0, 1fr)); gap: 2px; height: 26px; }
   .hour-control { appearance: none; border: 0; border-radius: 2px; min-width: 0; padding: 0; cursor: pointer; }
   .hour-control.up { background: var(--up); }
   .hour-control.down { background: repeating-linear-gradient(135deg, var(--down), var(--down) 3px, #a8211a 3px, #a8211a 5px); border: 1px solid #7e1914; }
@@ -333,7 +334,8 @@ HTML_PAGE = """<!DOCTYPE html>
     .component-meta { grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; }
     .current-status, .uptime { font-size: .75rem; }
     .hour-scroller { margin-right: -10px; padding: 2px 10px 6px 0; }
-    .hour-bar, .axis { width: max-content; min-width: 100%; }
+    .timeline-track { width: 1941px; min-width: 1941px; }
+    .hour-bar, .axis { width: 100%; min-width: 100%; }
     .hour-bar { grid-template-columns: repeat(72, 24px); gap: 3px; height: 40px; }
     .hour-control { width: 24px; height: 40px; }
   }
@@ -557,7 +559,9 @@ function renderComponent(component) {
   const bar = document.createElement('div');
   bar.className = 'hour-bar';
   component.hours.forEach((hour, hourIndex) => bar.appendChild(createHourButton(component, hour, hourIndex)));
-  scroller.appendChild(bar);
+  const track = document.createElement('div');
+  track.className = 'timeline-track';
+  track.appendChild(bar);
   const axis = document.createElement('div');
   axis.className = 'axis';
   const ago = document.createElement('span');
@@ -565,7 +569,8 @@ function renderComponent(component) {
   setText(ago, '72 小时前');
   setText(now, '现在');
   axis.append(ago, now);
-  scroller.appendChild(axis);
+  track.appendChild(axis);
+  scroller.appendChild(track);
   row.appendChild(scroller);
   return row;
 }
@@ -584,8 +589,15 @@ function render(data) {
   for (const row of componentsRoot.children) row.children[2].scrollLeft = scrollPositions.get(row.getAttribute('data-component-key')) || 0;
   if (focusedHour && Number.isInteger(focusedHour.index)) {
     const row = Array.from(componentsRoot.children).find(item => item.getAttribute('data-component-key') === focusedHour.key);
-    const restored = row && row.children[2] && row.children[2].children[0].children[focusedHour.index];
-    if (restored) { setRovingButton(restored); restored.focus(); }
+    const scroller = row && row.children[2];
+    const restored = scroller && scroller.children[0].children[0].children[focusedHour.index];
+    if (restored) {
+      const savedScrollLeft = scroller.scrollLeft;
+      setRovingButton(restored);
+      try { restored.focus({ preventScroll: true }); } catch (_error) { restored.focus(); }
+      scroller.scrollLeft = savedScrollLeft;
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { scroller.scrollLeft = savedScrollLeft; });
+    }
   }
   setText(document.getElementById('last-update'), formatTimestamp(data.generated_at));
   setText(refreshLabel, '每 ' + formatCount(data.refresh_interval_seconds) + ' 秒刷新');

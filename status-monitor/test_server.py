@@ -472,7 +472,7 @@ class Node {
   getAttribute(name) { return this.attributes[name] ?? null; }
   addEventListener(name, handler) { (this.listeners[name] ||= []).push(handler); }
   dispatch(name, event = {}) { (this.listeners[name] || []).forEach(handler => handler({ type: name, preventDefault() { this.defaultPrevented = true; }, ...event })); }
-  focus() { const prior = this.ownerDocument.activeElement; if (prior && prior !== this) prior.dispatch('blur'); this.ownerDocument.activeElement = this; this.dispatch('focus'); }
+  focus(options = {}) { const prior = this.ownerDocument.activeElement; if (prior && prior !== this) prior.dispatch('blur'); if (!options.preventScroll) { let ancestor = this.parentNode; while (ancestor && ancestor.className !== 'hour-scroller') ancestor = ancestor.parentNode; if (ancestor) ancestor.scrollLeft = 999; } this.ownerDocument.activeElement = this; this.dispatch('focus'); }
   getBoundingClientRect() { return this.rect; }
 }
 class Document {
@@ -528,7 +528,8 @@ function page(fetchImpl) {
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const activeIsClear = context => vm.runInContext('activeTooltipButton === null', context);
 const hasImage = node => node.tagName === 'IMG' || node.children.some(hasImage);
-const barFor = row => row.children[2].children[0];
+const trackFor = row => row.children[2].children[0];
+const barFor = row => trackFor(row).children[0];
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
 (async () => {
@@ -544,7 +545,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(root.children.every(row => barFor(row).children.length === 72), 'must render 72 buttons per row');
   assert(root.children.every(row => barFor(row).children.filter(control => control.tabIndex === 0).length === 1), 'each row must expose one roving tab stop');
   assert(root.children.flatMap(row => barFor(row).children).filter(control => control.tabIndex === 0).length === 6, 'six rows must expose exactly six sequential tab stops');
-  assert(root.children.every(row => row.children[2].className === 'hour-scroller' && row.children[2].attributes['aria-label'].includes('横向滑动')), 'each status bar must have an accessible horizontal scroll wrapper');
+  assert(root.children.every(row => row.children[2].className === 'hour-scroller' && row.children[2].attributes['aria-label'].includes('横向滑动') && trackFor(row).className === 'timeline-track' && barFor(row).parentNode === trackFor(row) && trackFor(row).children[1].parentNode === trackFor(row)), 'each status bar must have a shared scroll track for aligned grid and axis');
   const rovingBar = barFor(root.children[0]); const newest = rovingBar.children[71];
   assert(newest.tabIndex === 0, 'newest hour must be the initial row tab stop'); newest.focus(); newest.dispatch('keydown', { key: 'ArrowLeft' }); assert(live.document.activeElement === rovingBar.children[70] && rovingBar.children[70].tabIndex === 0 && newest.tabIndex === -1, 'ArrowLeft must move row focus and tabindex'); rovingBar.children[70].dispatch('keydown', { key: 'Home' }); assert(live.document.activeElement === rovingBar.children[0] && rovingBar.children[0].tabIndex === 0, 'Home must move to the first hour'); rovingBar.children[0].dispatch('keydown', { key: 'End' }); assert(live.document.activeElement === newest && newest.tabIndex === 0, 'End must restore newest hour focus');
   for (const [componentIndex, row] of root.children.entries()) {
@@ -556,15 +557,14 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
       const expectedClass = hour.status === 'up' ? 'up' : hour.status === 'down' ? 'down' : 'no-data';
       assert(controls[hourIndex].className.includes(expectedClass) && controls[hourIndex].attributes['aria-label'].includes(expectedStatus), `component ${componentIndex} hour ${hourIndex} must match its own payload status ${expectedStatus}`);
     });
-    assert(row.children[2].children[1].textContent.includes('72 小时前') && row.children[2].children[1].textContent.includes('现在'), 'each row must keep the 72-hour-to-now axis inside the scroll content');
+    assert(trackFor(row).children[1].textContent.includes('72 小时前') && trackFor(row).children[1].textContent.includes('现在'), 'each row must keep the 72-hour-to-now axis inside the scroll content');
   }
   assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'null last_check must be no data');
   let button = barFor(root.children[0]).children[0]; const tooltip = live.document.byId['status-tooltip'];
   button.dispatch('mouseenter'); assert(!tooltip.hidden && tooltip.textContent.includes('检查失败') && !tooltip.textContent.includes('<img'), 'unsafe error must be mapped safely'); assert(!hasImage(tooltip), 'unsafe error must not create an IMG node');
   const upButton = barFor(root.children[0]).children[1]; upButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：正常') && tooltip.textContent.includes('小时可用率：100.00%') && tooltip.textContent.includes('检测：1 / 1') && tooltip.textContent.includes('平均延迟：12 ms'), 'up tooltip must show normal details');
   const noDataButton = barFor(root.children[0]).children[2]; noDataButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：无数据') && tooltip.textContent.includes('小时可用率：无数据') && tooltip.textContent.includes('检测：0 / 0') && tooltip.textContent.includes('平均延迟：无数据'), 'no-data tooltip must show missing-data details');
-  root.children[0].children[2].scrollLeft = 144;
-  rovingBar.children[5].focus(); const safePayload = makePayload(); vm.runInContext('render(safePayloadForTest)', Object.assign(live.context, { safePayloadForTest: safePayload })); assert(live.document.activeElement && live.document.activeElement.getAttribute('data-component-key') === 'component-0' && live.document.activeElement.getAttribute('data-hour-index') === '5', 'refresh must restore focused hour by component key and index'); const safeDownButton = barFor(root.children[0]).children[0]; safeDownButton.rect = { left: 900, top: 610, bottom: 628, width: 16, height: 36 }; safeDownButton.dispatch('mouseenter'); const expectedStart = new Date('2025-01-02T03:04:05+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedEnd = new Date('2025-01-02T04:05:06+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedErrorAt = new Date('2025-01-02T03:30:45+08:00').toLocaleString('zh-CN', { hour12: false }); assert(Number.parseFloat(tooltip.style.top) >= 12 && Number.parseFloat(tooltip.style.top) <= 508 && tooltip.textContent.includes('时段：' + expectedStart + ' 至 ' + expectedEnd) && tooltip.textContent.includes('状态：故障') && tooltip.textContent.includes('小时可用率：0.00%') && tooltip.textContent.includes('检测：0 / 1') && tooltip.textContent.includes('平均延迟：12 ms') && tooltip.textContent.includes('最近错误：连接超时') && tooltip.textContent.includes('错误时间：' + expectedErrorAt), 'down tooltip must clamp vertically and show complete mapped failure details with actual timestamps');
+  live.document.activeElement = rovingBar.children[5]; root.children[0].children[2].scrollLeft = 144; const safePayload = makePayload(); vm.runInContext('render(safePayloadForTest)', Object.assign(live.context, { safePayloadForTest: safePayload })); assert(root.children[0].children[2].scrollLeft === 144 && live.document.activeElement && live.document.activeElement.getAttribute('data-component-key') === 'component-0' && live.document.activeElement.getAttribute('data-hour-index') === '5', 'refresh must restore scroll position and focused hour with preventScroll'); const safeDownButton = barFor(root.children[0]).children[0]; safeDownButton.rect = { left: 900, top: 610, bottom: 628, width: 16, height: 36 }; safeDownButton.dispatch('mouseenter'); const expectedStart = new Date('2025-01-02T03:04:05+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedEnd = new Date('2025-01-02T04:05:06+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedErrorAt = new Date('2025-01-02T03:30:45+08:00').toLocaleString('zh-CN', { hour12: false }); assert(Number.parseFloat(tooltip.style.top) >= 12 && Number.parseFloat(tooltip.style.top) <= 508 && tooltip.textContent.includes('时段：' + expectedStart + ' 至 ' + expectedEnd) && tooltip.textContent.includes('状态：故障') && tooltip.textContent.includes('小时可用率：0.00%') && tooltip.textContent.includes('检测：0 / 1') && tooltip.textContent.includes('平均延迟：12 ms') && tooltip.textContent.includes('最近错误：连接超时') && tooltip.textContent.includes('错误时间：' + expectedErrorAt), 'down tooltip must clamp vertically and show complete mapped failure details with actual timestamps');
   assert(root.children[0].children[2].scrollLeft === 144, 'refresh must preserve each component scroller position');
   button = safeDownButton;
   button.dispatch('mouseleave'); assert(tooltip.hidden && activeIsClear(live.context), 'mouseleave must dismiss tooltip');
@@ -606,9 +606,12 @@ class StatusPageTests(unittest.TestCase):
         self.assertEqual(server.HTML_PAGE.count('role="tooltip"'), 1)
         self.assertIn("hour-scroller", server.HTML_PAGE)
         self.assertNotIn('id="components" class="components" aria-live', server.HTML_PAGE)
-        self.assertIn("width: max-content", server.HTML_PAGE)
+        self.assertIn("width: 1941px", server.HTML_PAGE)
         self.assertIn("repeat(72, 24px)", server.HTML_PAGE)
         self.assertIn("max-height: calc(100vh - 24px)", server.HTML_PAGE)
+        self.assertIn("timeline-track", server.HTML_PAGE)
+        self.assertIn("width: 1941px", server.HTML_PAGE)
+        self.assertIn("focus({ preventScroll: true })", server.HTML_PAGE)
         self.assertIn("repeating-linear-gradient", server.HTML_PAGE)
         self.assertIn("dashed", server.HTML_PAGE)
         self.assertNotIn("innerHTML", server.HTML_PAGE)
