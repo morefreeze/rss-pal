@@ -415,6 +415,42 @@ class MonitorServiceTests(unittest.TestCase):
             ]
         self.assertEqual(retained, ["at-cutoff", "inside-window"])
 
+    def test_bind_failure_closes_service_without_starting_sampler(self):
+        env = {
+            "DB_PATH": str(Path(self.tempdir.name) / "startup.db"),
+            "CHECK_INTERVAL": "60",
+            "MONITOR_PORT": "8090",
+            "FRONTEND_URL": REAL_COMPONENTS[0].url,
+            "API_HEALTH_URL": REAL_COMPONENTS[1].url,
+            "WORKER_HEALTH_URL": REAL_COMPONENTS[2].url,
+            "RSSHUB_HEALTH_URL": REAL_COMPONENTS[3].url,
+            "PUBLIC_HEALTH_URL": REAL_COMPONENTS[4].url,
+        }
+        real_service_type = server.MonitorService
+        created_services = []
+
+        def create_service(*args, **kwargs):
+            service = real_service_type(*args, **kwargs)
+            created_services.append(service)
+            return service
+
+        with (
+            patch("server.MonitorService", side_effect=create_service),
+            patch("server.HTTPServer", side_effect=OSError("address already in use")),
+            patch("server.threading.Thread") as thread_type,
+        ):
+            try:
+                with self.assertRaises(OSError):
+                    server.main(env)
+
+                thread_type.assert_not_called()
+                self.assertEqual(len(created_services), 1)
+                self.assertTrue(created_services[0].closed)
+                self.assertEqual(created_services[0].inflight_count, 0)
+            finally:
+                for service in created_services:
+                    service.close()
+
 
 if __name__ == "__main__":
     unittest.main()

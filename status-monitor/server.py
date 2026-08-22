@@ -136,6 +136,11 @@ class MonitorService:
         with self._cycle_lock:
             return len(self._inflight)
 
+    @property
+    def closed(self):
+        with self._cycle_lock:
+            return self._closed
+
     def close(self):
         """Cancel queued probes and release the executor without waiting forever."""
         with self._cycle_lock:
@@ -580,17 +585,28 @@ def main(env=None):
         now_fn=lambda: datetime.now(CST),
     )
     stop_event = threading.Event()
-    sampler = threading.Thread(
-        target=sampling_loop, args=(service, stop_event), daemon=True
-    )
-    sampler.start()
-    httpd = HTTPServer(("0.0.0.0", port), make_handler(service))
+    httpd = None
+    sampler = None
+    sampler_started = False
     try:
+        httpd = HTTPServer(("0.0.0.0", port), make_handler(service))
+        sampler = threading.Thread(
+            target=sampling_loop, args=(service, stop_event), daemon=True
+        )
+        sampler.start()
+        sampler_started = True
         httpd.serve_forever()
     finally:
         stop_event.set()
-        httpd.server_close()
-        service.close()
+        try:
+            if httpd is not None:
+                httpd.server_close()
+        finally:
+            try:
+                service.close()
+            finally:
+                if sampler_started:
+                    sampler.join(timeout=1)
 
 
 if __name__ == "__main__":
