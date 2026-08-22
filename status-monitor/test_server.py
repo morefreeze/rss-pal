@@ -39,9 +39,13 @@ class DeploymentConfigTests(unittest.TestCase):
 
         self.assertIn(deny_location, nginx)
         self.assertLess(nginx.index(deny_location), nginx.index("location /api/status"))
-        self.assertLess(nginx.index(deny_location), nginx.index("location ^~ /api"))
+        generic_api_location = re.search(
+            r"^    location \^~ /api \{$", nginx, re.MULTILINE
+        )
+        self.assertIsNotNone(generic_api_location)
+        self.assertLess(nginx.index(deny_location), generic_api_location.start())
         self.assertNotIn("proxy_pass", deny_location)
-        self.assertIn("location ^~ /api", nginx)
+        self.assertNotIn("/api/media/youtube/", generic_api_location.group(0))
 
     def test_compose_status_monitor_uses_component_probe_contract_without_legacy_data(self):
         compose = (REPO_ROOT / "docker-compose.yml").read_text()
@@ -92,6 +96,38 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("status_data:/data", status_service)
         self.assertIn("restart: unless-stopped", status_service)
         self.assertIn("build:", status_service)
+
+    def test_compose_applies_heartbeat_migration_before_api_and_worker_start(self):
+        compose = (REPO_ROOT / "docker-compose.yml").read_text()
+
+        def service_body(name):
+            match = re.search(
+                rf"^  {re.escape(name)}:\n(?P<body>.*?)(?=^  [a-z][a-z0-9-]*:|^volumes:)",
+                compose,
+                re.MULTILINE | re.DOTALL,
+            )
+            self.assertIsNotNone(match, f"{name} service must be declared")
+            return match.group("body")
+
+        migration_service = service_body("status-migrate")
+        for setting in (
+            "image: postgres:15-alpine",
+            'PGHOST: postgres',
+            'PGDATABASE: rsspal',
+            'PGUSER: ${DB_ADMIN_USER:-postgres}',
+            'PGPASSWORD: ${DB_ADMIN_PASSWORD:-${DB_PASSWORD:?DB_PASSWORD required in .env}}',
+            '- ./backend/migrations:/migrations:ro',
+            'condition: service_healthy',
+            '"psql", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/037_service_heartbeats.sql"',
+        ):
+            self.assertIn(setting, migration_service)
+
+        for app_service_name in ("api", "worker"):
+            app_service = service_body(app_service_name)
+            self.assertRegex(
+                app_service,
+                r"status-migrate:\n        condition: service_completed_successfully",
+            )
 
 
 class MonitorServiceTests(unittest.TestCase):

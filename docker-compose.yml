@@ -23,6 +23,22 @@ services:
       timeout: 5s
       retries: 5
 
+  # Runs once after PostgreSQL is ready so existing database volumes receive
+  # heartbeat schema 037 before either service accesses it.
+  status-migrate:
+    image: postgres:15-alpine
+    environment:
+      PGHOST: postgres
+      PGDATABASE: rsspal
+      PGUSER: ${DB_ADMIN_USER:-postgres}
+      PGPASSWORD: ${DB_ADMIN_PASSWORD:-${DB_PASSWORD:?DB_PASSWORD required in .env}}
+    volumes:
+      - ./backend/migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/037_service_heartbeats.sql"]
+
   api:
     restart: unless-stopped
     build:
@@ -60,6 +76,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      status-migrate:
+        condition: service_completed_successfully
       rsshub:
         condition: service_started
       youtube-pot:
@@ -100,6 +118,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      status-migrate:
+        condition: service_completed_successfully
       rsshub:
         condition: service_started
     volumes:
