@@ -29,6 +29,7 @@ func NewFetcher(rsshubBase string) *Fetcher {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
+			Proxy:           http.ProxyFromEnvironment,
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
