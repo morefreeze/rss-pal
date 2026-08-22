@@ -33,7 +33,7 @@ class MonitorServiceTests(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
-    def service(self, probe_fn=None, db_path=None):
+    def service(self, probe_fn=None, db_path=None, now_fn=None):
         service_type = getattr(server, "MonitorService", None)
         self.assertIsNotNone(service_type, "MonitorService must be defined")
         service = service_type(
@@ -41,7 +41,7 @@ class MonitorServiceTests(unittest.TestCase):
             component_defs=REAL_COMPONENTS,
             probe_fn=probe_fn or (lambda _component: ProbeResult("up", 200, 5, None)),
             interval_seconds=60,
-            now_fn=lambda: self.now,
+            now_fn=now_fn or (lambda: self.now),
         )
         server.init_db(service.db_path)
         return service
@@ -133,22 +133,40 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertNotIn(secret, api_body.decode())
         self.assertIn("connection_failed", api_body.decode())
 
-    def test_self_health_is_down_only_when_previous_completion_is_older_than_120_seconds(self):
-        exactly_service = self.service()
-        exactly_service.sample_once(self.now - timedelta(seconds=120))
-        exactly_service.sample_once(self.now)
+    def test_self_health_uses_actual_completion_time_after_a_slow_cycle(self):
+        first_start = self.now
+        first_completion = first_start + timedelta(seconds=70)
+        second_start = first_completion + timedelta(seconds=60)
+        second_completion = second_start + timedelta(seconds=70)
+        third_start = second_completion + timedelta(seconds=121)
+        completion_times = iter(
+            [first_completion, second_completion, third_start + timedelta(seconds=1)]
+        )
+        service = self.service(now_fn=lambda: next(completion_times))
+
+        service.sample_once(first_start)
+        service.sample_once(second_start)
+        service.sample_once(third_start)
+
+        rows = [row for row in self.rows() if row[0] == "status-monitor"]
+        self.assertEqual([row[1] for row in rows], ["up", "up", "down"])
+        self.assertEqual(
+            service.last_cycle_completed_at,
+            third_start + timedelta(seconds=1),
+        )
+
+    def test_self_health_at_exactly_120_seconds_since_completion_remains_up(self):
+        first_start = self.now
+        first_completion = first_start + timedelta(seconds=70)
+        second_start = first_completion + timedelta(seconds=120)
+        completion_times = iter([first_completion, second_start + timedelta(seconds=1)])
+        exactly_service = self.service(now_fn=lambda: next(completion_times))
+
+        exactly_service.sample_once(first_start)
+        exactly_service.sample_once(second_start)
+
         exactly_rows = [row for row in self.rows() if row[0] == "status-monitor"]
         self.assertEqual([row[1] for row in exactly_rows], ["up", "up"])
-
-        older_db = str(Path(self.tempdir.name) / "older.db")
-        older_service = self.service(db_path=older_db)
-        older_service.sample_once(self.now - timedelta(seconds=121))
-        older_service.sample_once(self.now)
-        with sqlite3.connect(older_db) as conn:
-            older_rows = conn.execute(
-                "SELECT status FROM checks WHERE source = 'status-monitor' ORDER BY id"
-            ).fetchall()
-        self.assertEqual(older_rows, [("up",), ("down",)])
 
     def test_status_api_returns_six_ordered_components_with_72_hours_each(self):
         service = self.service()
