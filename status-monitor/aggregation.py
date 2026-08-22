@@ -102,8 +102,15 @@ def build_hour_buckets(rows, now: datetime, hours: int = 72) -> list[dict]:
     return _build_hour_buckets(_records_in_window(rows, now, hours), now, hours)
 
 
-def component_summary(conn, component, now: datetime, hours: int = 72) -> dict:
+def component_summary(
+    conn,
+    component,
+    now: datetime,
+    hours: int = 72,
+    freshness_seconds: int | float = 120,
+) -> dict:
     """Return one configured component's current state and compact 72-hour history."""
+    current_time = _parse_timestamp(now)
     window_start, window_end = _window(now, hours)
     rows = conn.execute(
         "SELECT ts, status, code, latency_ms, error FROM checks "
@@ -112,11 +119,17 @@ def component_summary(conn, component, now: datetime, hours: int = 72) -> dict:
     ).fetchall()
     records = _records_in_window(rows, now, hours, ordered=True)
     latest = records[-1] if records else None
+    latest_is_fresh = bool(
+        latest
+        and current_time - latest["ts"] <= timedelta(seconds=freshness_seconds)
+    )
     successful = sum(record["status"] == "up" for record in records)
     return {
         "key": component.key,
         "name": component.name,
-        "current_status": "up" if latest and latest["status"] == "up" else "down",
+        "current_status": (
+            "up" if latest_is_fresh and latest["status"] == "up" else "down"
+        ),
         "uptime_pct": round(successful / len(records) * 100, 2) if records else 0,
         "last_check": latest["ts"].isoformat() if latest else None,
         "hours": _build_hour_buckets(records, now, hours),
@@ -126,7 +139,16 @@ def component_summary(conn, component, now: datetime, hours: int = 72) -> dict:
 def status_payload(conn, component_defs, now: datetime, interval_seconds) -> dict:
     """Build the public status payload without exposing component URLs or raw rows."""
     generated_at = _parse_timestamp(now).isoformat()
-    components = [component_summary(conn, component, now) for component in component_defs]
+    freshness_seconds = interval_seconds * 2
+    components = [
+        component_summary(
+            conn,
+            component,
+            now,
+            freshness_seconds=freshness_seconds,
+        )
+        for component in component_defs
+    ]
     return {
         "generated_at": generated_at,
         "refresh_interval_seconds": interval_seconds,
