@@ -111,20 +111,39 @@ if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
   log "Build succeeded, running health check..."
   sleep 15
 
-  FAILED=$($COMPOSE "${COMPOSE_FILES[@]}" ps --filter "status=exited" -q 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$FAILED" -gt 0 ]; then
-    log "⚠️  $FAILED container(s) exited after build, rolling back..."
+  STATUS_MIGRATE_ID=$($COMPOSE "${COMPOSE_FILES[@]}" ps --all -q status-migrate 2>/dev/null | head -n 1)
+  if [ -z "$STATUS_MIGRATE_ID" ]; then
+    log "⚠️  status-migrate container is missing after compose up, rolling back..."
     ROLLBACK=true
   else
-    # Try hitting the API to confirm it's alive
-    API_PORT=$(grep -oP 'SERVER_PORT=\K\d+' "$PROJECT_DIR/.env" 2>/dev/null || echo "8080")
-    HEALTH=$(curl -sf -o /dev/null -w "%{http_code}" "http://localhost:$API_PORT/api/health" 2>/dev/null || echo "000")
-    if [ "$HEALTH" = "200" ] || [ "$HEALTH" = "401" ]; then
-      log "✅ Deploy successful! New commit: $(git rev-parse --short HEAD)"
-      exit 0
-    else
-      log "⚠️  Health check failed (HTTP $HEALTH), rolling back..."
+    STATUS_MIGRATE_EXIT_CODE=$(docker inspect -f '{{.State.ExitCode}}' "$STATUS_MIGRATE_ID" 2>/dev/null || echo "inspect_failed")
+    if [ "$STATUS_MIGRATE_EXIT_CODE" != "0" ]; then
+      log "⚠️  status-migrate exited with code $STATUS_MIGRATE_EXIT_CODE, rolling back..."
       ROLLBACK=true
+    elif $COMPOSE "${COMPOSE_FILES[@]}" rm -f status-migrate 2>&1 | tee -a "$LOG_FILE"; then
+      log "status-migrate completed successfully and was removed"
+    else
+      log "⚠️  could not remove successful status-migrate container, rolling back..."
+      ROLLBACK=true
+    fi
+  fi
+
+  if [ "${ROLLBACK:-false}" != "true" ]; then
+    FAILED=$($COMPOSE "${COMPOSE_FILES[@]}" ps --filter "status=exited" -q 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$FAILED" -gt 0 ]; then
+      log "⚠️  $FAILED container(s) exited after build, rolling back..."
+      ROLLBACK=true
+    else
+      # Try hitting the API to confirm it's alive
+      API_PORT=$(grep -oP 'SERVER_PORT=\K\d+' "$PROJECT_DIR/.env" 2>/dev/null || echo "8080")
+      HEALTH=$(curl -sf -o /dev/null -w "%{http_code}" "http://localhost:$API_PORT/api/health" 2>/dev/null || echo "000")
+      if [ "$HEALTH" = "200" ] || [ "$HEALTH" = "401" ]; then
+        log "✅ Deploy successful! New commit: $(git rev-parse --short HEAD)"
+        exit 0
+      else
+        log "⚠️  Health check failed (HTTP $HEALTH), rolling back..."
+        ROLLBACK=true
+      fi
     fi
   fi
 else

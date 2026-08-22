@@ -129,6 +129,41 @@ class DeploymentConfigTests(unittest.TestCase):
                 r"status-migrate:\n        condition: service_completed_successfully",
             )
 
+    def test_heartbeat_migration_skips_grant_when_app_role_is_absent(self):
+        migration = (
+            REPO_ROOT / "backend" / "migrations" / "037_service_heartbeats.sql"
+        ).read_text()
+
+        self.assertIn("CREATE TABLE IF NOT EXISTS service_heartbeats", migration)
+        self.assertRegex(
+            migration,
+            r"DO \$\$\s*BEGIN\s*IF EXISTS \(\s*SELECT 1 FROM pg_roles\s*"
+            r"WHERE rolname = 'rsspal_app'\s*\) THEN\s*GRANT SELECT, INSERT, UPDATE "
+            r"ON service_heartbeats TO rsspal_app;\s*END IF;\s*END\s*\$\$;",
+        )
+
+    def test_deploy_scripts_verify_and_remove_successful_status_migration_before_exit_checks(self):
+        auto_deploy = (REPO_ROOT / "scripts" / "auto_deploy.sh").read_text()
+        oracle_deploy = (REPO_ROOT / "scripts" / "deploy-oracle.sh").read_text()
+
+        for script, compose, failure_marker in (
+            (auto_deploy, r"\$COMPOSE \"\$\{COMPOSE_FILES\[@\]\}\"", "ROLLBACK=true"),
+            (oracle_deploy, r"docker compose", "error"),
+        ):
+            migration_check = re.search(
+                r"STATUS_MIGRATE_ID=.*?(?=\n\s*FAILED=)", script, re.DOTALL
+            )
+            self.assertIsNotNone(migration_check)
+            block = migration_check.group(0)
+            self.assertRegex(block, r"ps --all -q status-migrate")
+            self.assertRegex(block, r"docker inspect -f '\{\{\.State\.ExitCode\}\}'")
+            self.assertRegex(
+                block,
+                rf"(?s)if .*STATUS_MIGRATE_EXIT_CODE.*!= \"0\".*{failure_marker}",
+            )
+            self.assertRegex(block, rf"{compose}.*rm -f status-migrate")
+            self.assertLess(script.index(migration_check.group(0)), script.index("FAILED="))
+
 
 class MonitorServiceTests(unittest.TestCase):
     def setUp(self):

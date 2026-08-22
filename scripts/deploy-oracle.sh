@@ -239,6 +239,21 @@ docker compose up -d --build 2>&1
 info "等待服务启动..."
 sleep 15
 
+STATUS_MIGRATE_ID=$(docker compose ps --all -q status-migrate 2>/dev/null | head -n 1)
+if [[ -z "$STATUS_MIGRATE_ID" ]]; then
+  error "status-migrate 容器缺失，无法确认 037_service_heartbeats.sql 已完成"
+fi
+
+STATUS_MIGRATE_EXIT_CODE=$(docker inspect -f '{{.State.ExitCode}}' "$STATUS_MIGRATE_ID" 2>/dev/null || echo "inspect_failed")
+if [[ "$STATUS_MIGRATE_EXIT_CODE" != "0" ]]; then
+  error "status-migrate 以退出码 $STATUS_MIGRATE_EXIT_CODE 结束，部署停止"
+fi
+
+if ! docker compose rm -f status-migrate; then
+  error "status-migrate 已成功但无法移除，部署停止"
+fi
+info "status-migrate 成功完成并已移除"
+
 # 检查容器状态
 FAILED=$(docker compose ps --filter "status=exited" -q 2>/dev/null | wc -l | tr -d ' ')
 if [[ "$FAILED" -gt 0 ]]; then
