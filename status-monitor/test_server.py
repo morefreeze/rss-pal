@@ -452,5 +452,87 @@ class MonitorServiceTests(unittest.TestCase):
                     service.close()
 
 
+class StatusPageTests(unittest.TestCase):
+    def setUp(self):
+        self.page = server.HTML_PAGE
+
+    def test_page_uses_the_72_hour_component_status_contract(self):
+        self.assertIn("<title>RSS Pal Status</title>", self.page)
+        self.assertIn("过去 72 小时可用情况", self.page)
+        self.assertIn("所有系统运行正常", self.page)
+        self.assertIn("部分系统故障", self.page)
+        self.assertIn("每 60 秒刷新", self.page)
+        self.assertIn("setInterval(loadData, 60000)", self.page)
+        for field in (
+            "generated_at",
+            "refresh_interval_seconds",
+            "overall_status",
+            "components",
+            "key",
+            "name",
+            "current_status",
+            "uptime_pct",
+            "last_check",
+            "hours",
+            "start",
+            "end",
+            "successful_checks",
+            "total_checks",
+            "avg_latency_ms",
+            "last_error",
+            "last_error_at",
+        ):
+            self.assertIn(field, self.page)
+
+    def test_page_has_accessible_reusable_tooltip_and_all_input_events(self):
+        self.assertEqual(self.page.count('role="tooltip"'), 1)
+        for event_name in (
+            "mouseenter",
+            "mouseleave",
+            "focus",
+            "blur",
+            "pointerdown",
+            "keydown",
+            "Escape",
+        ):
+            self.assertIn(event_name, self.page)
+        self.assertIn("document.createElement('button')", self.page)
+        self.assertIn("aria-label", self.page)
+        self.assertIn("72 小时前", self.page)
+        self.assertIn("现在", self.page)
+
+    def test_page_requires_exactly_six_components_and_72_hour_buttons_per_row(self):
+        self.assertIn("data.components.length !== 6", self.page)
+        self.assertIn("typeof component.key", self.page)
+        self.assertIn("component.hours.length !== HOURS", self.page)
+        self.assertIn("grid-template-columns: repeat(72", self.page)
+        self.assertIn("component.hours.forEach(hour =>", self.page)
+
+    def test_page_removes_legacy_status_ui_and_untrusted_html_sinks(self):
+        self.assertNotIn("innerHTML", self.page)
+        self.assertNotIn("insertAdjacentHTML", self.page)
+        for legacy in ("local-section", "domain-section", "domain_stats", "incidents-list"):
+            self.assertNotIn(legacy, self.page)
+
+    def test_page_maps_errors_and_uses_safe_text_helpers_for_payload_values(self):
+        self.assertIn("function safeErrorLabel", self.page)
+        self.assertIn("Object.prototype.hasOwnProperty.call", self.page)
+        self.assertIn("检查失败", self.page)
+        self.assertIn("function setText", self.page)
+        self.assertIn("textContent", self.page)
+        malicious_error = '<img src=x onerror=alert(1)>'
+        self.assertNotIn(malicious_error, self.page)
+        self.assertNotIn("last_error +", self.page)
+        self.assertNotIn("last_error}`", self.page)
+
+    def test_page_refresh_guard_retains_the_last_successful_render_on_failure(self):
+        self.assertIn("let inFlight = false", self.page)
+        self.assertIn("if (inFlight) return", self.page)
+        self.assertIn("let lastSuccessfulData = null", self.page)
+        self.assertIn("数据暂时无法刷新", self.page)
+        self.assertIn("lastSuccessfulData", self.page)
+        self.assertIn("finally", self.page)
+
+
 if __name__ == "__main__":
     unittest.main()
