@@ -2,8 +2,9 @@ import json
 import unittest
 from dataclasses import FrozenInstanceError
 from unittest.mock import patch
+import urllib.error
 
-from components import Component, ProbeResult, load_components, probe
+from components import Component, ProbeResult, _NoRedirectHandler, load_components, probe
 
 
 class FakeResponse:
@@ -33,12 +34,12 @@ class ComponentProbeTests(unittest.TestCase):
 
     def test_api_requires_200_json_ok(self):
         ok_response = response_for(200, json.dumps({"status": "ok"}).encode())
-        with patch("components.urllib.request.urlopen", return_value=ok_response):
+        with patch("components._NO_REDIRECT_OPENER.open", return_value=ok_response):
             result = probe(self.api)
         self.assertEqual(result, ProbeResult("up", 200, result.latency_ms, None))
 
         down_response = response_for(200, json.dumps({"status": "down"}).encode())
-        with patch("components.urllib.request.urlopen", return_value=down_response):
+        with patch("components._NO_REDIRECT_OPENER.open", return_value=down_response):
             result = probe(self.api)
         self.assertEqual(result.status, "down")
         self.assertEqual(result.code, 200)
@@ -46,7 +47,7 @@ class ComponentProbeTests(unittest.TestCase):
 
     def test_api_rejects_invalid_json(self):
         response = response_for(200, b"not-json")
-        with patch("components.urllib.request.urlopen", return_value=response):
+        with patch("components._NO_REDIRECT_OPENER.open", return_value=response):
             result = probe(self.api)
         self.assertEqual(result.status, "down")
         self.assertEqual(result.code, 200)
@@ -54,22 +55,27 @@ class ComponentProbeTests(unittest.TestCase):
 
     def test_frontend_accepts_302(self):
         response = response_for(302, b"redirect")
-        with patch("components.urllib.request.urlopen", return_value=response):
+        redirect_error = urllib.error.HTTPError(
+            self.frontend.url, 302, "Found", {}, response
+        )
+        with patch("components._NO_REDIRECT_OPENER.open", side_effect=redirect_error):
             result = probe(self.frontend)
         self.assertEqual(result.status, "up")
         self.assertEqual(result.code, 302)
         self.assertIsNone(result.error)
+        self.assertEqual(response.read_calls, 1)
+        self.assertTrue(response.closed)
 
     def test_rsshub_rejects_500(self):
         response = response_for(500, b"server error")
-        with patch("components.urllib.request.urlopen", return_value=response):
+        with patch("components._NO_REDIRECT_OPENER.open", return_value=response):
             result = probe(self.rsshub)
         self.assertEqual(result.status, "down")
         self.assertEqual(result.code, 500)
         self.assertEqual(result.error, "http_error")
 
     def test_timeout_is_down_and_sanitized(self):
-        with patch("components.urllib.request.urlopen", side_effect=TimeoutError("slow")):
+        with patch("components._NO_REDIRECT_OPENER.open", side_effect=TimeoutError("slow")):
             result = probe(self.api)
         self.assertEqual(result.status, "down")
         self.assertIsNone(result.code)
@@ -81,7 +87,7 @@ class ComponentProbeTests(unittest.TestCase):
             "GET https://user:password@api.internal:8443/health failed\n"
             "Traceback (most recent call last): SELECT secret FROM users"
         )
-        with patch("components.urllib.request.urlopen", side_effect=error):
+        with patch("components._NO_REDIRECT_OPENER.open", side_effect=error):
             result = probe(self.api)
         self.assertEqual(result, ProbeResult("down", None, result.latency_ms, "connection_failed"))
         self.assertNotIn("api.internal", result.error)
@@ -91,7 +97,7 @@ class ComponentProbeTests(unittest.TestCase):
 
     def test_response_body_is_drained_and_closed(self):
         response = response_for(200, json.dumps({"status": "ok"}).encode())
-        with patch("components.urllib.request.urlopen", return_value=response):
+        with patch("components._NO_REDIRECT_OPENER.open", return_value=response):
             result = probe(self.api)
         self.assertEqual(result.status, "up")
         self.assertEqual(response.read_calls, 1)
@@ -100,6 +106,12 @@ class ComponentProbeTests(unittest.TestCase):
     def test_components_are_immutable(self):
         with self.assertRaises(FrozenInstanceError):
             self.api.url = "http://changed/"
+
+    def test_redirect_handler_does_not_follow_redirects(self):
+        handler = _NoRedirectHandler()
+        self.assertIsNone(
+            handler.redirect_request(None, None, 302, "Found", {}, "http://elsewhere/")
+        )
 
     def test_load_components_order_names_and_probe_kinds(self):
         env = {
