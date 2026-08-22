@@ -513,9 +513,9 @@ function page(fetchImpl) {
   for (const id of ['status-tooltip', 'components', 'overall-banner', 'refresh-notice', 'last-update', 'refresh-label']) document.byId[id] = new Node('div', document);
   document.byId['status-tooltip'].hidden = true;
   document.byId['refresh-notice'].hidden = true;
-  const timers = []; let fetchCalls = 0;
+  const timers = []; const animationFrames = []; let fetchCalls = 0;
   document.byId['status-tooltip'].rect = { left: 0, top: 0, bottom: 0, width: 320, height: 120 };
-  const context = { console, document, window: { innerWidth: 1024, innerHeight: 640 }, AbortController, Date, Number, Object, String, Array, Math, Error, Promise, requestAnimationFrame: callback => callback(),
+  const context = { console, document, window: { innerWidth: 1024, innerHeight: 640 }, AbortController, Date, Number, Object, String, Array, Math, Error, Promise, requestAnimationFrame: callback => { animationFrames.push(callback); return animationFrames.length - 1; },
     fetch: (...args) => { fetchCalls += 1; return fetchImpl(...args); },
     setInterval: () => 1,
     setTimeout: callback => { timers.push(callback); return timers.length - 1; },
@@ -523,7 +523,7 @@ function page(fetchImpl) {
   };
   context.globalThis = context;
   vm.createContext(context); vm.runInContext(script, context);
-  return { context, document, timers, calls: () => fetchCalls };
+  return { context, document, timers, animationFrames, flushAnimationFrames: () => { while (animationFrames.length) animationFrames.shift()(); }, calls: () => fetchCalls };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const activeIsClear = context => vm.runInContext('activeTooltipButton === null', context);
@@ -566,7 +566,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   const noDataButton = barFor(root.children[0]).children[2]; noDataButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：无数据') && tooltip.textContent.includes('小时可用率：无数据') && tooltip.textContent.includes('检测：0 / 0') && tooltip.textContent.includes('平均延迟：无数据'), 'no-data tooltip must show missing-data details');
   live.document.activeElement = rovingBar.children[5]; root.children[0].children[2].scrollLeft = 144; const safePayload = makePayload(); vm.runInContext('render(safePayloadForTest)', Object.assign(live.context, { safePayloadForTest: safePayload })); assert(root.children[0].children[2].scrollLeft === 144 && live.document.activeElement && live.document.activeElement.getAttribute('data-component-key') === 'component-0' && live.document.activeElement.getAttribute('data-hour-index') === '5', 'refresh must restore scroll position and focused hour with preventScroll'); const safeDownButton = barFor(root.children[0]).children[0]; safeDownButton.rect = { left: 900, top: 610, bottom: 628, width: 16, height: 36 }; safeDownButton.dispatch('mouseenter'); const expectedStart = new Date('2025-01-02T03:04:05+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedEnd = new Date('2025-01-02T04:05:06+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedErrorAt = new Date('2025-01-02T03:30:45+08:00').toLocaleString('zh-CN', { hour12: false }); assert(Number.parseFloat(tooltip.style.top) >= 12 && Number.parseFloat(tooltip.style.top) <= 508 && tooltip.textContent.includes('时段：' + expectedStart + ' 至 ' + expectedEnd) && tooltip.textContent.includes('状态：故障') && tooltip.textContent.includes('小时可用率：0.00%') && tooltip.textContent.includes('检测：0 / 1') && tooltip.textContent.includes('平均延迟：12 ms') && tooltip.textContent.includes('最近错误：连接超时') && tooltip.textContent.includes('错误时间：' + expectedErrorAt), 'down tooltip must clamp vertically and show complete mapped failure details with actual timestamps');
   assert(root.children[0].children[2].scrollLeft === 144, 'refresh must preserve each component scroller position');
-  const fallback = page(() => Promise.resolve({ ok: true, json: () => Promise.resolve(makePayload()) })); await flush(); await flush(); fallback.document.throwPreventScroll = true; const fallbackScroller = fallback.document.byId.components.children[0].children[2]; const fallbackButton = barFor(fallback.document.byId.components.children[0]).children[60]; fallback.document.activeElement = fallbackButton; fallbackScroller.scrollLeft = 211; vm.runInContext('render(fallbackPayloadForTest)', Object.assign(fallback.context, { fallbackPayloadForTest: makePayload() })); assert(fallback.document.byId.components.children[0].children[2].scrollLeft === 211, 'unsupported preventScroll fallback must restore scrollLeft after ordinary focus');
+  const fallback = page(() => Promise.resolve({ ok: true, json: () => Promise.resolve(makePayload()) })); await flush(); await flush(); fallback.document.throwPreventScroll = true; const fallbackScroller = fallback.document.byId.components.children[0].children[2]; const fallbackButton = barFor(fallback.document.byId.components.children[0]).children[60]; fallback.document.activeElement = fallbackButton; fallbackScroller.scrollLeft = 211; vm.runInContext('render(fallbackPayloadForTest)', Object.assign(fallback.context, { fallbackPayloadForTest: makePayload() })); assert(fallback.document.byId.components.children[0].children[2].scrollLeft === 211, 'unsupported preventScroll fallback must restore scrollLeft synchronously after ordinary focus'); fallback.document.byId.components.children[0].children[2].scrollLeft = 777; fallback.flushAnimationFrames(); assert(fallback.document.byId.components.children[0].children[2].scrollLeft === 211, 'deferred rAF restoration must undo delayed browser auto-scroll');
   button = safeDownButton;
   button.dispatch('mouseleave'); assert(tooltip.hidden && activeIsClear(live.context), 'mouseleave must dismiss tooltip');
   button.dispatch('focus'); assert(!tooltip.hidden, 'focus must show tooltip'); button.dispatch('blur'); assert(tooltip.hidden, 'blur must dismiss tooltip');
