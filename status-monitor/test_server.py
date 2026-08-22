@@ -52,6 +52,27 @@ class DeploymentConfigTests(unittest.TestCase):
         )
         self.assertIsNotNone(status_match)
         status_service = status_match.group("body")
+        environment_match = re.search(
+            r"^    environment:\n(?P<environment>(?:      [A-Z][A-Z0-9_]*:.*\n)+)",
+            status_service,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(environment_match)
+        environment_keys = re.findall(
+            r"^      ([A-Z][A-Z0-9_]*):",
+            environment_match.group("environment"),
+            re.MULTILINE,
+        )
+        self.assertEqual(
+            {key for key in environment_keys if key.endswith("_URL")},
+            {
+                "FRONTEND_URL",
+                "API_HEALTH_URL",
+                "WORKER_HEALTH_URL",
+                "RSSHUB_HEALTH_URL",
+                "PUBLIC_HEALTH_URL",
+            },
+        )
 
         for setting in (
             "FRONTEND_URL: http://frontend:80/",
