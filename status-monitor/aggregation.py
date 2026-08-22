@@ -121,7 +121,7 @@ def status_payload(conn, component_defs, now: datetime, interval_seconds) -> dic
     return {
         "generated_at": generated_at,
         "refresh_interval_seconds": interval_seconds,
-        "overall_status": "up" if all(
+        "overall_status": "up" if bool(components) and all(
             component["current_status"] == "up" for component in components
         ) else "down",
         "components": components,
