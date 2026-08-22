@@ -84,6 +84,10 @@ def _safe_result(result):
     return ProbeResult(status, code, latency_ms, error)
 
 
+class StatusDataUnavailable(Exception):
+    """Persisted status rows could not be aggregated safely."""
+
+
 class MonitorService:
     """Concurrent sampler and aggregated status data source."""
 
@@ -115,6 +119,9 @@ class MonitorService:
         self._last_cycle_completed_at = None
         self._state_lock = threading.Lock()
         self._cycle_lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=5)
+        self._inflight = {}
+        self._closed = False
 
     @property
     def last_cycle_completed_at(self):
@@ -123,6 +130,23 @@ class MonitorService:
 
     def now(self):
         return _aware_cst(self.now_fn())
+
+    @property
+    def inflight_count(self):
+        with self._cycle_lock:
+            return len(self._inflight)
+
+    def close(self):
+        """Cancel queued probes and release the executor without waiting forever."""
+        with self._cycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            futures = tuple(self._inflight.values())
+            self._inflight.clear()
+            for future in futures:
+                future.cancel()
+            self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _probe_one(self, component):
         try:
@@ -134,6 +158,8 @@ class MonitorService:
         """Probe all real components once and atomically persist six rows."""
         cycle_started_at = _aware_cst(now)
         with self._cycle_lock:
+            if self._closed:
+                raise RuntimeError("monitor service is closed")
             with self._state_lock:
                 previous_completion = self._last_cycle_completed_at
             self_up = (
@@ -147,29 +173,34 @@ class MonitorService:
                 None if self_up else "connection_failed",
             )
 
-            executor = ThreadPoolExecutor(max_workers=5)
-            try:
-                futures = {
-                    component.key: executor.submit(self._probe_one, component)
-                    for component in self.real_component_defs
-                }
-                completed, unfinished = wait(
-                    tuple(futures.values()), timeout=self.probe_timeout_seconds
-                )
-                results = {
-                    key: (
-                        future.result()
-                        if future in completed
-                        else ProbeResult(
-                            "down", None, None, "connection_timeout"
-                        )
+            results = {}
+            submitted = {}
+            for component in self.real_component_defs:
+                prior = self._inflight.get(component.key)
+                if prior is not None and prior.done():
+                    self._inflight.pop(component.key, None)
+                    prior = None
+                if prior is not None:
+                    results[component.key] = ProbeResult(
+                        "down", None, None, "connection_timeout"
                     )
-                    for key, future in futures.items()
-                }
-                for future in unfinished:
-                    future.cancel()
-            finally:
-                executor.shutdown(wait=False, cancel_futures=True)
+                    continue
+                future = self._executor.submit(self._probe_one, component)
+                self._inflight[component.key] = future
+                submitted[component.key] = future
+
+            completed, _unfinished = wait(
+                tuple(submitted.values()), timeout=self.probe_timeout_seconds
+            )
+            for key, future in submitted.items():
+                if future in completed:
+                    results[key] = future.result()
+                    if self._inflight.get(key) is future:
+                        self._inflight.pop(key, None)
+                else:
+                    results[key] = ProbeResult(
+                        "down", None, None, "connection_timeout"
+                    )
             results[SELF_COMPONENT.key] = self_result
 
             timestamp = cycle_started_at.isoformat()
@@ -204,21 +235,26 @@ class MonitorService:
 
     def payload(self, now):
         """Read the database and return the public aggregate schema."""
+        payload_now = _aware_cst(now)
         conn = _connect(self.db_path)
         try:
             conn.execute("BEGIN")
             try:
-                data = aggregation.status_payload(
-                    conn,
-                    self.component_defs,
-                    _aware_cst(now),
-                    self.interval_seconds,
-                )
+                try:
+                    data = aggregation.status_payload(
+                        conn,
+                        self.component_defs,
+                        payload_now,
+                        self.interval_seconds,
+                    )
+                except (ValueError, TypeError):
+                    raise StatusDataUnavailable from None
+                conn.commit()
+                return data
             except Exception:
-                conn.rollback()
+                if conn.in_transaction:
+                    conn.rollback()
                 raise
-            conn.commit()
-            return data
         finally:
             conn.close()
 
@@ -492,18 +528,6 @@ setInterval(loadData, 30000);
 </html>"""
 
 
-class _StatusDataUnavailable(Exception):
-    pass
-
-
-def _status_json_body(service):
-    try:
-        data = service.payload(service.now())
-        return json.dumps(data, ensure_ascii=False).encode("utf-8")
-    except (sqlite3.Error, ValueError, TypeError):
-        raise _StatusDataUnavailable from None
-
-
 def make_handler(service, html_page=HTML_PAGE):
     """Build an HTTP handler bound to one monitor service instance."""
 
@@ -518,14 +542,16 @@ def make_handler(service, html_page=HTML_PAGE):
 
         def do_GET(self):
             if self.path == "/api/status":
+                request_now = service.now()
                 try:
-                    body = _status_json_body(service)
-                except _StatusDataUnavailable:
+                    data = service.payload(request_now)
+                except (sqlite3.Error, StatusDataUnavailable):
                     body = json.dumps(
                         {"error": "status_data_unavailable"}, separators=(",", ":")
                     ).encode("utf-8")
                     self._send(500, "application/json; charset=utf-8", body)
                     return
+                body = json.dumps(data, ensure_ascii=False).encode("utf-8")
                 self._send(200, "application/json; charset=utf-8", body)
                 return
 
@@ -553,10 +579,18 @@ def main(env=None):
         interval_seconds=interval_seconds,
         now_fn=lambda: datetime.now(CST),
     )
-    sampler = threading.Thread(target=sampling_loop, args=(service,), daemon=True)
+    stop_event = threading.Event()
+    sampler = threading.Thread(
+        target=sampling_loop, args=(service, stop_event), daemon=True
+    )
     sampler.start()
     httpd = HTTPServer(("0.0.0.0", port), make_handler(service))
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    finally:
+        stop_event.set()
+        httpd.server_close()
+        service.close()
 
 
 if __name__ == "__main__":
