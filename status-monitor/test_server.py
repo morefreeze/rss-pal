@@ -27,6 +27,50 @@ REAL_COMPONENTS = (
     Component("public", "公网入口", "https://rss.example/api/health", "json_ok"),
 )
 EXPECTED_KEYS = ["frontend", "api", "worker", "rsshub", "status-monitor", "public"]
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+class DeploymentConfigTests(unittest.TestCase):
+    def test_nginx_denies_worker_health_before_status_and_generic_api_proxies(self):
+        nginx = (REPO_ROOT / "frontend" / "nginx.conf").read_text()
+        deny_location = """location = /api/internal/health/worker {
+        return 404;
+    }"""
+
+        self.assertIn(deny_location, nginx)
+        self.assertLess(nginx.index(deny_location), nginx.index("location /api/status"))
+        self.assertLess(nginx.index(deny_location), nginx.index("location ^~ /api"))
+        self.assertNotIn("proxy_pass", deny_location)
+        self.assertIn("location ^~ /api", nginx)
+
+    def test_compose_status_monitor_uses_component_probe_contract_without_legacy_data(self):
+        compose = (REPO_ROOT / "docker-compose.yml").read_text()
+        status_match = re.search(
+            r"^  status-monitor:\n(?P<body>.*?)(?=^  [a-z][a-z0-9-]*:|^volumes:)",
+            compose,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(status_match)
+        status_service = status_match.group("body")
+
+        for setting in (
+            "FRONTEND_URL: http://frontend:80/",
+            "API_HEALTH_URL: http://api:8080/api/health",
+            "WORKER_HEALTH_URL: http://api:8080/api/internal/health/worker",
+            "RSSHUB_HEALTH_URL: http://rsshub:1200/",
+            "PUBLIC_HEALTH_URL: https://rss.morefreeze.top/api/health",
+            "CHECK_INTERVAL: 60",
+            "MONITOR_PORT: 8090",
+        ):
+            self.assertIn(setting, status_service)
+
+        self.assertNotIn("MONITOR_DOMAIN", status_service)
+        self.assertNotIn("LOCAL_URL", status_service)
+        self.assertNotIn("domain-checks.db", status_service)
+        self.assertIn("127.0.0.1:8090:8090", status_service)
+        self.assertIn("status_data:/data", status_service)
+        self.assertIn("restart: unless-stopped", status_service)
+        self.assertIn("build:", status_service)
 
 
 class MonitorServiceTests(unittest.TestCase):

@@ -143,15 +143,17 @@ services:
       context: ./status-monitor
       dockerfile: Dockerfile
     environment:
-      MONITOR_DOMAIN: https://freezemacbook-pro.tailf22f5.ts.net
-      LOCAL_URL: http://frontend:80
+      FRONTEND_URL: http://frontend:80/
+      API_HEALTH_URL: http://api:8080/api/health
+      WORKER_HEALTH_URL: http://api:8080/api/internal/health/worker
+      RSSHUB_HEALTH_URL: http://rsshub:1200/
+      PUBLIC_HEALTH_URL: https://rss.morefreeze.top/api/health
       CHECK_INTERVAL: 60
       MONITOR_PORT: 8090
     ports:
       - "127.0.0.1:8090:8090"
     volumes:
       - status_data:/data
-      - ./scripts/domain-checks.db:/data/domain.db
     restart: unless-stopped
 
 volumes:
