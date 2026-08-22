@@ -8,6 +8,14 @@ import urllib.error
 import urllib.request
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
 @dataclass(frozen=True)
 class Component:
     """Immutable configuration for one monitored component."""
@@ -105,7 +113,7 @@ def probe(component, timeout=10):
             method="GET",
             headers={"User-Agent": "rss-pal-monitor/1.0"},
         )
-        response = urllib.request.urlopen(request, timeout=timeout)
+        response = _NO_REDIRECT_OPENER.open(request, timeout=timeout)
         code = _response_code(response)
         body, read_error = _drain_and_close(response)
         latency_ms = _latency_ms(start)
@@ -132,8 +140,13 @@ def probe(component, timeout=10):
         return _down(code, latency_ms, "invalid_response")
     except urllib.error.HTTPError as exc:
         code = _response_code(exc)
-        _drain_and_close(exc)
-        return _down(code, _latency_ms(start), "http_error")
+        _, read_error = _drain_and_close(exc)
+        latency_ms = _latency_ms(start)
+        if read_error is not None:
+            return _down(code, latency_ms, _error_category(read_error))
+        if component.kind == "http" and code is not None and 200 <= code < 400:
+            return ProbeResult("up", code, latency_ms, None)
+        return _down(code, latency_ms, "http_error")
     except Exception as exc:
         return _down(None, _latency_ms(start), _error_category(exc))
     finally:
