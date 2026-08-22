@@ -526,11 +526,15 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(root.children.map(row => row.children[0].children[0].textContent).join('|') === 'Component 0|Component 1|Component 2|Component 3|Component 4|Component 5', 'must preserve payload component order');
   assert(root.children.every((row, index) => row.children[0].children[1].textContent === (index % 2 ? '故障' : '正常') && row.children[0].children[2].textContent === `可用率 ${(100 - index).toFixed(2)}%`), 'must render current status and sample-weighted uptime');
   assert(root.children.every(row => row.children[2].children.length === 72), 'must render 72 buttons per row');
-  for (const row of root.children) {
+  for (const [componentIndex, row] of root.children.entries()) {
     const controls = row.children[2].children;
     const [down, up, noData] = controls;
     assert(down.className.includes('down') && up.className.includes('up') && noData.className.includes('no-data'), 'must give down/up/no-data hours distinct semantic color classes');
     assert(controls.every(control => control.tagName === 'BUTTON' && control.attributes['aria-describedby'] === 'status-tooltip' && typeof control.attributes['aria-label'] === 'string' && control.attributes['aria-label'].length > 0 && /正常|故障|无数据/.test(control.attributes['aria-label'])), 'every hourly control must be an accessible button with non-color status text');
+    next.components[componentIndex].hours.forEach((hour, hourIndex) => {
+      const expectedStatus = hour.status === 'up' ? '正常' : hour.status === 'down' ? '故障' : '无数据';
+      assert(controls[hourIndex].attributes['aria-label'].includes(expectedStatus), `hour ${hourIndex} aria-label must match its payload status ${expectedStatus}`);
+    });
     assert(row.children[3].textContent.includes('72 小时前') && row.children[3].textContent.includes('现在'), 'each row must show the 72-hour-to-now axis');
   }
   assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'null last_check must be no data');
