@@ -42,6 +42,32 @@ fi
 
 log "=== Auto deploy started (compose=$COMPOSE) ==="
 
+# Refresh the OCI egress tunnel if the unit exists. The systemd service can
+# hold a stale forward (listener alive, TCP channel dead) after network flaps;
+# all overseas feed fetches then fail with EOF until the tunnel is restarted.
+if systemctl cat rss-pal-oci-egress.service >/dev/null 2>&1; then
+  if sudo -n systemctl restart rss-pal-oci-egress.service 2>/dev/null; then
+    log "Restarted rss-pal-oci-egress.service (fresh egress tunnel)"
+  else
+    log "WARN: could not restart rss-pal-oci-egress.service (passwordless sudo unavailable?)"
+  fi
+fi
+
+# Compose file set. With no -f flags, docker compose only auto-loads
+# docker-compose.yml + docker-compose.override.yml — the OCI egress override
+# is silently skipped and every deploy drops the egress proxy env from
+# api/worker/rsshub, breaking all GFW-blocked feeds until manually fixed.
+# Always pass the full -f list explicitly.
+COMPOSE_FILES=(-f docker-compose.yml)
+if [ -f docker-compose.override.yml ]; then
+  COMPOSE_FILES+=(-f docker-compose.override.yml)
+fi
+EGRESS_FILE=$(ls docker-compose.override.oci-egress*.yml 2>/dev/null | sort -V | tail -1 || true)
+if [ -n "$EGRESS_FILE" ]; then
+  COMPOSE_FILES+=(-f "$EGRESS_FILE")
+  log "Including egress override: $EGRESS_FILE"
+fi
+
 # 1. Save current commit for rollback
 PREV_COMMIT=$(git rev-parse HEAD)
 log "Current commit: $PREV_COMMIT"
@@ -80,12 +106,12 @@ fi
 
 # 3. Rebuild and restart
 log "Building and restarting containers..."
-if $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"; then
+if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
   # 4. Health check: wait and verify containers are healthy
   log "Build succeeded, running health check..."
   sleep 15
 
-  FAILED=$($COMPOSE ps --filter "status=exited" -q 2>/dev/null | wc -l | tr -d ' ')
+  FAILED=$($COMPOSE "${COMPOSE_FILES[@]}" ps --filter "status=exited" -q 2>/dev/null | wc -l | tr -d ' ')
   if [ "$FAILED" -gt 0 ]; then
     log "⚠️  $FAILED container(s) exited after build, rolling back..."
     ROLLBACK=true
@@ -110,7 +136,7 @@ fi
 if [ "${ROLLBACK:-false}" = "true" ]; then
   log "Rolling back to $PREV_COMMIT..."
   git checkout "$PREV_COMMIT"
-  $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"
+  $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"
   sleep 10
   log "Rollback complete. Staying on $(git rev-parse --short HEAD)"
 fi
