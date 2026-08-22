@@ -176,15 +176,22 @@ class _HealthHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/oversized":
             self._send(200, b"x" * (64 * 1024 + 1))
             return
+        if self.path == "/oversized-http":
+            self._send(200, b"x" * (64 * 1024 + 1))
+            return
         if self.path == "/drip":
             body = b"abc"
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            for byte in body:
-                self.wfile.write(bytes([byte]))
-                self.wfile.flush()
-                time.sleep(0.03)
+            time.sleep(0.04)
+            try:
+                for byte in body:
+                    self.wfile.write(bytes([byte]))
+                    self.wfile.flush()
+                    time.sleep(0.03)
+            except BrokenPipeError:
+                pass
             return
         self._send(404, b"missing")
 
@@ -237,10 +244,19 @@ class LoopbackProbeTests(unittest.TestCase):
         self.assertEqual(result.code, 200)
         self.assertEqual(result.error, "invalid_response")
 
+    def test_real_oversized_http_body_remains_up(self):
+        result = probe(self.component("/oversized-http"))
+        self.assertEqual(result.status, "up")
+        self.assertEqual(result.code, 200)
+        self.assertIsNone(result.error)
+
     def test_real_drip_body_hits_overall_deadline(self):
+        started = time.monotonic()
         result = probe(self.component("/drip", "json_ok"), timeout=0.06)
+        elapsed = time.monotonic() - started
         self.assertEqual(result.status, "down")
         self.assertEqual(result.error, "connection_timeout")
+        self.assertLess(elapsed, 0.2)
 
 
 if __name__ == "__main__":

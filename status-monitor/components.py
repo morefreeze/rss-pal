@@ -27,6 +27,10 @@ class _ProbeDeadlineExceeded(Exception):
     pass
 
 
+class _BodyLimitReached(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class Component:
     """Immutable configuration for one monitored component."""
@@ -85,13 +89,38 @@ def _response_code(response):
         return None
 
 
-def _read_body(response, deadline):
+def _set_socket_timeout(response, remaining):
+    """Apply the remaining probe deadline to a urllib response socket."""
+    timeout = max(0.001, remaining)
+    pending = [response]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        setter = getattr(current, "settimeout", None)
+        if setter is not None:
+            try:
+                setter(timeout)
+                return
+            except (AttributeError, OSError):
+                pass
+        for attr in ("fp", "raw", "_sock", "sock", "socket"):
+            try:
+                pending.append(getattr(current, attr, None))
+            except Exception:
+                pass
+
+
+def _read_body(response, deadline, enforce_limit):
     chunks = []
     total = 0
     reader = getattr(response, "read1", None) or response.read
     while True:
         if _monotonic() >= deadline:
             raise _ProbeDeadlineExceeded
+        _set_socket_timeout(response, deadline - _monotonic())
         chunk = reader(min(_READ_CHUNK_BYTES, MAX_RESPONSE_BYTES + 1 - total))
         if not chunk:
             if _monotonic() >= deadline:
@@ -99,17 +128,17 @@ def _read_body(response, deadline):
             return b"".join(chunks)
         total += len(chunk)
         if total > MAX_RESPONSE_BYTES:
-            raise _ReadLimitExceeded
+            raise _ReadLimitExceeded if enforce_limit else _BodyLimitReached
         chunks.append(chunk)
         if _monotonic() >= deadline:
             raise _ProbeDeadlineExceeded
 
 
-def _drain_and_close(response, deadline):
+def _drain_and_close(response, deadline, enforce_limit):
     body = None
     read_error = None
     try:
-        body = _read_body(response, deadline)
+        body = _read_body(response, deadline, enforce_limit)
     except Exception as exc:
         read_error = exc
     finally:
@@ -151,9 +180,13 @@ def probe(component, timeout=10):
         )
         response = _NO_REDIRECT_OPENER.open(request, timeout=timeout)
         code = _response_code(response)
-        body, read_error = _drain_and_close(response, deadline)
+        body, read_error = _drain_and_close(
+            response, deadline, component.kind == "json_ok"
+        )
         latency_ms = _latency_ms(start)
 
+        if isinstance(read_error, _BodyLimitReached):
+            read_error = None
         if read_error is not None:
             return _down(code, latency_ms, _error_category(read_error))
 
@@ -176,8 +209,12 @@ def probe(component, timeout=10):
         return _down(code, latency_ms, "invalid_response")
     except urllib.error.HTTPError as exc:
         code = _response_code(exc)
-        _, read_error = _drain_and_close(exc, deadline)
+        _, read_error = _drain_and_close(
+            exc, deadline, component.kind == "json_ok"
+        )
         latency_ms = _latency_ms(start)
+        if isinstance(read_error, _BodyLimitReached):
+            read_error = None
         if read_error is not None:
             return _down(code, latency_ms, _error_category(read_error))
         if component.kind == "http" and code is not None and 200 <= code < 400:
