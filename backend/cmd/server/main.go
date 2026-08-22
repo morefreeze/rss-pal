@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/api"
@@ -52,6 +53,7 @@ func main() {
 	tagSuggestRepo := repository.NewTagSuggestionRepository(db)
 	clipRepo := repository.NewClipRepository(db)
 	hiddenRepo := repository.NewHiddenArticleRepository(db)
+	heartbeatRepo := repository.NewServiceHeartbeatRepository(db)
 
 	summarizer := ai.NewSummarizerWithModel(cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	summarizer.SetVisionModel(cfg.AI.Vision.Model)
@@ -94,6 +96,7 @@ func main() {
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
 	eventHandler := api.NewEventHandler(eventRepo)
 	feedHealthHandler := api.NewFeedHealthHandler(feedHealthRepo, feedRepo)
+	systemHealthHandler := api.NewSystemHealthHandler(heartbeatRepo, time.Now)
 	userTagHandler := api.NewUserTagHandler(userTagRepo, articleUserTagRepo, tagSuggestRepo)
 	clipHandler := api.NewClipHandler(clipRepo, articleUserTagRepo)
 	extensionIngestHandler := api.NewExtensionIngestHandler(feedRepo, articleRepo, userRepo)
@@ -139,6 +142,7 @@ func main() {
 	router.GET("/api/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "version": version.Version})
 	})
+	router.GET("/api/internal/health/worker", systemHealthHandler.Worker)
 
 	// Public routes
 	router.POST("/api/auth/init", authHandler.InitAdmin)

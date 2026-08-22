@@ -37,6 +37,43 @@ const (
 // Global semaphore for AI summary calls to avoid hammering the API
 var sumSem = make(chan struct{}, maxConcurrentSummary)
 
+type heartbeatWriter interface {
+	Beat(component string) error
+}
+
+func beatWorker(repo heartbeatWriter) {
+	if err := repo.Beat("worker"); err != nil {
+		log.Printf("worker heartbeat: %v", err)
+	}
+}
+
+func startWorkerHeartbeat(ctx context.Context, repo heartbeatWriter) {
+	startWorkerHeartbeatWithInterval(ctx, repo, time.Minute)
+}
+
+func startWorkerHeartbeatWithInterval(ctx context.Context, repo heartbeatWriter, interval time.Duration) {
+	beatWorker(repo)
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				beatWorker(repo)
+			}
+		}
+	}()
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -57,6 +94,10 @@ func main() {
 	userInsightsRepo := repository.NewUserInsightRepository(db)
 	dailyDigestRepo := repository.NewDailyDigestRepository(db)
 	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
+	heartbeatRepo := repository.NewServiceHeartbeatRepository(db)
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(context.Background())
+	defer cancelHeartbeat()
+	startWorkerHeartbeat(heartbeatCtx, heartbeatRepo)
 
 	fetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
 	contentFetcher := rss.NewContentFetcher()
