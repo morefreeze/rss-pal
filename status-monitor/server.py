@@ -1,184 +1,209 @@
 #!/usr/bin/env python3
-"""Dual-mode uptime monitor: local service health + external domain latency."""
+"""Collect and serve component status history for RSS Pal."""
 
 import json
 import os
 import sqlite3
-import ssl
 import threading
-import time
-import http.client
-import urllib.request
-import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
 
-# --- Config ---
-DOMAIN = os.getenv("MONITOR_DOMAIN", "https://freezemacbook-pro.tailf22f5.ts.net")
-LOCAL_URL = os.getenv("LOCAL_URL", "http://frontend:80")
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
-PORT = int(os.getenv("MONITOR_PORT", "8090"))
-DB_PATH = os.getenv("DB_PATH", "/data/status.db")
-HISTORY_HOURS = int(os.getenv("HISTORY_HOURS", "72"))
+import aggregation
+from components import Component, ProbeResult, load_components, probe
 
 CST = timezone(timedelta(hours=8))
+SELF_COMPONENT = Component("status-monitor", "Status Monitor", "", "self")
+SAFE_ERRORS = frozenset(
+    {"connection_failed", "connection_timeout", "http_error", "invalid_response"}
+)
+BUSY_TIMEOUT_MS = 5_000
+RETENTION_DAYS = 7
 
 
 # --- DB ---
-def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS checks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts TEXT NOT NULL,
-            source TEXT NOT NULL DEFAULT 'domain',
-            status TEXT NOT NULL,
-            code INTEGER,
-            latency_ms INTEGER,
-            error TEXT
-        )
-    """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_checks_ts ON checks(ts)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_checks_source ON checks(source)")
-    conn.commit()
-    conn.close()
+def _connect(db_path):
+    conn = sqlite3.connect(db_path, timeout=BUSY_TIMEOUT_MS / 1_000)
+    conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+    return conn
 
 
-def record_check(source, status, code=None, latency_ms=None, error=None):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO checks (ts, source, status, code, latency_ms, error) VALUES (?, ?, ?, ?, ?, ?)",
-        (datetime.now(CST).isoformat(), source, status, code, latency_ms, error)
-    )
-    cutoff = (datetime.now(CST) - timedelta(days=7)).isoformat()
-    conn.execute("DELETE FROM checks WHERE ts < ?", (cutoff,))
-    conn.commit()
-    conn.close()
-
-
-def get_stats_for(source, conn):
-    cutoff = (datetime.now(CST) - timedelta(hours=HISTORY_HOURS)).isoformat()
-    rows = conn.execute(
-        "SELECT ts, status, code, latency_ms, error FROM checks WHERE source = ? AND ts > ? ORDER BY ts DESC",
-        (source, cutoff)
-    ).fetchall()
-
-    total = len(rows)
-    if total == 0:
-        return {"total": 0, "up": 0, "down": 0, "uptime_pct": 0, "avg_latency_ms": 0, "checks": []}
-
-    up = sum(1 for r in rows if r[1] == "up")
-    down = total - up
-    latencies = [r[3] for r in rows if r[3] is not None]
-    avg_lat = sum(latencies) / len(latencies) if latencies else 0
-
-    checks = []
-    for r in rows:
-        checks.append({
-            "ts": r[0], "status": r[1], "code": r[2],
-            "latency_ms": r[3], "error": r[4]
-        })
-
-    return {
-        "total": total, "up": up, "down": down,
-        "uptime_pct": round(up / total * 100, 2) if total else 0,
-        "avg_latency_ms": round(avg_lat),
-        "last_check": rows[0][0] if rows else None,
-        "checks": checks,
-    }
-
-
-def get_stats():
-    conn = sqlite3.connect(DB_PATH)
-    local = get_stats_for("local", conn)
-    conn.close()
-
-    # Read domain checks from host-mounted DB (written by host cron job)
-    domain_stats = {"total": 0, "up": 0, "down": 0, "uptime_pct": 0, "avg_latency_ms": 0, "checks": []}
-    domain_db = os.path.join(os.path.dirname(DB_PATH), "domain.db")
-    if os.path.exists(domain_db):
-        try:
-            dconn = sqlite3.connect(domain_db)
-            domain_stats = get_stats_for("domain", dconn)
-            dconn.close()
-        except Exception:
-            pass
-
-    return {
-        "domain": DOMAIN,
-        "check_interval": CHECK_INTERVAL,
-        "local": local,
-        "domain_stats": domain_stats,
-    }
-
-
-# --- Domain checker with connection reuse ---
-class DomainChecker:
-    """Reuses HTTPS connection to avoid TLS handshake per check."""
-    def __init__(self, domain_url):
-        from urllib.parse import urlparse
-        parsed = urlparse(domain_url)
-        self.host = parsed.hostname
-        self.port = parsed.port or 443
-        self.path = parsed.path or "/"
-        self._conn = None
-        self._lock = threading.Lock()
-
-    def _new_conn(self):
-        ctx = ssl.create_default_context()
-        return http.client.HTTPSConnection(self.host, self.port, context=ctx, timeout=10)
-
-    def check(self):
-        with self._lock:
-            start = time.monotonic()
-            try:
-                if self._conn is None:
-                    self._conn = self._new_conn()
-                self._conn.request("GET", self.path, headers={"User-Agent": "rss-pal-monitor/1.0", "Connection": "keep-alive"})
-                resp = self._conn.getresponse()
-                latency = int((time.monotonic() - start) * 1000)
-                # Drain body so connection can be reused
-                resp.read()
-                return "up", resp.status, latency, None
-            except Exception as e:
-                # Connection dead, will recreate next time
-                self._conn = None
-                if 'start' in dir():
-                    latency = int((time.monotonic() - start) * 1000)
-                else:
-                    latency = None
-                return "down", None, latency, str(e)[:200]
-
-domain_checker = DomainChecker(DOMAIN)
-
-
-# --- Checker ---
-def do_check(url, source):
-    if source == "domain":
-        status, code, latency, error = domain_checker.check()
-        record_check(source, status, code=code, latency_ms=latency, error=error)
-        return
+def init_db(db_path):
+    """Create the append-only checks schema and non-destructive indexes."""
+    directory = os.path.dirname(os.path.abspath(db_path))
+    os.makedirs(directory, exist_ok=True)
+    conn = _connect(db_path)
     try:
-        start = time.monotonic()
-        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "rss-pal-monitor/1.0"})
-        resp = urllib.request.urlopen(req, timeout=10)
-        latency = int((time.monotonic() - start) * 1000)
-        record_check(source, "up", code=resp.status, latency_ms=latency)
-    except urllib.error.HTTPError as e:
-        latency = int((time.monotonic() - start) * 1000)
-        record_check(source, "up", code=e.code, latency_ms=latency)
-    except Exception as e:
-        record_check(source, "down", error=str(e)[:200])
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS checks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'domain',
+                status TEXT NOT NULL,
+                code INTEGER,
+                latency_ms INTEGER,
+                error TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_checks_ts ON checks(ts)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_checks_source ON checks(source)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_checks_source_ts ON checks(source, ts)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
-def checker_loop():
-    while True:
+def _aware_cst(value):
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    return value.astimezone(CST)
+
+
+def _safe_integer(value):
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _safe_result(result):
+    if not isinstance(result, ProbeResult):
+        return ProbeResult("down", None, None, "connection_failed")
+    status = result.status if result.status in {"up", "down"} else "down"
+    code = _safe_integer(result.code)
+    latency_ms = _safe_integer(result.latency_ms)
+    if latency_ms is not None and latency_ms < 0:
+        latency_ms = None
+    if status == "up":
+        error = None
+    else:
+        error = result.error if result.error in SAFE_ERRORS else "connection_failed"
+    return ProbeResult(status, code, latency_ms, error)
+
+
+class MonitorService:
+    """Concurrent sampler and aggregated status data source."""
+
+    def __init__(
+        self,
+        db_path,
+        component_defs,
+        probe_fn=probe,
+        interval_seconds=60,
+        now_fn=lambda: datetime.now(CST),
+    ):
+        real_components = tuple(component_defs)
+        if [component.key for component in real_components] != [
+            "frontend", "api", "worker", "rsshub", "public"
+        ]:
+            raise ValueError("component_defs must contain the five real components")
+        self.db_path = db_path
+        self.real_component_defs = real_components
+        self.component_defs = (
+            real_components[:4] + (SELF_COMPONENT,) + real_components[4:]
+        )
+        self.probe_fn = probe_fn
+        self.interval_seconds = interval_seconds
+        self.now_fn = now_fn
+        self._last_cycle_completed_at = None
+        self._state_lock = threading.Lock()
+        self._cycle_lock = threading.Lock()
+
+    @property
+    def last_cycle_completed_at(self):
+        with self._state_lock:
+            return self._last_cycle_completed_at
+
+    def now(self):
+        return _aware_cst(self.now_fn())
+
+    def _probe_one(self, component):
         try:
-            do_check(LOCAL_URL, "local")
+            return _safe_result(self.probe_fn(component))
+        except Exception:
+            return ProbeResult("down", None, None, "connection_failed")
+
+    def sample_once(self, now):
+        """Probe all real components once and atomically persist six rows."""
+        cycle_started_at = _aware_cst(now)
+        with self._cycle_lock:
+            with self._state_lock:
+                previous_completion = self._last_cycle_completed_at
+            self_up = (
+                previous_completion is None
+                or cycle_started_at - previous_completion <= timedelta(seconds=120)
+            )
+            self_result = ProbeResult(
+                "up" if self_up else "down",
+                None,
+                None,
+                None if self_up else "connection_failed",
+            )
+
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {
+                    component.key: executor.submit(self._probe_one, component)
+                    for component in self.real_component_defs
+                }
+                results = {
+                    key: future.result()
+                    for key, future in futures.items()
+                }
+            results[SELF_COMPONENT.key] = self_result
+
+            timestamp = cycle_started_at.isoformat()
+            rows = [
+                (
+                    timestamp,
+                    component.key,
+                    results[component.key].status,
+                    results[component.key].code,
+                    results[component.key].latency_ms,
+                    results[component.key].error,
+                )
+                for component in self.component_defs
+            ]
+            cutoff = (cycle_started_at - timedelta(days=RETENTION_DAYS)).isoformat()
+            conn = _connect(self.db_path)
+            try:
+                conn.executemany(
+                    "INSERT INTO checks "
+                    "(ts, source, status, code, latency_ms, error) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    rows,
+                )
+                conn.execute("DELETE FROM checks WHERE ts < ?", (cutoff,))
+                conn.commit()
+            finally:
+                conn.close()
+
+            with self._state_lock:
+                self._last_cycle_completed_at = cycle_started_at
+
+    def payload(self, now):
+        """Read the database and return the public aggregate schema."""
+        conn = _connect(self.db_path)
+        try:
+            return aggregation.status_payload(
+                conn,
+                self.component_defs,
+                _aware_cst(now),
+                self.interval_seconds,
+            )
+        finally:
+            conn.close()
+
+
+def sampling_loop(service, stop_event=None):
+    """Sample immediately, then wait one configured interval between cycles."""
+    stopper = stop_event or threading.Event()
+    while not stopper.is_set():
+        try:
+            service.sample_once(service.now())
         except Exception:
             pass
-        time.sleep(CHECK_INTERVAL)
+        stopper.wait(service.interval_seconds)
 
 
 # --- HTTP ---
@@ -439,32 +464,61 @@ setInterval(loadData, 30000);
 </html>"""
 
 
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/api/status':
-            data = get_stats()
-            body = json.dumps(data, ensure_ascii=False).encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            body = HTML_PAGE.encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
+def make_handler(service, html_page=HTML_PAGE):
+    """Build an HTTP handler bound to one monitor service instance."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, status, content_type, body):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
 
-    def log_message(self, format, *args):
-        pass
+        def do_GET(self):
+            if self.path == "/api/status":
+                try:
+                    data = service.payload(service.now())
+                except sqlite3.Error:
+                    body = json.dumps(
+                        {"error": "status_data_unavailable"}, separators=(",", ":")
+                    ).encode("utf-8")
+                    self._send(500, "application/json; charset=utf-8", body)
+                    return
+                body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+                self._send(200, "application/json; charset=utf-8", body)
+                return
+
+            body = html_page.encode("utf-8")
+            self._send(200, "text/html; charset=utf-8", body)
+
+        def log_message(self, _format, *_args):
+            pass
+
+    return Handler
 
 
-if __name__ == '__main__':
-    init_db()
-    t = threading.Thread(target=checker_loop, daemon=True)
-    t.start()
-    print(f"Monitor running: local={LOCAL_URL} domain={DOMAIN} every {CHECK_INTERVAL}s")
-    print(f"Status page: http://0.0.0.0:{PORT}")
-    server = HTTPServer(('0.0.0.0', PORT), Handler)
-    server.serve_forever()
+def main(env=None):
+    runtime_env = os.environ if env is None else env
+    db_path = runtime_env.get("DB_PATH", "/data/status.db")
+    interval_seconds = int(runtime_env.get("CHECK_INTERVAL", "60"))
+    port = int(runtime_env.get("MONITOR_PORT", "8090"))
+    component_defs = load_components(runtime_env)
+
+    init_db(db_path)
+    service = MonitorService(
+        db_path=db_path,
+        component_defs=component_defs,
+        probe_fn=probe,
+        interval_seconds=interval_seconds,
+        now_fn=lambda: datetime.now(CST),
+    )
+    sampler = threading.Thread(target=sampling_loop, args=(service,), daemon=True)
+    sampler.start()
+    httpd = HTTPServer(("0.0.0.0", port), make_handler(service))
+    httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
