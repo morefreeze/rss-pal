@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 )
 
 var ErrHeartbeatNotFound = errors.New("service heartbeat not found")
@@ -14,6 +16,18 @@ type ServiceHeartbeatRepository struct {
 
 func NewServiceHeartbeatRepository(db *sql.DB) *ServiceHeartbeatRepository {
 	return &ServiceHeartbeatRepository{db: db}
+}
+
+// WithCtx returns a repository view bound to the per-request transaction
+// stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
+// handle if no tx is present.
+func (r *ServiceHeartbeatRepository) WithCtx(c ctxkey.CtxGetter) *ServiceHeartbeatRepository {
+	if v, ok := c.Get(ctxkey.Tx); ok {
+		if q, ok := v.(Querier); ok {
+			return &ServiceHeartbeatRepository{db: q}
+		}
+	}
+	return r
 }
 
 func (r *ServiceHeartbeatRepository) Beat(component string) error {
