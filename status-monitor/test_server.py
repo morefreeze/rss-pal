@@ -4,7 +4,9 @@ import json
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -33,7 +35,13 @@ class MonitorServiceTests(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
-    def service(self, probe_fn=None, db_path=None, now_fn=None):
+    def service(
+        self,
+        probe_fn=None,
+        db_path=None,
+        now_fn=None,
+        probe_timeout_seconds=None,
+    ):
         service_type = getattr(server, "MonitorService", None)
         self.assertIsNotNone(service_type, "MonitorService must be defined")
         service = service_type(
@@ -42,12 +50,17 @@ class MonitorServiceTests(unittest.TestCase):
             probe_fn=probe_fn or (lambda _component: ProbeResult("up", 200, 5, None)),
             interval_seconds=60,
             now_fn=now_fn or (lambda: self.now),
+            **(
+                {"probe_timeout_seconds": probe_timeout_seconds}
+                if probe_timeout_seconds is not None
+                else {}
+            ),
         )
         server.init_db(service.db_path)
         return service
 
     def rows(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             return conn.execute(
                 "SELECT source, status, code, latency_ms, error FROM checks ORDER BY id"
             ).fetchall()
@@ -168,6 +181,88 @@ class MonitorServiceTests(unittest.TestCase):
         exactly_rows = [row for row in self.rows() if row[0] == "status-monitor"]
         self.assertEqual([row[1] for row in exactly_rows], ["up", "up"])
 
+    def test_payload_uses_one_read_snapshot_across_all_component_queries(self):
+        service = self.service()
+        service.sample_once(self.now - timedelta(minutes=1))
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute("PRAGMA journal_mode = WAL")
+
+        first_query_finished = threading.Event()
+        writer_committed = threading.Event()
+        writer_errors = []
+
+        def writer():
+            try:
+                self.assertTrue(first_query_finished.wait(timeout=2))
+                with closing(sqlite3.connect(self.db_path, timeout=2)) as conn:
+                    conn.executemany(
+                        "INSERT INTO checks "
+                        "(ts, source, status, code, latency_ms, error) "
+                        "VALUES (?, ?, 'down', 500, 9, 'http_error')",
+                        [(self.now.isoformat(), key) for key in EXPECTED_KEYS],
+                    )
+                    conn.commit()
+            except BaseException as exc:
+                writer_errors.append(exc)
+            finally:
+                writer_committed.set()
+
+        original_summary = server.aggregation.component_summary
+        query_count = 0
+
+        def coordinated_summary(*args, **kwargs):
+            nonlocal query_count
+            result = original_summary(*args, **kwargs)
+            query_count += 1
+            if query_count == 1:
+                first_query_finished.set()
+                self.assertTrue(writer_committed.wait(timeout=2))
+            return result
+
+        writer_thread = threading.Thread(target=writer)
+        writer_thread.start()
+        try:
+            with patch("aggregation.component_summary", coordinated_summary):
+                payload = service.payload(self.now)
+        finally:
+            first_query_finished.set()
+            writer_thread.join(timeout=2)
+
+        self.assertFalse(writer_thread.is_alive())
+        self.assertEqual(writer_errors, [])
+        statuses = {item["current_status"] for item in payload["components"]}
+        self.assertIn(statuses, ({"up"}, {"down"}))
+
+    def test_hanging_probe_hits_cycle_deadline_without_blocking_other_rows(self):
+        release_hung_probe = threading.Event()
+        hung_probe_finished = threading.Event()
+
+        def probe_fn(component):
+            if component.key == "api":
+                try:
+                    release_hung_probe.wait(timeout=2)
+                finally:
+                    hung_probe_finished.set()
+                return ProbeResult("up", 200, 1, None)
+            return ProbeResult("up", 204, 2, None)
+
+        service = self.service(probe_fn=probe_fn, probe_timeout_seconds=0.05)
+        started = time.monotonic()
+        try:
+            service.sample_once(self.now)
+            elapsed = time.monotonic() - started
+            rows = self.rows()
+            self.assertLess(elapsed, 0.3)
+            self.assertEqual(len(rows), 6)
+            by_source = {row[0]: row[1:] for row in rows}
+            self.assertEqual(
+                by_source["api"], ("down", None, None, "connection_timeout")
+            )
+            self.assertEqual(by_source["worker"], ("up", 204, 2, None))
+        finally:
+            release_hung_probe.set()
+        self.assertTrue(hung_probe_finished.wait(timeout=1))
+
     def test_status_api_returns_six_ordered_components_with_72_hours_each(self):
         service = self.service()
         service.sample_once(self.now)
@@ -194,8 +289,26 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertNotIn("overall_status", body.decode())
         self.assertNotIn(missing_schema, body.decode())
 
+    def test_malformed_persisted_timestamp_returns_sanitized_500(self):
+        service = self.service()
+        malformed = "2026-08-22T12:http://api:8080?token=secret"
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute(
+                "INSERT INTO checks (ts, source, status) VALUES (?, 'api', 'up')",
+                (malformed,),
+            )
+            conn.commit()
+
+        status, _, body = self.request(service)
+
+        self.assertEqual(status, 500)
+        self.assertEqual(json.loads(body), {"error": "status_data_unavailable"})
+        self.assertNotIn(malformed, body.decode())
+        self.assertNotIn("api:8080", body.decode())
+        self.assertNotIn(self.db_path, body.decode())
+
     def test_init_db_adds_composite_index_without_losing_existing_schema_or_rows(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             conn.execute(
                 "CREATE TABLE checks ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, "
@@ -212,7 +325,7 @@ class MonitorServiceTests(unittest.TestCase):
 
         server.init_db(self.db_path)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             columns = conn.execute("PRAGMA table_info(checks)").fetchall()
             rows = conn.execute(
                 "SELECT ts, source, status, code, latency_ms, error FROM checks"
@@ -233,7 +346,7 @@ class MonitorServiceTests(unittest.TestCase):
     def test_sample_cleanup_removes_only_data_older_than_seven_days(self):
         service = self.service()
         cutoff = self.now - timedelta(days=7)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             conn.executemany(
                 "INSERT INTO checks (ts, source, status) VALUES (?, ?, 'up')",
                 [
@@ -246,7 +359,7 @@ class MonitorServiceTests(unittest.TestCase):
 
         service.sample_once(self.now)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             retained = [
                 row[0]
                 for row in conn.execute(
