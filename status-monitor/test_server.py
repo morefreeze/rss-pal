@@ -1,8 +1,11 @@
 import concurrent.futures
 import http.client
 import json
+import re
 import sqlite3
+import subprocess
 import tempfile
+import textwrap
 import threading
 import time
 import unittest
@@ -452,86 +455,114 @@ class MonitorServiceTests(unittest.TestCase):
                     service.close()
 
 
+NODE_PAGE_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const script = fs.readFileSync(0, 'utf8');
+
+class Node {
+  constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this.className = ''; this.hidden = false; this.style = {}; this.attributes = {}; this.listeners = {}; this._text = ''; }
+  set textContent(value) { this._text = String(value); this.children = []; }
+  get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
+  appendChild(child) { if (child.tagName === '#FRAGMENT') { [...child.children].forEach(item => this.appendChild(item)); child.children = []; return child; } child.parentNode = this; this.children.push(child); return child; }
+  append(...children) { children.forEach(child => this.appendChild(child)); }
+  replaceChildren(...children) { this.children = []; this._text = ''; children.forEach(child => this.appendChild(child)); }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  addEventListener(name, handler) { (this.listeners[name] ||= []).push(handler); }
+  dispatch(name, event = {}) { (this.listeners[name] || []).forEach(handler => handler({ type: name, ...event })); }
+  getBoundingClientRect() { return { left: 20, top: 30 }; }
+}
+class Document {
+  constructor() { this.byId = {}; this.listeners = {}; }
+  createElement(tag) { return new Node(tag); }
+  createDocumentFragment() { return new Node('#fragment'); }
+  getElementById(id) { return this.byId[id]; }
+  addEventListener(name, handler) { (this.listeners[name] ||= []).push(handler); }
+  dispatch(name, event = {}) { (this.listeners[name] || []).forEach(handler => handler({ type: name, ...event })); }
+}
+function makePayload({ nullLastCheck = false, malicious = false } = {}) {
+  const hours = Array.from({ length: 72 }, (_, index) => ({
+    start: `2026-08-20T${String(index % 24).padStart(2, '0')}:00:00+08:00`,
+    end: `2026-08-20T${String((index + 1) % 24).padStart(2, '0')}:00:00+08:00`,
+    status: index === 0 && malicious ? 'down' : 'up', uptime_pct: 100,
+    successful_checks: index === 0 && malicious ? 0 : 1, total_checks: 1,
+    avg_latency_ms: 12, last_error: index === 0 && malicious ? '<img src=x onerror=alert(1)>' : null,
+    last_error_at: index === 0 && malicious ? '2026-08-20T00:30:00+08:00' : null
+  }));
+  return { generated_at: '2026-08-22T12:00:00+08:00', refresh_interval_seconds: 60, overall_status: 'up',
+    components: Array.from({ length: 6 }, (_, index) => ({ key: `component-${index}`, name: `Component ${index}`, current_status: 'up', uptime_pct: 100, last_check: nullLastCheck && index === 0 ? null : '2026-08-22T12:00:00+08:00', hours })) };
+}
+function page(fetchImpl) {
+  const document = new Document();
+  for (const id of ['status-tooltip', 'components', 'overall-banner', 'refresh-notice', 'last-update', 'refresh-label']) document.byId[id] = new Node();
+  document.byId['status-tooltip'].hidden = true;
+  document.byId['refresh-notice'].hidden = true;
+  const timers = []; let fetchCalls = 0;
+  const context = { console, document, window: { innerWidth: 1024 }, AbortController, Date, Number, Object, String, Array, Math, Error, Promise,
+    fetch: (...args) => { fetchCalls += 1; return fetchImpl(...args); },
+    setInterval: () => 1,
+    setTimeout: callback => { timers.push(callback); return timers.length - 1; },
+    clearTimeout: index => { timers[index] = null; },
+  };
+  context.globalThis = context;
+  vm.createContext(context); vm.runInContext(script, context);
+  return { context, document, timers, calls: () => fetchCalls };
+}
+const flush = () => new Promise(resolve => setImmediate(resolve));
+const activeIsClear = context => vm.runInContext('activeTooltipButton === null', context);
+const hasImage = node => node.tagName === 'IMG' || node.children.some(hasImage);
+function assert(condition, message) { if (!condition) throw new Error(message); }
+
+(async () => {
+  let next = makePayload({ nullLastCheck: true, malicious: true });
+  let fetchImpl = () => Promise.resolve({ ok: true, json: () => Promise.resolve(next) });
+  const live = page((...args) => fetchImpl(...args));
+  await flush(); await flush();
+  const root = live.document.byId.components;
+  assert(root.children.length === 6, 'must render six component rows');
+  assert(root.children.every(row => row.children[2].children.length === 72), 'must render 72 buttons per row');
+  assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'null last_check must be no data');
+  const button = root.children[0].children[2].children[0]; const tooltip = live.document.byId['status-tooltip'];
+  button.dispatch('mouseenter'); assert(!tooltip.hidden && tooltip.textContent.includes('检查失败') && !tooltip.textContent.includes('<img'), 'unsafe error must be mapped safely'); assert(!hasImage(tooltip), 'unsafe error must not create an IMG node');
+  button.dispatch('mouseleave'); assert(tooltip.hidden && activeIsClear(live.context), 'mouseleave must dismiss tooltip');
+  button.dispatch('focus'); assert(!tooltip.hidden, 'focus must show tooltip'); button.dispatch('blur'); assert(tooltip.hidden, 'blur must dismiss tooltip');
+  button.dispatch('pointerdown'); assert(!tooltip.hidden, 'pointerdown must show tooltip'); button.dispatch('pointerdown'); assert(tooltip.hidden, 'second pointerdown must toggle tooltip');
+  button.dispatch('focus'); live.document.dispatch('keydown', { key: 'Escape' }); assert(tooltip.hidden && activeIsClear(live.context), 'Escape must dismiss tooltip');
+  button.dispatch('focus'); vm.runInContext('render(makePayloadForTest)', Object.assign(live.context, { makePayloadForTest: makePayload() })); assert(tooltip.hidden && activeIsClear(live.context), 'refresh render must dismiss tooltip');
+  const emptyLastCheck = makePayload(); emptyLastCheck.components[0].last_check = ''; vm.runInContext('render(emptyLastCheckForTest)', Object.assign(live.context, { emptyLastCheckForTest: emptyLastCheck })); assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'empty last_check must be no data');
+  const missingLastCheck = makePayload(); delete missingLastCheck.components[0].last_check; vm.runInContext('render(missingLastCheckForTest)', Object.assign(live.context, { missingLastCheckForTest: missingLastCheck })); assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'missing last_check must be no data');
+  const priorFirstRow = root.children[0]; fetchImpl = () => Promise.reject(new Error('offline')); vm.runInContext('loadData()', live.context); await flush(); await flush(); assert(root.children[0] === priorFirstRow && !live.document.byId['refresh-notice'].hidden, 'refresh failure must retain rows and show notice');
+
+  const firstFailure = page(() => Promise.reject(new Error('offline'))); await flush(); await flush(); assert(!firstFailure.document.byId['refresh-notice'].hidden && firstFailure.document.byId['overall-banner'].textContent === '数据暂时无法刷新' && !firstFailure.document.byId['overall-banner'].className.includes('up'), 'first failure must not fake green');
+
+  const slow = page((_url, options) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted'))))); assert(slow.calls() === 1, 'initial load must start once'); vm.runInContext('loadData(); loadData()', slow.context); assert(slow.calls() === 1, 'overlapping loads must issue one fetch'); assert(slow.timers.length > 0, 'request timeout must be scheduled'); slow.timers[0](); await flush(); await flush(); assert(activeIsClear(slow.context) && !slow.document.byId['refresh-notice'].hidden && slow.timers[0] === null, 'timeout must clear timer and show unavailable'); let retryCalls = 0; slow.context.fetch = () => { retryCalls += 1; return Promise.resolve({ ok: true, json: () => Promise.resolve(makePayload()) }); }; vm.runInContext('loadData()', slow.context); await flush(); await flush(); assert(retryCalls === 1, 'timeout must reset inFlight for a retry');
+  process.stdout.write('page runtime harness ok\\n');
+})().catch(error => { console.error(error.stack); process.exitCode = 1; });
+"""
+
+
 class StatusPageTests(unittest.TestCase):
-    def setUp(self):
-        self.page = server.HTML_PAGE
+    def test_page_script_executes_status_rendering_security_and_refresh_contracts(self):
+        script_match = re.search(r"<script>\n(.*?)\n</script>", server.HTML_PAGE, re.DOTALL)
+        self.assertIsNotNone(script_match)
+        result = subprocess.run(
+            ["node", "-e", NODE_PAGE_HARNESS],
+            input=script_match.group(1),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("page runtime harness ok", result.stdout)
 
-    def test_page_uses_the_72_hour_component_status_contract(self):
-        self.assertIn("<title>RSS Pal Status</title>", self.page)
-        self.assertIn("过去 72 小时可用情况", self.page)
-        self.assertIn("所有系统运行正常", self.page)
-        self.assertIn("部分系统故障", self.page)
-        self.assertIn("每 60 秒刷新", self.page)
-        self.assertIn("setInterval(loadData, 60000)", self.page)
-        for field in (
-            "generated_at",
-            "refresh_interval_seconds",
-            "overall_status",
-            "components",
-            "key",
-            "name",
-            "current_status",
-            "uptime_pct",
-            "last_check",
-            "hours",
-            "start",
-            "end",
-            "successful_checks",
-            "total_checks",
-            "avg_latency_ms",
-            "last_error",
-            "last_error_at",
-        ):
-            self.assertIn(field, self.page)
-
-    def test_page_has_accessible_reusable_tooltip_and_all_input_events(self):
-        self.assertEqual(self.page.count('role="tooltip"'), 1)
-        for event_name in (
-            "mouseenter",
-            "mouseleave",
-            "focus",
-            "blur",
-            "pointerdown",
-            "keydown",
-            "Escape",
-        ):
-            self.assertIn(event_name, self.page)
-        self.assertIn("document.createElement('button')", self.page)
-        self.assertIn("aria-label", self.page)
-        self.assertIn("72 小时前", self.page)
-        self.assertIn("现在", self.page)
-
-    def test_page_requires_exactly_six_components_and_72_hour_buttons_per_row(self):
-        self.assertIn("data.components.length !== 6", self.page)
-        self.assertIn("typeof component.key", self.page)
-        self.assertIn("component.hours.length !== HOURS", self.page)
-        self.assertIn("grid-template-columns: repeat(72", self.page)
-        self.assertIn("component.hours.forEach(hour =>", self.page)
-
-    def test_page_removes_legacy_status_ui_and_untrusted_html_sinks(self):
-        self.assertNotIn("innerHTML", self.page)
-        self.assertNotIn("insertAdjacentHTML", self.page)
-        for legacy in ("local-section", "domain-section", "domain_stats", "incidents-list"):
-            self.assertNotIn(legacy, self.page)
-
-    def test_page_maps_errors_and_uses_safe_text_helpers_for_payload_values(self):
-        self.assertIn("function safeErrorLabel", self.page)
-        self.assertIn("Object.prototype.hasOwnProperty.call", self.page)
-        self.assertIn("检查失败", self.page)
-        self.assertIn("function setText", self.page)
-        self.assertIn("textContent", self.page)
-        malicious_error = '<img src=x onerror=alert(1)>'
-        self.assertNotIn(malicious_error, self.page)
-        self.assertNotIn("last_error +", self.page)
-        self.assertNotIn("last_error}`", self.page)
-
-    def test_page_refresh_guard_retains_the_last_successful_render_on_failure(self):
-        self.assertIn("let inFlight = false", self.page)
-        self.assertIn("if (inFlight) return", self.page)
-        self.assertIn("let lastSuccessfulData = null", self.page)
-        self.assertIn("数据暂时无法刷新", self.page)
-        self.assertIn("lastSuccessfulData", self.page)
-        self.assertIn("finally", self.page)
+    def test_page_keeps_required_markup_and_removes_unsafe_legacy_sinks(self):
+        self.assertIn("<title>RSS Pal Status</title>", server.HTML_PAGE)
+        self.assertIn("过去 72 小时可用情况", server.HTML_PAGE)
+        self.assertIn("setInterval(loadData, 60000)", server.HTML_PAGE)
+        self.assertEqual(server.HTML_PAGE.count('role="tooltip"'), 1)
+        self.assertNotIn("innerHTML", server.HTML_PAGE)
+        self.assertNotIn("insertAdjacentHTML", server.HTML_PAGE)
 
 
 if __name__ == "__main__":

@@ -360,6 +360,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <div id="status-tooltip" class="tooltip" role="tooltip" hidden></div>
 <script>
 const HOURS = 72;
+const REQUEST_TIMEOUT_MS = 10000;
 const ERROR_LABELS = Object.freeze({
   connection_failed: '连接失败',
   connection_timeout: '连接超时',
@@ -393,6 +394,7 @@ function hourStatusText(value) {
 }
 
 function formatTimestamp(value) {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return '无数据';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '无数据';
   return date.toLocaleString('zh-CN', { hour12: false });
@@ -520,6 +522,7 @@ function render(data) {
   validatePayload(data);
   const fragment = document.createDocumentFragment();
   data.components.forEach(component => fragment.appendChild(renderComponent(component)));
+  dismissTooltip();
   componentsRoot.replaceChildren(fragment);
   setText(document.getElementById('last-update'), formatTimestamp(data.generated_at));
   setText(refreshLabel, '每 ' + formatCount(data.refresh_interval_seconds) + ' 秒刷新');
@@ -540,8 +543,10 @@ function showRefreshFailure() {
 async function loadData() {
   if (inFlight) return;
   inFlight = true;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch('/api/status');
+    const response = await fetch('/api/status', { signal: controller.signal });
     if (!response.ok) throw new Error('status request failed');
     const data = await response.json();
     render(data);
@@ -550,6 +555,7 @@ async function loadData() {
   } catch (_error) {
     showRefreshFailure();
   } finally {
+    clearTimeout(timeoutId);
     inFlight = false;
   }
 }
