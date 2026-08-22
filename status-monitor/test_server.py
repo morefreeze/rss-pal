@@ -1,7 +1,9 @@
 import concurrent.futures
 import http.client
 import json
+import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -233,12 +235,89 @@ class DeploymentConfigTests(unittest.TestCase):
             script,
             r"if env AUTO_DEPLOY_REEXEC=1 .* /bin/bash \"\$PROJECT_DIR/scripts/auto_deploy\.sh\"; then",
         )
-        self.assertIn("REEXEC_STATUS=$?", script)
+        self.assertRegex(
+            script,
+            r"then\n\s+exit 0\n\s+else\n\s+REEXEC_STATUS=\$\?",
+        )
         self.assertRegex(
             script,
             r'(?s)if \[ "\$\(git rev-parse HEAD\)" != "\$PREV_COMMIT" \]; then.*rollback_deployment',
         )
         self.assertRegex(script, r"(?s)REEXEC_STATUS.*exit \"\$REEXEC_STATUS\"")
+
+    def test_auto_deploy_preserves_nonzero_continuation_exit_code(self):
+        """A merged child failure must be returned after the parent rolls back."""
+        with tempfile.TemporaryDirectory() as tempdir:
+            project = Path(tempdir)
+            scripts = project / "scripts"
+            fake_bin = project / "bin"
+            scripts.mkdir()
+            fake_bin.mkdir()
+            shutil.copy2(REPO_ROOT / "scripts" / "auto_deploy.sh", scripts / "auto_deploy.sh")
+            (project / "docker-compose.yml").write_text("services: {}\n")
+            (project / ".head").write_text("old\n")
+
+            def fake_command(name, source):
+                command = fake_bin / name
+                command.write_text(textwrap.dedent(source))
+                command.chmod(0o755)
+
+            fake_command(
+                "git",
+                """\
+                #!/usr/bin/env bash
+                set -eu
+                case "$1" in
+                  rev-parse) cat "$PWD/.head" ;;
+                  fetch) exit 0 ;;
+                  rev-list) echo 1 ;;
+                  diff) printf '%s\\n' scripts/auto_deploy.sh backend/changed.go ;;
+                  merge) printf '%s\\n' new > "$PWD/.head" ;;
+                  checkout) printf '%s\\n' "$2" > "$PWD/.head" ;;
+                  *) exit 0 ;;
+                esac
+                """,
+            )
+            fake_command(
+                "docker",
+                """\
+                #!/usr/bin/env bash
+                set -eu
+                if [ "$1" = "compose" ]; then
+                  shift
+                  if [ "${1:-}" = "version" ]; then
+                    echo 'Docker Compose version v2.0.0'
+                    exit 0
+                  fi
+                  for argument in "$@"; do
+                    if [ "$argument" = "up" ]; then
+                      exit 7
+                    fi
+                  done
+                fi
+                exit 0
+                """,
+            )
+            fake_command("curl", "#!/usr/bin/env bash\nexit 1\n")
+            fake_command("systemctl", "#!/usr/bin/env bash\nexit 1\n")
+
+            environment = os.environ.copy()
+            environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
+            environment.pop("AUTO_DEPLOY_REEXEC", None)
+            environment.pop("AUTO_DEPLOY_PREV_COMMIT", None)
+            environment.pop("AUTO_DEPLOY_CHANGED_FILES", None)
+            result = subprocess.run(
+                ["/bin/bash", "scripts/auto_deploy.sh"],
+                cwd=project,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertEqual((project / ".head").read_text(), "old\n")
+            self.assertIn("merged auto_deploy.sh failed with exit code 1", result.stdout)
 
     def test_oracle_deploy_uses_untracked_nginx_override_and_refuses_dirty_tracked_tree(self):
         script = (REPO_ROOT / "scripts" / "deploy-oracle.sh").read_text()

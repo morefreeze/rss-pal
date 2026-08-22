@@ -173,13 +173,14 @@ else
     log "auto_deploy.sh changed; starting the merged script once"
     if env AUTO_DEPLOY_REEXEC=1 AUTO_DEPLOY_PREV_COMMIT="$PREV_COMMIT" AUTO_DEPLOY_CHANGED_FILES="$CHANGED_FILES" /bin/bash "$PROJECT_DIR/scripts/auto_deploy.sh"; then
       exit 0
+    else
+      REEXEC_STATUS=$?
+      log "merged auto_deploy.sh failed with exit code $REEXEC_STATUS"
+      if [ "$(git rev-parse HEAD)" != "$PREV_COMMIT" ]; then
+        rollback_deployment
+      fi
+      exit "$REEXEC_STATUS"
     fi
-    REEXEC_STATUS=$?
-    log "merged auto_deploy.sh failed with exit code $REEXEC_STATUS"
-    if [ "$(git rev-parse HEAD)" != "$PREV_COMMIT" ]; then
-      rollback_deployment
-    fi
-    exit "$REEXEC_STATUS"
   fi
 fi
 
