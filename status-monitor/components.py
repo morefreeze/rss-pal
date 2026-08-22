@@ -14,6 +14,17 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+_monotonic = time.monotonic
+MAX_RESPONSE_BYTES = 64 * 1024
+_READ_CHUNK_BYTES = 8 * 1024
+
+
+class _ReadLimitExceeded(Exception):
+    pass
+
+
+class _ProbeDeadlineExceeded(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -58,7 +69,7 @@ def load_components(env):
 
 
 def _latency_ms(start):
-    return max(0, int((time.monotonic() - start) * 1000))
+    return max(0, int((_monotonic() - start) * 1000))
 
 
 def _response_code(response):
@@ -74,11 +85,31 @@ def _response_code(response):
         return None
 
 
-def _drain_and_close(response):
+def _read_body(response, deadline):
+    chunks = []
+    total = 0
+    reader = getattr(response, "read1", None) or response.read
+    while True:
+        if _monotonic() >= deadline:
+            raise _ProbeDeadlineExceeded
+        chunk = reader(min(_READ_CHUNK_BYTES, MAX_RESPONSE_BYTES + 1 - total))
+        if not chunk:
+            if _monotonic() >= deadline:
+                raise _ProbeDeadlineExceeded
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > MAX_RESPONSE_BYTES:
+            raise _ReadLimitExceeded
+        chunks.append(chunk)
+        if _monotonic() >= deadline:
+            raise _ProbeDeadlineExceeded
+
+
+def _drain_and_close(response, deadline):
     body = None
     read_error = None
     try:
-        body = response.read()
+        body = _read_body(response, deadline)
     except Exception as exc:
         read_error = exc
     finally:
@@ -90,6 +121,10 @@ def _drain_and_close(response):
 
 
 def _error_category(exc):
+    if isinstance(exc, _ProbeDeadlineExceeded):
+        return "connection_timeout"
+    if isinstance(exc, _ReadLimitExceeded):
+        return "invalid_response"
     if isinstance(exc, (TimeoutError, socket.timeout)):
         return "connection_timeout"
     if isinstance(exc, urllib.error.URLError) and isinstance(
@@ -105,7 +140,8 @@ def _down(code, latency_ms, error):
 
 def probe(component, timeout=10):
     """Probe a component and return only safe, structured outcome data."""
-    start = time.monotonic()
+    start = _monotonic()
+    deadline = start + timeout
     response = None
     try:
         request = urllib.request.Request(
@@ -115,7 +151,7 @@ def probe(component, timeout=10):
         )
         response = _NO_REDIRECT_OPENER.open(request, timeout=timeout)
         code = _response_code(response)
-        body, read_error = _drain_and_close(response)
+        body, read_error = _drain_and_close(response, deadline)
         latency_ms = _latency_ms(start)
 
         if read_error is not None:
@@ -140,7 +176,7 @@ def probe(component, timeout=10):
         return _down(code, latency_ms, "invalid_response")
     except urllib.error.HTTPError as exc:
         code = _response_code(exc)
-        _, read_error = _drain_and_close(exc)
+        _, read_error = _drain_and_close(exc, deadline)
         latency_ms = _latency_ms(start)
         if read_error is not None:
             return _down(code, latency_ms, _error_category(read_error))
