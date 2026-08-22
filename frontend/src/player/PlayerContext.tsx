@@ -57,6 +57,9 @@ const initial: PlayerState = {
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const pendingResumeListenerRef = useRef<(() => void) | null>(null)
+  // Fallback bookkeeping: relay failure (server can't reach the CDN) should
+  // retry once against the original URL before surfacing an error.
+  const relayFallbackRef = useRef<{ direct: string; usingRelay: boolean; triedDirect: boolean } | null>(null)
   const [state, setState] = useState<PlayerState>(initial)
   const stateRef = useRef(state)
   stateRef.current = state
@@ -95,7 +98,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setState(s => ({ ...s, playing: false, loading: false }))
       flush({ position: stateRef.current.duration, isCompleted: true })
     }
-    const onError = () => setState(s => ({ ...s, error: '无法加载音频', loading: false, playing: false }))
+    const onError = () => {
+      const el = audioRef.current
+      const fb = relayFallbackRef.current
+      // Relay failed and we haven't tried the original URL yet → one retry
+      // against the direct CDN (helps when the client CAN reach the CDN but
+      // the server can't, e.g. overseas listeners).
+      if (el && fb && fb.usingRelay && !fb.triedDirect) {
+        fb.triedDirect = true
+        fb.usingRelay = false
+        setState(s => ({ ...s, src: fb.direct, loading: true, error: null }))
+        el.src = fb.direct
+        const resumeAt = stateRef.current.position
+        const onFallbackLoaded = () => {
+          el.currentTime = resumeAt
+          el.play().catch(() => { setState(s => ({ ...s, loading: false, playing: false })) })
+          el.removeEventListener('loadedmetadata', onFallbackLoaded)
+        }
+        el.addEventListener('loadedmetadata', onFallbackLoaded)
+        el.load()
+        return
+      }
+      setState(s => ({ ...s, error: '无法加载音频', loading: false, playing: false }))
+    }
     el.addEventListener('loadedmetadata', onLoaded)
     el.addEventListener('timeupdate', onTime)
     el.addEventListener('play', onPlay)
@@ -130,6 +155,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const el = audioRef.current
     if (!el) return
 
+    // Audio streams through the server-side relay so playback works even
+    // when the CDN hosting the enclosure is unreachable from the client's
+    // network (Substack behind the GFW). Video embeds are handled by
+    // iframes elsewhere and keep their original URL.
+    const isVideo = (article.media_type ?? '').startsWith('video/')
+    const src = isVideo ? article.media_url : `/api/media/audio/${article.id}`
+    relayFallbackRef.current = {
+      direct: article.media_url,
+      usingRelay: src !== article.media_url,
+      triedDirect: false,
+    }
+
     // If switching to a different article, flush the old one first.
     if (stateRef.current.articleId && stateRef.current.articleId !== article.id) {
       await flush()
@@ -147,7 +184,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       articleId: article.id,
       title: article.title,
       feedTitle: article.feed_title || '',
-      src: article.media_url,
+      src,
       duration: article.media_duration_seconds || 0,
       position: resumeAt,
       playing: false,
@@ -160,7 +197,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // rapid switches the old listener would otherwise fire against the new src.
     clearPendingResume()
 
-    el.src = article.media_url
+    el.src = src
     el.playbackRate = stateRef.current.speed
     // Wait for the metadata before seeking — otherwise the seek is dropped.
     const playFromResume = () => {

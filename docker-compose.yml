@@ -57,6 +57,10 @@ services:
       RSSHUB_BASE_URL: http://rsshub:1200
       YOUTUBE_POT_PROVIDER_URL: http://youtube-pot:4416
       BACKUP_DIR: /backups
+      # Optional forward proxy for the audio relay's upstream fetches
+      # (GFW-blocked podcast CDNs, e.g. Substack). Set to the OCI squid
+      # tunnel in production; empty elsewhere.
+      MEDIA_PROXY_URL: ${MEDIA_PROXY_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

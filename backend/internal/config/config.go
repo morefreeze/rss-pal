@@ -15,6 +15,11 @@ type Config struct {
 	JWT      JWTConfig
 	RSSHub   RSSHubConfig
 	Backup   BackupConfig
+
+	// MediaProxyURL routes audio relay upstream fetches through a fixed
+	// forward proxy (e.g. the OCI squid tunnel on the Tencent host). Empty
+	// means direct / standard proxy env vars.
+	MediaProxyURL string
 }
 
 type BackupConfig struct {
@@ -123,6 +128,7 @@ func Load() *Config {
 		Backup: BackupConfig{
 			Dir: getEnv("BACKUP_DIR", "/backups"),
 		},
+		MediaProxyURL: getEnv("MEDIA_PROXY_URL", ""),
 	}
 }
 
