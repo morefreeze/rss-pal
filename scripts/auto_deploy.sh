@@ -130,6 +130,17 @@ check_runtime_services() {
   fi
 }
 
+rollback_deployment() {
+  log "Rolling back to $PREV_COMMIT..."
+  git checkout "$PREV_COMMIT"
+  if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
+    sleep 10
+    log "Rollback complete. Staying on $(git rev-parse --short HEAD)"
+  else
+    log "Rollback rebuild failed. Staying on $(git rev-parse --short HEAD)"
+  fi
+}
+
 # 1. Save current commit and pull latest main. A continuation keeps the
 # original rollback target and changed-file set after re-execing a new script.
 CONTINUATION="false"
@@ -159,8 +170,16 @@ else
   git merge --no-edit origin/master
 
   if printf '%s\n' "$CHANGED_FILES" | grep -Fxq 'scripts/auto_deploy.sh' && [ "$AUTO_DEPLOY_REEXEC" != "1" ]; then
-    log "auto_deploy.sh changed; re-execing the merged script once"
-    exec env AUTO_DEPLOY_REEXEC=1 AUTO_DEPLOY_PREV_COMMIT="$PREV_COMMIT" AUTO_DEPLOY_CHANGED_FILES="$CHANGED_FILES" /bin/bash "$PROJECT_DIR/scripts/auto_deploy.sh"
+    log "auto_deploy.sh changed; starting the merged script once"
+    if env AUTO_DEPLOY_REEXEC=1 AUTO_DEPLOY_PREV_COMMIT="$PREV_COMMIT" AUTO_DEPLOY_CHANGED_FILES="$CHANGED_FILES" /bin/bash "$PROJECT_DIR/scripts/auto_deploy.sh"; then
+      exit 0
+    fi
+    REEXEC_STATUS=$?
+    log "merged auto_deploy.sh failed with exit code $REEXEC_STATUS"
+    if [ "$(git rev-parse HEAD)" != "$PREV_COMMIT" ]; then
+      rollback_deployment
+    fi
+    exit "$REEXEC_STATUS"
   fi
 fi
 
@@ -236,13 +255,6 @@ fi
 
 # 5. Rollback if needed
 if [ "${ROLLBACK:-false}" = "true" ]; then
-  log "Rolling back to $PREV_COMMIT..."
-  git checkout "$PREV_COMMIT"
-  if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
-    sleep 10
-    log "Rollback complete. Staying on $(git rev-parse --short HEAD)"
-  else
-    log "Rollback rebuild failed. Staying on $(git rev-parse --short HEAD)"
-  fi
+  rollback_deployment
   exit 1
 fi

@@ -141,6 +141,9 @@ step "4. 拉取代码"
 if [[ -d "$APP_DIR" ]]; then
   info "目录已存在: $APP_DIR，拉取最新代码..."
   cd "$APP_DIR"
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    error "检测到已跟踪文件的本地修改；请先提交、暂存或人工处理后再部署，未修改任何用户文件"
+  fi
   git fetch origin "$BRANCH"
   git reset --hard "origin/$BRANCH"
 else
@@ -208,20 +211,39 @@ if grep -q "^CLAUDE_API_KEY=$" "$ENV_FILE" || ! grep -q "^CLAUDE_API_KEY=" "$ENV
 fi
 
 # ==========================================
-step "6. 修改 nginx 配置（去掉本地 SSL）"
+step "6. 生成 Oracle 专用 nginx 覆盖配置"
 # ==========================================
 NGINX_CONF="$APP_DIR/frontend/nginx.conf"
-if grep -q "listen 443 ssl" "$NGINX_CONF"; then
-  info "修改 nginx.conf — 移除本地 SSL 配置..."
-  cp "$NGINX_CONF" "$NGINX_CONF.bak"
-  sed -i \
+ORACLE_RUNTIME_DIR="$APP_DIR/.oracle-runtime"
+ORACLE_NGINX_CONF="$ORACLE_RUNTIME_DIR/nginx.oracle.conf"
+ORACLE_COMPOSE_OVERRIDE="$ORACLE_RUNTIME_DIR/compose.oracle.yml"
+mkdir -p "$ORACLE_RUNTIME_DIR"
+
+if [[ -n "$DOMAIN" ]]; then
+  sed \
     -e '/listen 443 ssl;/d' \
     -e '/ssl_certificate/d' \
     -e '/ssl_session_/d' \
     -e '/ssl_session_tickets/d' \
-    "$NGINX_CONF"
-  info "nginx.conf 已更新（备份: nginx.conf.bak）"
+    -e "s/server_name localhost;/server_name $DOMAIN;/" \
+    "$NGINX_CONF" > "$ORACLE_NGINX_CONF"
+else
+  sed \
+    -e '/listen 443 ssl;/d' \
+    -e '/ssl_certificate/d' \
+    -e '/ssl_session_/d' \
+    -e '/ssl_session_tickets/d' \
+    "$NGINX_CONF" > "$ORACLE_NGINX_CONF"
 fi
+
+cat > "$ORACLE_COMPOSE_OVERRIDE" <<EOF
+services:
+  frontend:
+    volumes:
+      - $ORACLE_NGINX_CONF:/etc/nginx/conf.d/default.conf:ro
+EOF
+COMPOSE_FILES=(-f docker-compose.yml -f "$ORACLE_COMPOSE_OVERRIDE")
+info "Oracle nginx 覆盖配置已生成于未跟踪目录: $ORACLE_RUNTIME_DIR"
 
 # ==========================================
 step "7. 创建必要目录"
@@ -234,7 +256,7 @@ step "8. 构建并启动服务"
 # ==========================================
 info "开始构建（Go 编译约需 5-6 分钟）..."
 cd "$APP_DIR"
-docker compose up -d --build 2>&1
+docker compose "${COMPOSE_FILES[@]}" up -d --build 2>&1
 
 info "等待服务启动..."
 sleep 15
@@ -332,9 +354,6 @@ step "11. 配置域名 & HTTPS（可选）"
 # ==========================================
 if [[ -n "$DOMAIN" ]]; then
   info "配置域名: $DOMAIN"
-  
-  # 更新 docker nginx 配置中的 server_name
-  sed -i "s/server_name localhost;/server_name $DOMAIN;/" "$NGINX_CONF"
   
   # 配置系统 nginx 反向代理
   if [[ "$OS" == "centos" ]]; then

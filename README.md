@@ -46,6 +46,21 @@ docker compose up -d
 - `docker compose up` 会自动运行一次 `status-migrate`：它在 PostgreSQL 健康后执行幂等的 `037_service_heartbeats.sql`，并且 API 与 Worker 只会在该迁移成功后启动；迁移失败会阻止它们启动。
 - 两个部署辅助脚本会确认 `status-migrate` 的退出码为 `0` 后移除该一次性容器，避免把正常的 `Exited (0)` 计为运行时故障。手动执行 Compose 时可能会看到 `status-migrate` 为 `Exited (0)`；只有通过 `docker inspect` 确认退出码为 `0` 才表示迁移成功。
 
+首次从不含 re-exec guard 的旧版 `auto_deploy.sh`（pre-guard）升级时，已启动的旧 Bash 进程不能自动读取合并后的新脚本。请在仓库根目录安全地 fetch 后，将远端最新脚本导出到 `scripts/` 下未跟踪的临时文件并执行一次；后续自动更新由 guard 处理：
+
+```bash
+(
+  git fetch origin master
+  upgrade_script=$(mktemp "$PWD/scripts/.auto_deploy_upgrade.XXXXXX")
+  git show origin/master:scripts/auto_deploy.sh > "$upgrade_script"
+  chmod 700 "$upgrade_script"
+  /bin/bash "$upgrade_script"
+  upgrade_status=$?
+  rm -f "$upgrade_script"
+  exit "$upgrade_status"
+)
+```
+
 在部署主机上可使用以下命令验证路由和监控服务；这些命令只检查当前运行状态，不代表生产部署已经完成：
 
 ```bash
