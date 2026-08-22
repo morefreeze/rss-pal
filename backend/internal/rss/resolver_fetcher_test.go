@@ -53,6 +53,17 @@ func snapshotRequest(req *http.Request) requestSnapshot {
 	}
 }
 
+func TestNewFetcherUsesProxyFromEnvironment(t *testing.T) {
+	fetcher := NewFetcher("http://rsshub.test:1200")
+	transport, ok := fetcher.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", fetcher.client.Transport)
+	}
+	if transport.Proxy == nil {
+		t.Fatal("transport proxy is nil; RSS requests bypass HTTP_PROXY and HTTPS_PROXY")
+	}
+}
+
 const weiboRSSBody = `<?xml version="1.0"?><rss version="2.0"><channel><title>Weibo</title>` +
 	`<link>https://weibo.com/u/1195230310</link><description>feed</description>` +
 	`<item><title>post</title><link>https://weibo.com/1195230310/post</link><guid>post</guid></item>` +
