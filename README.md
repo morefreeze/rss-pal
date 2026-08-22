@@ -33,6 +33,24 @@ docker-compose up -d
 
 3. 访问 http://localhost，首次使用会自动创建管理员账号
 
+## 服务状态页与运维检查
+
+公开状态页为 `/status`。状态监控每 60 秒采样一次，页面也每 60 秒刷新；每个组件展示最近 72 小时历史。监控的六个组件按以下顺序显示：Frontend、API、Worker、RSSHub、Status Monitor、公网入口。
+
+- 状态为正常或故障时分别显示 up/down；尚未采样的小时显示灰色无数据。
+- 鼠标悬停或触摸点击小时格可查看该小时的状态、可用率、检测次数、延迟与最近错误。
+- Worker 以超过 3 分钟未完成一次采样为异常；恰好 3 分钟仍视为健康。
+- Worker 内部健康检查 `/api/internal/health/worker` 仅供 Docker 网络中的 status-monitor 使用，Nginx 对外精确拦截并返回 404，不会被通用 `/api` 代理暴露。
+
+在部署主机上可使用以下命令验证路由和监控服务；这些命令只检查当前运行状态，不代表生产部署已经完成：
+
+```bash
+curl -fsS http://127.0.0.1:8090/api/status
+curl -fsS http://127.0.0.1/status
+curl -fsS https://rss.morefreeze.top/status
+curl -i http://127.0.0.1/api/internal/health/worker  # expect 404
+```
+
 ### 手动部署
 
 ```bash
