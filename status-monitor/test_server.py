@@ -482,15 +482,15 @@ class Document {
 }
 function makePayload({ nullLastCheck = false, malicious = false } = {}) {
   const hours = Array.from({ length: 72 }, (_, index) => ({
-    start: `2026-08-20T${String(index % 24).padStart(2, '0')}:00:00+08:00`,
-    end: `2026-08-20T${String((index + 1) % 24).padStart(2, '0')}:00:00+08:00`,
+    start: index === 0 ? '2025-01-02T03:04:05+08:00' : `2026-08-20T${String(index % 24).padStart(2, '0')}:00:00+08:00`,
+    end: index === 0 ? '2025-01-02T04:05:06+08:00' : `2026-08-20T${String((index + 1) % 24).padStart(2, '0')}:00:00+08:00`,
     status: index === 0 ? 'down' : index === 2 ? null : 'up',
     uptime_pct: index === 2 ? null : index === 0 ? 0 : 100,
     successful_checks: index === 0 ? 0 : index === 2 ? 0 : 1,
     total_checks: index === 2 ? 0 : 1,
     avg_latency_ms: index === 2 ? null : 12,
     last_error: index === 0 ? (malicious ? '<img src=x onerror=alert(1)>' : 'connection_timeout') : null,
-    last_error_at: index === 0 ? '2026-08-20T00:30:00+08:00' : null
+    last_error_at: index === 0 ? '2025-01-02T03:30:45+08:00' : null
   }));
   return { generated_at: '2026-08-22T12:00:00+08:00', refresh_interval_seconds: 60, overall_status: 'up',
     components: Array.from({ length: 6 }, (_, index) => ({ key: `component-${index}`, name: `Component ${index}`, current_status: index % 2 ? 'down' : 'up', uptime_pct: 100 - index, last_check: nullLastCheck && index === 0 ? null : '2026-08-22T12:00:00+08:00', hours })) };
@@ -527,9 +527,10 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(root.children.every((row, index) => row.children[0].children[1].textContent === (index % 2 ? '故障' : '正常') && row.children[0].children[2].textContent === `可用率 ${(100 - index).toFixed(2)}%`), 'must render current status and sample-weighted uptime');
   assert(root.children.every(row => row.children[2].children.length === 72), 'must render 72 buttons per row');
   for (const row of root.children) {
-    const [down, up, noData] = row.children[2].children;
+    const controls = row.children[2].children;
+    const [down, up, noData] = controls;
     assert(down.className.includes('down') && up.className.includes('up') && noData.className.includes('no-data'), 'must give down/up/no-data hours distinct semantic color classes');
-    assert(down.attributes['aria-describedby'] === 'status-tooltip' && down.attributes['aria-label'].includes('故障') && up.attributes['aria-label'].includes('正常') && noData.attributes['aria-label'].includes('无数据'), 'hour controls must expose non-color status descriptions');
+    assert(controls.every(control => control.tagName === 'BUTTON' && control.attributes['aria-describedby'] === 'status-tooltip' && typeof control.attributes['aria-label'] === 'string' && control.attributes['aria-label'].length > 0 && /正常|故障|无数据/.test(control.attributes['aria-label'])), 'every hourly control must be an accessible button with non-color status text');
     assert(row.children[3].textContent.includes('72 小时前') && row.children[3].textContent.includes('现在'), 'each row must show the 72-hour-to-now axis');
   }
   assert(root.children[0].children[1].textContent.includes('无数据') && !root.children[0].children[1].textContent.includes('1970'), 'null last_check must be no data');
@@ -537,7 +538,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   button.dispatch('mouseenter'); assert(!tooltip.hidden && tooltip.textContent.includes('检查失败') && !tooltip.textContent.includes('<img'), 'unsafe error must be mapped safely'); assert(!hasImage(tooltip), 'unsafe error must not create an IMG node');
   const upButton = root.children[0].children[2].children[1]; upButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：正常') && tooltip.textContent.includes('小时可用率：100.00%') && tooltip.textContent.includes('检测：1 / 1') && tooltip.textContent.includes('平均延迟：12 ms'), 'up tooltip must show normal details');
   const noDataButton = root.children[0].children[2].children[2]; noDataButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('状态：无数据') && tooltip.textContent.includes('小时可用率：无数据') && tooltip.textContent.includes('检测：0 / 0') && tooltip.textContent.includes('平均延迟：无数据'), 'no-data tooltip must show missing-data details');
-  const safePayload = makePayload(); vm.runInContext('render(safePayloadForTest)', Object.assign(live.context, { safePayloadForTest: safePayload })); const safeDownButton = root.children[0].children[2].children[0]; safeDownButton.dispatch('mouseenter'); assert(tooltip.textContent.includes('时段：') && tooltip.textContent.includes('至') && tooltip.textContent.includes('状态：故障') && tooltip.textContent.includes('小时可用率：0.00%') && tooltip.textContent.includes('检测：0 / 1') && tooltip.textContent.includes('平均延迟：12 ms') && tooltip.textContent.includes('最近错误：连接超时') && tooltip.textContent.includes('错误时间：'), 'down tooltip must show the complete mapped failure details');
+  const safePayload = makePayload(); vm.runInContext('render(safePayloadForTest)', Object.assign(live.context, { safePayloadForTest: safePayload })); const safeDownButton = root.children[0].children[2].children[0]; safeDownButton.dispatch('mouseenter'); const expectedStart = new Date('2025-01-02T03:04:05+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedEnd = new Date('2025-01-02T04:05:06+08:00').toLocaleString('zh-CN', { hour12: false }); const expectedErrorAt = new Date('2025-01-02T03:30:45+08:00').toLocaleString('zh-CN', { hour12: false }); assert(tooltip.textContent.includes('时段：' + expectedStart + ' 至 ' + expectedEnd) && tooltip.textContent.includes('状态：故障') && tooltip.textContent.includes('小时可用率：0.00%') && tooltip.textContent.includes('检测：0 / 1') && tooltip.textContent.includes('平均延迟：12 ms') && tooltip.textContent.includes('最近错误：连接超时') && tooltip.textContent.includes('错误时间：' + expectedErrorAt), 'down tooltip must show the complete mapped failure details with actual timestamps');
   button = safeDownButton;
   button.dispatch('mouseleave'); assert(tooltip.hidden && activeIsClear(live.context), 'mouseleave must dismiss tooltip');
   button.dispatch('focus'); assert(!tooltip.hidden, 'focus must show tooltip'); button.dispatch('blur'); assert(tooltip.hidden, 'blur must dismiss tooltip');
