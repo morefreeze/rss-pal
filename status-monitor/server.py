@@ -178,8 +178,9 @@ class MonitorService:
             finally:
                 conn.close()
 
+            cycle_completed_at = _aware_cst(self.now_fn())
             with self._state_lock:
-                self._last_cycle_completed_at = cycle_started_at
+                self._last_cycle_completed_at = cycle_completed_at
 
     def payload(self, now):
         """Read the database and return the public aggregate schema."""
