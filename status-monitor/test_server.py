@@ -636,6 +636,45 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertEqual([len(item["hours"]) for item in payload["components"]], [72] * 6)
         self.assertEqual(payload["refresh_interval_seconds"], 60)
 
+    def test_repeated_sampling_write_failures_make_stale_api_status_fail_closed(self):
+        clock = [self.now]
+        service = self.service(now_fn=lambda: clock[0])
+        service.sample_once(clock[0])
+
+        class TwoFailedCycles:
+            def __init__(self):
+                self.cycles = 0
+
+            def is_set(self):
+                return self.cycles == 2
+
+            def wait(self, seconds):
+                self.cycles += 1
+                clock[0] += timedelta(seconds=seconds)
+
+        clock[0] += timedelta(seconds=60)
+        with patch("server._connect", side_effect=sqlite3.OperationalError("disk unavailable")):
+            server.sampling_loop(service, TwoFailedCycles())
+        clock[0] += timedelta(seconds=1)
+
+        status, _, body = self.request(service)
+        payload = json.loads(body)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["overall_status"], "down")
+        self.assertEqual(
+            [item["current_status"] for item in payload["components"]],
+            ["down"] * 6,
+        )
+        self.assertEqual(
+            [item["last_check"] for item in payload["components"]],
+            [self.now.isoformat()] * 6,
+        )
+        self.assertEqual(
+            [item["hours"][-1]["status"] for item in payload["components"]],
+            ["up"] * 6,
+        )
+
     def test_sqlite_read_error_returns_500_without_fake_green_or_details(self):
         missing_schema = str(Path(self.tempdir.name) / "missing-schema.db")
         service = self.service(db_path=missing_schema)

@@ -117,6 +117,37 @@ class AggregationTests(unittest.TestCase):
         self.assertEqual(summary["current_status"], "up")
         self.assertEqual(summary["last_check"], (self.now - timedelta(minutes=1)).isoformat())
 
+    def test_stale_latest_up_fails_current_status_closed_without_rewriting_history(self):
+        stale_check = self.now - timedelta(seconds=121)
+        self.add_check(stale_check, status="up")
+        component = Component("api", "API", "http://api/private", "json_ok")
+
+        payload = status_payload(self.conn, (component,), self.now, interval_seconds=60)
+
+        self.assertEqual(payload["overall_status"], "down")
+        self.assertEqual(payload["components"][0]["current_status"], "down")
+        self.assertEqual(payload["components"][0]["last_check"], stale_check.isoformat())
+        self.assertEqual(payload["components"][0]["hours"][-1]["status"], "up")
+
+    def test_latest_up_at_exactly_two_sampling_intervals_remains_current(self):
+        boundary_check = self.now - timedelta(seconds=60)
+        self.add_check(boundary_check, status="up")
+        component = Component("api", "API", "http://api/private", "json_ok")
+
+        payload = status_payload(self.conn, (component,), self.now, interval_seconds=30)
+
+        self.assertEqual(payload["overall_status"], "up")
+        self.assertEqual(payload["components"][0]["current_status"], "up")
+
+    def test_latest_up_inside_two_configured_sampling_intervals_is_current(self):
+        self.add_check(self.now - timedelta(seconds=59), status="up")
+        component = Component("api", "API", "http://api/private", "json_ok")
+
+        payload = status_payload(self.conn, (component,), self.now, interval_seconds=30)
+
+        self.assertEqual(payload["overall_status"], "up")
+        self.assertEqual(payload["components"][0]["current_status"], "up")
+
     def test_component_summary_queries_only_the_cst_history_window_in_timestamp_order(self):
         window_start = hour_floor(self.now) - timedelta(hours=71)
         window_end = hour_floor(self.now) + timedelta(hours=1)
