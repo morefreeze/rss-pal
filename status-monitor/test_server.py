@@ -201,9 +201,9 @@ class DeploymentConfigTests(unittest.TestCase):
         )
         self.assertIsNotNone(rollback)
         rollback_body = rollback.group("body")
-        self.assertIn("Rollback complete", rollback_body)
         self.assertIn("exit 1", rollback_body)
-        self.assertLess(rollback_body.index("Rollback complete"), rollback_body.index("exit 1"))
+        self.assertIn("rollback_deployment", rollback_body)
+        self.assertIn("Rollback complete", script)
 
     def test_auto_deploy_reexecs_once_after_merging_a_changed_deploy_script(self):
         script = (REPO_ROOT / "scripts" / "auto_deploy.sh").read_text()
@@ -215,14 +215,50 @@ class DeploymentConfigTests(unittest.TestCase):
             script,
             r"if .*scripts/auto_deploy\.sh.*AUTO_DEPLOY_REEXEC.*!= \"1\"",
         )
+        self.assertNotIn("exec env AUTO_DEPLOY_REEXEC=1", script)
         self.assertRegex(
             script,
-            r"exec env AUTO_DEPLOY_REEXEC=1 AUTO_DEPLOY_PREV_COMMIT=.*"
+            r"if env AUTO_DEPLOY_REEXEC=1 AUTO_DEPLOY_PREV_COMMIT=.*"
             r"AUTO_DEPLOY_CHANGED_FILES=.* /bin/bash \"\$PROJECT_DIR/scripts/auto_deploy\.sh\"",
         )
         self.assertIn('CONTINUATION="true"', script)
         self.assertLess(script.index('CONTINUATION="true"'), script.index('BEHIND='))
         self.assertIn('if [ "$AUTO_DEPLOY_REEXEC" = "1" ]; then', script)
+
+    def test_auto_deploy_parent_handles_continuation_failure_without_leaving_new_head_running(self):
+        script = (REPO_ROOT / "scripts" / "auto_deploy.sh").read_text()
+
+        self.assertNotIn("exec env AUTO_DEPLOY_REEXEC=1", script)
+        self.assertRegex(
+            script,
+            r"if env AUTO_DEPLOY_REEXEC=1 .* /bin/bash \"\$PROJECT_DIR/scripts/auto_deploy\.sh\"; then",
+        )
+        self.assertIn("REEXEC_STATUS=$?", script)
+        self.assertRegex(
+            script,
+            r'(?s)if \[ "\$\(git rev-parse HEAD\)" != "\$PREV_COMMIT" \]; then.*rollback_deployment',
+        )
+        self.assertRegex(script, r"(?s)REEXEC_STATUS.*exit \"\$REEXEC_STATUS\"")
+
+    def test_oracle_deploy_uses_untracked_nginx_override_and_refuses_dirty_tracked_tree(self):
+        script = (REPO_ROOT / "scripts" / "deploy-oracle.sh").read_text()
+
+        self.assertRegex(script, r"if ! git diff --quiet \|\| ! git diff --cached --quiet; then")
+        self.assertIn("ORACLE_NGINX_CONF", script)
+        self.assertIn("ORACLE_COMPOSE_OVERRIDE", script)
+        self.assertIn("/etc/nginx/conf.d/default.conf:ro", script)
+        self.assertIn('COMPOSE_FILES=(-f docker-compose.yml -f "$ORACLE_COMPOSE_OVERRIDE")', script)
+        self.assertNotIn('sed -i "s/server_name localhost;/server_name $DOMAIN;/" "$NGINX_CONF"', script)
+        self.assertNotRegex(script, r"sed -i .*NGINX_CONF")
+
+    def test_readme_documents_one_time_pre_guard_upgrade_bootstrap(self):
+        readme = (REPO_ROOT / "README.md").read_text()
+
+        self.assertIn("pre-guard", readme)
+        self.assertIn("git fetch origin master", readme)
+        self.assertIn("git show origin/master:scripts/auto_deploy.sh", readme)
+        self.assertIn("mktemp \"$PWD/scripts/.auto_deploy_upgrade.XXXXXX\"", readme)
+        self.assertIn("/bin/bash \"$upgrade_script\"", readme)
 
 
 class MonitorServiceTests(unittest.TestCase):
