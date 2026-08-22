@@ -2,7 +2,8 @@
 
 All returned timestamps are ISO 8601 values normalized to China Standard Time
 (``+08:00``).  Input check rows may be SQLite result tuples containing either
-``(ts, status, code, latency_ms, error)`` or the complete checks schema.
+``(ts, status, code, latency_ms, error)``, a six-column row with ``source``,
+or the complete checks schema including its leading ``id``.
 """
 
 from collections.abc import Mapping
@@ -41,8 +42,10 @@ def _record(row):
         ts, status, code, latency_ms, error = row
     elif len(row) == 6:
         ts, _source, status, code, latency_ms, error = row
+    elif len(row) == 7:
+        _id, ts, _source, status, code, latency_ms, error = row
     else:
-        raise ValueError("check row must contain five or six fields")
+        raise ValueError("check row must contain five, six, or seven fields")
     return {
         "ts": _parse_timestamp(ts),
         "status": status,
@@ -59,12 +62,12 @@ def _window(now: datetime, hours: int):
     return current_hour - timedelta(hours=hours - 1), current_hour + timedelta(hours=1)
 
 
-def _records_in_window(rows, now: datetime, hours: int):
+def _records_in_window(rows, now: datetime, hours: int, ordered: bool = False):
     start, end = _window(now, hours)
-    return sorted(
-        (record for row in rows if start <= (record := _record(row))["ts"] < end),
-        key=lambda record: record["ts"],
-    )
+    records = [
+        record for row in rows if start <= (record := _record(row))["ts"] < end
+    ]
+    return records if ordered else sorted(records, key=lambda record: record["ts"])
 
 
 def _bucket(start: datetime, records: list[dict]) -> dict:
@@ -86,22 +89,28 @@ def _bucket(start: datetime, records: list[dict]) -> dict:
     }
 
 
-def build_hour_buckets(rows, now: datetime, hours: int = 72) -> list[dict]:
-    """Aggregate check rows into CST natural-hour buckets, oldest first."""
+def _build_hour_buckets(records, now: datetime, hours: int) -> list[dict]:
     first_hour, _ = _window(now, hours)
     grouped = {first_hour + timedelta(hours=index): [] for index in range(hours)}
-    for record in _records_in_window(rows, now, hours):
+    for record in records:
         grouped[hour_floor(record["ts"])].append(record)
     return [_bucket(start, grouped[start]) for start in grouped]
 
 
+def build_hour_buckets(rows, now: datetime, hours: int = 72) -> list[dict]:
+    """Aggregate check rows into CST natural-hour buckets, oldest first."""
+    return _build_hour_buckets(_records_in_window(rows, now, hours), now, hours)
+
+
 def component_summary(conn, component, now: datetime, hours: int = 72) -> dict:
     """Return one configured component's current state and compact 72-hour history."""
+    window_start, window_end = _window(now, hours)
     rows = conn.execute(
-        "SELECT ts, status, code, latency_ms, error FROM checks WHERE source = ?",
-        (component.key,),
+        "SELECT ts, status, code, latency_ms, error FROM checks "
+        "WHERE source = ? AND ts >= ? AND ts < ? ORDER BY ts ASC",
+        (component.key, window_start.isoformat(), window_end.isoformat()),
     ).fetchall()
-    records = _records_in_window(rows, now, hours)
+    records = _records_in_window(rows, now, hours, ordered=True)
     latest = records[-1] if records else None
     successful = sum(record["status"] == "up" for record in records)
     return {
@@ -110,7 +119,7 @@ def component_summary(conn, component, now: datetime, hours: int = 72) -> dict:
         "current_status": "up" if latest and latest["status"] == "up" else "down",
         "uptime_pct": round(successful / len(records) * 100, 2) if records else 0,
         "last_check": latest["ts"].isoformat() if latest else None,
-        "hours": build_hour_buckets(rows, now, hours),
+        "hours": _build_hour_buckets(records, now, hours),
     }
 
 
