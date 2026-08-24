@@ -104,3 +104,37 @@ func TestHasAddressableArticleBlock(t *testing.T) {
 		})
 	}
 }
+
+func TestAnnotateArticleForSummaryIgnoresFenceWithTrailingText(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "backtick fence",
+			in:   "```\ninside\n``` trailing\nstill inside\n```\n\nAfter\n",
+			want: "```\ninside\n``` trailing\nstill inside\n```\n\n[正文锚点: article-section-000]\nAfter\n",
+		},
+		{
+			name: "tilde fence",
+			in:   "~~~\ninside\n~~~ trailing\nstill inside\n~~~\n\nAfter\n",
+			want: "~~~\ninside\n~~~ trailing\nstill inside\n~~~\n\n[正文锚点: article-section-000]\nAfter\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := annotateArticleForSummary(tc.in); got != tc.want {
+				t.Errorf("annotateArticleForSummary() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnnotateArticleForSummaryDoesNotSuppressMeaningfulBlockquote(t *testing.T) {
+	in := "> ![](https://example.com/image.png)\n> meaningful quote\n"
+	want := "> ![](https://example.com/image.png)\n[正文锚点: article-section-000]\n> meaningful quote\n"
+	if got := annotateArticleForSummary(in); got != want {
+		t.Errorf("annotateArticleForSummary() = %q, want %q", got, want)
+	}
+}
