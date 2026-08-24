@@ -60,6 +60,7 @@ func annotateArticle(content string) (string, int) {
 	var out strings.Builder
 	out.Grow(len(content) + len(lines)*32)
 
+	nextID := 1
 	count := 0
 	var active articleBlockKind
 	var fence byte
@@ -95,12 +96,13 @@ func annotateArticle(content string) (string, int) {
 		kind, start := articleAnchorLineKind(line.text, active)
 		imageOnly := articleAnchorIsImageOnly(line.text, kind)
 		if start && !imageOnly {
-			out.WriteString(fmt.Sprintf("[正文锚点: %s]%s", articleAnchorID(count), newline))
+			out.WriteString(fmt.Sprintf("[正文锚点: %s]%s", articleAnchorID(nextID), newline))
+			nextID++
 			count++
 		}
 		out.WriteString(line.text)
 		out.WriteString(line.ending)
-		if imageOnly && kind == articleBlockBlockquote {
+		if imageOnly && kind == articleBlockBlockquote && active != articleBlockBlockquote {
 			active = articleBlockNone
 		} else {
 			active = kind
