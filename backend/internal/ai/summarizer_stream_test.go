@@ -142,3 +142,24 @@ func TestStreamDetailedPromptsUseAnchorsButBriefPromptsDoNot(t *testing.T) {
 		t.Errorf("custom stream detailed template should precede system-owned instruction:\n%s", detailedTemplate)
 	}
 }
+
+func TestSummarizeWithTemplateStreamDoesNotAddAnchorsWhenDetailedTemplateOmitsContent(t *testing.T) {
+	srv, cap := newStreamCaptureServer(t)
+	s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
+
+	if _, err := s.SummarizeWithTemplateStream(
+		context.Background(), "Title", articleAnchorTestContent,
+		"STREAM BRIEF {content}", "STREAM DETAILED ONLY {title}",
+		func(string) {}, func(string) {},
+	); err != nil {
+		t.Fatalf("SummarizeWithTemplateStream: %v", err)
+	}
+	if len(cap.bodies) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(cap.bodies))
+	}
+	detailedPrompt := requestUserText(t, cap.bodies[1])
+	if detailedPrompt != "STREAM DETAILED ONLY Title" {
+		t.Errorf("detailed prompt = %q, want rendered content-less template unchanged", detailedPrompt)
+	}
+	assertTextPromptWithoutArticleAnchors(t, detailedPrompt, "content-less stream template detailed")
+}

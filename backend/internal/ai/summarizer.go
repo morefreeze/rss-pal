@@ -343,10 +343,7 @@ func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, con
 	if err != nil {
 		return nil, fmt.Errorf("failed to stream brief with template: %w", err)
 	}
-	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
-	detailedReplacer := strings.NewReplacer("{title}", title, "{content}", detailedContent)
-	detailedPrompt := detailedReplacer.Replace(detailedPromptTpl)
-	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
+	detailedPrompt := buildDetailedTemplatePrompt(title, content, detailedPromptTpl)
 
 	detailed, err := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
 	if err != nil {
@@ -384,6 +381,16 @@ func (s *Summarizer) generateDetailed(ctx context.Context, title, content string
 	prompt = appendDetailedArticleAnchorInstruction(prompt, anchorInstruction)
 
 	return s.call(ctx, prompt, detailedMaxTokens)
+}
+
+func buildDetailedTemplatePrompt(title, content, detailedPromptTpl string) string {
+	detailedContent := content
+	anchorInstruction := ""
+	if strings.Contains(detailedPromptTpl, "{content}") {
+		detailedContent, anchorInstruction = buildDetailedArticlePromptInput(content)
+	}
+	prompt := strings.NewReplacer("{title}", title, "{content}", detailedContent).Replace(detailedPromptTpl)
+	return appendDetailedArticleAnchorInstruction(prompt, anchorInstruction)
 }
 
 func (s *Summarizer) ExtractTopics(ctx context.Context, title, content string) ([]string, error) {
@@ -424,10 +431,7 @@ func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, 
 		return nil, fmt.Errorf("failed to generate brief with template: %w", err)
 	}
 
-	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
-	detailedReplacer := strings.NewReplacer("{title}", title, "{content}", detailedContent)
-	detailedPrompt := detailedReplacer.Replace(detailedPromptTpl)
-	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
+	detailedPrompt := buildDetailedTemplatePrompt(title, content, detailedPromptTpl)
 	detailed, err := s.call(ctx, detailedPrompt, detailedMaxTokens)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate detailed summary with template: %w", err)
