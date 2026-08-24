@@ -10,6 +10,7 @@ type Props = {
 
 const REMARK_PLUGINS = [remarkGfm]
 const ARTICLE_HIGHLIGHT_TIMEOUT_MS = 7_100
+const ARTICLE_LINK_LABEL = '跳转原文'
 
 const activeHighlights = new WeakMap<HTMLElement, () => void>()
 
@@ -86,7 +87,7 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
 
   return (
     <a href={href} onClick={handleClick} onAuxClick={handleAuxClick} {...rest} className={className}>
-      {children}
+      {targetID ? ARTICLE_LINK_LABEL : children}
       {targetID && <span className="summary-article-link-icon" aria-hidden="true">⌖</span>}
     </a>
   )
