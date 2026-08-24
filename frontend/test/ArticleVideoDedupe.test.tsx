@@ -70,7 +70,7 @@ describe('article video render deduplication', () => {
     expect(container.querySelectorAll('#article-section-002')).toHaveLength(1)
     expect(container.querySelectorAll('iframe[title="youtube video dQw4w9WgXcQ"]')).toHaveLength(1)
 
-    fireEvent.click(screen.getByRole('link', { name: 'Jump' }), { detail: 1 })
+    fireEvent.click(screen.getByRole('link', { name: '跳转原文' }), { detail: 1 })
     expect(target?.classList.contains('article-anchor-highlight')).toBe(true)
   })
 
