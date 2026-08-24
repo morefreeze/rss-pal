@@ -10,7 +10,7 @@ const articleAnchorPrefix = "article-section-"
 
 // detailedArticleAnchorInstruction is appended only to detailed-summary
 // prompts when the supplied article includes addressable content blocks.
-const detailedArticleAnchorInstruction = `请尽量按原文顺序总结，并按大意合并相邻内容。仅在确有助于定位原文的总结段落末尾添加一个 [查看原文](#article-section-NNN) 链接，NNN 必须来自正文中已有的锚点，且每个总结组或段落至多一个。不要每段都添加跳转；短文或整篇只讲一件事时可以完全不添加。`
+const detailedArticleAnchorInstruction = `请按原文顺序总结，并按语义分组（按大意合并相邻内容）。当文章包含多个清晰的章节或主题组时，添加至少 3 个、至多 30 个 [查看原文](#article-section-NNN) 链接；每个总结组或段落至多一个。NNN 只能使用正文中提供的锚点（来自正文中已有的锚点），并按原文顺序分布链接。不要为了凑够最少数量而给每个正文段落添加链接，不要每段都添加跳转。短文或单一连续主题的文章可以不添加链接；短文或整篇只讲一件事时可以完全不添加；除上述例外，不得只添加 1 或 2 个链接。示例：[查看原文](#article-section-003)。`
 
 var (
 	articleATXHeadingRE            = regexp.MustCompile(`^ {0,3}#{1,6}(?:[[:space:]]|$)`)
