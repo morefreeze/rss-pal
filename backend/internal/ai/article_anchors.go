@@ -93,13 +93,18 @@ func annotateArticle(content string) (string, int) {
 		}
 
 		kind, start := articleAnchorLineKind(line.text, active)
-		if start && !articleAnchorIsImageOnly(line.text, kind) {
+		imageOnly := articleAnchorIsImageOnly(line.text, kind)
+		if start && !imageOnly {
 			out.WriteString(fmt.Sprintf("[正文锚点: %s]%s", articleAnchorID(count), newline))
 			count++
 		}
 		out.WriteString(line.text)
 		out.WriteString(line.ending)
-		active = kind
+		if imageOnly && kind == articleBlockBlockquote {
+			active = articleBlockNone
+		} else {
+			active = kind
+		}
 	}
 
 	return out.String(), count
@@ -163,7 +168,7 @@ func articleAnchorIsFence(line string, char byte, minimumLength int) bool {
 	for length < len(trimmed) && trimmed[length] == char {
 		length++
 	}
-	return length >= minimumLength
+	return length >= minimumLength && strings.TrimSpace(trimmed[length:]) == ""
 }
 
 func articleAnchorLineKind(line string, active articleBlockKind) (articleBlockKind, bool) {
