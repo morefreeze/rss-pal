@@ -97,7 +97,7 @@ export default function MiniPlayer() {
           onKeyUp={() => {
             if (dragValue !== null) { p.seek(dragValue); setDragValue(null) }
           }}
-          style={{ width: '100%' }}
+          style={{ width: '100%', paddingInline: 0 }}
           aria-label="播放进度"
         />
       </div>
