@@ -53,16 +53,16 @@ function isNativelyFocusable(target: HTMLElement): boolean {
 
 type SummaryLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraProps
 
-function SummaryLink({ href, children, node: _node, onClick, ...rest }: SummaryLinkProps) {
+function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest }: SummaryLinkProps) {
+  const targetID = parseArticleAnchor(href)
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     onClick?.(event)
     if (event.defaultPrevented) return
 
-    const targetID = parseArticleAnchor(href)
     if (!targetID) return
+    event.preventDefault()
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
 
-    event.preventDefault()
     const target = document.getElementById(targetID)
     if (!target) return
 
@@ -77,7 +77,12 @@ function SummaryLink({ href, children, node: _node, onClick, ...rest }: SummaryL
     if (needsTemporaryTabIndex) target.removeAttribute('tabindex')
   }
 
-  return <a href={href} onClick={handleClick} {...rest}>{children}</a>
+  const handleAuxClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    onAuxClick?.(event)
+    if (!event.defaultPrevented && targetID) event.preventDefault()
+  }
+
+  return <a href={href} onClick={handleClick} onAuxClick={handleAuxClick} {...rest}>{children}</a>
 }
 
 const COMPONENTS: Components = { a: SummaryLink }

@@ -9,8 +9,7 @@ import rehypeKatex from 'rehype-katex'
 import 'highlight.js/styles/github.css'
 import 'katex/dist/katex.min.css'
 import { stripMathShadow, escapeAmbiguousMathDollars } from '../util/mathShadow'
-import { flattenImageAltBlankLines } from '../util/imageAlt'
-import { annotateArticleMarkdown, createArticleAnchorRemarkPlugin, findArticleAnchors } from '../util/articleAnchors'
+import { annotateArticleMarkdown, createArticleAnchorRemarkPlugin, findArticleAnchors, normalizeArticleAnchorSource } from '../util/articleAnchors'
 import VideoEmbed from './VideoEmbed'
 import { parsePlaceholder, type VideoEmbedData } from './parseVideoPlaceholder'
 import { CodeWrapContext } from './CodeWrapContext'
@@ -228,7 +227,7 @@ const COMPONENTS: Components = {
     )
   },
   a: ArticleLink,
-  p: ({ children, ...rest }) => {
+  p: ({ children, node: _node, ...rest }) => {
     const suppressedVideo = useContext(SuppressedVideoContext)
     const text = extractParagraphText(children)
     if (text) {
@@ -239,9 +238,9 @@ const COMPONENTS: Components = {
           v.platform === suppressedVideo.platform &&
           v.id === suppressedVideo.id
         ) {
-          return null
+          return <div {...rest} hidden aria-hidden="true" />
         }
-        return <VideoEmbed {...v} />
+        return <div {...rest}><VideoEmbed {...v} /></div>
       }
     }
     return <p {...rest}>{children}</p>
@@ -261,7 +260,7 @@ const COMPONENTS: Components = {
 function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
   const cleaned = useMemo(
     () => annotateArticleMarkdown(normalizeVideoPlaceholders(
-      flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source))),
+      normalizeArticleAnchorSource(escapeAmbiguousMathDollars(stripMathShadow(source))),
     )),
     [source],
   )

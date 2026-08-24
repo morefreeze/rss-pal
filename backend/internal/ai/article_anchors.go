@@ -13,10 +13,12 @@ const articleAnchorPrefix = "article-section-"
 const detailedArticleAnchorInstruction = `请尽量按原文顺序总结，并按大意合并相邻内容。仅在确有助于定位原文的总结段落末尾添加一个 [查看原文](#article-section-NNN) 链接，NNN 必须来自正文中已有的锚点，且每个总结组或段落至多一个。不要每段都添加跳转；短文或整篇只讲一件事时可以完全不添加。`
 
 var (
-	articleATXHeadingRE = regexp.MustCompile(`^ {0,3}#{1,6}(?:[[:space:]]|$)`)
-	articleListItemRE   = regexp.MustCompile(`^[[:space:]]*(?:[*+-]|[0-9]+[.)])[[:space:]]+`)
-	articleBlockquoteRE = regexp.MustCompile(`^ {0,3}>[[:space:]]?`)
-	articleLinkRE       = regexp.MustCompile(`\[([^\]]*)\]\([^)]+\)`)
+	articleATXHeadingRE            = regexp.MustCompile(`^ {0,3}#{1,6}(?:[[:space:]]|$)`)
+	articleListItemRE              = regexp.MustCompile(`^[[:space:]]*(?:[*+-]|[0-9]+[.)])[[:space:]]+`)
+	articleBlockquoteRE            = regexp.MustCompile(`^ {0,3}>[[:space:]]?`)
+	articleLinkRE                  = regexp.MustCompile(`\[([^\]]*)\]\([^)]+\)`)
+	articleImageAltWithBlankLineRE = regexp.MustCompile(`!\[([^\]]*\n[ \t]*\n[^\]]*)\]\(([^)\s]+)\)`)
+	articleBlankLineRunRE          = regexp.MustCompile(`[ \t]*\n([ \t]*\n)+[ \t]*`)
 )
 
 type articleAnchorLine struct {
@@ -40,8 +42,8 @@ func articleAnchorID(index int) string {
 }
 
 // annotateArticleForSummary inserts one line-oriented marker before every
-// addressable Markdown block. The source text and its line ending style are
-// otherwise left untouched.
+// addressable Markdown block. Its transient prompt input is first normalized
+// to match frontend rendering; stored Markdown is never changed here.
 func annotateArticleForSummary(content string) string {
 	annotated, _ := annotateArticle(content)
 	return annotated
@@ -73,6 +75,7 @@ func appendDetailedArticleAnchorInstruction(prompt, instruction string) string {
 }
 
 func annotateArticle(content string) (string, int) {
+	content = normalizeArticleAnchorSource(content)
 	lines := splitArticleAnchorLines(content)
 	if len(lines) == 0 {
 		return content, 0
@@ -117,7 +120,8 @@ func annotateArticle(content string) (string, int) {
 			continue
 		}
 
-		if articleAnchorIsTopLevelIndentedCode(line.text) {
+		if articleAnchorIsTopLevelIndentedCode(line.text) &&
+			!(active == articleBlockList && articleListItemRE.MatchString(line.text)) {
 			active = articleBlockNone
 			out.WriteString(line.text)
 			out.WriteString(line.ending)
@@ -144,6 +148,20 @@ func annotateArticle(content string) (string, int) {
 	}
 
 	return out.String(), count
+}
+
+// normalizeArticleAnchorSource mirrors the frontend anchor normalization.
+// Blank lines inside image alt text are destructive to CommonMark block
+// boundaries, so both prompt annotation and rendering scan this same form.
+func normalizeArticleAnchorSource(content string) string {
+	return articleImageAltWithBlankLineRE.ReplaceAllStringFunc(content, func(match string) string {
+		sub := articleImageAltWithBlankLineRE.FindStringSubmatch(match)
+		if len(sub) != 3 {
+			return match
+		}
+		alt := strings.TrimSpace(articleBlankLineRunRE.ReplaceAllString(sub[1], " "))
+		return "![" + alt + "](" + sub[2] + ")"
+	})
 }
 
 func articleAnchorParagraphHasMeaningfulContinuation(lines []articleAnchorLine, start int) bool {
