@@ -52,31 +52,39 @@ describe('SummaryMarkdown article links', () => {
     document.body.replaceChildren()
   })
 
-  it('decorates only valid article links with an aria-hidden anchor icon', () => {
-    render(<SummaryMarkdown source={[
-      '[查看原文](#article-section-001)',
-      '[External](https://example.com)',
-      '[Invalid](#article-section-01)',
-    ].join('\n\n')} />)
+  it.each(['查看原文', '跳转原文', '任意文案'])(
+    'normalizes the stored label %s and decorates the article link once',
+    (storedLabel) => {
+      render(<SummaryMarkdown source={`[${storedLabel}](#article-section-001)`} />)
 
-    const articleLink = screen.getByRole('link', { name: '查看原文' })
-    const articleIcon = articleLink.querySelector('.summary-article-link-icon')
-    expect(articleLink.classList.contains('summary-article-link')).toBe(true)
-    expect(articleIcon?.textContent).toBe('⌖')
-    expect(articleIcon?.getAttribute('aria-hidden')).toBe('true')
+      const articleLink = screen.getByRole('link', { name: '跳转原文' })
+      const articleIcons = articleLink.querySelectorAll('.summary-article-link-icon')
+      expect(articleLink.textContent).toBe('跳转原文⌖')
+      expect(articleLink.classList.contains('summary-article-link')).toBe(true)
+      expect(articleIcons).toHaveLength(1)
+      expect(articleIcons[0].getAttribute('aria-hidden')).toBe('true')
+    },
+  )
 
-    for (const name of ['External', 'Invalid']) {
-      const link = screen.getByRole('link', { name })
-      expect(link.classList.contains('summary-article-link')).toBe(false)
-      expect(link.querySelector('.summary-article-link-icon')).toBeNull()
-    }
+  it.each([
+    ['External', 'https://example.com'],
+    ['Fragment', '#other-section'],
+    ['Invalid', '#article-section-01'],
+  ])('does not normalize the non-article link %s', (label, href) => {
+    render(<SummaryMarkdown source={`[${label}](${href})`} />)
+
+    const link = screen.getByRole('link', { name: label })
+    expect(link.textContent).toBe(label)
+    expect(link.getAttribute('href')).toBe(href)
+    expect(link.classList.contains('summary-article-link')).toBe(false)
+    expect(link.querySelector('.summary-article-link-icon')).toBeNull()
   })
 
   it('scrolls a valid body target, highlights it, and cleans up after its animation', () => {
     const target = addArticleTarget()
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
 
-    expect(fireEvent.click(screen.getByRole('link', { name: 'Jump' }), { detail: 1 })).toBe(false)
+    expect(fireEvent.click(screen.getByRole('link', { name: '跳转原文' }), { detail: 1 })).toBe(false)
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
     expect(target.classList.contains('article-anchor-highlight')).toBe(true)
 
@@ -87,7 +95,7 @@ describe('SummaryMarkdown article links', () => {
   it('safely consumes a valid href whose body target is absent', () => {
     render(<SummaryMarkdown source="[Missing](#article-section-001)" />)
 
-    expect(fireEvent.click(screen.getByRole('link', { name: 'Missing' }), { detail: 1 })).toBe(false)
+    expect(fireEvent.click(screen.getByRole('link', { name: '跳转原文' }), { detail: 1 })).toBe(false)
     expect(scrollIntoView).not.toHaveBeenCalled()
   })
 
@@ -102,7 +110,7 @@ describe('SummaryMarkdown article links', () => {
   ])('keeps a strict article anchor inert for %s', (_name, eventType, init, withTarget) => {
     const target = withTarget ? addArticleTarget() : null
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
-    const link = screen.getByRole('link', { name: 'Jump' })
+    const link = screen.getByRole('link', { name: '跳转原文' })
     const activation = new MouseEvent(eventType, {
       bubbles: true,
       cancelable: true,
@@ -122,7 +130,7 @@ describe('SummaryMarkdown article links', () => {
     setReducedMotion(true)
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
 
-    fireEvent.click(screen.getByRole('link', { name: 'Jump' }), { detail: 1 })
+    fireEvent.click(screen.getByRole('link', { name: '跳转原文' }), { detail: 1 })
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'center' })
     expect(target.classList.contains('article-anchor-highlight')).toBe(true)
     act(() => vi.advanceTimersByTime(7_000))
@@ -136,7 +144,7 @@ describe('SummaryMarkdown article links', () => {
     const target = addArticleTarget()
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
 
-    fireEvent.click(screen.getByRole('link', { name: 'Jump' }), { detail: 1 })
+    fireEvent.click(screen.getByRole('link', { name: '跳转原文' }), { detail: 1 })
     act(() => vi.advanceTimersByTime(6_999))
     expect(target.classList.contains('article-anchor-highlight')).toBe(true)
     act(() => vi.advanceTimersByTime(101))
@@ -149,7 +157,7 @@ describe('SummaryMarkdown article links', () => {
     document.body.append(before)
     before.focus()
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
-    const link = screen.getByRole('link', { name: 'Jump' })
+    const link = screen.getByRole('link', { name: '跳转原文' })
 
     fireEvent.click(link, { detail: 1 })
     expect(document.activeElement).toBe(before)
@@ -164,7 +172,7 @@ describe('SummaryMarkdown article links', () => {
     vi.useFakeTimers()
     const target = addArticleTarget()
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
-    const link = screen.getByRole('link', { name: 'Jump' })
+    const link = screen.getByRole('link', { name: '跳转原文' })
 
     fireEvent.click(link, { detail: 1 })
     act(() => vi.advanceTimersByTime(500))
