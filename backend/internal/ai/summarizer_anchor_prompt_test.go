@@ -41,6 +41,33 @@ func TestBuildDetailedArticlePromptInputLeavesImageOnlyContentUnchanged(t *testi
 	}
 }
 
+func TestSummarizeDetailedPromptLeavesEmptyAndImageOnlyContentUnannotated(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{name: "empty", content: ""},
+		{name: "image only", content: "![cover](https://example.com/cover.jpg)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, cap := newCaptureServer(t, "brief", "detailed")
+			s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
+
+			result, err := s.Summarize(context.Background(), "Title", tc.content)
+			if err != nil {
+				t.Fatalf("Summarize: %v", err)
+			}
+			if result.Brief != "brief" || result.Detailed != "detailed" {
+				t.Fatalf("summary = %#v, want normal brief and detailed responses", result)
+			}
+			if len(cap.bodies) != 2 {
+				t.Fatalf("captured %d requests, want 2", len(cap.bodies))
+			}
+			assertTextPromptWithoutArticleAnchors(t, requestUserText(t, cap.bodies[1]), "default detailed "+tc.name)
+		})
+	}
+}
+
 func TestDetailedPromptsUseAnchorsButBriefPromptsDoNot(t *testing.T) {
 	srv, cap := newCaptureServer(t, "brief", "detailed", "brief template", "detailed template")
 	s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
