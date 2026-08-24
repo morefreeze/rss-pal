@@ -152,3 +152,17 @@ func TestAnnotateArticleForSummaryKeepsImageOnlyMiddleQuoteInBlock(t *testing.T)
 		t.Errorf("annotateArticleForSummary() = %q, want one anchor for continuous quote", got)
 	}
 }
+
+func TestAnnotateArticleForSummaryAnchorsParagraphWithImageContinuation(t *testing.T) {
+	in := "![cover](https://example.com/cover.png)\n说明文字\n"
+	want := "[正文锚点: article-section-001]\n" + in
+	if got := annotateArticleForSummary(in); got != want {
+		t.Errorf("annotateArticleForSummary() = %q, want image-led paragraph anchor", got)
+	}
+}
+
+func TestHasAddressableArticleBlockForImageContinuation(t *testing.T) {
+	if !hasAddressableArticleBlock("![cover](https://example.com/cover.png)\n说明文字\n") {
+		t.Fatal("hasAddressableArticleBlock() = false, want true for meaningful continuation")
+	}
+}

@@ -30,7 +30,7 @@ const (
 	articleBlockList
 )
 
-// articleAnchorID returns the stable, zero-based ID used by summary prompts.
+// articleAnchorID returns the stable, one-based ID used by summary prompts.
 func articleAnchorID(index int) string {
 	return fmt.Sprintf("%s%03d", articleAnchorPrefix, index)
 }
@@ -65,7 +65,7 @@ func annotateArticle(content string) (string, int) {
 	var active articleBlockKind
 	var fence byte
 	fenceLen := 0
-	for _, line := range lines {
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line.text)
 		if fence != 0 {
 			out.WriteString(line.text)
@@ -95,6 +95,9 @@ func annotateArticle(content string) (string, int) {
 
 		kind, start := articleAnchorLineKind(line.text, active)
 		imageOnly := articleAnchorIsImageOnly(line.text, kind)
+		if imageOnly && kind == articleBlockParagraph && active != articleBlockParagraph && articleAnchorParagraphHasMeaningfulContinuation(lines, i) {
+			imageOnly = false
+		}
 		if start && !imageOnly {
 			out.WriteString(fmt.Sprintf("[正文锚点: %s]%s", articleAnchorID(nextID), newline))
 			nextID++
@@ -110,6 +113,26 @@ func annotateArticle(content string) (string, int) {
 	}
 
 	return out.String(), count
+}
+
+func articleAnchorParagraphHasMeaningfulContinuation(lines []articleAnchorLine, start int) bool {
+	for i := start + 1; i < len(lines); i++ {
+		line := lines[i]
+		if strings.TrimSpace(line.text) == "" || articleAnchorIsThematicBreak(line.text) {
+			return false
+		}
+		if _, _, ok := articleAnchorFenceStart(line.text); ok {
+			return false
+		}
+		kind, _ := articleAnchorLineKind(line.text, articleBlockParagraph)
+		if kind != articleBlockParagraph {
+			return false
+		}
+		if !articleAnchorIsImageOnly(line.text, articleBlockParagraph) {
+			return true
+		}
+	}
+	return false
 }
 
 func splitArticleAnchorLines(content string) []articleAnchorLine {
