@@ -784,6 +784,26 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .summary-markdown li { margin: 2px 0; }
 .summary-markdown li > p { margin: 0; }
 
+.article-anchor-highlight {
+  background-color: var(--accent-soft, rgba(0, 102, 204, 0.18));
+  outline: 2px solid var(--accent-soft, rgba(0, 102, 204, 0.28));
+  outline-offset: 3px;
+  animation: article-anchor-highlight 1.2s ease-out;
+}
+@keyframes article-anchor-highlight {
+  0%, 35% {
+    background-color: var(--accent-soft, rgba(0, 102, 204, 0.18));
+    outline-color: var(--accent-soft, rgba(0, 102, 204, 0.28));
+  }
+  100% {
+    background-color: transparent;
+    outline-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .article-anchor-highlight { animation: none; }
+}
+
 /* === Toast === */
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(-12px); }
