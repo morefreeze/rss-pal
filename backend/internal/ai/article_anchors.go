@@ -11,12 +11,12 @@ const articleAnchorPrefix = "article-section-"
 // detailedArticleAnchorInstruction is appended only to detailed-summary
 // prompts when the supplied article includes addressable content blocks.
 const (
-	detailedArticleAnchorMinLinks = 3
-	detailedArticleAnchorMaxLinks = 30
-	detailedArticleAnchorLinkExample = "示例：[查看原文](#article-section-003)"
+	detailedArticleAnchorMinLinks    = 3
+	detailedArticleAnchorMaxLinks    = 30
+	detailedArticleAnchorLinkExample = "示例：[跳转原文](#article-section-003)"
 )
 
-var detailedArticleAnchorInstruction = fmt.Sprintf(`请按原文顺序总结，并按语义分组（按大意合并相邻内容）。若文章不是短文，且包含多个清晰的章节或主题组、至少 %d 个可用且不重复的正文锚点，并且每个语义组都能对应不同的正文锚点，则必须添加至少 %d 个、至多 %d 个 [查看原文](#article-section-NNN) 链接；对于满足上述非短文条件的文章，即使只有两个高层主题，只要正文有至少 %d 个可用锚点也必须添加链接；每个总结组或段落至多一个。NNN 只能使用正文中提供的锚点（来自正文中已有的锚点），并按原文顺序分布链接。如果正文可用锚点少于 %d 个，输出 0 个链接；不得重复使用同一个锚点来凑够最少数量。不要为了凑够最少数量而给每个正文段落添加链接，不要每段都添加跳转。短文即使包含多个主题也可以输出 0 个链接；短文或单一连续主题的文章可以不添加链接；短文或整篇只讲一件事时可以完全不添加；只有正文可用锚点少于 %d 个、文章是短文，或文章是单一连续主题时，才允许输出 0 个链接；除上述例外，不得只添加 1 或 2 个链接。%s。`, detailedArticleAnchorMinLinks, detailedArticleAnchorMinLinks, detailedArticleAnchorMaxLinks, detailedArticleAnchorMinLinks, detailedArticleAnchorMinLinks, detailedArticleAnchorMinLinks, detailedArticleAnchorLinkExample)
+var detailedArticleAnchorInstruction = fmt.Sprintf(`请按原文顺序总结，并按语义分组（按大意合并相邻内容）。若文章不是短文，且包含多个清晰的章节或主题组、至少 %d 个可用且不重复的正文锚点，并且每个语义组都能对应不同的正文锚点，则必须添加至少 %d 个、至多 %d 个 [跳转原文](#article-section-NNN) 链接；对于满足上述非短文条件的文章，即使只有两个高层主题，只要正文有至少 %d 个可用锚点也必须添加链接；每个总结组或段落至多一个。NNN 只能使用正文中提供的锚点（来自正文中已有的锚点），并按原文顺序分布链接。如果正文可用锚点少于 %d 个，输出 0 个链接；不得重复使用同一个锚点来凑够最少数量。不要为了凑够最少数量而给每个正文段落添加链接，不要每段都添加跳转。短文即使包含多个主题也可以输出 0 个链接；短文或单一连续主题的文章可以不添加链接；短文或整篇只讲一件事时可以完全不添加；只有正文可用锚点少于 %d 个、文章是短文，或文章是单一连续主题时，才允许输出 0 个链接；除上述例外，不得只添加 1 或 2 个链接。%s。`, detailedArticleAnchorMinLinks, detailedArticleAnchorMinLinks, detailedArticleAnchorMaxLinks, detailedArticleAnchorMinLinks, detailedArticleAnchorMinLinks, detailedArticleAnchorMinLinks, detailedArticleAnchorLinkExample)
 
 var (
 	articleATXHeadingRE            = regexp.MustCompile(`^ {0,3}#{1,6}(?:[[:space:]]|$)`)
