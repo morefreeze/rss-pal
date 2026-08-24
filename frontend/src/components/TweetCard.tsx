@@ -76,8 +76,8 @@ export default function TweetCard({ article, compact = false }: Props) {
   const storedContent = articleContent(article)
   const content = useMemo(() => normalizeArticleAnchorSource(storedContent), [storedContent])
   const { handle, displayName, date, body } = useMemo(() => parseByline(content), [content])
-  const anchors = useMemo(() => findArticleAnchors(content), [content])
-  const bylineAnchor = handle
+  const anchors = useMemo(() => compact ? [] : findArticleAnchors(content), [compact, content])
+  const bylineAnchor = !compact && handle
     ? anchors.find(({ kind, line }) => kind === 'blockquote' && line === 1)
     : undefined
   const articleAnchorRemarkPlugin = useMemo(
@@ -85,8 +85,8 @@ export default function TweetCard({ article, compact = false }: Props) {
     [anchors],
   )
   const remarkPlugins = useMemo(
-    () => [remarkGfm, articleAnchorRemarkPlugin],
-    [articleAnchorRemarkPlugin],
+    () => compact ? [remarkGfm] : [remarkGfm, articleAnchorRemarkPlugin],
+    [articleAnchorRemarkPlugin, compact],
   )
   const avatar = initialAvatar(handle, displayName)
 

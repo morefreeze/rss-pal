@@ -123,6 +123,24 @@ export function normalizeVideoPlaceholders(source: string): string {
     .join('\n')
 }
 
+function prepareArticleMarkdown(source: string): string {
+  return annotateArticleMarkdown(normalizeVideoPlaceholders(
+    normalizeArticleAnchorSource(escapeAmbiguousMathDollars(stripMathShadow(source))),
+  ))
+}
+
+export function findStandaloneVideoAnchorID(source: string, video: VideoIdentity): string | undefined {
+  const cleaned = prepareArticleMarkdown(source)
+  const placeholderLine = cleaned.split(/\r?\n/).findIndex((line) => {
+    const parsed = parsePlaceholder(line.trim())
+    return parsed?.platform === video.platform && parsed.id === video.id
+  })
+  if (placeholderLine < 0) return undefined
+  return findArticleAnchors(cleaned).find(({ kind, line }) => (
+    kind === 'paragraph' && line === placeholderLine + 1
+  ))?.id
+}
+
 // Returns the plain-text content of paragraph children when it consists
 // of a single text run, otherwise null. Used to detect placeholder
 // paragraphs without false-positives on rich content.
@@ -238,7 +256,7 @@ const COMPONENTS: Components = {
           v.platform === suppressedVideo.platform &&
           v.id === suppressedVideo.id
         ) {
-          return <div {...rest} hidden aria-hidden="true" />
+          return null
         }
         return <div {...rest}><VideoEmbed {...v} /></div>
       }
@@ -259,9 +277,7 @@ const COMPONENTS: Components = {
 // markdown re-parse and image remount.
 function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
   const cleaned = useMemo(
-    () => annotateArticleMarkdown(normalizeVideoPlaceholders(
-      normalizeArticleAnchorSource(escapeAmbiguousMathDollars(stripMathShadow(source))),
-    )),
+    () => prepareArticleMarkdown(source),
     [source],
   )
   const articleAnchors = useMemo(() => findArticleAnchors(cleaned), [cleaned])

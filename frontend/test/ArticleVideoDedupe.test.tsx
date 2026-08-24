@@ -1,10 +1,11 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { Article } from '../src/api/client'
 
 import ArticlePlayerCard from '../src/components/ArticlePlayerCard'
-import MarkdownArticle from '../src/components/MarkdownArticle'
+import MarkdownArticle, { findStandaloneVideoAnchorID } from '../src/components/MarkdownArticle'
+import SummaryMarkdown from '../src/components/SummaryMarkdown'
 import { parseStoredEmbedURL } from '../src/components/parseVideoPlaceholder'
 
 function videoArticle(overrides: Partial<Article>): Article {
@@ -22,14 +23,18 @@ function videoArticle(overrides: Partial<Article>): Article {
   }
 }
 
-function renderArticleVideo(article: Article) {
+function renderArticleVideo(article: Article, summarySource = '') {
   const primaryVideo = parseStoredEmbedURL(
     article.media_url ?? '',
     article.media_type ?? '',
   )
-  render(
+  const articleAnchorID = primaryVideo
+    ? findStandaloneVideoAnchorID(article.content, primaryVideo)
+    : undefined
+  return render(
     <>
-      <ArticlePlayerCard article={article} />
+      <ArticlePlayerCard article={article} articleAnchorID={articleAnchorID} />
+      {summarySource && <SummaryMarkdown source={summarySource} />}
       <MarkdownArticle
         source={article.content}
         suppressVideo={primaryVideo ?? undefined}
@@ -39,6 +44,36 @@ function renderArticleVideo(article: Article) {
 }
 
 describe('article video render deduplication', () => {
+  it('finds the canonical ID for the matching standalone placeholder', () => {
+    expect(findStandaloneVideoAnchorID(
+      'Before\n\n[[video:youtube:dQw4w9WgXcQ]]\n\nAfter',
+      { platform: 'youtube', id: 'dQw4w9WgXcQ' },
+    )).toBe('article-section-002')
+  })
+
+  it('moves the suppressed placeholder target onto the visible primary player', () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: () => {},
+    })
+    const { container } = renderArticleVideo(videoArticle({
+      media_type: 'video/youtube',
+      media_url: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+      content: 'Before\n\n[[video:youtube:dQw4w9WgXcQ]]\n\nAfter',
+    }), '[Jump](#article-section-002)')
+
+    const target = container.querySelector('#article-section-002')
+    expect(target).toBeTruthy()
+    expect(target?.hasAttribute('hidden')).toBe(false)
+    expect(target?.classList.contains('article-section-anchor')).toBe(true)
+    expect(target?.querySelector('iframe[title="youtube video dQw4w9WgXcQ"]')).toBeTruthy()
+    expect(container.querySelectorAll('#article-section-002')).toHaveLength(1)
+    expect(container.querySelectorAll('iframe[title="youtube video dQw4w9WgXcQ"]')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('link', { name: 'Jump' }), { detail: 1 })
+    expect(target?.classList.contains('article-anchor-highlight')).toBe(true)
+  })
+
   it('suppresses only the matching inline YouTube player and preserves surrounding content', () => {
     renderArticleVideo(videoArticle({
       media_type: 'video/youtube',

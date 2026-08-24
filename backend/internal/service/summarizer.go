@@ -16,12 +16,7 @@ func NewSummarizerService(summarizer *ai.Summarizer) *SummarizerService {
 }
 
 func (s *SummarizerService) Summarize(ctx context.Context, article *model.Article) (brief, detailed string, err error) {
-	content := article.Content
-	if content == "" {
-		content = article.Title
-	}
-
-	result, err := s.summarizer.Summarize(ctx, article.Title, content)
+	result, err := s.summarizer.Summarize(ctx, article.Title, article.Content)
 	if err != nil {
 		return "", "", err
 	}
@@ -30,12 +25,7 @@ func (s *SummarizerService) Summarize(ctx context.Context, article *model.Articl
 }
 
 func (s *SummarizerService) SummarizeWithTemplate(ctx context.Context, article *model.Article, briefPrompt, detailedPrompt string) (brief, detailed string, err error) {
-	content := article.Content
-	if content == "" {
-		content = article.Title
-	}
-
-	result, err := s.summarizer.SummarizeWithTemplate(ctx, article.Title, content, briefPrompt, detailedPrompt)
+	result, err := s.summarizer.SummarizeWithTemplate(ctx, article.Title, article.Content, briefPrompt, detailedPrompt)
 	if err != nil {
 		return "", "", err
 	}
@@ -45,11 +35,7 @@ func (s *SummarizerService) SummarizeWithTemplate(ctx context.Context, article *
 
 func (s *SummarizerService) SummarizeStream(ctx context.Context, article *model.Article,
 	onBriefDelta, onDetailedDelta func(string)) (brief, detailed string, err error) {
-	content := article.Content
-	if content == "" {
-		content = article.Title
-	}
-	result, err := s.summarizer.SummarizeStream(ctx, article.Title, content, onBriefDelta, onDetailedDelta)
+	result, err := s.summarizer.SummarizeStream(ctx, article.Title, article.Content, onBriefDelta, onDetailedDelta)
 	if err != nil {
 		return "", "", err
 	}
@@ -59,11 +45,7 @@ func (s *SummarizerService) SummarizeStream(ctx context.Context, article *model.
 func (s *SummarizerService) SummarizeWithTemplateStream(ctx context.Context, article *model.Article,
 	briefPrompt, detailedPrompt string,
 	onBriefDelta, onDetailedDelta func(string)) (brief, detailed string, err error) {
-	content := article.Content
-	if content == "" {
-		content = article.Title
-	}
-	result, err := s.summarizer.SummarizeWithTemplateStream(ctx, article.Title, content, briefPrompt, detailedPrompt, onBriefDelta, onDetailedDelta)
+	result, err := s.summarizer.SummarizeWithTemplateStream(ctx, article.Title, article.Content, briefPrompt, detailedPrompt, onBriefDelta, onDetailedDelta)
 	if err != nil {
 		return "", "", err
 	}
@@ -84,11 +66,7 @@ func (s *SummarizerService) ExtractTopics(ctx context.Context, article *model.Ar
 // source URLs (same slice from FetchAndStore) used to instruct the model to
 // embed markdown image references in the summary.
 func (s *SummarizerService) SummarizeWithImages(ctx context.Context, article *model.Article, imagePaths, imageURLs []string) (brief, detailed string, err error) {
-	content := article.Content
-	if content == "" {
-		content = article.Title
-	}
-	result, err := s.summarizer.SummarizeWithImages(ctx, article.Title, content, imagePaths, imageURLs)
+	result, err := s.summarizer.SummarizeWithImages(ctx, article.Title, article.Content, imagePaths, imageURLs)
 	if err != nil {
 		return "", "", err
 	}
@@ -98,11 +76,7 @@ func (s *SummarizerService) SummarizeWithImages(ctx context.Context, article *mo
 // SummarizeWithImagesStream is the streaming variant.
 func (s *SummarizerService) SummarizeWithImagesStream(ctx context.Context, article *model.Article, imagePaths, imageURLs []string,
 	onBriefDelta, onDetailedDelta func(string)) (brief, detailed string, err error) {
-	content := article.Content
-	if content == "" {
-		content = article.Title
-	}
-	result, err := s.summarizer.SummarizeWithImagesStream(ctx, article.Title, content, imagePaths, imageURLs, onBriefDelta, onDetailedDelta)
+	result, err := s.summarizer.SummarizeWithImagesStream(ctx, article.Title, article.Content, imagePaths, imageURLs, onBriefDelta, onDetailedDelta)
 	if err != nil {
 		return "", "", err
 	}
