@@ -97,6 +97,26 @@ func TestDetailedPromptsUseAnchorsButBriefPromptsDoNot(t *testing.T) {
 	}
 }
 
+func TestSummarizeWithTemplateDoesNotAddAnchorsWhenDetailedTemplateOmitsContent(t *testing.T) {
+	srv, cap := newCaptureServer(t, "brief", "detailed")
+	s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
+
+	if _, err := s.SummarizeWithTemplate(
+		context.Background(), "Title", articleAnchorTestContent,
+		"BRIEF {content}", "DETAILED ONLY {title}",
+	); err != nil {
+		t.Fatalf("SummarizeWithTemplate: %v", err)
+	}
+	if len(cap.bodies) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(cap.bodies))
+	}
+	detailedPrompt := requestUserText(t, cap.bodies[1])
+	if detailedPrompt != "DETAILED ONLY Title" {
+		t.Errorf("detailed prompt = %q, want rendered content-less template unchanged", detailedPrompt)
+	}
+	assertTextPromptWithoutArticleAnchors(t, detailedPrompt, "content-less template detailed")
+}
+
 func TestGenerateDetailedAnnotatesOnlyTruncatedContent(t *testing.T) {
 	srv, cap := newCaptureServer(t, "detailed")
 	s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
