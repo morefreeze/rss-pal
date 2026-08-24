@@ -7,7 +7,7 @@ import {
   putArticleDetail,
   resetArticleDetailCache,
 } from '../src/api/articleDetailCache'
-import type { ArticleDetailResponse, ArticleListItem } from '../src/api/client'
+import type { Article, ArticleDetailResponse, ArticleListItem } from '../src/api/client'
 
 const apiMocks = vi.hoisted(() => ({
   dislikeArticle: vi.fn(async () => undefined),
@@ -33,12 +33,18 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 const markdownMocks = vi.hoisted(() => ({
+  findVideoAnchor: vi.fn(() => 'article-section-001'),
+  render: vi.fn(),
+}))
+
+const playerCardMocks = vi.hoisted(() => ({
   render: vi.fn(),
 }))
 
 vi.mock('../src/api/client', () => apiMocks)
 
 vi.mock('../src/components/MarkdownArticle', () => ({
+  findStandaloneVideoAnchorID: markdownMocks.findVideoAnchor,
   default: (props: {
     source: string
     imageDimensions?: Record<string, [number, number]>
@@ -49,7 +55,12 @@ vi.mock('../src/components/MarkdownArticle', () => ({
   },
 }))
 vi.mock('../src/components/TagBar', () => ({ default: () => null }))
-vi.mock('../src/components/ArticlePlayerCard', () => ({ default: () => null }))
+vi.mock('../src/components/ArticlePlayerCard', () => ({
+  default: (props: { article: Article; articleAnchorID?: string }) => {
+    playerCardMocks.render(props)
+    return null
+  },
+}))
 vi.mock('../src/components/ArticleActionsMenu', () => ({ default: () => null }))
 vi.mock('../src/components/ArticleProgressBar', () => ({ default: () => null }))
 vi.mock('../src/components/BatchFetchConfirmDialog', () => ({
@@ -219,6 +230,11 @@ describe('ArticlePage immediate loading', () => {
         id: 'dQw4w9WgXcQ',
       },
     })
+    expect(markdownMocks.findVideoAnchor).toHaveBeenCalledWith(
+      '[[video:youtube:dQw4w9WgXcQ?start=90]]',
+      { platform: 'youtube', id: 'dQw4w9WgXcQ' },
+    )
+    expect(playerCardMocks.render.mock.calls.at(-1)?.[0].articleAnchorID).toBe('article-section-001')
   })
 
   it('invalidates the cached detail after a partial article mutation', async () => {

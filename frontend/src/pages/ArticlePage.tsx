@@ -31,7 +31,7 @@ import {
   type DraftLink,
 } from '../utils/linkSetSelection'
 import ReadingMeta from '../components/ReadingMeta'
-import MarkdownArticle from '../components/MarkdownArticle'
+import MarkdownArticle, { findStandaloneVideoAnchorID } from '../components/MarkdownArticle'
 import SummaryMarkdown from '../components/SummaryMarkdown'
 import TweetCard from '../components/TweetCard'
 import ReadingLayout from '../components/ReadingLayout'
@@ -253,6 +253,12 @@ export default function ArticlePage() {
       return video ? { platform: video.platform, id: video.id } : undefined
     },
     [article?.media_type, article?.media_url],
+  )
+  const primaryVideoAnchorID = useMemo(
+    () => article?.content && primaryVideo
+      ? findStandaloneVideoAnchorID(article.content, primaryVideo)
+      : undefined,
+    [article?.content, primaryVideo],
   )
   const normalize = useCallback(
     (href: string) => normalizeHTTPURL(href, articleURL),
@@ -1257,7 +1263,7 @@ export default function ArticlePage() {
 
         <TagBar articleId={article.id} />
 
-        <ArticlePlayerCard article={article} />
+        <ArticlePlayerCard article={article} articleAnchorID={primaryVideoAnchorID} />
 
         <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
           <button

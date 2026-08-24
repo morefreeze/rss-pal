@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import type { Article } from '../src/api/client'
+import type { Article, ArticleListItem } from '../src/api/client'
 import TweetCard from '../src/components/TweetCard'
 
 const article: Article = {
@@ -18,6 +18,20 @@ const article: Article = {
   kind: 'tweet',
 }
 
+function compactArticle(id: number): ArticleListItem {
+  return {
+    id,
+    feed_id: 1,
+    title: `Tweet ${id}`,
+    url: `https://x.com/alice/status/${id}`,
+    published_at: '2026-08-24T00:00:00Z',
+    summary_brief: 'Compact summary',
+    fetched_at: '2026-08-24T00:00:00Z',
+    manual_tags: [],
+    kind: 'tweet',
+  }
+}
+
 describe('TweetCard article anchors', () => {
   it('keeps backend numbering after extracting the visible byline', () => {
     const { container } = render(<TweetCard article={article} />)
@@ -32,5 +46,17 @@ describe('TweetCard article anchors', () => {
     expect(container.querySelectorAll('#article-section-001')).toHaveLength(1)
     expect(container.querySelectorAll('#article-section-002')).toHaveLength(1)
     expect(container.querySelectorAll('#article-section-003')).toHaveLength(1)
+  })
+
+  it('does not install article anchors in repeated compact cards', () => {
+    const { container } = render(
+      <>
+        <TweetCard article={compactArticle(1)} compact />
+        <TweetCard article={compactArticle(2)} compact />
+      </>,
+    )
+
+    expect(screen.getAllByText('Compact summary')).toHaveLength(2)
+    expect(container.querySelectorAll('[id^="article-section-"]')).toHaveLength(0)
   })
 })

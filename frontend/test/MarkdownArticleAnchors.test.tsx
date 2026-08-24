@@ -79,7 +79,7 @@ describe('MarkdownArticle article anchors', () => {
     expect(container.querySelectorAll('iframe[title="youtube video dQw4w9WgXcQ"]')).toHaveLength(1)
   })
 
-  it('keeps a non-visible canonical target when the standalone video is suppressed', () => {
+  it('does not leave a duplicate body target when the standalone video is suppressed', () => {
     const source = 'Before\n\n[[video:youtube:dQw4w9WgXcQ]]\n\nAfter'
     const { container } = render(
       <MarkdownArticle
@@ -88,9 +88,7 @@ describe('MarkdownArticle article anchors', () => {
       />,
     )
 
-    const target = container.querySelector('#article-section-002')
-    expect(target).toBeTruthy()
-    expect(target?.hasAttribute('hidden')).toBe(true)
+    expect(container.querySelector('#article-section-002')).toBeNull()
     expect(container.querySelectorAll('iframe[title="youtube video dQw4w9WgXcQ"]')).toHaveLength(0)
     expect(container.querySelector('p#article-section-003')?.textContent).toBe('After')
   })

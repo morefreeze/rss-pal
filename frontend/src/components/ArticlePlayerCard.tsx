@@ -11,14 +11,26 @@ function fmtMinSec(sec: number): string {
   return `${m}分${s.toString().padStart(2, '0')}秒`
 }
 
-export default function ArticlePlayerCard({ article }: { article: Article }) {
+interface Props {
+  article: Article
+  articleAnchorID?: string
+}
+
+export default function ArticlePlayerCard({ article, articleAnchorID }: Props) {
   if (!article.media_url) return null
 
   // Branch on media_type: video → embedded iframe; otherwise → audio player.
   if (article.media_type && article.media_type.startsWith('video/')) {
     const v = parseStoredEmbedURL(article.media_url, article.media_type)
     if (!v) return null
-    return <VideoEmbed {...v} />
+    return (
+      <div
+        id={articleAnchorID}
+        className={articleAnchorID ? 'article-section-anchor' : undefined}
+      >
+        <VideoEmbed {...v} />
+      </div>
+    )
   }
 
   return <AudioCard article={article} />
