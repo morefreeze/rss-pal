@@ -60,6 +60,7 @@ function SummaryLink({ href, children, node: _node, onClick, ...rest }: SummaryL
 
     const targetID = parseArticleAnchor(href)
     if (!targetID) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
 
     event.preventDefault()
     const target = document.getElementById(targetID)

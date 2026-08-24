@@ -71,6 +71,24 @@ describe('SummaryMarkdown article links', () => {
     expect(scrollIntoView).not.toHaveBeenCalled()
   })
 
+  it.each(['ctrlKey', 'metaKey'] as const)('leaves a valid %s modified click to the browser', (modifier) => {
+    const target = addArticleTarget()
+    render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
+    const link = screen.getByRole('link', { name: 'Jump' })
+    const click = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      [modifier]: true,
+    })
+
+    expect(link.dispatchEvent(click)).toBe(true)
+    expect(click.defaultPrevented).toBe(false)
+    expect(link.getAttribute('href')).toBe('#article-section-001')
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(target.classList.contains('article-anchor-highlight')).toBe(false)
+  })
+
   it('uses instant scrolling when reduced motion is preferred', () => {
     const target = addArticleTarget()
     setReducedMotion(true)
@@ -114,6 +132,8 @@ describe('SummaryMarkdown article links', () => {
   })
 
   it('preserves the baseline rendering and default click behavior for non-article links', () => {
+    vi.useFakeTimers()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const source = [
       '[External](https://example.com)',
       '[Fragment](#other-section)',
@@ -133,5 +153,6 @@ describe('SummaryMarkdown article links', () => {
       expect(fireEvent.click(link, { detail: 1 })).toBe(true)
     }
     expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(consoleError).not.toHaveBeenCalled()
   })
 })
