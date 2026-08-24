@@ -8,6 +8,10 @@ import (
 
 const articleAnchorPrefix = "article-section-"
 
+// detailedArticleAnchorInstruction is appended only to detailed-summary
+// prompts when the supplied article includes addressable content blocks.
+const detailedArticleAnchorInstruction = `请尽量按原文顺序总结，并按大意合并相邻内容。仅在确有助于定位原文的总结段落末尾添加一个 [查看原文](#article-section-NNN) 链接，NNN 必须来自正文中已有的锚点，且每个总结组或段落至多一个。不要每段都添加跳转；短文或整篇只讲一件事时可以完全不添加。`
+
 var (
 	articleATXHeadingRE = regexp.MustCompile(`^ {0,3}#{1,6}(?:[[:space:]]|$)`)
 	articleListItemRE   = regexp.MustCompile(`^[[:space:]]*(?:[*+-]|[0-9]+[.)])[[:space:]]+`)
@@ -48,6 +52,24 @@ func annotateArticleForSummary(content string) string {
 func hasAddressableArticleBlock(content string) bool {
 	_, count := annotateArticle(content)
 	return count > 0
+}
+
+// buildDetailedArticlePromptInput prepares already-truncated content for a
+// detailed-summary prompt. It leaves content without addressable blocks alone
+// so image-only and empty articles do not advertise unusable anchors.
+func buildDetailedArticlePromptInput(content string) (annotated, instruction string) {
+	annotated, count := annotateArticle(content)
+	if count == 0 {
+		return content, ""
+	}
+	return annotated, detailedArticleAnchorInstruction
+}
+
+func appendDetailedArticleAnchorInstruction(prompt, instruction string) string {
+	if instruction == "" {
+		return prompt
+	}
+	return prompt + "\n\n" + instruction
 }
 
 func annotateArticle(content string) (string, int) {
