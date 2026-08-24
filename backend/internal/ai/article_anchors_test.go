@@ -166,3 +166,11 @@ func TestHasAddressableArticleBlockForImageContinuation(t *testing.T) {
 		t.Fatal("hasAddressableArticleBlock() = false, want true for meaningful continuation")
 	}
 }
+
+func TestAnnotateArticleForSummarySkipsIndentedCodeAndListContinuations(t *testing.T) {
+	in := "    top-level code\n\tmore top-level code\n\n- item\n\n  continuation paragraph\n\noutside\n"
+	want := "    top-level code\n\tmore top-level code\n\n[正文锚点: article-section-001]\n- item\n\n  continuation paragraph\n\n[正文锚点: article-section-002]\noutside\n"
+	if got := annotateArticleForSummary(in); got != want {
+		t.Errorf("annotateArticleForSummary() = %q, want %q", got, want)
+	}
+}

@@ -109,6 +109,15 @@ func annotateArticle(content string) (string, int) {
 		}
 
 		if trimmed == "" || articleAnchorIsThematicBreak(line.text) {
+			if active != articleBlockList || !articleAnchorListHasContinuation(lines, i) {
+				active = articleBlockNone
+			}
+			out.WriteString(line.text)
+			out.WriteString(line.ending)
+			continue
+		}
+
+		if articleAnchorIsTopLevelIndentedCode(line.text) {
 			active = articleBlockNone
 			out.WriteString(line.text)
 			out.WriteString(line.ending)
@@ -143,7 +152,7 @@ func articleAnchorParagraphHasMeaningfulContinuation(lines []articleAnchorLine, 
 		if strings.TrimSpace(line.text) == "" || articleAnchorIsThematicBreak(line.text) {
 			return false
 		}
-		if _, _, ok := articleAnchorFenceStart(line.text); ok {
+		if _, _, ok := articleAnchorFenceStart(line.text); ok || articleAnchorIsTopLevelIndentedCode(line.text) {
 			return false
 		}
 		kind, _ := articleAnchorLineKind(line.text, articleBlockParagraph)
@@ -155,6 +164,21 @@ func articleAnchorParagraphHasMeaningfulContinuation(lines []articleAnchorLine, 
 		}
 	}
 	return false
+}
+
+func articleAnchorListHasContinuation(lines []articleAnchorLine, blankLine int) bool {
+	for i := blankLine + 1; i < len(lines); i++ {
+		text := lines[i].text
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		return strings.HasPrefix(text, " ") || strings.HasPrefix(text, "\t")
+	}
+	return false
+}
+
+func articleAnchorIsTopLevelIndentedCode(line string) bool {
+	return strings.HasPrefix(line, "\t") || strings.HasPrefix(line, "    ")
 }
 
 func splitArticleAnchorLines(content string) []articleAnchorLine {

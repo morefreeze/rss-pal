@@ -13,22 +13,24 @@ const readerContext: ReaderActionContextValue = {
 }
 
 describe('MarkdownArticle article anchors', () => {
-  it('renders invisible block-local targets without changing article text or real links', () => {
-    const article = '# Heading\n\nA paragraph with an [external link](https://example.com).\n\n- First item'
+  it('assigns IDs directly to blocks without changing article text or real links', () => {
+    const article = '    const hidden = true\n\n# Heading\n\nA paragraph with an [external link](https://example.com).\n\n- First item\n\n[rss-pal-anchor](#article-section-002)'
     const { container, rerender } = render(
       <ReaderActionContext.Provider value={readerContext}>
         <MarkdownArticle source={article} />
       </ReaderActionContext.Provider>,
     )
 
-    expect(container.querySelectorAll('.article-section-anchor')).toHaveLength(3)
-    expect(container.querySelector('h1 > #article-section-001')).toBeTruthy()
-    expect(container.querySelector('p > #article-section-002')).toBeTruthy()
-    expect(container.querySelector('li > #article-section-003')).toBeTruthy()
+    expect(container.querySelectorAll('#article-section-001, #article-section-002, #article-section-003, #article-section-004')).toHaveLength(4)
+    expect(container.querySelector('h1#article-section-001')).toBeTruthy()
+    expect(container.querySelector('p#article-section-002')).toBeTruthy()
+    expect(container.querySelector('li#article-section-003')).toBeTruthy()
+    expect(container.querySelector('pre code')?.textContent).toBe('const hidden = true\n')
+    expect(container.querySelectorAll('#article-section-002')).toHaveLength(1)
     expect(screen.getByRole('heading', { name: 'Heading' }).textContent).toBe('Heading')
     expect(screen.getByText('A paragraph with an', { exact: false }).textContent).toBe('A paragraph with an external link.')
     expect(screen.getByRole('listitem').textContent).toBe('First item')
-    expect(screen.queryByText('rss-pal-anchor')).toBeNull()
+    expect(screen.getByRole('link', { name: 'rss-pal-anchor' }).getAttribute('href')).toBe('#article-section-002')
 
     const external = screen.getByRole('link', { name: 'external link' })
     expect(external.getAttribute('href')).toBe('https://example.com')
@@ -40,10 +42,11 @@ describe('MarkdownArticle article anchors', () => {
         <MarkdownArticle source={article} />
       </ReaderActionContext.Provider>,
     )
-    expect([...container.querySelectorAll('.article-section-anchor')].map((node) => node.id)).toEqual([
+    expect([...container.querySelectorAll('[id^="article-section-"]')].map((node) => node.id)).toEqual([
       'article-section-001',
       'article-section-002',
       'article-section-003',
+      'article-section-004',
     ])
   })
 })
