@@ -783,12 +783,30 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .summary-markdown ul, .summary-markdown ol { padding-left: 1.4em; margin: 4px 0; }
 .summary-markdown li { margin: 2px 0; }
 .summary-markdown li > p { margin: 0; }
+.summary-article-link {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 3px;
+  min-height: 28px;
+  padding: 3px 4px;
+}
+.summary-article-link-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 1.2em;
+  height: 1.2em;
+  margin-top: -0.3em;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 0.72em;
+  line-height: 1;
+}
 
 .article-anchor-highlight {
   background-color: var(--accent-soft, rgba(0, 102, 204, 0.18));
   outline: 2px solid var(--accent-soft, rgba(0, 102, 204, 0.28));
   outline-offset: 3px;
-  animation: article-anchor-highlight 1.2s ease-out;
+  animation: article-anchor-highlight 7s ease-out;
 }
 @keyframes article-anchor-highlight {
   0%, 35% {

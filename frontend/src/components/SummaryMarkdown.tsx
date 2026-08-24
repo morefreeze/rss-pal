@@ -9,7 +9,7 @@ type Props = {
 }
 
 const REMARK_PLUGINS = [remarkGfm]
-const ARTICLE_HIGHLIGHT_TIMEOUT_MS = 1_300
+const ARTICLE_HIGHLIGHT_TIMEOUT_MS = 7_100
 
 const activeHighlights = new WeakMap<HTMLElement, () => void>()
 
@@ -82,7 +82,14 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
     if (!event.defaultPrevented && targetID) event.preventDefault()
   }
 
-  return <a href={href} onClick={handleClick} onAuxClick={handleAuxClick} {...rest}>{children}</a>
+  const className = [rest.className, targetID ? 'summary-article-link' : ''].filter(Boolean).join(' ') || undefined
+
+  return (
+    <a href={href} onClick={handleClick} onAuxClick={handleAuxClick} {...rest} className={className}>
+      {children}
+      {targetID && <span className="summary-article-link-icon" aria-hidden="true">⌖</span>}
+    </a>
+  )
 }
 
 const COMPONENTS: Components = { a: SummaryLink }
