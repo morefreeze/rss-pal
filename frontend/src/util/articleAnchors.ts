@@ -156,28 +156,35 @@ export function annotateArticleMarkdown(source: string): string {
 
 type MarkdownNode = {
   type?: string
-  position?: { start?: { line?: number } }
+  position?: { start?: { line?: number }, end?: { line?: number } }
   children?: MarkdownNode[]
   data?: { hProperties?: Record<string, unknown> }
 }
 
 export function createArticleAnchorRemarkPlugin(anchors: ArticleAnchor[]) {
-  const records = new Map(anchors.map((anchor) => [`${anchor.kind}:${anchor.line}`, anchor]))
   return () => (tree: MarkdownNode) => {
-    const visit = (node: MarkdownNode) => {
-      const kind = node.type === 'listItem'
-        ? 'list'
-        : node.type === 'paragraph' || node.type === 'heading' || node.type === 'blockquote'
-          ? node.type
-          : undefined
-      const line = node.position?.start?.line
-      const anchor = kind && line && records.get(`${kind}:${line}`)
-      if (anchor) {
-        node.data ??= {}
-        node.data.hProperties = { ...node.data.hProperties, id: anchor.id, className: 'article-section-anchor' }
-      }
-      node.children?.forEach(visit)
+    const candidates: MarkdownNode[] = []
+    const collect = (node: MarkdownNode) => {
+      if (node.type === 'heading' || node.type === 'paragraph' || node.type === 'blockquote' || node.type === 'listItem' || node.type === 'table') candidates.push(node)
+      node.children?.forEach(collect)
     }
-    visit(tree)
+    collect(tree)
+
+    const used = new Set<MarkdownNode>()
+    for (const anchor of anchors) {
+      const node = candidates.find((candidate) => {
+        if (used.has(candidate)) return false
+        const start = candidate.position?.start?.line
+        const end = candidate.position?.end?.line ?? start
+        if (!start || !end || anchor.line < start || anchor.line > end) return false
+        if (anchor.kind === 'blockquote') return candidate.type === 'blockquote'
+        if (anchor.kind === 'list') return candidate.type === 'listItem' && start === anchor.line
+        return start === anchor.line && (candidate.type === 'heading' || candidate.type === 'table' || candidate.type === 'paragraph')
+      })
+      if (!node) continue
+      used.add(node)
+      node.data ??= {}
+      node.data.hProperties = { ...node.data.hProperties, id: anchor.id, className: 'article-section-anchor' }
+    }
   }
 }

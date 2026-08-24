@@ -13,6 +13,16 @@ const readerContext: ReaderActionContextValue = {
 }
 
 describe('MarkdownArticle article anchors', () => {
+  it.each([
+    ['image-first blockquote', '> ![](https://example.com/image.png)\n> meaningful quote', 'blockquote', 'article-section-001'],
+    ['GFM table', '| Name | Value |\n| --- | --- |\n| A | B |', 'table', 'article-section-001'],
+    ['setext heading', 'Setext title\n============', 'h1', 'article-section-001'],
+  ])('assigns %s anchors to the parsed block container', (_name, source, selector, id) => {
+    const { container } = render(<MarkdownArticle source={source} />)
+    expect(container.querySelector(`${selector}#${id}`)).toBeTruthy()
+    expect(container.querySelectorAll(`#${id}`)).toHaveLength(1)
+  })
+
   it('assigns IDs directly to blocks without changing article text or real links', () => {
     const article = '    const hidden = true\n\n# Heading\n\nA paragraph with an [external link](https://example.com).\n\n- First item\n\n[rss-pal-anchor](#article-section-002)'
     const { container, rerender } = render(
