@@ -312,6 +312,7 @@ func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to stream brief: %w", err)
 	}
+	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
 
 	detailedPrompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论：
 
@@ -320,7 +321,8 @@ func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 内容：
 %s
 
-请用中文输出详细总结。`, title, content)
+请用中文输出详细总结。`, title, detailedContent)
+	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
 
 	detailed, err := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
 	if err != nil {
@@ -335,14 +337,18 @@ func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, con
 	briefPromptTpl, detailedPromptTpl string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
 	content = truncateContent(content)
-	r := strings.NewReplacer("{title}", title, "{content}", content)
+	briefReplacer := strings.NewReplacer("{title}", title, "{content}", content)
 
-	brief, err := s.callStream(ctx, r.Replace(briefPromptTpl), briefMaxTokens, onBriefDelta)
+	brief, err := s.callStream(ctx, briefReplacer.Replace(briefPromptTpl), briefMaxTokens, onBriefDelta)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stream brief with template: %w", err)
 	}
+	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
+	detailedReplacer := strings.NewReplacer("{title}", title, "{content}", detailedContent)
+	detailedPrompt := detailedReplacer.Replace(detailedPromptTpl)
+	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
 
-	detailed, err := s.callStream(ctx, r.Replace(detailedPromptTpl), detailedMaxTokens, onDetailedDelta)
+	detailed, err := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stream detailed with template: %w", err)
 	}
@@ -366,6 +372,7 @@ func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (
 
 func (s *Summarizer) generateDetailed(ctx context.Context, title, content string) (string, error) {
 	content = truncateContent(content)
+	content, anchorInstruction := buildDetailedArticlePromptInput(content)
 	prompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论：
 
 标题：%s
@@ -374,6 +381,7 @@ func (s *Summarizer) generateDetailed(ctx context.Context, title, content string
 %s
 
 请用中文输出详细总结。`, title, content)
+	prompt = appendDetailedArticleAnchorInstruction(prompt, anchorInstruction)
 
 	return s.call(ctx, prompt, detailedMaxTokens)
 }
@@ -408,15 +416,18 @@ func (s *Summarizer) ExtractTopics(ctx context.Context, title, content string) (
 // Templates may contain {title} and {content} placeholders which are replaced before calling the AI.
 func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, briefPromptTpl, detailedPromptTpl string) (*SummaryResult, error) {
 	content = truncateContent(content)
-	r := strings.NewReplacer("{title}", title, "{content}", content)
+	briefReplacer := strings.NewReplacer("{title}", title, "{content}", content)
 
-	briefPrompt := r.Replace(briefPromptTpl)
+	briefPrompt := briefReplacer.Replace(briefPromptTpl)
 	brief, err := s.call(ctx, briefPrompt, briefMaxTokens)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate brief with template: %w", err)
 	}
 
-	detailedPrompt := r.Replace(detailedPromptTpl)
+	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
+	detailedReplacer := strings.NewReplacer("{title}", title, "{content}", detailedContent)
+	detailedPrompt := detailedReplacer.Replace(detailedPromptTpl)
+	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
 	detailed, err := s.call(ctx, detailedPrompt, detailedMaxTokens)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate detailed summary with template: %w", err)
@@ -577,7 +588,9 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 		return s.Summarize(ctx, title, content)
 	}
 
-	detailedPrompt := buildVisionDetailedPrompt(title, content, urlList)
+	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
+	detailedPrompt := buildVisionDetailedPrompt(title, detailedContent, urlList)
+	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
 	detailed, err := s.callVision(ctx, detailedPrompt, imagePaths, detailedMaxTokens)
 	if err != nil {
 		// Brief already succeeded; fall back only the detailed half.
@@ -748,7 +761,9 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
 	}
 
-	detailedPrompt := buildVisionDetailedPrompt(title, content, urlList)
+	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
+	detailedPrompt := buildVisionDetailedPrompt(title, detailedContent, urlList)
+	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
 	detailed, err := s.callVisionStream(ctx, detailedPrompt, imagePaths, detailedMaxTokens, onDetailedDelta)
 	if err != nil {
 		log.Printf("vision stream detailed failed, falling back to text stream detailed: %v", err)

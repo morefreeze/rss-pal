@@ -3,11 +3,29 @@ package ai
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+type streamCaptured struct {
+	bodies [][]byte
+}
+
+func newStreamCaptureServer(t *testing.T) (*httptest.Server, *streamCaptured) {
+	t.Helper()
+	cap := &streamCaptured{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		cap.bodies = append(cap.bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	return srv, cap
+}
 
 func TestCallStream_AccumulatesDeltasAndReturnsFullText(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,5 +110,35 @@ func TestCallStream_ReturnsErrorOnNon200(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "500") {
 		t.Errorf("error %q does not mention status 500", err.Error())
+	}
+}
+
+func TestStreamDetailedPromptsUseAnchorsButBriefPromptsDoNot(t *testing.T) {
+	srv, cap := newStreamCaptureServer(t)
+	s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
+
+	if _, err := s.SummarizeStream(context.Background(), "Title", articleAnchorTestContent, func(string) {}, func(string) {}); err != nil {
+		t.Fatalf("SummarizeStream: %v", err)
+	}
+	if _, err := s.SummarizeWithTemplateStream(
+		context.Background(), "Title", articleAnchorTestContent,
+		"STREAM BRIEF TEMPLATE\n{title}\n{content}",
+		"STREAM DETAILED TEMPLATE\n{title}\n{content}",
+		func(string) {}, func(string) {},
+	); err != nil {
+		t.Fatalf("SummarizeWithTemplateStream: %v", err)
+	}
+	if len(cap.bodies) != 4 {
+		t.Fatalf("captured %d requests, want 4", len(cap.bodies))
+	}
+
+	assertTextPromptWithoutArticleAnchors(t, requestUserText(t, cap.bodies[0]), "stream brief")
+	assertTextPromptWithArticleAnchors(t, requestUserText(t, cap.bodies[1]), "stream detailed")
+	assertTextPromptWithoutArticleAnchors(t, requestUserText(t, cap.bodies[2]), "stream template brief")
+	detailedTemplate := requestUserText(t, cap.bodies[3])
+	assertTextPromptWithArticleAnchors(t, detailedTemplate, "stream template detailed")
+	if !strings.Contains(detailedTemplate, "STREAM DETAILED TEMPLATE") ||
+		!strings.HasSuffix(detailedTemplate, detailedArticleAnchorInstruction) {
+		t.Errorf("custom stream detailed template should precede system-owned instruction:\n%s", detailedTemplate)
 	}
 }

@@ -212,6 +212,77 @@ func TestSummarizeWithImages_promptEmbedsImageURLs(t *testing.T) {
 	}
 }
 
+func TestVisionDetailedPromptUsesAnchorsButBriefPromptDoesNot(t *testing.T) {
+	srv, cap := newCaptureServer(t, "brief", "detailed")
+	s := NewSummarizerWithModel("test-key", srv.URL, "text-model")
+	s.SetVisionModel("vision-model")
+
+	imgPath := filepath.Join(t.TempDir(), "0.jpg")
+	writeTestJPEG(t, imgPath)
+	if _, err := s.SummarizeWithImages(context.Background(), "Title", articleAnchorTestContent, []string{imgPath}, nil); err != nil {
+		t.Fatalf("SummarizeWithImages: %v", err)
+	}
+	if len(cap.bodies) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(cap.bodies))
+	}
+	assertTextPromptWithoutArticleAnchors(t, visionRequestUserText(t, cap.bodies[0]), "vision brief")
+	assertTextPromptWithArticleAnchors(t, visionRequestUserText(t, cap.bodies[1]), "vision detailed")
+}
+
+func TestVisionStreamDetailedPromptUsesAnchorsButBriefPromptDoesNot(t *testing.T) {
+	srv, cap := newStreamCaptureServer(t)
+	s := NewSummarizerWithModel("test-key", srv.URL, "text-model")
+	s.SetVisionModel("vision-model")
+
+	imgPath := filepath.Join(t.TempDir(), "0.jpg")
+	writeTestJPEG(t, imgPath)
+	if _, err := s.SummarizeWithImagesStream(
+		context.Background(), "Title", articleAnchorTestContent, []string{imgPath}, nil,
+		func(string) {}, func(string) {},
+	); err != nil {
+		t.Fatalf("SummarizeWithImagesStream: %v", err)
+	}
+	if len(cap.bodies) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(cap.bodies))
+	}
+	assertTextPromptWithoutArticleAnchors(t, visionRequestUserText(t, cap.bodies[0]), "vision stream brief")
+	assertTextPromptWithArticleAnchors(t, visionRequestUserText(t, cap.bodies[1]), "vision stream detailed")
+}
+
+func visionRequestUserText(t *testing.T, body []byte) string {
+	t.Helper()
+	var request struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &request); err != nil {
+		t.Fatalf("unmarshal vision request: %v", err)
+	}
+	for _, message := range request.Messages {
+		if message.Role != "user" {
+			continue
+		}
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(message.Content, &blocks); err != nil {
+			t.Fatalf("unmarshal user content blocks: %v", err)
+		}
+		var text string
+		for _, block := range blocks {
+			if block.Type == "text" {
+				text += block.Text
+			}
+		}
+		return text
+	}
+	t.Fatal("request has no user message")
+	return ""
+}
+
 func containsAll(s string, needles ...string) bool {
 	for _, n := range needles {
 		if !contains(s, n) {
