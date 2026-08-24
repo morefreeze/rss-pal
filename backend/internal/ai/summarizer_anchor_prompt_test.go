@@ -19,7 +19,7 @@ func TestBuildDetailedArticlePromptInputAnnotatesAddressableContentAndExplainsLi
 	for _, want := range []string{
 		"原文顺序",
 		"按大意合并相邻内容",
-		"[查看原文](#article-section-NNN)",
+		"[跳转原文](#article-section-NNN)",
 		"来自正文中已有的锚点",
 		"至多一个",
 		"不要每段都添加跳转",
@@ -39,7 +39,7 @@ func TestDetailedArticleAnchorInstructionRequiresBoundedLinks(t *testing.T) {
 		"若文章不是短文，且包含多个清晰的章节或主题组",
 		"满足上述非短文条件的文章，即使只有两个高层主题",
 		fmt.Sprintf("必须添加至少 %d 个、至多 %d 个", detailedArticleAnchorMinLinks, detailedArticleAnchorMaxLinks),
-		"[查看原文](#article-section-NNN)",
+		"[跳转原文](#article-section-NNN)",
 		detailedArticleAnchorLinkExample,
 		"多个清晰的章节或主题组",
 		"至少 3 个可用且不重复的正文锚点",
@@ -50,6 +50,9 @@ func TestDetailedArticleAnchorInstructionRequiresBoundedLinks(t *testing.T) {
 		if !strings.Contains(detailedArticleAnchorInstruction, want) {
 			t.Errorf("instruction missing %q:\n%s", want, detailedArticleAnchorInstruction)
 		}
+	}
+	if strings.Contains(detailedArticleAnchorInstruction, "[查看原文](") {
+		t.Fatalf("instruction contains stale article-link label:\n%s", detailedArticleAnchorInstruction)
 	}
 }
 
