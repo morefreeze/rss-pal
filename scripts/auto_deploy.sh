@@ -30,6 +30,24 @@ configure_outbound_proxy() {
   fi
 }
 
+wait_for_outbound_proxy() {
+  local proxy="${DEPLOY_PROXY:-http://172.18.0.1:3128}"
+  local attempt
+
+  for attempt in 1 2 3 4 5; do
+    if curl -fsS --connect-timeout 2 --max-time 5 -x "$proxy" https://api.github.com/rate_limit >/dev/null 2>&1; then
+      log "Outbound proxy is ready: $proxy"
+      return 0
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      sleep 1
+    fi
+  done
+
+  log "ERROR: Outbound proxy did not become ready: $proxy"
+  return 1
+}
+
 configure_outbound_proxy
 
 legacy_compose_supported() {
@@ -67,6 +85,9 @@ log "=== Auto deploy started (compose=$COMPOSE) ==="
 if systemctl cat rss-pal-oci-egress.service >/dev/null 2>&1; then
   if sudo -n systemctl restart rss-pal-oci-egress.service 2>/dev/null; then
     log "Restarted rss-pal-oci-egress.service (fresh egress tunnel)"
+    if ! wait_for_outbound_proxy; then
+      exit 1
+    fi
   else
     log "WARN: could not restart rss-pal-oci-egress.service (passwordless sudo unavailable?)"
   fi
