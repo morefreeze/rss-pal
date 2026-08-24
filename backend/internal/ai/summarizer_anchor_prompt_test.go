@@ -30,6 +30,29 @@ func TestBuildDetailedArticlePromptInputAnnotatesAddressableContentAndExplainsLi
 	}
 }
 
+func TestDetailedArticleAnchorInstructionRequiresBoundedLinks(t *testing.T) {
+	for _, want := range []string{
+		"按原文顺序",
+		"按语义分组",
+		"多个清晰的章节或主题组",
+		"至少 3 个、至多 30 个",
+		"每个总结组或段落至多一个",
+		"只能使用正文中提供的锚点",
+		"按原文顺序分布",
+		"不要为了凑够最少数量而给每个正文段落添加链接",
+		"短文或单一连续主题的文章可以不添加链接",
+		"除上述例外，不得只添加 1 或 2 个链接",
+		"示例：[查看原文](#article-section-003)",
+	} {
+		if !strings.Contains(detailedArticleAnchorInstruction, want) {
+			t.Errorf("instruction missing %q:\n%s", want, detailedArticleAnchorInstruction)
+		}
+	}
+	if !strings.Contains(detailedArticleAnchorInstruction, "[查看原文](#article-section-NNN)") {
+		t.Errorf("instruction missing the anchor-link format:\n%s", detailedArticleAnchorInstruction)
+	}
+}
+
 func TestBuildDetailedArticlePromptInputLeavesImageOnlyContentUnchanged(t *testing.T) {
 	content := "![cover](https://example.com/cover.jpg)\n"
 	annotated, instruction := buildDetailedArticlePromptInput(content)
