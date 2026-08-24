@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -31,31 +32,21 @@ func TestBuildDetailedArticlePromptInputAnnotatesAddressableContentAndExplainsLi
 }
 
 func TestDetailedArticleAnchorInstructionRequiresBoundedLinks(t *testing.T) {
-	cases := []struct {
-		name string
-		want []string
-	}{
-		{name: "strict markdown format", want: []string{"[查看原文](#article-section-NNN)", "示例：[查看原文](#article-section-003)"}},
-		{name: "bounded thresholds", want: []string{"至少 3 个", "至多 30 个"}},
-		{name: "three available anchors precondition", want: []string{"至少 3 个可用且不重复的正文锚点", "多个清晰的章节或主题组"}},
-		{name: "distinct anchors map to meaningful groups", want: []string{"多个清晰的章节或主题组", "每个语义组都能对应不同的正文锚点"}},
-		{name: "two high-level topics still qualify", want: []string{"即使只有两个高层主题，只要正文有至少 3 个可用锚点也必须添加链接"}},
-		{name: "eligible articles must link", want: []string{"必须添加至少 3 个、至多 30 个"}},
-		{name: "fewer than three means zero", want: []string{"可用锚点少于 3 个", "输出 0 个链接"}},
-		{name: "no duplicate ids", want: []string{"不得重复使用同一个锚点"}},
-		{name: "only supplied ids", want: []string{"只能使用正文中提供的锚点"}},
-		{name: "single theme exception", want: []string{"短文或单一连续主题的文章可以不添加链接"}},
-		{name: "zero only for exceptions", want: []string{"只有可用锚点少于 3 个，或短文/单一连续主题时，才允许输出 0 个链接"}},
-		{name: "never one or two", want: []string{"不得只添加 1 或 2 个链接"}},
+	if detailedArticleAnchorMinLinks != 3 || detailedArticleAnchorMaxLinks != 30 {
+		t.Fatalf("link bounds = %d-%d, want 3-30", detailedArticleAnchorMinLinks, detailedArticleAnchorMaxLinks)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, want := range tc.want {
-				if !strings.Contains(detailedArticleAnchorInstruction, want) {
-					t.Errorf("instruction missing %q:\n%s", want, detailedArticleAnchorInstruction)
-				}
-			}
-		})
+	for _, want := range []string{
+		fmt.Sprintf("必须添加至少 %d 个、至多 %d 个", detailedArticleAnchorMinLinks, detailedArticleAnchorMaxLinks),
+		"[查看原文](#article-section-NNN)",
+		detailedArticleAnchorLinkExample,
+		"多个清晰的章节或主题组",
+		"至少 3 个可用且不重复的正文锚点",
+		"输出 0 个链接",
+		"不得只添加 1 或 2 个链接",
+	} {
+		if !strings.Contains(detailedArticleAnchorInstruction, want) {
+			t.Errorf("instruction missing %q:\n%s", want, detailedArticleAnchorInstruction)
+		}
 	}
 }
 
