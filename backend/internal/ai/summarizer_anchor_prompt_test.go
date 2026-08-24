@@ -36,12 +36,14 @@ func TestDetailedArticleAnchorInstructionRequiresBoundedLinks(t *testing.T) {
 		t.Fatalf("link bounds = %d-%d, want 3-30", detailedArticleAnchorMinLinks, detailedArticleAnchorMaxLinks)
 	}
 	for _, want := range []string{
+		"若文章不是短文，且包含多个清晰的章节或主题组",
 		fmt.Sprintf("必须添加至少 %d 个、至多 %d 个", detailedArticleAnchorMinLinks, detailedArticleAnchorMaxLinks),
 		"[查看原文](#article-section-NNN)",
 		detailedArticleAnchorLinkExample,
 		"多个清晰的章节或主题组",
 		"至少 3 个可用且不重复的正文锚点",
 		"输出 0 个链接",
+		"短文即使包含多个主题也可以输出 0 个链接",
 		"不得只添加 1 或 2 个链接",
 	} {
 		if !strings.Contains(detailedArticleAnchorInstruction, want) {
