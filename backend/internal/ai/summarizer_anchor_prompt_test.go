@@ -37,6 +37,7 @@ func TestDetailedArticleAnchorInstructionRequiresBoundedLinks(t *testing.T) {
 	}
 	for _, want := range []string{
 		"若文章不是短文，且包含多个清晰的章节或主题组",
+		"满足上述非短文条件的文章，即使只有两个高层主题",
 		fmt.Sprintf("必须添加至少 %d 个、至多 %d 个", detailedArticleAnchorMinLinks, detailedArticleAnchorMaxLinks),
 		"[查看原文](#article-section-NNN)",
 		detailedArticleAnchorLinkExample,
