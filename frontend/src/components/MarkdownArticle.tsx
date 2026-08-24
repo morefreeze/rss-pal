@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components, ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -10,6 +10,7 @@ import 'highlight.js/styles/github.css'
 import 'katex/dist/katex.min.css'
 import { stripMathShadow, escapeAmbiguousMathDollars } from '../util/mathShadow'
 import { flattenImageAltBlankLines } from '../util/imageAlt'
+import { ARTICLE_ANCHOR_LABEL, annotateArticleMarkdown, parseArticleAnchor } from '../util/articleAnchors'
 import VideoEmbed from './VideoEmbed'
 import { parsePlaceholder, type VideoEmbedData } from './parseVideoPlaceholder'
 import { CodeWrapContext } from './CodeWrapContext'
@@ -129,10 +130,17 @@ export function normalizeVideoPlaceholders(source: string): string {
 function extractParagraphText(children: unknown): string | null {
   if (typeof children === 'string') return children
   if (Array.isArray(children)) {
-    if (children.length !== 1) return null
-    return extractParagraphText(children[0])
+    const visibleChildren = children.filter((child) => !isArticleAnchorElement(child))
+    if (visibleChildren.length !== 1) return null
+    return extractParagraphText(visibleChildren[0])
   }
   return null
+}
+
+function isArticleAnchorElement(child: unknown): boolean {
+  return isValidElement<{ children?: unknown, href?: string }>(child)
+    && child.props.children === ARTICLE_ANCHOR_LABEL
+    && parseArticleAnchor(child.props.href) !== null
 }
 
 // Wraps each fenced <pre> so the wrap state can be toggled per-block on
@@ -163,14 +171,20 @@ type ArticleLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraPro
 function ArticleLink({ href, children, className, node: _node, ...rest }: ArticleLinkProps) {
   const actionContext = useContext(ReaderActionContext)
   const anchorRef = useRef<HTMLAnchorElement>(null)
-  const normalized = href && actionContext ? actionContext.normalizeLink(href) : null
+  const articleAnchorID = parseArticleAnchor(href)
+  const isArticleAnchor = articleAnchorID !== null && children === ARTICLE_ANCHOR_LABEL
+  const normalized = !isArticleAnchor && href && actionContext ? actionContext.normalizeLink(href) : null
   const state = normalized && actionContext ? actionContext.getLinkState(normalized) : null
 
   useEffect(() => {
-    if (!normalized || !actionContext?.onLinkDiscovered || !anchorRef.current) return
+    if (isArticleAnchor || !normalized || !actionContext?.onLinkDiscovered || !anchorRef.current) return
     const title = (anchorRef.current.textContent ?? '').trim().replace(/\s+/g, ' ') || normalized
     actionContext.onLinkDiscovered({ url: normalized, title })
-  }, [actionContext, children, normalized])
+  }, [actionContext, children, isArticleAnchor, normalized])
+
+  if (isArticleAnchor) {
+    return <span id={articleAnchorID} className="article-section-anchor" aria-hidden="true" />
+  }
 
   return (
     <a
@@ -259,9 +273,9 @@ const COMPONENTS: Components = {
 // markdown re-parse and image remount.
 function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
   const cleaned = useMemo(
-    () => normalizeVideoPlaceholders(
+    () => annotateArticleMarkdown(normalizeVideoPlaceholders(
       flattenImageAltBlankLines(escapeAmbiguousMathDollars(stripMathShadow(source))),
-    ),
+    )),
     [source],
   )
   const articleLang = useMemo(() => detectArticleLang(cleaned), [cleaned])
