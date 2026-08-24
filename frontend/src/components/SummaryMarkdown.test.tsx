@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SummaryMarkdown from './SummaryMarkdown'
 
-const HIGHLIGHT_TIMEOUT_MS = 1_300
+const HIGHLIGHT_TIMEOUT_MS = 7_100
 
 function addArticleTarget(id = 'article-section-001'): HTMLElement {
   const target = document.createElement('h2')
@@ -52,6 +52,26 @@ describe('SummaryMarkdown article links', () => {
     document.body.replaceChildren()
   })
 
+  it('decorates only valid article links with an aria-hidden anchor icon', () => {
+    render(<SummaryMarkdown source={[
+      '[查看原文](#article-section-001)',
+      '[External](https://example.com)',
+      '[Invalid](#article-section-01)',
+    ].join('\n\n')} />)
+
+    const articleLink = screen.getByRole('link', { name: '查看原文' })
+    const articleIcon = articleLink.querySelector('.summary-article-link-icon')
+    expect(articleLink.classList.contains('summary-article-link')).toBe(true)
+    expect(articleIcon?.textContent).toBe('⌖')
+    expect(articleIcon?.getAttribute('aria-hidden')).toBe('true')
+
+    for (const name of ['External', 'Invalid']) {
+      const link = screen.getByRole('link', { name })
+      expect(link.classList.contains('summary-article-link')).toBe(false)
+      expect(link.querySelector('.summary-article-link-icon')).toBeNull()
+    }
+  })
+
   it('scrolls a valid body target, highlights it, and cleans up after its animation', () => {
     const target = addArticleTarget()
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
@@ -97,6 +117,7 @@ describe('SummaryMarkdown article links', () => {
   })
 
   it('uses instant scrolling when reduced motion is preferred', () => {
+    vi.useFakeTimers()
     const target = addArticleTarget()
     setReducedMotion(true)
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
@@ -104,6 +125,22 @@ describe('SummaryMarkdown article links', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Jump' }), { detail: 1 })
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'center' })
     expect(target.classList.contains('article-anchor-highlight')).toBe(true)
+    act(() => vi.advanceTimersByTime(7_000))
+    expect(target.classList.contains('article-anchor-highlight')).toBe(true)
+    act(() => vi.advanceTimersByTime(100))
+    expect(target.classList.contains('article-anchor-highlight')).toBe(false)
+  })
+
+  it('keeps the highlight until the 7100ms fallback boundary', () => {
+    vi.useFakeTimers()
+    const target = addArticleTarget()
+    render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
+
+    fireEvent.click(screen.getByRole('link', { name: 'Jump' }), { detail: 1 })
+    act(() => vi.advanceTimersByTime(6_999))
+    expect(target.classList.contains('article-anchor-highlight')).toBe(true)
+    act(() => vi.advanceTimersByTime(101))
+    expect(target.classList.contains('article-anchor-highlight')).toBe(false)
   })
 
   it('does not steal focus for mouse activation but temporarily focuses a keyboard target', () => {
