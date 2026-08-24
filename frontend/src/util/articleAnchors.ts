@@ -1,3 +1,5 @@
+import { flattenImageAltBlankLines } from './imageAlt'
+
 export const ARTICLE_ANCHOR_RE = /^#article-section-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$/
 
 const ARTICLE_ANCHOR_PREFIX = 'article-section-'
@@ -15,6 +17,13 @@ type ArticleBlockKind = ArticleAnchorKind | 'none'
 
 export function parseArticleAnchor(href: string | undefined): string | null {
   return href && ARTICLE_ANCHOR_RE.test(href) ? href.slice(1) : null
+}
+
+// Canonical, idempotent normalization shared in behavior with the backend
+// prompt annotator. Callers render and scan this form without mutating the
+// stored author Markdown.
+export function normalizeArticleAnchorSource(source: string): string {
+  return flattenImageAltBlankLines(source)
 }
 
 function articleAnchorID(index: number): string {
@@ -113,7 +122,7 @@ function nextActiveBlock(kind: ArticleBlockKind, imageOnly: boolean, active: Art
 // Returns out-of-band source positions. It deliberately never mutates author
 // Markdown: ReactMarkdown's remark plugin applies these records to AST blocks.
 export function findArticleAnchors(source: string): ArticleAnchor[] {
-  const lines = splitLines(source)
+  const lines = splitLines(normalizeArticleAnchorSource(source))
   const anchors: ArticleAnchor[] = []
   let active: ArticleBlockKind = 'none'
   let fence: { char: string, length: number } | null = null
@@ -134,7 +143,7 @@ export function findArticleAnchors(source: string): ArticleAnchor[] {
       active = active === 'list' && listHasContinuation(lines, i) ? 'list' : 'none'
       continue
     }
-    if (isTopLevelIndentedCode(line.text)) {
+    if (isTopLevelIndentedCode(line.text) && !(active === 'list' && LIST_ITEM_RE.test(line.text))) {
       active = 'none'
       continue
     }

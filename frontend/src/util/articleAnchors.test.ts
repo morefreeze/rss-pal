@@ -41,4 +41,26 @@ describe('article anchors', () => {
     expect(findArticleAnchors('![cover](https://example.com/cover.png)\n说明文字\n').map(({ id }) => id)).toEqual(['article-section-001'])
     expect(findArticleAnchors('> ![](https://example.com/image.png)\n> meaningful quote\n').map(({ line, id }) => `${line}:${id}`)).toEqual(['2:article-section-001'])
   })
+
+  it('normalizes blank lines inside image alt text before assigning IDs', () => {
+    const source = 'Intro\n\n![multi-line alt\n\ntext](https://example.com/a.png)\n\nAfter'
+    expect(findArticleAnchors(source).map(({ kind, line, id }) => `${kind}:${line}:${id}`)).toEqual([
+      'paragraph:1:article-section-001',
+      'paragraph:5:article-section-002',
+    ])
+  })
+
+  it('recognizes four-space nested lists without treating top-level indented code as a list', () => {
+    const nested = '- parent\n    - nested\n- sibling'
+    expect(findArticleAnchors(nested).map(({ kind, line, id }) => `${kind}:${line}:${id}`)).toEqual([
+      'list:1:article-section-001',
+      'list:2:article-section-002',
+      'list:3:article-section-003',
+    ])
+
+    const topLevelCode = '    - top-level code\n\nText'
+    expect(findArticleAnchors(topLevelCode).map(({ kind, line, id }) => `${kind}:${line}:${id}`)).toEqual([
+      'paragraph:3:article-section-001',
+    ])
+  })
 })

@@ -71,22 +71,29 @@ describe('SummaryMarkdown article links', () => {
     expect(scrollIntoView).not.toHaveBeenCalled()
   })
 
-  it.each(['ctrlKey', 'metaKey'] as const)('leaves a valid %s modified click to the browser', (modifier) => {
-    const target = addArticleTarget()
+  it.each([
+    ['Ctrl-click', 'click', { button: 0, ctrlKey: true }, true],
+    ['Cmd-click', 'click', { button: 0, metaKey: true }, true],
+    ['Shift-click', 'click', { button: 0, shiftKey: true }, true],
+    ['Alt-click', 'click', { button: 0, altKey: true }, true],
+    ['middle click', 'click', { button: 1 }, false],
+    ['middle auxclick', 'auxclick', { button: 1 }, false],
+    ['right auxclick', 'auxclick', { button: 2 }, false],
+  ])('keeps a strict article anchor inert for %s', (_name, eventType, init, withTarget) => {
+    const target = withTarget ? addArticleTarget() : null
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
     const link = screen.getByRole('link', { name: 'Jump' })
-    const click = new MouseEvent('click', {
+    const activation = new MouseEvent(eventType, {
       bubbles: true,
       cancelable: true,
-      button: 0,
-      [modifier]: true,
+      ...init,
     })
 
-    expect(link.dispatchEvent(click)).toBe(true)
-    expect(click.defaultPrevented).toBe(false)
+    expect(link.dispatchEvent(activation)).toBe(false)
+    expect(activation.defaultPrevented).toBe(true)
     expect(link.getAttribute('href')).toBe('#article-section-001')
     expect(scrollIntoView).not.toHaveBeenCalled()
-    expect(target.classList.contains('article-anchor-highlight')).toBe(false)
+    expect(target?.classList.contains('article-anchor-highlight') ?? false).toBe(false)
   })
 
   it('uses instant scrolling when reduced motion is preferred', () => {

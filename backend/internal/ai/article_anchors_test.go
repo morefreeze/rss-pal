@@ -174,3 +174,27 @@ func TestAnnotateArticleForSummarySkipsIndentedCodeAndListContinuations(t *testi
 		t.Errorf("annotateArticleForSummary() = %q, want %q", got, want)
 	}
 }
+
+func TestAnnotateArticleForSummaryNormalizesBlankLinesInsideImageAlt(t *testing.T) {
+	in := "Intro\n\n![multi-line alt\n\ntext](https://example.com/a.png)\n\nAfter"
+	want := "[正文锚点: article-section-001]\nIntro\n\n![multi-line alt text](https://example.com/a.png)\n\n[正文锚点: article-section-002]\nAfter"
+	if got := annotateArticleForSummary(in); got != want {
+		t.Errorf("annotateArticleForSummary() = %q, want normalized anchor source %q", got, want)
+	}
+}
+
+func TestAnnotateArticleForSummaryRecognizesFourSpaceNestedLists(t *testing.T) {
+	in := "- parent\n    - nested\n- sibling"
+	want := "[正文锚点: article-section-001]\n- parent\n[正文锚点: article-section-002]\n    - nested\n[正文锚点: article-section-003]\n- sibling"
+	if got := annotateArticleForSummary(in); got != want {
+		t.Errorf("annotateArticleForSummary() = %q, want %q", got, want)
+	}
+}
+
+func TestAnnotateArticleForSummaryKeepsTopLevelIndentedListMarkerAsCode(t *testing.T) {
+	in := "    - top-level code\n\nText"
+	want := "    - top-level code\n\n[正文锚点: article-section-001]\nText"
+	if got := annotateArticleForSummary(in); got != want {
+		t.Errorf("annotateArticleForSummary() = %q, want %q", got, want)
+	}
+}

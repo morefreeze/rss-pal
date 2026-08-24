@@ -59,4 +59,60 @@ describe('MarkdownArticle article anchors', () => {
       'article-section-004',
     ])
   })
+
+  it('keeps image-alt cleanup and scanner numbering in lockstep', () => {
+    const source = 'Intro\n\n![multi-line alt\n\ntext](https://example.com/a.png)\n\nAfter'
+    const { container } = render(<MarkdownArticle source={source} />)
+
+    expect(container.querySelector('p#article-section-001')?.textContent).toBe('Intro')
+    expect(container.querySelector('p#article-section-002')?.textContent).toBe('After')
+    expect(container.querySelectorAll('[id^="article-section-"]')).toHaveLength(2)
+  })
+
+  it('keeps the canonical target on a rendered standalone video placeholder', () => {
+    const source = 'Before\n\n[[video:youtube:dQw4w9WgXcQ]]\n\nAfter'
+    const { container } = render(<MarkdownArticle source={source} />)
+
+    const target = container.querySelector('#article-section-002')
+    expect(target?.classList.contains('article-section-anchor')).toBe(true)
+    expect(target?.querySelector('iframe[title="youtube video dQw4w9WgXcQ"]')).toBeTruthy()
+    expect(container.querySelectorAll('iframe[title="youtube video dQw4w9WgXcQ"]')).toHaveLength(1)
+  })
+
+  it('keeps a non-visible canonical target when the standalone video is suppressed', () => {
+    const source = 'Before\n\n[[video:youtube:dQw4w9WgXcQ]]\n\nAfter'
+    const { container } = render(
+      <MarkdownArticle
+        source={source}
+        suppressVideo={{ platform: 'youtube', id: 'dQw4w9WgXcQ' }}
+      />,
+    )
+
+    const target = container.querySelector('#article-section-002')
+    expect(target).toBeTruthy()
+    expect(target?.hasAttribute('hidden')).toBe(true)
+    expect(container.querySelectorAll('iframe[title="youtube video dQw4w9WgXcQ"]')).toHaveLength(0)
+    expect(container.querySelector('p#article-section-003')?.textContent).toBe('After')
+  })
+
+  it('assigns three unique IDs to a four-space nested list', () => {
+    const source = '- parent\n    - nested\n- sibling'
+    const { container } = render(<MarkdownArticle source={source} />)
+
+    expect([...container.querySelectorAll('li[id^="article-section-"]')].map((node) => node.id)).toEqual([
+      'article-section-001',
+      'article-section-002',
+      'article-section-003',
+    ])
+    expect(container.querySelector('li#article-section-001 li#article-section-002')?.textContent).toBe('nested')
+  })
+
+  it('does not anchor a top-level four-space indented list marker parsed as code', () => {
+    const source = '    - top-level code\n\nText'
+    const { container } = render(<MarkdownArticle source={source} />)
+
+    expect(container.querySelector('pre code')?.textContent).toBe('- top-level code\n')
+    expect(container.querySelector('p#article-section-001')?.textContent).toBe('Text')
+    expect(container.querySelectorAll('[id^="article-section-"]')).toHaveLength(1)
+  })
 })

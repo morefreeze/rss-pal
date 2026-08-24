@@ -1,6 +1,8 @@
+import { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Article, ArticleListItem } from '../api/client'
+import { createArticleAnchorRemarkPlugin, findArticleAnchors, normalizeArticleAnchorSource } from '../util/articleAnchors'
 import './TweetCard.css'
 
 interface Props {
@@ -20,8 +22,10 @@ interface ParsedByline {
 //   > @handle (DisplayName) · YYYY-MM-DD
 // with DisplayName and the date each optional (BuildTweetByline degrades
 // gracefully when either is missing). Returns the rest of the content
-// as `body` with leading blank lines stripped so the markdown body
-// starts cleanly. When the first line doesn't match (e.g. the article
+// as `body`, replacing the extracted first line with a blank line so AST
+// source positions still match the canonical full-article anchor scan.
+// Markdown ignores those leading blank lines, so the visible body stays
+// unchanged. When the first line doesn't match (e.g. the article
 // was somehow stored without a byline) we return empty author fields
 // and pass the entire content through as the body.
 function parseByline(content: string): ParsedByline {
@@ -29,7 +33,7 @@ function parseByline(content: string): ParsedByline {
   const first = lines[0] || ''
   const m = first.match(/^>\s*@(\S+)(?:\s*\(([^)]+)\))?(?:\s*·\s*(.+?))?\s*$/)
   if (!m) return { handle: '', displayName: '', date: '', body: content }
-  const body = lines.slice(1).join('\n').replace(/^\n+/, '')
+  const body = `\n${lines.slice(1).join('\n')}`
   return {
     handle: m[1] || '',
     displayName: m[2] || '',
@@ -69,12 +73,29 @@ function initialAvatar(handle: string, displayName: string): { char: string; bg:
 }
 
 export default function TweetCard({ article, compact = false }: Props) {
-  const { handle, displayName, date, body } = parseByline(articleContent(article))
+  const storedContent = articleContent(article)
+  const content = useMemo(() => normalizeArticleAnchorSource(storedContent), [storedContent])
+  const { handle, displayName, date, body } = useMemo(() => parseByline(content), [content])
+  const anchors = useMemo(() => findArticleAnchors(content), [content])
+  const bylineAnchor = handle
+    ? anchors.find(({ kind, line }) => kind === 'blockquote' && line === 1)
+    : undefined
+  const articleAnchorRemarkPlugin = useMemo(
+    () => createArticleAnchorRemarkPlugin(anchors),
+    [anchors],
+  )
+  const remarkPlugins = useMemo(
+    () => [remarkGfm, articleAnchorRemarkPlugin],
+    [articleAnchorRemarkPlugin],
+  )
   const avatar = initialAvatar(handle, displayName)
 
   return (
     <div className={`tweet-card${compact ? ' tweet-card-compact' : ''}`}>
-      <header className="tweet-card-header">
+      <header
+        id={bylineAnchor?.id}
+        className={`tweet-card-header${bylineAnchor ? ' article-section-anchor' : ''}`}
+      >
         <div className="tweet-card-avatar" style={{ background: avatar.bg }}>{avatar.char}</div>
         <div className="tweet-card-meta">
           {displayName && <span className="tweet-card-name">{displayName}</span>}
@@ -84,7 +105,7 @@ export default function TweetCard({ article, compact = false }: Props) {
       </header>
       <div className="tweet-card-body">
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={remarkPlugins}
           components={{
             a: ({ href, children, ...rest }) => {
               // Tweet text often contains links to other x.com paths as
