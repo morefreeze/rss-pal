@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { getArticles, getGroupedArticles, searchArticles, getRecommended, markAllRead, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, likeArticle, dislikeArticle, getTagSidebar, TagSidebarData } from '../api/client'
+import { getArticles, getGroupedArticles, searchArticles, getDailyDigest, markAllRead, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, getTagSidebar, TagSidebarData } from '../api/client'
 import { writeNav, type NavContext } from '../utils/articleNav'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
@@ -294,8 +294,7 @@ export default function ArticleListPage() {
   // sort, 分组) under a ⋯ menu so the row only carries 仅未读 / 已保存 / 全部已读.
   const compactToolbar = breakpoint === 'phone'
   const [articles, setArticles] = useState<ArticleListItem[]>([])
-  const [recommended, setRecommended] = useState<Article[]>([])
-  const [boostedIds, setBoostedIds] = useState<Set<number>>(new Set())
+  const [briefingArticles, setBriefingArticles] = useState<Article[]>([])
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -340,8 +339,8 @@ export default function ArticleListPage() {
   const [sortDir, setSortDir] = useState<ArticleOrder>(() => {
     try { return sessionStorage.getItem('articlesSortDir') === 'asc' ? 'asc' : 'desc' } catch { return 'desc' }
   })
-  const [showRecommended, setShowRecommended] = useState(() => {
-    try { return localStorage.getItem('showRecommended') === 'true' } catch { return false }
+  const [showBriefing, setShowBriefing] = useState(() => {
+    try { return localStorage.getItem('showBriefing') === 'true' } catch { return false }
   })
   const [grouped, setGrouped] = useState(() => {
     try { return sessionStorage.getItem('articlesGrouped') === 'true' } catch { return false }
@@ -442,7 +441,7 @@ export default function ArticleListPage() {
 
   useEffect(() => {
     loadFeeds()
-    loadRecommended()
+    loadBriefing()
     const onRefreshUnread = () => {
       try {
         setSessionReadIds(new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]')))
@@ -652,43 +651,12 @@ export default function ArticleListPage() {
     }
   }
 
-  const loadRecommended = async () => {
+  const loadBriefing = async () => {
     try {
-      const data = await getRecommended(10)
-      setRecommended(data || [])
+      const digest = await getDailyDigest()
+      setBriefingArticles(digest.articles || [])
     } catch {
-      // Ignore errors for recommended
-    }
-  }
-
-  const handleBoost = async (articleId: number, e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setBoostedIds(prev => {
-      const next = new Set(prev)
-      next.add(articleId)
-      return next
-    })
-    try {
-      await likeArticle(articleId)
-    } catch {
-      setBoostedIds(prev => {
-        const next = new Set(prev)
-        next.delete(articleId)
-        return next
-      })
-    }
-  }
-
-  const handleDampen = async (articleId: number, e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setRecommended(prev => prev.filter(a => a.id !== articleId))
-    try {
-      await dislikeArticle(articleId)
-      await loadRecommended()
-    } catch {
-      // Keep the row removed locally; next page load will resync.
+      // The briefing is supplementary; leave the panel hidden on failure.
     }
   }
 
@@ -991,89 +959,72 @@ export default function ArticleListPage() {
         />
       )}
 
-      {!isClippingMode && recommended.length > 0 && !searchQuery && !grouped && (
+      {!isClippingMode && briefingArticles.length > 0 && !searchQuery && !grouped && (
         <div className="rec-panel">
           <button
             type="button"
             className="rec-panel-header"
-            aria-expanded={showRecommended}
-            title={showRecommended ? '收起' : '展开'}
+            aria-expanded={showBriefing}
+            title={showBriefing ? '收起' : '展开'}
             onClick={() => {
-              const next = !showRecommended
-              setShowRecommended(next)
-              try { localStorage.setItem('showRecommended', String(next)) } catch {}
+              const next = !showBriefing
+              setShowBriefing(next)
+              try { localStorage.setItem('showBriefing', String(next)) } catch {}
             }}
           >
             <span aria-hidden className="rec-panel-arrow">
-              {showRecommended ? '▼' : '▶'}
+              {showBriefing ? '▼' : '▶'}
             </span>
-            <h3 className="rec-panel-title">为你推荐</h3>
-            <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({recommended.length})</span>
+            <h3 className="rec-panel-title">简报</h3>
+            <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({briefingArticles.length})</span>
           </button>
-          {showRecommended && recommended.map(article => (
-            <div
-              key={article.id}
-              className="rec-row"
-              role="link"
-              tabIndex={0}
-              onClick={() => navigate(`/articles/${article.id}`, {
-                state: { from: articleEntryPath, articlePreview: article },
-              })}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  navigate(`/articles/${article.id}`, {
-                    state: { from: articleEntryPath, articlePreview: article },
-                  })
-                }
-              }}
-              style={{ cursor: 'pointer' }}
-            >
-              <div className="flex-between">
-                <div style={{ flex: 1 }}>
-                  <div className="text-bold" style={{ display: 'flex', alignItems: 'center' }}>
-                    <MediaIndicator article={article} onPlay={player.playArticle} />
-                    <span>{article.title}</span>
-                  </div>
-                  <div className="flex gap-2 mt-1">
-                    <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
-                    {article.feed_title && (
-                      <FeedSourceLink
-                        feedId={article.feed_id}
-                        label={article.feed_title}
-                        search={sourceSearch}
-                        className="text-sm"
-                        style={{ padding: '1px 6px', background: 'var(--accent-soft)', borderRadius: 4, color: 'var(--accent)' }}
-                        onNavigate={handleSourceFilter}
-                      />
-                    )}
-                  </div>
-                </div>
-                <div className="rec-feedback">
-                  {boostedIds.has(article.id) ? (
-                    <span className="rec-feedback-badge">✓ 已多推</span>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="rec-feedback-btn"
-                        title="多推这类"
-                        aria-label="多推这类"
-                        onClick={(e) => handleBoost(article.id, e)}
-                      >👍</button>
-                      <button
-                        type="button"
-                        className="rec-feedback-btn"
-                        title="少推这类"
-                        aria-label="少推这类"
-                        onClick={(e) => handleDampen(article.id, e)}
-                      >👎</button>
-                    </>
+          {showBriefing && briefingArticles.map(article => {
+            const read = isRead(article)
+            return (
+              <div
+                key={article.id}
+                className="rec-row"
+                role="link"
+                tabIndex={0}
+                onClick={() => openArticle(article.id, article)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    openArticle(article.id, article)
+                  }
+                }}
+                style={{ cursor: 'pointer', opacity: read ? 0.6 : 1 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  {!read && (
+                    <span
+                      aria-label="未读"
+                      style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }}
+                    />
                   )}
+                  <div style={{ flex: 1 }}>
+                    <div className={read ? 'text-muted' : 'text-bold'} style={{ display: 'flex', alignItems: 'center' }}>
+                      <MediaIndicator article={article} onPlay={player.playArticle} />
+                      <span>{article.title}</span>
+                    </div>
+                    <div className="flex gap-2 mt-1">
+                      <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
+                      {article.feed_title && (
+                        <FeedSourceLink
+                          feedId={article.feed_id}
+                          label={article.feed_title}
+                          search={sourceSearch}
+                          className="text-sm"
+                          style={{ padding: '1px 6px', background: 'var(--accent-soft)', borderRadius: 4, color: 'var(--accent)' }}
+                          onNavigate={handleSourceFilter}
+                        />
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
