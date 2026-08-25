@@ -884,11 +884,15 @@ export const downloadBackup = async (metadataName: string, hasSaved: boolean): P
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+export type WeeklyGenerationStatus = 'ready' | 'scheduled' | 'pending' | 'not_planned'
+
 export interface WeeklyDigest {
   week_start: string
   intro_text: string
   articles: Article[]
   pending?: boolean
+  generation_status?: WeeklyGenerationStatus
+  estimated_generation_at?: string
 }
 
 export const getWeeklyDigest = (week?: string) =>
