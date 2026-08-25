@@ -37,3 +37,19 @@ func TestNextDaily0400CST(t *testing.T) {
 		})
 	}
 }
+
+func TestInterestRunNowEnabled(t *testing.T) {
+	t.Setenv("INTERESTS_RUN_NOW", "1")
+	t.Setenv("INSIGHTS_RUN_NOW", "")
+	if !interestRunNowEnabled() {
+		t.Fatal("interestRunNowEnabled() = false; want true")
+	}
+}
+
+func TestInterestRunNowEnabledAcceptsLegacyAlias(t *testing.T) {
+	t.Setenv("INTERESTS_RUN_NOW", "")
+	t.Setenv("INSIGHTS_RUN_NOW", "1")
+	if !interestRunNowEnabled() {
+		t.Fatal("interestRunNowEnabled() = false; want true")
+	}
+}

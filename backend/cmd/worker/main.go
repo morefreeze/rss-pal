@@ -121,7 +121,7 @@ func main() {
 	}
 
 	if summarizer != nil {
-		stopCron := scheduleDailyInsightCron(insightCronDeps{
+		stopCron := scheduleDailyInterestCron(interestCronDeps{
 			userRepo:          userRepo,
 			prefRepo:          prefRepo,
 			articleRepo:       articleRepo,

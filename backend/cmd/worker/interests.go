@@ -15,18 +15,18 @@ const dailyHourCST = 4
 
 const decayFactor = 0.98
 
-// scheduleDailyInsightCron arranges generateDailyInsights to run every 24h at
+// scheduleDailyInterestCron arranges generateDailyInterests to run every 24h at
 // 04:00 UTC+8. Stop the returned cancel func to abort. Survives missed wakeups
 // (always reschedules from "now → next 04:00").
 //
-// Dev hook: setting INSIGHTS_RUN_NOW=1 fires runDailyInsightJob once on startup
-// before entering the regular schedule loop.
-func scheduleDailyInsightCron(deps insightCronDeps) context.CancelFunc {
+// Dev hook: setting INTERESTS_RUN_NOW=1 fires runDailyInterestJob once on startup
+// before entering the regular schedule loop. INSIGHTS_RUN_NOW remains a legacy alias.
+func scheduleDailyInterestCron(deps interestCronDeps) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		if os.Getenv("INSIGHTS_RUN_NOW") == "1" {
-			log.Printf("daily insight cron: INSIGHTS_RUN_NOW=1 → firing immediately")
-			runDailyInsightJob(ctx, deps)
+		if interestRunNowEnabled() {
+			log.Printf("daily interest cron: INTERESTS_RUN_NOW=1 → firing immediately")
+			runDailyInterestJob(ctx, deps)
 		}
 		for {
 			next := nextDaily0400CST(time.Now())
@@ -34,12 +34,16 @@ func scheduleDailyInsightCron(deps insightCronDeps) context.CancelFunc {
 			case <-ctx.Done():
 				return
 			case <-time.After(time.Until(next)):
-				log.Printf("daily insight cron: firing at %s", time.Now().Format(time.RFC3339))
-				runDailyInsightJob(ctx, deps)
+				log.Printf("daily interest cron: firing at %s", time.Now().Format(time.RFC3339))
+				runDailyInterestJob(ctx, deps)
 			}
 		}
 	}()
 	return cancel
+}
+
+func interestRunNowEnabled() bool {
+	return os.Getenv("INTERESTS_RUN_NOW") == "1" || os.Getenv("INSIGHTS_RUN_NOW") == "1"
 }
 
 func nextDaily0400CST(now time.Time) time.Time {
@@ -52,7 +56,7 @@ func nextDaily0400CST(now time.Time) time.Time {
 	return target
 }
 
-type insightCronDeps struct {
+type interestCronDeps struct {
 	userRepo          *repository.UserRepository
 	prefRepo          *repository.PreferenceRepository
 	articleRepo       *repository.ArticleRepository
@@ -62,20 +66,20 @@ type insightCronDeps struct {
 	defaultModel      string
 }
 
-func runDailyInsightJob(ctx context.Context, deps insightCronDeps) {
+func runDailyInterestJob(ctx context.Context, deps interestCronDeps) {
 	if err := deps.prefRepo.DecayAllTopics(decayFactor); err != nil {
-		log.Printf("daily cron: DecayAllTopics: %v", err)
+		log.Printf("daily interest cron: DecayAllTopics: %v", err)
 	}
 	if err := deps.prefRepo.DecayAllTags(decayFactor); err != nil {
-		log.Printf("daily cron: DecayAllTags: %v", err)
+		log.Printf("daily interest cron: DecayAllTags: %v", err)
 	}
-	generateDailyInsights(ctx, deps)
+	generateDailyInterests(ctx, deps)
 }
 
-func generateDailyInsights(ctx context.Context, deps insightCronDeps) {
+func generateDailyInterests(ctx context.Context, deps interestCronDeps) {
 	users, err := deps.userRepo.ListAll()
 	if err != nil {
-		log.Printf("daily cron: ListAll users: %v", err)
+		log.Printf("daily interest cron: ListAll users: %v", err)
 		return
 	}
 	for _, u := range users {
@@ -87,19 +91,19 @@ func generateDailyInsights(ctx context.Context, deps insightCronDeps) {
 		titles, _ := deps.prefRepo.GetRecentReadTitles(u.ID, 20)
 		candidates, err := deps.articleRepo.GetInterestCandidates(u.ID, 40, 10)
 		if err != nil {
-			log.Printf("daily cron: user %d GetInterestCandidates: %v", u.ID, err)
+			log.Printf("daily interest cron: user %d GetInterestCandidates: %v", u.ID, err)
 			candidates = nil
 		}
 
 		prompt := ai.BuildInterestPrompt(topics, tags, titles, candidates)
 		id, err := deps.userInterestsRepo.InsertPending(u.ID, "auto", deps.defaultModel)
 		if err != nil {
-			log.Printf("daily cron: user %d InsertPending: %v", u.ID, err)
+			log.Printf("daily interest cron: user %d InsertPending: %v", u.ID, err)
 			continue
 		}
 		raw, err := deps.summarizer.GenerateUserInterestJSON(ctx, prompt)
 		if err != nil {
-			log.Printf("daily cron: user %d generate: %v", u.ID, err)
+			log.Printf("daily interest cron: user %d generate: %v", u.ID, err)
 			_ = deps.userInterestsRepo.MarkFailed(id, err.Error())
 			continue
 		}
@@ -109,13 +113,13 @@ func generateDailyInsights(ctx context.Context, deps insightCronDeps) {
 		}
 		markdown, recs, dropped := ai.ParseInterestJSON(raw, idSet)
 		if len(dropped) > 0 {
-			log.Printf("daily cron: user %d dropped %d entries: %v", u.ID, len(dropped), dropped)
+			log.Printf("daily interest cron: user %d dropped %d entries: %v", u.ID, len(dropped), dropped)
 		}
 		if err := deps.userInterestsRepo.MarkDoneWithRecs(id, markdown, recs); err != nil {
-			log.Printf("daily cron: user %d MarkDoneWithRecs: %v", u.ID, err)
+			log.Printf("daily interest cron: user %d MarkDoneWithRecs: %v", u.ID, err)
 			continue
 		}
-		log.Printf("daily cron: user %d ok (topics=%d tags=%d, %dB md, %d recs)",
+		log.Printf("daily interest cron: user %d ok (topics=%d tags=%d, %dB md, %d recs)",
 			u.ID, len(topics), len(tags), len(markdown), len(recs))
 		select {
 		case <-ctx.Done():
