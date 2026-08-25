@@ -7,11 +7,11 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 )
 
-func TestBuildInsightPromptCandidatesIncludeIDsAndReadMarker(t *testing.T) {
+func TestBuildInterestPromptCandidatesIncludeIDsAndReadMarker(t *testing.T) {
 	topics := []model.InterestTopic{{Topic: "AI", Weight: 5.0}}
 	tags := []model.InterestTag{{Tag: "transformers", Weight: 3.0}}
 	titles := []string{"Why GPT-5 matters"}
-	cands := []model.InsightCandidate{
+	cands := []model.InterestCandidate{
 		{
 			Article:    model.Article{ID: 123, Title: "Mixture of Experts deep dive", FeedTitle: "ML Weekly"},
 			BriefShort: "How sparse routing works",
@@ -22,7 +22,7 @@ func TestBuildInsightPromptCandidatesIncludeIDsAndReadMarker(t *testing.T) {
 			BriefShort:  "",
 		},
 	}
-	got := BuildInsightPrompt(topics, tags, titles, cands)
+	got := BuildInterestPrompt(topics, tags, titles, cands)
 	mustContain := []string{
 		"[id=123]",
 		"Mixture of Experts deep dive",
@@ -46,8 +46,8 @@ func TestBuildInsightPromptCandidatesIncludeIDsAndReadMarker(t *testing.T) {
 	}
 }
 
-func TestBuildInsightPromptEmptyCandidatesStillProducesPrompt(t *testing.T) {
-	got := BuildInsightPrompt(nil, nil, nil, nil)
+func TestBuildInterestPromptEmptyCandidatesStillProducesPrompt(t *testing.T) {
+	got := BuildInterestPrompt(nil, nil, nil, nil)
 	if !strings.Contains(got, "\"recommendations\"") {
 		t.Errorf("prompt should still describe schema even when empty:\n%s", got)
 	}
