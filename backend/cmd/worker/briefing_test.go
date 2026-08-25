@@ -47,3 +47,30 @@ func TestIsMondayInShanghai(t *testing.T) {
 		t.Errorf("expected !Mon for %s", tue)
 	}
 }
+
+func TestRecentCompletedWeekStarts(t *testing.T) {
+	tests := []struct {
+		name string
+		now  time.Time
+	}{
+		{name: "midweek", now: sh(2026, time.August, 25, 10, 0)},
+		{name: "monday boundary", now: sh(2026, time.August, 24, 0, 1)},
+	}
+	want := []time.Time{
+		sh(2026, time.August, 17, 0, 0),
+		sh(2026, time.August, 10, 0, 0),
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := recentCompletedWeekStarts(tt.now, 2)
+			if len(got) != len(want) {
+				t.Fatalf("len = %d, want %d", len(got), len(want))
+			}
+			for i := range want {
+				if !got[i].Equal(want[i]) {
+					t.Errorf("week[%d] = %s, want %s", i, got[i], want[i])
+				}
+			}
+		})
+	}
+}
