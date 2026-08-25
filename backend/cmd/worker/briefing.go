@@ -50,7 +50,7 @@ type briefingDeps struct {
 }
 
 // scheduleBriefingCron fires fireDailyForAllUsers every day at 05:00 Asia/Shanghai,
-// and fireWeeklyForAllUsers additionally on Mondays. Mirrors scheduleDailyInsightCron.
+// and fireWeeklyForAllUsers additionally on Mondays. Mirrors scheduleDailyInterestCron.
 // Dev hook: BRIEFING_RUN_NOW=1 fires both jobs immediately on startup.
 func scheduleBriefingCron(deps briefingDeps) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())

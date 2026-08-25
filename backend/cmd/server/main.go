@@ -84,8 +84,8 @@ func main() {
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
-	userInsightsRepo := repository.NewUserInsightRepository(db)
-	insightsHandler := api.NewInsightsHandler(prefRepo, articleRepo, templateRepo, userInsightsRepo, summarizer, cfg)
+	userInterestsRepo := repository.NewUserInterestRepository(db)
+	interestsHandler := api.NewInterestsHandler(prefRepo, articleRepo, templateRepo, userInterestsRepo, summarizer, cfg)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo)
 	dailyHandler := api.NewDailyHandler(articleRepo, dailyDigestRepo)
 	briefingHandler := api.NewBriefingHandler(userRepo)
@@ -302,9 +302,8 @@ func main() {
 		apiGroup.GET("/stats", statsHandler.GetStats)
 		apiGroup.GET("/stats/progress", statsHandler.GetProgress)
 
-		// Insights
-		apiGroup.GET("/insights/latest", insightsHandler.Latest)
-		apiGroup.POST("/insights/generate", insightsHandler.Generate)
+		// Interests (with one-version legacy aliases)
+		registerInterestRoutes(apiGroup, interestsHandler)
 
 		// Weekly / daily briefings (worker generates async; API is read-only)
 		apiGroup.GET("/weekly-digest", weeklyHandler.Get)

@@ -805,17 +805,17 @@ func (s *Summarizer) Polish(ctx context.Context, promptText string) (string, err
 	return s.doCall(ctx, body, 600)
 }
 
-// GenerateUserInsight runs a non-streaming chat completion with the layered
+// GenerateUserInterest runs a non-streaming chat completion with the layered
 // prompt the worker built. maxTokens is fixed at 1500 (sufficient for the
-// 4-section markdown insight format).
-func (s *Summarizer) GenerateUserInsight(ctx context.Context, prompt string) (string, error) {
+// 4-section markdown interest-analysis format).
+func (s *Summarizer) GenerateUserInterest(ctx context.Context, prompt string) (string, error) {
 	return s.call(ctx, prompt, 1500)
 }
 
-// GenerateUserInsightJSON asks the AI for a JSON object containing markdown +
+// GenerateUserInterestJSON asks the AI for a JSON object containing markdown +
 // recommendations. Returns the raw body for the caller to parse and validate.
 // maxTokens=2000 leaves room for the JSON envelope plus markdown plus reasons.
-func (s *Summarizer) GenerateUserInsightJSON(ctx context.Context, prompt string) (string, error) {
+func (s *Summarizer) GenerateUserInterestJSON(ctx context.Context, prompt string) (string, error) {
 	return s.callJSON(ctx, prompt, 2000)
 }
 
@@ -853,12 +853,12 @@ func (s *Summarizer) callJSON(ctx context.Context, prompt string, maxTokens int)
 	return "", lastErr
 }
 
-// Model returns the configured model id (used by user_insights.model column).
+// Model returns the configured model id stored with generated interest analyses.
 func (s *Summarizer) Model() string {
 	return s.model
 }
 
-func (s *Summarizer) GenerateInsights(ctx context.Context, topics []string, recentArticles string) (string, error) {
+func (s *Summarizer) GenerateInterests(ctx context.Context, topics []string, recentArticles string) (string, error) {
 	prompt := fmt.Sprintf(`基于用户的兴趣主题和最近的阅读行为，请分析用户的兴趣趋势并提供洞察：
 
 用户兴趣主题（按权重排序）：

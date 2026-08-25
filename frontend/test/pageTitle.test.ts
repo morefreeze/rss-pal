@@ -18,6 +18,10 @@ describe('page title helpers', () => {
     expect(getRoutePageTitle('/articles', '?feed_id=7')).toBe('订阅文章')
   })
 
+  it('names the canonical interest path as 兴趣', () => {
+    expect(getRoutePageTitle('/interests')).toBe('兴趣')
+  })
+
   it('uses article preview titles for article detail history entries', () => {
     const state: ArticleTitleLocationState = {
       articlePreview: {
