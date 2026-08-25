@@ -8,6 +8,7 @@ const TABS: Tab[] = [
   { to: '/articles',            icon: '📰', label: '文章', showUnread: true, matchClip: false },
   { to: '/articles?view=clip',  icon: '⭐', label: '网摘',                   matchClip: true  },
   { to: '/feeds',               icon: '📡', label: '订阅' },
+  { to: '/briefing',            icon: '📅', label: '简报' },
 ]
 
 interface Props {
