@@ -1661,7 +1661,7 @@ func (r *ArticleRepository) queryLinkSetFallback(userID, days, limit int, exclud
 	return r.scanArticleWithParentTitle(rows)
 }
 
-// GetInsightCandidates returns up to (unreadLimit + readLimit) candidate
+// GetInterestCandidates returns up to (unreadLimit + readLimit) candidate
 // articles for the AI prompt:
 //
 //   - unread block: visible to userID, not yet completed, ranked by score
@@ -1674,7 +1674,7 @@ func (r *ArticleRepository) queryLinkSetFallback(userID, days, limit int, exclud
 //
 // The two blocks are concatenated (unread first). They are disjoint by
 // is_completed, so no extra dedup is needed.
-func (r *ArticleRepository) GetInsightCandidates(userID, unreadLimit, readLimit int) ([]model.InsightCandidate, error) {
+func (r *ArticleRepository) GetInterestCandidates(userID, unreadLimit, readLimit int) ([]model.InterestCandidate, error) {
 	const unreadQuery = `
 SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at,
        a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes,
@@ -1734,7 +1734,7 @@ ORDER BY p.score DESC, rp.last_read_at DESC
 LIMIT $2
 `
 
-	scan := func(rows *sql.Rows, alreadyRead bool, out *[]model.InsightCandidate) error {
+	scan := func(rows *sql.Rows, alreadyRead bool, out *[]model.InterestCandidate) error {
 		defer rows.Close()
 		for rows.Next() {
 			var a model.Article
@@ -1778,7 +1778,7 @@ LIMIT $2
 			if len(brief) > 60 {
 				brief = brief[:60]
 			}
-			*out = append(*out, model.InsightCandidate{
+			*out = append(*out, model.InterestCandidate{
 				Article:     a,
 				AlreadyRead: alreadyRead,
 				BriefShort:  string(brief),
@@ -1787,7 +1787,7 @@ LIMIT $2
 		return rows.Err()
 	}
 
-	var out []model.InsightCandidate
+	var out []model.InterestCandidate
 	if unreadLimit > 0 {
 		rows, err := r.db.Query(unreadQuery, userID, unreadLimit)
 		if err != nil {

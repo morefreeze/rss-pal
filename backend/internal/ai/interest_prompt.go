@@ -7,12 +7,12 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 )
 
-// BuildInsightPrompt builds the user prompt for JSON-mode insight generation.
+// BuildInterestPrompt builds the user prompt for JSON-mode interest analysis.
 // Candidates are rendered as "[id=N] Title — feed · brief" so the AI references
 // exact ids in the response. "[r]" prefixes already-read candidates so the AI
 // can frame them as "revisit" recommendations when relevant.
-func BuildInsightPrompt(topics []model.InterestTopic, tags []model.InterestTag,
-	recentTitles []string, candidates []model.InsightCandidate) string {
+func BuildInterestPrompt(topics []model.InterestTopic, tags []model.InterestTag,
+	recentTitles []string, candidates []model.InterestCandidate) string {
 
 	var b strings.Builder
 	b.WriteString(`基于用户的兴趣画像和最近阅读，请输出严格 json：

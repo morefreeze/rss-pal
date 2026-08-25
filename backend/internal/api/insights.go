@@ -16,24 +16,24 @@ import (
 )
 
 type InsightsHandler struct {
-	prefRepo         *repository.PreferenceRepository
-	articleRepo      *repository.ArticleRepository
-	templateRepo     *repository.TemplateRepository
-	userInsightsRepo *repository.UserInsightRepository
-	summarizer       *ai.Summarizer
-	cfg              *config.Config
+	prefRepo          *repository.PreferenceRepository
+	articleRepo       *repository.ArticleRepository
+	templateRepo      *repository.TemplateRepository
+	userInterestsRepo *repository.UserInterestRepository
+	summarizer        *ai.Summarizer
+	cfg               *config.Config
 }
 
 func NewInsightsHandler(prefRepo *repository.PreferenceRepository, articleRepo *repository.ArticleRepository,
-	templateRepo *repository.TemplateRepository, userInsightsRepo *repository.UserInsightRepository,
+	templateRepo *repository.TemplateRepository, userInterestsRepo *repository.UserInterestRepository,
 	summarizer *ai.Summarizer, cfg *config.Config) *InsightsHandler {
 	return &InsightsHandler{
-		prefRepo:         prefRepo,
-		articleRepo:      articleRepo,
-		templateRepo:     templateRepo,
-		userInsightsRepo: userInsightsRepo,
-		summarizer:       summarizer,
-		cfg:              cfg,
+		prefRepo:          prefRepo,
+		articleRepo:       articleRepo,
+		templateRepo:      templateRepo,
+		userInterestsRepo: userInterestsRepo,
+		summarizer:        summarizer,
+		cfg:               cfg,
 	}
 }
 
@@ -49,9 +49,9 @@ type insightQuota struct {
 }
 
 func (h *InsightsHandler) computeQuota(c *gin.Context, userID int) (insightQuota, bool) {
-	insightsRepo := h.userInsightsRepo.WithCtx(c)
-	today, _ := insightsRepo.CountManualSince(userID, 24*time.Hour)
-	month, _ := insightsRepo.CountManualSince(userID, 30*24*time.Hour)
+	interestsRepo := h.userInterestsRepo.WithCtx(c)
+	today, _ := interestsRepo.CountManualSince(userID, 24*time.Hour)
+	month, _ := interestsRepo.CountManualSince(userID, 30*24*time.Hour)
 	q := insightQuota{
 		RemainingToday: dailyManualLimit - today,
 		RemainingMonth: monthlyManualLimit - month,
@@ -65,11 +65,11 @@ func (h *InsightsHandler) computeQuota(c *gin.Context, userID int) (insightQuota
 	return q, q.RemainingToday > 0 && q.RemainingMonth > 0
 }
 
-// Latest returns the most recent insight + quota + per-recommendation article
+// Latest returns the most recent interest analysis + quota + per-recommendation article
 // metadata so the frontend can render clickable cards without an extra round-trip.
 func (h *InsightsHandler) Latest(c *gin.Context) {
 	userID := getUserID(c)
-	ins, _ := h.userInsightsRepo.WithCtx(c).GetLatest(userID)
+	ins, _ := h.userInterestsRepo.WithCtx(c).GetLatest(userID)
 	quota, _ := h.computeQuota(c, userID)
 	resp := gin.H{
 		"insight":         ins,
@@ -161,14 +161,14 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 	}
 	tags, _ := prefRepo.GetTags(userID)
 	titles, _ := prefRepo.GetRecentReadTitles(userID, 20)
-	candidates, err := h.articleRepo.WithCtx(c).GetInsightCandidates(userID, 40, 10)
+	candidates, err := h.articleRepo.WithCtx(c).GetInterestCandidates(userID, 40, 10)
 	if err != nil {
-		log.Printf("insights: GetInsightCandidates user=%d: %v", userID, err)
+		log.Printf("insights: GetInterestCandidates user=%d: %v", userID, err)
 		candidates = nil
 	}
 
 	summarizer := h.chooseSummarizer(c, userID)
-	id, err := h.userInsightsRepo.WithCtx(c).InsertPending(userID, "manual", summarizer.Model())
+	id, err := h.userInterestsRepo.WithCtx(c).InsertPending(userID, "manual", summarizer.Model())
 	if err != nil {
 		if errors.Is(err, repository.ErrPendingExists) {
 			c.JSON(http.StatusConflict, gin.H{
@@ -182,7 +182,7 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 		return
 	}
 
-	prompt := ai.BuildInsightPrompt(topics, tags, titles, candidates)
+	prompt := ai.BuildInterestPrompt(topics, tags, titles, candidates)
 
 	go h.runAsyncManual(id, userID, summarizer, prompt, candidates)
 
@@ -194,24 +194,24 @@ func (h *InsightsHandler) Generate(c *gin.Context) {
 	})
 }
 
-func (h *InsightsHandler) runAsyncManual(id, userID int, s *ai.Summarizer, prompt string, candidates []model.InsightCandidate) {
+func (h *InsightsHandler) runAsyncManual(id, userID int, s *ai.Summarizer, prompt string, candidates []model.InterestCandidate) {
 	ctx, cancel := context.WithTimeout(context.Background(), asyncGenTimeout)
 	defer cancel()
-	raw, err := s.GenerateUserInsightJSON(ctx, prompt)
+	raw, err := s.GenerateUserInterestJSON(ctx, prompt)
 	if err != nil {
 		log.Printf("insights: async user=%d id=%d failed: %v", userID, id, err)
-		_ = h.userInsightsRepo.MarkFailed(id, err.Error())
+		_ = h.userInterestsRepo.MarkFailed(id, err.Error())
 		return
 	}
 	idSet := make(map[int]bool, len(candidates))
 	for _, c := range candidates {
 		idSet[c.Article.ID] = true
 	}
-	markdown, recs, dropped := ai.ParseInsightJSON(raw, idSet)
+	markdown, recs, dropped := ai.ParseInterestJSON(raw, idSet)
 	if len(dropped) > 0 {
 		log.Printf("insights: user=%d id=%d dropped %d entries: %v", userID, id, len(dropped), dropped)
 	}
-	if err := h.userInsightsRepo.MarkDoneWithRecs(id, markdown, recs); err != nil {
+	if err := h.userInterestsRepo.MarkDoneWithRecs(id, markdown, recs); err != nil {
 		log.Printf("insights: async user=%d id=%d MarkDoneWithRecs: %v", userID, id, err)
 		return
 	}

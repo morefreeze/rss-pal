@@ -12,21 +12,21 @@ import (
 	"github.com/lib/pq"
 )
 
-type UserInsightRepository struct {
+type UserInterestRepository struct {
 	db Querier
 }
 
-func NewUserInsightRepository(db *sql.DB) *UserInsightRepository {
-	return &UserInsightRepository{db: db}
+func NewUserInterestRepository(db *sql.DB) *UserInterestRepository {
+	return &UserInterestRepository{db: db}
 }
 
 // WithCtx returns a repository view bound to the per-request transaction
 // stashed under ctxkey.Tx by RLSTxMiddleware. Falls back to the underlying
 // handle if no tx is present.
-func (r *UserInsightRepository) WithCtx(c ctxkey.CtxGetter) *UserInsightRepository {
+func (r *UserInterestRepository) WithCtx(c ctxkey.CtxGetter) *UserInterestRepository {
 	if v, ok := c.Get(ctxkey.Tx); ok {
 		if q, ok := v.(Querier); ok {
-			return &UserInsightRepository{db: q}
+			return &UserInterestRepository{db: q}
 		}
 	}
 	return r
@@ -38,7 +38,7 @@ var ErrPendingExists = errors.New("pending insight already exists for user")
 
 // InsertPending creates a new pending row and returns its id. Fails with
 // ErrPendingExists if the user already has a pending row.
-func (r *UserInsightRepository) InsertPending(userID int, triggeredBy, modelName string) (int, error) {
+func (r *UserInterestRepository) InsertPending(userID int, triggeredBy, modelName string) (int, error) {
 	if triggeredBy != "auto" && triggeredBy != "manual" {
 		return 0, fmt.Errorf("invalid triggered_by: %s", triggeredBy)
 	}
@@ -59,7 +59,7 @@ func (r *UserInsightRepository) InsertPending(userID int, triggeredBy, modelName
 }
 
 // MarkDone updates a pending row to status='done' with the AI-generated content.
-func (r *UserInsightRepository) MarkDone(id int, content string) error {
+func (r *UserInterestRepository) MarkDone(id int, content string) error {
 	res, err := r.db.Exec(`
 		UPDATE user_insights
 		SET content = $2, status = 'done', error_msg = NULL, generated_at = NOW()
@@ -76,7 +76,7 @@ func (r *UserInsightRepository) MarkDone(id int, content string) error {
 }
 
 // MarkFailed updates a pending row to status='failed' with an error message.
-func (r *UserInsightRepository) MarkFailed(id int, errMsg string) error {
+func (r *UserInterestRepository) MarkFailed(id int, errMsg string) error {
 	if len(errMsg) > 1000 {
 		errMsg = errMsg[:1000]
 	}
@@ -88,8 +88,8 @@ func (r *UserInsightRepository) MarkFailed(id int, errMsg string) error {
 	return err
 }
 
-// GetLatest returns the most recent insight for a user (any status), or nil.
-func (r *UserInsightRepository) GetLatest(userID int) (*model.UserInsight, error) {
+// GetLatest returns the most recent interest analysis for a user (any status), or nil.
+func (r *UserInterestRepository) GetLatest(userID int) (*model.UserInterest, error) {
 	row := r.db.QueryRow(`
 		SELECT id, user_id, COALESCE(content, ''), status, COALESCE(error_msg, ''),
 		       triggered_by, COALESCE(model, ''), generated_at, recommendations
@@ -98,7 +98,7 @@ func (r *UserInsightRepository) GetLatest(userID int) (*model.UserInsight, error
 		ORDER BY generated_at DESC
 		LIMIT 1
 	`, userID)
-	var ui model.UserInsight
+	var ui model.UserInterest
 	var recsRaw sql.NullString
 	err := row.Scan(&ui.ID, &ui.UserID, &ui.Content, &ui.Status, &ui.ErrorMsg,
 		&ui.TriggeredBy, &ui.Model, &ui.GeneratedAt, &recsRaw)
@@ -118,7 +118,7 @@ func (r *UserInsightRepository) GetLatest(userID int) (*model.UserInsight, error
 
 // MarkDoneWithRecs upgrades a pending row to status='done' with both the
 // markdown content and the validated recommendations slice (may be empty).
-func (r *UserInsightRepository) MarkDoneWithRecs(id int, content string, recs []model.RecommendationDirection) error {
+func (r *UserInterestRepository) MarkDoneWithRecs(id int, content string, recs []model.RecommendationDirection) error {
 	var recsArg interface{}
 	if len(recs) > 0 {
 		b, err := json.Marshal(recs)
@@ -145,7 +145,7 @@ func (r *UserInsightRepository) MarkDoneWithRecs(id int, content string, recs []
 
 // CountManualSince counts only completed (status='done') manual generations
 // in the given window. Pending and failed do not consume quota.
-func (r *UserInsightRepository) CountManualSince(userID int, window time.Duration) (int, error) {
+func (r *UserInterestRepository) CountManualSince(userID int, window time.Duration) (int, error) {
 	var n int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*) FROM user_insights
@@ -159,7 +159,7 @@ func (r *UserInsightRepository) CountManualSince(userID int, window time.Duratio
 }
 
 // HasPending reports whether the user currently has a pending row.
-func (r *UserInsightRepository) HasPending(userID int) (bool, error) {
+func (r *UserInterestRepository) HasPending(userID int) (bool, error) {
 	var exists bool
 	err := r.db.QueryRow(`
 		SELECT EXISTS(SELECT 1 FROM user_insights WHERE user_id = $1 AND status = 'pending')

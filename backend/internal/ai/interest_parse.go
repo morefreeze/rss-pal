@@ -14,18 +14,18 @@ const (
 	maxReasonRunes   = 200
 )
 
-type insightEnvelope struct {
+type interestEnvelope struct {
 	Markdown        string                          `json:"markdown"`
 	Recommendations []model.RecommendationDirection `json:"recommendations"`
 }
 
-// ParseInsightJSON extracts markdown + validated recommendations from raw AI
+// ParseInterestJSON extracts markdown + validated recommendations from raw AI
 // output. The candidate-id whitelist is enforced; entries failing any rule are
-// dropped (with a reason recorded) instead of failing the whole insight.
+// dropped (with a reason recorded) instead of failing the whole interest analysis.
 //
 // On total parse failure it returns the raw string as markdown so the user
 // still sees something readable; recs are nil; drop reasons explain why.
-func ParseInsightJSON(raw string, candidateIDs map[int]bool) (string, []model.RecommendationDirection, []string) {
+func ParseInterestJSON(raw string, candidateIDs map[int]bool) (string, []model.RecommendationDirection, []string) {
 	dropped := []string{}
 
 	body := stripCodeFence(strings.TrimSpace(raw))
@@ -35,7 +35,7 @@ func ParseInsightJSON(raw string, candidateIDs map[int]bool) (string, []model.Re
 		}
 	}
 
-	var env insightEnvelope
+	var env interestEnvelope
 	if err := json.Unmarshal([]byte(body), &env); err != nil {
 		dropped = append(dropped, fmt.Sprintf("json parse failed: %v", err))
 		return raw, nil, dropped

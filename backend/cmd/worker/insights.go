@@ -53,13 +53,13 @@ func nextDaily0400CST(now time.Time) time.Time {
 }
 
 type insightCronDeps struct {
-	userRepo         *repository.UserRepository
-	prefRepo         *repository.PreferenceRepository
-	articleRepo      *repository.ArticleRepository
-	userInsightsRepo *repository.UserInsightRepository
-	templateRepo     *repository.TemplateRepository
-	summarizer       *ai.Summarizer
-	defaultModel     string
+	userRepo          *repository.UserRepository
+	prefRepo          *repository.PreferenceRepository
+	articleRepo       *repository.ArticleRepository
+	userInterestsRepo *repository.UserInterestRepository
+	templateRepo      *repository.TemplateRepository
+	summarizer        *ai.Summarizer
+	defaultModel      string
 }
 
 func runDailyInsightJob(ctx context.Context, deps insightCronDeps) {
@@ -85,33 +85,33 @@ func generateDailyInsights(ctx context.Context, deps insightCronDeps) {
 			continue
 		}
 		titles, _ := deps.prefRepo.GetRecentReadTitles(u.ID, 20)
-		candidates, err := deps.articleRepo.GetInsightCandidates(u.ID, 40, 10)
+		candidates, err := deps.articleRepo.GetInterestCandidates(u.ID, 40, 10)
 		if err != nil {
-			log.Printf("daily cron: user %d GetInsightCandidates: %v", u.ID, err)
+			log.Printf("daily cron: user %d GetInterestCandidates: %v", u.ID, err)
 			candidates = nil
 		}
 
-		prompt := ai.BuildInsightPrompt(topics, tags, titles, candidates)
-		id, err := deps.userInsightsRepo.InsertPending(u.ID, "auto", deps.defaultModel)
+		prompt := ai.BuildInterestPrompt(topics, tags, titles, candidates)
+		id, err := deps.userInterestsRepo.InsertPending(u.ID, "auto", deps.defaultModel)
 		if err != nil {
 			log.Printf("daily cron: user %d InsertPending: %v", u.ID, err)
 			continue
 		}
-		raw, err := deps.summarizer.GenerateUserInsightJSON(ctx, prompt)
+		raw, err := deps.summarizer.GenerateUserInterestJSON(ctx, prompt)
 		if err != nil {
 			log.Printf("daily cron: user %d generate: %v", u.ID, err)
-			_ = deps.userInsightsRepo.MarkFailed(id, err.Error())
+			_ = deps.userInterestsRepo.MarkFailed(id, err.Error())
 			continue
 		}
 		idSet := make(map[int]bool, len(candidates))
 		for _, c := range candidates {
 			idSet[c.Article.ID] = true
 		}
-		markdown, recs, dropped := ai.ParseInsightJSON(raw, idSet)
+		markdown, recs, dropped := ai.ParseInterestJSON(raw, idSet)
 		if len(dropped) > 0 {
 			log.Printf("daily cron: user %d dropped %d entries: %v", u.ID, len(dropped), dropped)
 		}
-		if err := deps.userInsightsRepo.MarkDoneWithRecs(id, markdown, recs); err != nil {
+		if err := deps.userInterestsRepo.MarkDoneWithRecs(id, markdown, recs); err != nil {
 			log.Printf("daily cron: user %d MarkDoneWithRecs: %v", u.ID, err)
 			continue
 		}

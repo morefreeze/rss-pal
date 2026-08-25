@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestParseInsightJSON_HappyPath(t *testing.T) {
+func TestParseInterestJSON_HappyPath(t *testing.T) {
 	raw := `{
 		"markdown": "## 核心兴趣\n你喜欢分布式系统",
 		"recommendations": [
@@ -20,7 +20,7 @@ func TestParseInsightJSON_HappyPath(t *testing.T) {
 		]
 	}`
 	pool := map[int]bool{1: true, 2: true, 3: true}
-	md, recs, dropped := ParseInsightJSON(raw, pool)
+	md, recs, dropped := ParseInterestJSON(raw, pool)
 	if !strings.Contains(md, "核心兴趣") {
 		t.Errorf("markdown lost: %q", md)
 	}
@@ -35,9 +35,9 @@ func TestParseInsightJSON_HappyPath(t *testing.T) {
 	}
 }
 
-func TestParseInsightJSON_FenceWrapped(t *testing.T) {
+func TestParseInterestJSON_FenceWrapped(t *testing.T) {
 	raw := "```json\n{\"markdown\":\"hi\",\"recommendations\":[]}\n```"
-	md, recs, _ := ParseInsightJSON(raw, nil)
+	md, recs, _ := ParseInterestJSON(raw, nil)
 	if md != "hi" {
 		t.Errorf("markdown = %q", md)
 	}
@@ -46,7 +46,7 @@ func TestParseInsightJSON_FenceWrapped(t *testing.T) {
 	}
 }
 
-func TestParseInsightJSON_DropsInvalidIDsAndKinds(t *testing.T) {
+func TestParseInterestJSON_DropsInvalidIDsAndKinds(t *testing.T) {
 	raw := `{
 		"markdown": "ok",
 		"recommendations": [
@@ -66,7 +66,7 @@ func TestParseInsightJSON_DropsInvalidIDsAndKinds(t *testing.T) {
 		]
 	}`
 	pool := map[int]bool{1: true, 2: true}
-	md, recs, dropped := ParseInsightJSON(raw, pool)
+	md, recs, dropped := ParseInterestJSON(raw, pool)
 	if md != "ok" {
 		t.Errorf("md = %q", md)
 	}
@@ -81,8 +81,8 @@ func TestParseInsightJSON_DropsInvalidIDsAndKinds(t *testing.T) {
 	}
 }
 
-func TestParseInsightJSON_TotalGarbage(t *testing.T) {
-	md, recs, dropped := ParseInsightJSON("not json at all", map[int]bool{})
+func TestParseInterestJSON_TotalGarbage(t *testing.T) {
+	md, recs, dropped := ParseInterestJSON("not json at all", map[int]bool{})
 	if md != "not json at all" {
 		t.Errorf("md should fall back to raw: %q", md)
 	}
@@ -94,7 +94,7 @@ func TestParseInsightJSON_TotalGarbage(t *testing.T) {
 	}
 }
 
-func TestParseInsightJSON_CapsAt3DirectionsAnd5Articles(t *testing.T) {
+func TestParseInterestJSON_CapsAt3DirectionsAnd5Articles(t *testing.T) {
 	raw := `{
 		"markdown": "x",
 		"recommendations": [
@@ -105,7 +105,7 @@ func TestParseInsightJSON_CapsAt3DirectionsAnd5Articles(t *testing.T) {
 		]
 	}`
 	pool := map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true, 6: true}
-	_, recs, _ := ParseInsightJSON(raw, pool)
+	_, recs, _ := ParseInterestJSON(raw, pool)
 	if len(recs) != 3 {
 		t.Errorf("expected 3-direction cap, got %d", len(recs))
 	}
@@ -123,7 +123,7 @@ func TestParseInsightJSON_CapsAt3DirectionsAnd5Articles(t *testing.T) {
 			]}
 		]
 	}`
-	_, recs2, _ := ParseInsightJSON(raw2, pool)
+	_, recs2, _ := ParseInterestJSON(raw2, pool)
 	total := 0
 	for _, d := range recs2 {
 		total += len(d.Articles)
