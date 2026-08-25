@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const weeklyDigestMaxTokens = 4096
+
 // GenerateWeeklyIntro produces a Chinese 150-200 word intro that frames the
 // theme of the week given the titles + brief summaries of the top articles.
 // Returns "" + nil when articles is empty.
@@ -30,7 +32,7 @@ func (s *Summarizer) GenerateWeeklyIntro(ctx context.Context, articles []WeeklyD
 - 语气专业、克制，避免营销化措辞。
 - 直接输出导语正文，不要标题、不要 Markdown、不要分点列表。`
 
-	return s.call(ctx, prompt, 600)
+	return s.call(ctx, prompt, weeklyDigestMaxTokens)
 }
 
 // WeeklyDigestItem is the minimum payload the prompt needs.
