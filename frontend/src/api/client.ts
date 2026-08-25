@@ -357,7 +357,7 @@ export interface RecArticleMeta {
   is_read: boolean
 }
 
-export interface PersistedInsight {
+export interface PersistedInterest {
   id: number
   content: string
   status: 'pending' | 'done' | 'failed'
@@ -368,8 +368,8 @@ export interface PersistedInsight {
   recommendations?: RecommendationDirection[]
 }
 
-export interface InsightsLatest {
-  insight: PersistedInsight | null
+export interface InterestsLatest {
+  interest: PersistedInterest | null
   remaining_today: number
   remaining_month: number
   rec_articles?: Record<string, RecArticleMeta>
@@ -596,10 +596,10 @@ export const recordReadDuration = (articleId: number, durationSeconds: number) =
 export const getTopics = () =>
   api.get<InterestTopic[]>('/preferences/topics').then(res => res.data)
 
-export const getLatestInsights = () =>
-  api.get<InsightsLatest>('/insights/latest').then(res => res.data)
+export const getLatestInterests = () =>
+  api.get<InterestsLatest>('/interests/latest').then(res => res.data)
 
-export interface GenerateInsightsResp {
+export interface GenerateInterestsResp {
   status: 'pending' | 'no_data'
   id?: number
   message?: string
@@ -607,11 +607,11 @@ export interface GenerateInsightsResp {
   remaining_month: number
 }
 
-// generateInsights kicks off an async insight job. Returns immediately;
-// poll /insights/latest to observe transition from pending → done|failed.
+// generateInterests kicks off an async interest job. Returns immediately;
+// poll /interests/latest to observe transition from pending → done|failed.
 // Throws on HTTP error (e.g. 429 quota_exceeded, 409 already_pending).
-export const generateInsights = () =>
-  api.post<GenerateInsightsResp>('/insights/generate').then(res => res.data)
+export const generateInterests = () =>
+  api.post<GenerateInterestsResp>('/interests/generate').then(res => res.data)
 
 export const getTags = () =>
   api.get<InterestTag[]>('/preferences/tags').then(res => res.data)

@@ -91,7 +91,7 @@ func main() {
 	articleUserTagRepo := repository.NewArticleUserTagRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	templateRepo := repository.NewTemplateRepository(db)
-	userInsightsRepo := repository.NewUserInsightRepository(db)
+	userInterestsRepo := repository.NewUserInterestRepository(db)
 	dailyDigestRepo := repository.NewDailyDigestRepository(db)
 	weeklyDigestRepo := repository.NewWeeklyDigestRepository(db)
 	heartbeatRepo := repository.NewServiceHeartbeatRepository(db)
@@ -121,14 +121,14 @@ func main() {
 	}
 
 	if summarizer != nil {
-		stopCron := scheduleDailyInsightCron(insightCronDeps{
-			userRepo:         userRepo,
-			prefRepo:         prefRepo,
-			articleRepo:      articleRepo,
-			userInsightsRepo: userInsightsRepo,
-			templateRepo:     templateRepo,
-			summarizer:       summarizer,
-			defaultModel:     cfg.Claude.Model,
+		stopCron := scheduleDailyInterestCron(interestCronDeps{
+			userRepo:          userRepo,
+			prefRepo:          prefRepo,
+			articleRepo:       articleRepo,
+			userInterestsRepo: userInterestsRepo,
+			templateRepo:      templateRepo,
+			summarizer:        summarizer,
+			defaultModel:      cfg.Claude.Model,
 		})
 		defer stopCron()
 	}

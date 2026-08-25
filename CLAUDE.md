@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 RSS Pal is a personal RSS reader service with AI-powered summarization and personalized recommendations. The UI and AI prompts are in Chinese. It consists of a Go backend, a React/TypeScript frontend, and PostgreSQL, all orchestrated via Docker Compose with an RSSHub sidecar.
 
+## Delivery Workflow
+
+For implementation changes in this repository, once development and the relevant full verification are complete, merge the completed feature branch into `master`, push `master`, and deploy to Tencent production unless the user explicitly opts out. Do not stop at an integration-choice prompt.
+
+- A `master` push triggers `.github/workflows/deploy-tencent.yml`; wait for the workflow to finish and verify its exact head commit.
+- Treat `tencent-rss-pal:/opt/rss-pal` as the production runtime and connect directly from the local machine unless the user explicitly requests another path.
+- Verify the remote revision, running containers, local/public API health, and the public frontend bundle or affected UI as applicable before reporting completion.
+- Preserve unrelated working-tree files, including untracked backup artifacts.
+
 ## Common Commands
 
 ### Docker (recommended)
@@ -44,14 +53,14 @@ psql -U postgres -d rsspal -f backend/migrations/001_init.sql  # Manual initial 
 
 Two primary Go binaries share the `internal/` package:
 - **`cmd/server`** — Gin HTTP API serving `/api/*` routes. JWT-based auth (`golang-jwt/jwt/v4` with HS256, 7-day expiry). Middleware extracts user from JWT in `Authorization: Bearer` header.
-- **`cmd/worker`** — Background loop polling RSS feeds every 1 minute with concurrency limits (5 feeds, 3 content fetches, 2 AI summaries). Also runs: transcript backfill, summary backfill, article classification, link-set candidate detection, daily insight generation, and daily DB backups.
+- **`cmd/worker`** — Background loop polling RSS feeds every 1 minute with concurrency limits (5 feeds, 3 content fetches, 2 AI summaries). Also runs: transcript backfill, summary backfill, article classification, link-set candidate detection, daily interest generation, and daily DB backups.
 
 Additional binaries: `cmd/backfill_content`, `cmd/backfill_metrics`, `cmd/seed`.
 
 Backend follows a layered pattern: `api/` (HTTP handlers) → `service/` (business logic) → `repository/` (SQL via `database/sql` + `lib/pq`) → `model/`. There is no ORM; all SQL is handwritten with positional parameters (`$1`, `$2`, ...).
 
 ### Key backend packages
-- **`internal/ai`** — Calls OpenAI-compatible API (default: Claude Haiku via `CLAUDE_BASE_URL`). Generates brief/detailed summaries, extracts topics, produces insights, classifies articles into categories, and generates weekly digests. Prompts are in Chinese.
+- **`internal/ai`** — Calls OpenAI-compatible API (default: Claude Haiku via `CLAUDE_BASE_URL`). Generates brief/detailed summaries, extracts topics, produces interest analyses, classifies articles into categories, and generates weekly digests. Prompts are in Chinese.
 - **`internal/rss`** — `Fetcher` parses RSS/Atom via `gofeed` with HTTP cache headers (ETag/If-Modified-Since). `ContentFetcher` scrapes full article content from URLs using `goquery`. Also handles video/media detection, link-set extraction, and HTML feed scraping.
 - **`internal/transcript`** — Fetches video/audio transcripts from YouTube CC, Bilibili CC, and HTML page scraping. Returns combined text appended to article content.
 - **`internal/backup`** — Scheduled daily PostgreSQL backup (pg_dump) with retention and restore.

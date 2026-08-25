@@ -8,11 +8,10 @@ import RegisterPage from './pages/RegisterPage'
 import FeedListPage from './pages/FeedListPage'
 import ArticleListPage from './pages/ArticleListPage'
 import ArticlePage from './pages/ArticlePage'
-import InsightsPage from './pages/InsightsPage'
+import InterestsPage from './pages/InterestsPage'
 import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
 import SharePage from './pages/SharePage'
-import RecommendedPage from './pages/RecommendedPage'
 import WeeklyPage from './pages/WeeklyPage'
 import DailyPage from './pages/DailyPage'
 import BriefingRedirect from './components/BriefingRedirect'
@@ -22,7 +21,7 @@ import ExtensionConfigPage from './pages/ExtensionConfigPage'
 import Layout from './components/Layout'
 import RoutePageTitle from './components/RoutePageTitle'
 
-interface User {
+export interface User {
   id: number
   username: string
   is_admin: boolean
@@ -39,6 +38,45 @@ function RequireAuth({ user, onLogout }: { user: User | null; onLogout: () => vo
     return <Navigate to="/login" replace />
   }
   return <Layout user={user} onLogout={onLogout} />
+}
+
+export function AppRoutes({
+  user,
+  onLogin,
+  onLogout,
+}: {
+  user: User | null
+  onLogin: (user: User) => void
+  onLogout: () => void
+}) {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage onLogin={onLogin} />} />
+      <Route path="/register" element={<RegisterPage onLogin={onLogin} />} />
+      <Route path="/share/:token" element={<SharePage />} />
+      <Route path="/extension-config" element={<ExtensionConfigPage />} />
+      <Route element={<RequireAuth user={user} onLogout={onLogout} />}>
+        <Route index element={<Navigate to="/articles" replace />} />
+        <Route path="feeds" element={<FeedListPage />} />
+        <Route path="feeds/health" element={<FeedHealthPage />} />
+        <Route path="briefing" element={<BriefingRedirect />} />
+        <Route path="daily" element={<DailyPage />} />
+        <Route path="weekly" element={<WeeklyPage />} />
+        <Route path="articles" element={<ArticleListPage />} />
+        <Route path="articles/:id" element={<ArticlePage />} />
+        <Route path="clip" element={<ClipPage />} />
+        {/* Back-compat: bookmarks of the old /saved view land on /articles
+            with the 已保存 checkbox pre-ticked. ArticleListPage handles the
+            query param and strips it from the URL. */}
+        <Route path="saved" element={<Navigate to="/articles?saved=1" replace />} />
+        <Route path="interests" element={<InterestsPage />} />
+        <Route path="insights" element={<Navigate to="/interests" replace />} />
+        <Route path="stats" element={<StatsPage />} />
+        <Route path="settings" element={<SettingsPage user={user} />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/articles" replace />} />
+    </Routes>
+  )
 }
 
 function App() {
@@ -66,32 +104,7 @@ function App() {
   return (
     <BrowserRouter>
       <RoutePageTitle />
-      <Routes>
-        <Route path="/login" element={<LoginPage onLogin={setUser} />} />
-        <Route path="/register" element={<RegisterPage onLogin={setUser} />} />
-        <Route path="/share/:token" element={<SharePage />} />
-        <Route path="/extension-config" element={<ExtensionConfigPage />} />
-        <Route element={<RequireAuth user={user} onLogout={handleLogout} />}>
-          <Route index element={<Navigate to="/articles" replace />} />
-          <Route path="feeds" element={<FeedListPage />} />
-          <Route path="feeds/health" element={<FeedHealthPage />} />
-          <Route path="recommended" element={<RecommendedPage />} />
-          <Route path="briefing" element={<BriefingRedirect />} />
-          <Route path="daily" element={<DailyPage />} />
-          <Route path="weekly" element={<WeeklyPage />} />
-          <Route path="articles" element={<ArticleListPage />} />
-          <Route path="articles/:id" element={<ArticlePage />} />
-          <Route path="clip" element={<ClipPage />} />
-          {/* Back-compat: bookmarks of the old /saved view land on /articles
-              with the 已保存 checkbox pre-ticked. ArticleListPage handles the
-              query param and strips it from the URL. */}
-          <Route path="saved" element={<Navigate to="/articles?saved=1" replace />} />
-          <Route path="insights" element={<InsightsPage />} />
-          <Route path="stats" element={<StatsPage />} />
-          <Route path="settings" element={<SettingsPage user={user} />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/articles" replace />} />
-      </Routes>
+      <AppRoutes user={user} onLogin={setUser} onLogout={handleLogout} />
     </BrowserRouter>
   )
 }

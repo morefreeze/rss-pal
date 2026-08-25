@@ -110,7 +110,7 @@ type ReadingProgress struct {
 
 type AddFeedRequest struct {
 	URL         string `json:"url"`
-	FeedType    string `json:"feed_type"`    // "rss" or "html", defaults to "rss"
+	FeedType    string `json:"feed_type"` // "rss" or "html", defaults to "rss"
 	ExpandLinks bool   `json:"expand_links"`
 }
 
@@ -131,8 +131,8 @@ type InterestTag struct {
 	LastReinforcedAt time.Time `json:"last_reinforced_at" db:"last_reinforced_at"`
 }
 
-// UserInsight is one persisted AI-generated insight (auto or manual).
-type UserInsight struct {
+// UserInterest is one persisted AI-generated interest analysis (auto or manual).
+type UserInterest struct {
 	ID              int                       `json:"id" db:"id"`
 	UserID          int                       `json:"user_id" db:"user_id"`
 	Content         string                    `json:"content" db:"content"`
@@ -159,9 +159,9 @@ type RecommendationDirection struct {
 	Articles      []ArticleRecommendation `json:"articles"`
 }
 
-// InsightCandidate is one row from ArticleRepository.GetInsightCandidates,
+// InterestCandidate is one row from ArticleRepository.GetInterestCandidates,
 // shipped to the AI prompt as a candidate article it may select.
-type InsightCandidate struct {
+type InterestCandidate struct {
 	Article     Article
 	AlreadyRead bool   // true when from the past-favorites slice (read 30–180d ago, ever liked/saved)
 	BriefShort  string // first 60 runes of summary_brief, "" if none
