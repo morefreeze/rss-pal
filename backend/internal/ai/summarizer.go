@@ -859,7 +859,7 @@ func (s *Summarizer) Model() string {
 }
 
 func (s *Summarizer) GenerateInterests(ctx context.Context, topics []string, recentArticles string) (string, error) {
-	prompt := fmt.Sprintf(`基于用户的兴趣主题和最近的阅读行为，请进行兴趣分析：
+	prompt := fmt.Sprintf(`基于用户的兴趣主题和最近的阅读行为，请分析用户的兴趣趋势并提供洞察：
 
 用户兴趣主题（按权重排序）：
 %s

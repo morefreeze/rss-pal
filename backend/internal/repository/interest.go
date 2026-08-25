@@ -98,10 +98,10 @@ func (r *UserInterestRepository) GetLatest(userID int) (*model.UserInterest, err
 		ORDER BY generated_at DESC
 		LIMIT 1
 	`, userID)
-	var ui model.UserInterest
+	var interest model.UserInterest
 	var recsRaw sql.NullString
-	err := row.Scan(&ui.ID, &ui.UserID, &ui.Content, &ui.Status, &ui.ErrorMsg,
-		&ui.TriggeredBy, &ui.Model, &ui.GeneratedAt, &recsRaw)
+	err := row.Scan(&interest.ID, &interest.UserID, &interest.Content, &interest.Status, &interest.ErrorMsg,
+		&interest.TriggeredBy, &interest.Model, &interest.GeneratedAt, &recsRaw)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -109,11 +109,11 @@ func (r *UserInterestRepository) GetLatest(userID int) (*model.UserInterest, err
 		return nil, err
 	}
 	if recsRaw.Valid && recsRaw.String != "" && recsRaw.String != "null" {
-		if jerr := json.Unmarshal([]byte(recsRaw.String), &ui.Recommendations); jerr != nil {
-			ui.Recommendations = nil
+		if jerr := json.Unmarshal([]byte(recsRaw.String), &interest.Recommendations); jerr != nil {
+			interest.Recommendations = nil
 		}
 	}
-	return &ui, nil
+	return &interest, nil
 }
 
 // MarkDoneWithRecs upgrades a pending row to status='done' with both the
