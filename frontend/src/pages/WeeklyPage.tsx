@@ -7,6 +7,7 @@ import BriefingWCardStrip from '../components/BriefingWCardStrip'
 import SummaryMarkdown from '../components/SummaryMarkdown'
 import { writeNav } from '../utils/articleNav'
 import { toast } from '../utils/toast'
+import { weeklyEmptyStateMessage } from '../util/weeklyGenerationStatus'
 
 export default function WeeklyPage() {
   const [params] = useSearchParams()
@@ -61,6 +62,10 @@ export default function WeeklyPage() {
     </div>
   )
 
+  const emptyStateMessage = digest.articles.length === 0
+    ? weeklyEmptyStateMessage(digest)
+    : null
+
   return (
     <div>
       <BriefingTabs current="weekly" />
@@ -69,8 +74,8 @@ export default function WeeklyPage() {
         <h2 style={{ margin: 0 }}>本周精选 · {digest.week_start}</h2>
       </div>
 
-      {digest.pending && digest.articles.length === 0 ? (
-        <div className="card">周报生成中,稍后刷新…</div>
+      {emptyStateMessage ? (
+        <div className="card">{emptyStateMessage}</div>
       ) : (
         <>
           {digest.intro_text ? (
