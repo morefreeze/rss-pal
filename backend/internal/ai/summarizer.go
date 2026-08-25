@@ -853,7 +853,7 @@ func (s *Summarizer) callJSON(ctx context.Context, prompt string, maxTokens int)
 	return "", lastErr
 }
 
-// Model returns the configured model id (used by user_insights.model column).
+// Model returns the configured model id stored with generated interest analyses.
 func (s *Summarizer) Model() string {
 	return s.model
 }

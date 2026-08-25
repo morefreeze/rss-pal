@@ -34,7 +34,7 @@ func (r *UserInterestRepository) WithCtx(c ctxkey.CtxGetter) *UserInterestReposi
 
 // ErrPendingExists is returned by InsertPending when a pending row already
 // exists for the user (DB-enforced via unique partial index).
-var ErrPendingExists = errors.New("pending insight already exists for user")
+var ErrPendingExists = errors.New("pending interest analysis already exists for user")
 
 // InsertPending creates a new pending row and returns its id. Fails with
 // ErrPendingExists if the user already has a pending row.
@@ -70,7 +70,7 @@ func (r *UserInterestRepository) MarkDone(id int, content string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("no pending insight with id=%d", id)
+		return fmt.Errorf("no pending interest analysis with id=%d", id)
 	}
 	return nil
 }
@@ -138,7 +138,7 @@ func (r *UserInterestRepository) MarkDoneWithRecs(id int, content string, recs [
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("no pending insight with id=%d", id)
+		return fmt.Errorf("no pending interest analysis with id=%d", id)
 	}
 	return nil
 }

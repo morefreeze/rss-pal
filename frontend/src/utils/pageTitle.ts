@@ -18,7 +18,6 @@ const STATIC_ROUTE_TITLES: Record<string, string> = {
   '/weekly': '每周简报',
   '/clip': '网摘',
   '/interests': '兴趣',
-  '/insights': '兴趣',
   '/stats': '统计',
   '/settings': '设置',
 }
