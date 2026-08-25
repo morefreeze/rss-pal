@@ -2,11 +2,12 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticleListPage from '../src/pages/ArticleListPage'
-import type { ArticleListItem, Feed } from '../src/api/client'
+import type { Article, ArticleListItem, Feed } from '../src/api/client'
 
 const apiMocks = vi.hoisted(() => ({
   dislikeArticle: vi.fn(),
   getArticles: vi.fn(),
+  getDailyDigest: vi.fn(),
   getFeeds: vi.fn(),
   getGroupedArticles: vi.fn(),
   getRecommended: vi.fn(),
@@ -93,6 +94,23 @@ function makeArticles(startId: number): ArticleListItem[] {
   }))
 }
 
+function makeBriefingArticle(id: number, title: string, read = false): Article {
+  return {
+    id,
+    feed_id: 1,
+    feed_title: 'Briefing Feed',
+    title,
+    url: `https://example.com/${id}`,
+    content: '',
+    published_at: '2026-08-25T00:00:00Z',
+    summary_brief: '',
+    summary_detailed: '',
+    fetched_at: '2026-08-25T00:00:00Z',
+    is_read: read,
+    manual_tags: [],
+  }
+}
+
 function makeFeed(id: number, title: string, url: string, unreadCount = 0, feedType = 'rss'): Feed {
   return {
     id,
@@ -136,6 +154,14 @@ describe('ArticleListPage automatic pagination', () => {
     vi.clearAllMocks()
     breakpointMock.current = 'desktop'
     apiMocks.getFeeds.mockResolvedValue([])
+    apiMocks.getDailyDigest.mockResolvedValue({
+      requested_date: '2026-08-25',
+      shown_date: '2026-08-25',
+      pending: false,
+      intro_text: '',
+      articles: [],
+      mode: 'cached',
+    })
     apiMocks.getRecommended.mockResolvedValue([])
     vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
@@ -169,6 +195,68 @@ describe('ArticleListPage automatic pagination', () => {
     await Promise.resolve()
     await Promise.resolve()
   }
+
+  it('replaces recommendations with a collapsed daily briefing panel', async () => {
+    apiMocks.getArticles.mockResolvedValue([])
+    apiMocks.getDailyDigest.mockResolvedValue({
+      requested_date: '2026-08-25',
+      shown_date: '2026-08-25',
+      pending: false,
+      intro_text: '',
+      articles: [makeBriefingArticle(101, 'Daily briefing article')],
+      mode: 'cached',
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <ArticleListPage />
+      </MemoryRouter>,
+    )
+
+    const header = await screen.findByRole('button', { name: /简报/ })
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText('Daily briefing article')).toBeNull()
+    expect(screen.queryByText('为你推荐')).toBeNull()
+    expect(apiMocks.getRecommended).not.toHaveBeenCalled()
+
+    fireEvent.click(header)
+    expect(await screen.findByRole('link', { name: /Daily briefing article/ })).toBeTruthy()
+  })
+
+  it('shows the briefing articles current server and session read state', async () => {
+    sessionStorage.setItem('readArticles', JSON.stringify([103]))
+    apiMocks.getArticles.mockResolvedValue([])
+    apiMocks.getDailyDigest.mockResolvedValue({
+      requested_date: '2026-08-25',
+      shown_date: '2026-08-25',
+      pending: false,
+      intro_text: '',
+      articles: [
+        makeBriefingArticle(101, 'Unread briefing article', false),
+        makeBriefingArticle(102, 'Server-read briefing article', true),
+        makeBriefingArticle(103, 'Session-read briefing article', false),
+      ],
+      mode: 'cached',
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/articles']}>
+        <ArticleListPage />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /简报/ }))
+    const unread = await screen.findByRole('link', { name: /Unread briefing article/ })
+    const serverRead = screen.getByRole('link', { name: /Server-read briefing article/ })
+    const sessionRead = screen.getByRole('link', { name: /Session-read briefing article/ })
+
+    expect(unread.style.opacity).toBe('1')
+    expect(unread.querySelector('[aria-label="未读"]')).toBeTruthy()
+    expect(serverRead.style.opacity).toBe('0.6')
+    expect(serverRead.querySelector('[aria-label="未读"]')).toBeNull()
+    expect(sessionRead.style.opacity).toBe('0.6')
+    expect(sessionRead.querySelector('[aria-label="未读"]')).toBeNull()
+  })
 
   it('promotes an interacted article into the detail prefetch queue', async () => {
     apiMocks.getArticles.mockImplementation(({ offset }: { offset: number }) =>
