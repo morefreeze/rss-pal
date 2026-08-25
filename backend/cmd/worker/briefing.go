@@ -12,10 +12,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 )
 
-const (
-	briefingHourCST        = 5
-	weeklyCatchUpWeekCount = 2
-)
+const briefingHourCST = 5
 
 var briefingShanghai = time.FixedZone("Asia/Shanghai", 8*3600)
 
@@ -31,15 +28,6 @@ func nextBriefingFire(now time.Time) time.Time {
 
 func isMondayShanghai(t time.Time) bool {
 	return t.In(briefingShanghai).Weekday() == time.Monday
-}
-
-func recentCompletedWeekStarts(now time.Time, count int) []time.Time {
-	thisWeek := api.MondayLabel(now)
-	weeks := make([]time.Time, 0, count)
-	for k := 1; k <= count; k++ {
-		weeks = append(weeks, thisWeek.AddDate(0, 0, -7*k))
-	}
-	return weeks
 }
 
 type briefingDeps struct {
@@ -291,7 +279,7 @@ func runBriefingCatchUp(ctx context.Context, deps briefingDeps) {
 	for k := 1; k <= 3; k++ {
 		fireDailyForAllUsers(ctx, deps, today.AddDate(0, 0, -k))
 	}
-	for _, weekStart := range recentCompletedWeekStarts(now, weeklyCatchUpWeekCount) {
+	for _, weekStart := range api.RecentCompletedWeekStarts(now, api.WeeklyCatchUpWeekCount) {
 		fireWeeklyForAllUsers(ctx, deps, weekStart)
 	}
 }

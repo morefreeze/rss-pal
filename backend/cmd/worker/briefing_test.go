@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/bytedance/rss-pal/internal/api"
 )
 
 func sh(year int, month time.Month, day, hour, min int) time.Time {
@@ -62,7 +64,7 @@ func TestRecentCompletedWeekStarts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := recentCompletedWeekStarts(tt.now, 2)
+			got := api.RecentCompletedWeekStarts(tt.now, api.WeeklyCatchUpWeekCount)
 			if len(got) != len(want) {
 				t.Fatalf("len = %d, want %d", len(got), len(want))
 			}

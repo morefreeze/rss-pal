@@ -12,12 +12,13 @@ import (
 type WeeklyHandler struct {
 	articleRepo *repository.ArticleRepository
 	digestRepo  *repository.WeeklyDigestRepository
+	now         func() time.Time
 }
 
 // NewWeeklyHandler constructs a read-only weekly digest handler. The worker
 // is the sole writer of weekly_digests; the API never invokes the summarizer.
 func NewWeeklyHandler(articleRepo *repository.ArticleRepository, digestRepo *repository.WeeklyDigestRepository) *WeeklyHandler {
-	return &WeeklyHandler{articleRepo: articleRepo, digestRepo: digestRepo}
+	return &WeeklyHandler{articleRepo: articleRepo, digestRepo: digestRepo, now: time.Now}
 }
 
 var shanghai = time.FixedZone("Asia/Shanghai", 8*3600)
@@ -34,11 +35,12 @@ func startOfWeek(t time.Time) time.Time {
 
 func (h *WeeklyHandler) Get(c *gin.Context) {
 	userID := getUserID(c)
+	now := h.now()
 
 	// Default to last week (this Monday - 7 days) since the worker generates
 	// "last week" on the Monday 05:00 cron tick — the current week's digest
 	// doesn't exist yet. Symmetric with daily's "default to yesterday".
-	weekStart := startOfWeek(time.Now()).AddDate(0, 0, -7)
+	weekStart := startOfWeek(now).AddDate(0, 0, -7)
 	if w := c.Query("week"); w != "" {
 		parsed, err := time.ParseInLocation("2006-01-02", w, shanghai)
 		if err != nil {
@@ -55,12 +57,18 @@ func (h *WeeklyHandler) Get(c *gin.Context) {
 	}
 
 	if cached == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"week_start": weekStart.Format("2006-01-02"),
-			"intro_text": "",
-			"articles":   []model.Article{},
-			"pending":    true,
-		})
+		metadata := WeeklyGenerationMetadataAt(now, weekStart, false)
+		response := gin.H{
+			"week_start":        weekStart.Format("2006-01-02"),
+			"intro_text":        "",
+			"articles":          []model.Article{},
+			"pending":           metadata.Pending,
+			"generation_status": metadata.Status,
+		}
+		if metadata.EstimatedGenerationAt != nil {
+			response["estimated_generation_at"] = metadata.EstimatedGenerationAt.Format(time.RFC3339)
+		}
+		c.JSON(http.StatusOK, response)
 		return
 	}
 
@@ -77,9 +85,10 @@ func (h *WeeklyHandler) Get(c *gin.Context) {
 		articles = []model.Article{}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"week_start": weekStart.Format("2006-01-02"),
-		"intro_text": cached.IntroText,
-		"articles":   articles,
-		"pending":    false,
+		"week_start":        weekStart.Format("2006-01-02"),
+		"intro_text":        cached.IntroText,
+		"articles":          articles,
+		"pending":           false,
+		"generation_status": WeeklyGenerationReady,
 	})
 }
