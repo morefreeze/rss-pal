@@ -48,9 +48,9 @@ export default function RecommendationsCard({ recommendations, articles }: Props
                   onClick={() => {
                     try {
                       sessionStorage.removeItem('articleNavList')
-                      sessionStorage.setItem('articleEntryPath', '/insights')
+                      sessionStorage.setItem('articleEntryPath', '/interests')
                     } catch {}
-                    navigate(`/articles/${a.article_id}`, { state: { from: '/insights' } })
+                    navigate(`/articles/${a.article_id}`, { state: { from: '/interests' } })
                   }}
                   style={{
                     padding: 12,

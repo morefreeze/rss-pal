@@ -4,8 +4,7 @@ import { useNavigate } from 'react-router-dom'
 type SheetItem = { icon: string; label: string; to?: string; action?: 'logout' }
 
 const ITEMS: SheetItem[] = [
-  { icon: '✨', label: '推荐',     to: '/recommended' },
-  { icon: '💡', label: '洞察',     to: '/insights' },
+  { icon: '💡', label: '兴趣',     to: '/interests' },
   { icon: '📊', label: '统计',     to: '/stats' },
   { icon: '⚙️', label: '设置',     to: '/settings' },
   { icon: '🚪', label: '登出',     action: 'logout' },
