@@ -12,7 +12,10 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 )
 
-const briefingHourCST = 5
+const (
+	briefingHourCST        = 5
+	weeklyCatchUpWeekCount = 2
+)
 
 var briefingShanghai = time.FixedZone("Asia/Shanghai", 8*3600)
 
@@ -28,6 +31,15 @@ func nextBriefingFire(now time.Time) time.Time {
 
 func isMondayShanghai(t time.Time) bool {
 	return t.In(briefingShanghai).Weekday() == time.Monday
+}
+
+func recentCompletedWeekStarts(now time.Time, count int) []time.Time {
+	thisWeek := api.MondayLabel(now)
+	weeks := make([]time.Time, 0, count)
+	for k := 1; k <= count; k++ {
+		weeks = append(weeks, thisWeek.AddDate(0, 0, -7*k))
+	}
+	return weeks
 }
 
 type briefingDeps struct {
@@ -272,12 +284,14 @@ func generateOneWeekly(ctx context.Context, deps briefingDeps, userID int, weekS
 }
 
 // runBriefingCatchUp generates any missing dailies for the last 3 completed days
-// and the last completed weekly. Called once at worker startup.
+// and weeklies for the last 2 completed weeks. Called once at worker startup.
 func runBriefingCatchUp(ctx context.Context, deps briefingDeps) {
 	now := time.Now()
 	today := api.TodayLabel(now)
 	for k := 1; k <= 3; k++ {
 		fireDailyForAllUsers(ctx, deps, today.AddDate(0, 0, -k))
 	}
-	fireWeeklyForAllUsers(ctx, deps, api.MondayLabel(now).AddDate(0, 0, -7))
+	for _, weekStart := range recentCompletedWeekStarts(now, weeklyCatchUpWeekCount) {
+		fireWeeklyForAllUsers(ctx, deps, weekStart)
+	}
 }
