@@ -34,7 +34,10 @@ code, and preserve compatibility for existing interest URLs and API clients.
   - `GET /api/interests/latest`
   - `POST /api/interests/generate`
 - Keep `GET /api/insights/latest` and `POST /api/insights/generate` as temporary
-  compatibility aliases backed by the same interest handler methods.
+  compatibility aliases backed by the same internal interest implementation.
+  The canonical latest response uses the `interest` field; the legacy latest
+  response keeps the `insight` field so an already-open old frontend bundle
+  remains functional during deployment.
 - Rename the worker development hook from `INSIGHTS_RUN_NOW` to
   `INTERESTS_RUN_NOW`, while accepting the old variable as a temporary alias so
   existing operational commands do not silently stop working.
@@ -65,8 +68,9 @@ and `RecommendedPage` remain independent. Interest generation keeps its
 existing async lifecycle, quota handling, AI validation, and persistence
 semantics; only code-level names, routes, and user copy change.
 
-The canonical interest handlers own the implementation. Compatibility routes
-must call the same handler methods rather than duplicate business logic.
+The canonical interest handlers own the implementation. Canonical and legacy
+routes must call the same internal query/response builder rather than duplicate
+business logic; only the compatibility response field name may differ.
 
 ## Testing
 
