@@ -33,6 +33,21 @@ func startOfWeek(t time.Time) time.Time {
 	return time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, shanghai)
 }
 
+func weeklyMissingResponse(now, weekStart time.Time) gin.H {
+	metadata := WeeklyGenerationMetadataAt(now, weekStart, false)
+	response := gin.H{
+		"week_start":        weekStart.Format("2006-01-02"),
+		"intro_text":        "",
+		"articles":          []model.Article{},
+		"pending":           metadata.Pending,
+		"generation_status": metadata.Status,
+	}
+	if metadata.EstimatedGenerationAt != nil {
+		response["estimated_generation_at"] = metadata.EstimatedGenerationAt.Format(time.RFC3339)
+	}
+	return response
+}
+
 func (h *WeeklyHandler) Get(c *gin.Context) {
 	userID := getUserID(c)
 	now := h.now()
@@ -57,18 +72,7 @@ func (h *WeeklyHandler) Get(c *gin.Context) {
 	}
 
 	if cached == nil {
-		metadata := WeeklyGenerationMetadataAt(now, weekStart, false)
-		response := gin.H{
-			"week_start":        weekStart.Format("2006-01-02"),
-			"intro_text":        "",
-			"articles":          []model.Article{},
-			"pending":           metadata.Pending,
-			"generation_status": metadata.Status,
-		}
-		if metadata.EstimatedGenerationAt != nil {
-			response["estimated_generation_at"] = metadata.EstimatedGenerationAt.Format(time.RFC3339)
-		}
-		c.JSON(http.StatusOK, response)
+		c.JSON(http.StatusOK, weeklyMissingResponse(now, weekStart))
 		return
 	}
 
