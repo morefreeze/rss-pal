@@ -14,11 +14,11 @@ const STATIC_ROUTE_TITLES: Record<string, string> = {
   '/extension-config': '浏览器扩展配置',
   '/feeds': '订阅源',
   '/feeds/health': '订阅健康',
-  '/recommended': '推荐',
   '/daily': '每日简报',
   '/weekly': '每周简报',
   '/clip': '网摘',
-  '/insights': '洞察',
+  '/interests': '兴趣',
+  '/insights': '兴趣',
   '/stats': '统计',
   '/settings': '设置',
 }

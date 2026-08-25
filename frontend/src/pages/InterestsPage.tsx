@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import {
-  getTopics, getTags, getLatestInsights, generateInsights,
+  getTopics, getTags, getLatestInterests, generateInterests,
   deleteTopic, deleteInterestTag,
-  InterestTopic, InterestTag, PersistedInsight, RecArticleMeta,
+  InterestTopic, InterestTag, PersistedInterest, RecArticleMeta,
 } from '../api/client'
 import RecommendationsCard from '../components/RecommendationsCard'
 
@@ -12,12 +12,12 @@ type Phase = 'loading' | 'empty' | 'has'
 
 const POLL_MS = 2000
 
-export default function InsightsPage() {
+export default function InterestsPage() {
   const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('loading')
   const [topics, setTopics] = useState<InterestTopic[]>([])
   const [tags, setTags] = useState<InterestTag[]>([])
-  const [insight, setInsight] = useState<PersistedInsight | null>(null)
+  const [interest, setInterest] = useState<PersistedInterest | null>(null)
   const [recArticles, setRecArticles] = useState<Record<string, RecArticleMeta>>({})
   const [remainingToday, setRemainingToday] = useState(3)
   const [remainingMonth, setRemainingMonth] = useState(100)
@@ -26,30 +26,30 @@ export default function InsightsPage() {
   const pollRef = useRef<number | null>(null)
 
   const refresh = async () => {
-    const latest = await getLatestInsights().catch(() => null)
+    const latest = await getLatestInterests().catch(() => null)
     if (!latest) return null
     setRemainingToday(latest.remaining_today)
     setRemainingMonth(latest.remaining_month)
-    setInsight(latest.insight)
+    setInterest(latest.interest)
     setRecArticles(latest.rec_articles || {})
-    return latest.insight
+    return latest.interest
   }
 
   useEffect(() => {
     Promise.all([
       getTopics().then(d => d || []).catch(() => []),
       getTags().then(d => d || []).catch(() => []),
-      getLatestInsights().catch(() => null),
+      getLatestInterests().catch(() => null),
     ]).then(([t, g, latest]) => {
       setTopics(t)
       setTags(g)
       if (latest) {
         setRemainingToday(latest.remaining_today)
         setRemainingMonth(latest.remaining_month)
-        setInsight(latest.insight)
+        setInterest(latest.interest)
         setRecArticles(latest.rec_articles || {})
       }
-      const empty = t.length === 0 && g.length === 0 && (!latest || !latest.insight)
+      const empty = t.length === 0 && g.length === 0 && (!latest || !latest.interest)
       setPhase(empty ? 'empty' : 'has')
     })
     return () => { if (pollRef.current) window.clearInterval(pollRef.current) }
@@ -57,21 +57,21 @@ export default function InsightsPage() {
 
   // Auto-poll while a pending row exists.
   useEffect(() => {
-    if (insight?.status !== 'pending') {
+    if (interest?.status !== 'pending') {
       if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null }
       return
     }
     if (pollRef.current) return
     pollRef.current = window.setInterval(refresh, POLL_MS)
     return () => { if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null } }
-  }, [insight?.status])
+  }, [interest?.status])
 
   const handleGenerate = async () => {
-    if (busy || remainingToday <= 0 || insight?.status === 'pending') return
+    if (busy || remainingToday <= 0 || interest?.status === 'pending') return
     setBusy(true)
     setErrorMsg(null)
     try {
-      const resp = await generateInsights()
+      const resp = await generateInterests()
       if (resp.status === 'no_data') {
         setErrorMsg(resp.message || '暂无足够数据')
         return
@@ -104,17 +104,17 @@ export default function InsightsPage() {
   if (phase === 'loading') return <div className="card">Loading...</div>
   if (phase === 'empty') return <EmptyState onGo={() => navigate('/articles')} />
 
-  const isPending = insight?.status === 'pending'
+  const isPending = interest?.status === 'pending'
   const buttonLabel = busy ? '提交中…' :
                       isPending ? '生成中…' :
                       remainingToday <= 0 ? '今日已达上限' :
                       `重新生成 (今日 ${remainingToday}/3)`
   const buttonDisabled = busy || isPending || remainingToday <= 0
-  const subtitle = insight && insight.status === 'done' ? formatSubtitle(insight) : ''
+  const subtitle = interest && interest.status === 'done' ? formatSubtitle(interest) : ''
 
   return (
     <div>
-      <h2 className="mb-2">兴趣洞察</h2>
+      <h2 className="mb-2">兴趣</h2>
 
       <Cloud
         title="兴趣主题"
@@ -134,7 +134,7 @@ export default function InsightsPage() {
 
       <div className="card">
         <div className="flex-between mb-2">
-          <h3>AI 个性化洞察</h3>
+          <h3>AI 个性化兴趣分析</h3>
           <button
             onClick={handleGenerate}
             disabled={buttonDisabled}
@@ -151,22 +151,22 @@ export default function InsightsPage() {
           <div className="text-muted text-sm" style={{ padding: '12px 0' }}>
             🌀 正在生成中，需要 30 秒到 1 分钟，稍后回来查看（页面会自动刷新）
           </div>
-        ) : insight?.status === 'failed' ? (
+        ) : interest?.status === 'failed' ? (
           <div className="text-sm" style={{ color: '#c0392b' }}>
-            上次生成失败：{insight.error_msg || '未知错误'}（不消耗配额，可重试）
+            上次生成失败：{interest.error_msg || '未知错误'}（不消耗配额，可重试）
           </div>
-        ) : insight?.status === 'done' && insight.content ? (
+        ) : interest?.status === 'done' && interest.content ? (
           <div className="markdown-body">
-            <ReactMarkdown>{insight.content}</ReactMarkdown>
+            <ReactMarkdown>{interest.content}</ReactMarkdown>
           </div>
         ) : (
-          <div className="text-muted text-sm">点击右上角生成洞察</div>
+          <div className="text-muted text-sm">点击右上角生成兴趣分析</div>
         )}
       </div>
 
-      {insight?.status === 'done' && insight.recommendations && (
+      {interest?.status === 'done' && interest.recommendations && (
         <RecommendationsCard
-          recommendations={insight.recommendations}
+          recommendations={interest.recommendations}
           articles={recArticles}
         />
       )}
@@ -184,9 +184,9 @@ export default function InsightsPage() {
   )
 }
 
-function formatSubtitle(ins: PersistedInsight): string {
-  const ago = formatAgo(ins.generated_at)
-  return ins.triggered_by === 'auto'
+function formatSubtitle(interest: PersistedInterest): string {
+  const ago = formatAgo(interest.generated_at)
+  return interest.triggered_by === 'auto'
     ? `${ago} · 由系统自动生成`
     : `${ago} · 你触发的`
 }
@@ -204,8 +204,8 @@ function formatAgo(iso: string): string {
 function EmptyState({ onGo }: { onGo: () => void }) {
   return (
     <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-      <h3>💡 还没有足够数据生成洞察</h3>
-      <p className="text-muted">洞察基于你对文章的反应生成。试着：</p>
+      <h3>💡 还没有足够数据形成兴趣画像</h3>
+      <p className="text-muted">兴趣画像基于你对文章的反应形成。试着：</p>
       <ul style={{ display: 'inline-block', textAlign: 'left', lineHeight: 2 }}>
         <li>多阅读一会文章</li>
         <li>给文章点个 ❤️</li>
