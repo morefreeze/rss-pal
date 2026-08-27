@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useEffect, useId, useMemo, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components, ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { parseArticleAnchor } from '../util/articleAnchors'
+import { clearArticleAnchorRoundTrip, startArticleAnchorRoundTrip } from '../util/articleAnchorRoundTrip'
 
 type Props = {
   source: string
@@ -56,6 +57,17 @@ type SummaryLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraPro
 
 function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest }: SummaryLinkProps) {
   const targetID = parseArticleAnchor(href)
+  const reactID = useId().replace(/:/g, '')
+  const sourceID = targetID ? `summary-article-source-${reactID}` : undefined
+  const sourceRef = useRef<HTMLAnchorElement>(null)
+
+  useEffect(() => {
+    const source = sourceRef.current
+    return () => {
+      if (source) clearArticleAnchorRoundTrip(source)
+    }
+  }, [])
+
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     onClick?.(event)
     if (event.defaultPrevented) return
@@ -70,6 +82,7 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
     target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' })
     restartArticleHighlight(target)
+    if (sourceRef.current) startArticleAnchorRoundTrip(sourceRef.current, target)
 
     if (event.detail !== 0) return
     const needsTemporaryTabIndex = !isNativelyFocusable(target)
@@ -86,9 +99,18 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
   const className = [rest.className, targetID ? 'summary-article-link' : ''].filter(Boolean).join(' ') || undefined
 
   return (
-    <a href={href} onClick={handleClick} onAuxClick={handleAuxClick} {...rest} className={className}>
-      {targetID ? ARTICLE_LINK_LABEL : children}
-      {targetID && <span className="summary-article-link-icon" aria-hidden="true">⌖</span>}
+    <a
+      ref={sourceRef}
+      id={sourceID}
+      href={href}
+      onClick={handleClick}
+      onAuxClick={handleAuxClick}
+      {...rest}
+      className={className}
+      aria-label={targetID ? ARTICLE_LINK_LABEL : rest['aria-label']}
+      title={targetID ? ARTICLE_LINK_LABEL : rest.title}
+    >
+      {targetID ? <span className="summary-article-link-icon" aria-hidden="true">⌖</span> : children}
     </a>
   )
 }
