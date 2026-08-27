@@ -60,8 +60,9 @@ describe('article anchor round trip', () => {
     const source = addAnchor('summary-article-source-1')
     const target = addTarget()
     const historyLength = history.length
+    const onReturn = vi.fn()
 
-    startArticleAnchorRoundTrip(source, target)
+    startArticleAnchorRoundTrip(source, target, { onReturn })
 
     const back = document.querySelector<HTMLAnchorElement>('.article-anchor-return-link')
     expect(back?.textContent).toBe('↩⌖')
@@ -74,6 +75,7 @@ describe('article anchor round trip', () => {
     fireEvent.click(back!, { detail: 1 })
 
     expect(source.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
+    expect(onReturn).toHaveBeenCalledTimes(1)
     expect(document.querySelector('.article-anchor-return-link')).toBeNull()
     expect(location.hash).toBe('')
     expect(history.length).toBe(historyLength)
@@ -184,12 +186,14 @@ describe('article anchor round trip', () => {
   it('cleans up safely when the recorded source is detached', () => {
     const source = addAnchor('summary-article-source-1')
     const target = addTarget()
-    startArticleAnchorRoundTrip(source, target)
+    const onReturn = vi.fn()
+    startArticleAnchorRoundTrip(source, target, { onReturn })
     source.remove()
 
     fireEvent.click(document.querySelector('.article-anchor-return-link')!, { detail: 1 })
 
     expect(source.scrollIntoView).not.toHaveBeenCalled()
+    expect(onReturn).not.toHaveBeenCalled()
     expect(document.querySelector('.article-anchor-return-link')).toBeNull()
     expect(location.hash).toBe('')
   })
