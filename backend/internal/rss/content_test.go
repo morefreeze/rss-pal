@@ -1,6 +1,12 @@
 package rss
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -451,6 +457,209 @@ func TestFetchContentFromReader_PromotesLazyImage(t *testing.T) {
 	if !strings.Contains(got, "mmbiz.qpic.cn/foo.png") {
 		t.Errorf("expected lazy-loaded img URL preserved, got:\n%s", got)
 	}
+}
+
+func TestContentFetcherDirectBypassesReader(t *testing.T) {
+	readerCalls := 0
+	readerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		readerCalls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer readerServer.Close()
+	directServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `<html><head><title>Direct title</title></head><body><article><p>`+strings.Repeat("useful direct content ", 30)+`</p></article></body></html>`)
+	}))
+	defer directServer.Close()
+
+	client := &http.Client{}
+	fetcher := &ContentFetcher{
+		client:      client,
+		jinaBaseURL: "http://jina.invalid/",
+		reader:      newZAIReader("reader-key", readerServer.URL, client),
+	}
+	result, err := fetcher.FetchContentWithMetadata(context.Background(), directServer.URL)
+	if err != nil {
+		t.Fatalf("FetchContentWithMetadata: %v", err)
+	}
+	if len(result.Content) < jinaFallbackMinChars || result.Title != "Direct title" {
+		t.Fatalf("result = %#v", result)
+	}
+	if readerCalls != 0 {
+		t.Fatalf("Reader calls = %d, want 0", readerCalls)
+	}
+}
+
+func TestContentFetcherReaderFallbackUsesRequestedCacheMode(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		fresh       bool
+		wantNoCache bool
+	}{
+		{name: "automatic uses cache", fresh: false, wantNoCache: false},
+		{name: "manual is fresh", fresh: true, wantNoCache: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotNoCache bool
+			readerServer := newContentReaderServer(t, func(arguments map[string]any) map[string]any {
+				gotNoCache, _ = arguments["no_cache"].(bool)
+				return toolResult(false, `{"title":"Reader title","content":"# Reader content\n\nRecovered body."}`)
+			})
+			defer readerServer.Close()
+			directServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, `<html><head><title>Direct title</title></head><body><article>short</article></body></html>`)
+			}))
+			defer directServer.Close()
+
+			client := &http.Client{}
+			fetcher := &ContentFetcher{
+				client:      client,
+				jinaBaseURL: "http://jina.invalid/",
+				reader:      newZAIReader("reader-key", readerServer.URL, client),
+			}
+			if tt.fresh {
+				content, err := fetcher.FetchContentFresh(context.Background(), directServer.URL)
+				if err != nil {
+					t.Fatalf("FetchContentFresh: %v", err)
+				}
+				if content != "# Reader content\n\nRecovered body." {
+					t.Fatalf("fresh content = %q", content)
+				}
+			} else {
+				result, err := fetcher.FetchContentWithMetadata(context.Background(), directServer.URL)
+				if err != nil {
+					t.Fatalf("FetchContentWithMetadata: %v", err)
+				}
+				if result.Content != "# Reader content\n\nRecovered body." || result.Title != "Reader title" {
+					t.Fatalf("result = %#v", result)
+				}
+			}
+			if gotNoCache != tt.wantNoCache {
+				t.Fatalf("no_cache = %t, want %t", gotNoCache, tt.wantNoCache)
+			}
+		})
+	}
+}
+
+func TestContentFetcherReaderFailureFallsBackToJina(t *testing.T) {
+	readerServer := newContentReaderServer(t, func(map[string]any) map[string]any {
+		return map[string]any{
+			"jsonrpc": "2.0",
+			"id":      2,
+			"error":   map[string]any{"code": -32000, "message": "reader unavailable"},
+		}
+	})
+	defer readerServer.Close()
+	directServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer directServer.Close()
+	jinaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "# Jina fallback\n\nRecovered after Reader failure.")
+	}))
+	defer jinaServer.Close()
+
+	client := &http.Client{}
+	fetcher := &ContentFetcher{
+		client:      client,
+		jinaBaseURL: jinaServer.URL + "/",
+		reader:      newZAIReader("reader-key", readerServer.URL, client),
+	}
+	content, err := fetcher.FetchContent(context.Background(), directServer.URL)
+	if err != nil {
+		t.Fatalf("FetchContent: %v", err)
+	}
+	if content != "# Jina fallback\n\nRecovered after Reader failure." {
+		t.Fatalf("content = %q", content)
+	}
+}
+
+func TestContentFetcherEmptyReaderKeySkipsMCP(t *testing.T) {
+	readerCalls := 0
+	readerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		readerCalls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer readerServer.Close()
+	directServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer directServer.Close()
+	jinaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "Jina without Reader configuration")
+	}))
+	defer jinaServer.Close()
+
+	client := &http.Client{}
+	fetcher := &ContentFetcher{
+		client:      client,
+		jinaBaseURL: jinaServer.URL + "/",
+		reader:      newZAIReader("", readerServer.URL, client),
+	}
+	content, err := fetcher.FetchContent(context.Background(), directServer.URL)
+	if err != nil {
+		t.Fatalf("FetchContent: %v", err)
+	}
+	if content != "Jina without Reader configuration" {
+		t.Fatalf("content = %q", content)
+	}
+	if readerCalls != 0 {
+		t.Fatalf("Reader calls = %d, want 0", readerCalls)
+	}
+}
+
+func TestContentFetcherFallbackPreservesOriginalTransportError(t *testing.T) {
+	directErr := errors.New("direct transport failed")
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "source.invalid":
+			return nil, directErr
+		case "reader.invalid":
+			return nil, errors.New("reader transport failed")
+		case "jina.invalid":
+			return nil, errors.New("jina transport failed")
+		default:
+			return nil, errors.New("unexpected host")
+		}
+	})}
+	fetcher := &ContentFetcher{
+		client:      client,
+		jinaBaseURL: "https://jina.invalid/",
+		reader:      newZAIReader("reader-key", "https://reader.invalid/mcp", client),
+	}
+	_, err := fetcher.FetchContent(context.Background(), "https://source.invalid/article")
+	if !errors.Is(err, directErr) {
+		t.Fatalf("error = %v, want original direct error", err)
+	}
+}
+
+func newContentReaderServer(t *testing.T, tool func(map[string]any) map[string]any) *httptest.Server {
+	t.Helper()
+	requestNumber := 0
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNumber++
+		switch requestNumber {
+		case 1:
+			w.Header().Set("Mcp-Session-Id", "content-reader-session")
+			writeSSE(t, w, map[string]any{"jsonrpc": "2.0", "id": 1, "result": map[string]any{}})
+		case 2:
+			w.WriteHeader(http.StatusAccepted)
+		case 3:
+			var request struct {
+				Params struct {
+					Arguments map[string]any `json:"arguments"`
+				} `json:"params"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode tool call: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			writeSSE(t, w, tool(request.Params.Arguments))
+		default:
+			t.Errorf("unexpected Reader request %d", requestNumber)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
 }
 
 func TestIsAvatarImg(t *testing.T) {
