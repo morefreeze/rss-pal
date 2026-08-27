@@ -215,6 +215,34 @@ func TestZAIReaderHonorsContextTimeout(t *testing.T) {
 	}
 }
 
+func TestZAIReaderAcceptsStringWrappedReaderResult(t *testing.T) {
+	readerResult, err := json.Marshal(map[string]any{
+		"title":   "Wrapped title",
+		"content": "# Wrapped Reader content",
+	})
+	if err != nil {
+		t.Fatalf("marshal Reader result: %v", err)
+	}
+	wrappedResult, err := json.Marshal(string(readerResult))
+	if err != nil {
+		t.Fatalf("wrap Reader result: %v", err)
+	}
+
+	server := httptest.NewServer(sessionHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeSSE(t, w, toolResult(false, string(wrappedResult)))
+	}))
+	defer server.Close()
+
+	reader := newZAIReader("reader-test-key", server.URL, server.Client())
+	result, err := reader.fetch(context.Background(), "https://example.com", false)
+	if err != nil {
+		t.Fatalf("fetch string-wrapped result: %v", err)
+	}
+	if result.Title != "Wrapped title" || result.Content != "# Wrapped Reader content" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func sessionHandler(t *testing.T, tool http.HandlerFunc) http.HandlerFunc {
 	t.Helper()
 	var requestNumber int
