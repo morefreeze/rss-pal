@@ -82,7 +82,12 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
     target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' })
     restartArticleHighlight(target)
-    if (sourceRef.current) startArticleAnchorRoundTrip(sourceRef.current, target)
+    const source = sourceRef.current
+    if (source) {
+      startArticleAnchorRoundTrip(source, target, {
+        onReturn: () => restartArticleHighlight(source),
+      })
+    }
 
     if (event.detail !== 0) return
     const needsTemporaryTabIndex = !isNativelyFocusable(target)
@@ -110,7 +115,12 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
       aria-label={targetID ? ARTICLE_LINK_LABEL : rest['aria-label']}
       title={targetID ? ARTICLE_LINK_LABEL : rest.title}
     >
-      {targetID ? <span className="summary-article-link-icon" aria-hidden="true">⌖</span> : children}
+      {targetID ? (
+        <>
+          <span className="summary-article-link-label">跳转原文</span>
+          <span className="summary-article-link-icon" aria-hidden="true">⌖</span>
+        </>
+      ) : children}
     </a>
   )
 }
