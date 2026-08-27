@@ -8,6 +8,10 @@ type ActiveRoundTrip = {
   cleanup: () => void
 }
 
+type ArticleAnchorRoundTripOptions = {
+  onReturn?: () => void
+}
+
 let activeRoundTrip: ActiveRoundTrip | null = null
 
 function prefersReducedMotion(): boolean {
@@ -39,6 +43,7 @@ export function clearArticleAnchorRoundTrip(source?: HTMLAnchorElement): void {
 export function startArticleAnchorRoundTrip(
   source: HTMLAnchorElement,
   target: HTMLElement,
+  options: ArticleAnchorRoundTripOptions = {},
 ): void {
   clearArticleAnchorRoundTrip()
 
@@ -98,6 +103,7 @@ export function startArticleAnchorRoundTrip(
         block: 'center',
       })
       if (event.detail === 0) source.focus({ preventScroll: true })
+      options.onReturn?.()
     }
     clearArticleAnchorRoundTrip(source)
   }
