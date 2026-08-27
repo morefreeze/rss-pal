@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SummaryMarkdown from './SummaryMarkdown'
+import { clearArticleAnchorRoundTrip } from '../util/articleAnchorRoundTrip'
 
 const HIGHLIGHT_TIMEOUT_MS = 7_100
 
@@ -46,6 +47,7 @@ describe('SummaryMarkdown article links', () => {
   })
 
   afterEach(() => {
+    clearArticleAnchorRoundTrip()
     vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -53,13 +55,16 @@ describe('SummaryMarkdown article links', () => {
   })
 
   it.each(['查看原文', '跳转原文', '任意文案'])(
-    'normalizes the stored label %s and decorates the article link once',
+    'renders the stored article reference %s as one icon-only semantic anchor',
     (storedLabel) => {
       render(<SummaryMarkdown source={`[${storedLabel}](#article-section-001)`} />)
 
       const articleLink = screen.getByRole('link', { name: '跳转原文' })
       const articleIcons = articleLink.querySelectorAll('.summary-article-link-icon')
-      expect(articleLink.textContent).toBe('跳转原文⌖')
+      expect(articleLink.textContent).toBe('⌖')
+      expect(articleLink.id).toMatch(/^summary-article-source-/)
+      expect(articleLink.getAttribute('href')).toBe('#article-section-001')
+      expect(articleLink.getAttribute('title')).toBe('跳转原文')
       expect(articleLink.classList.contains('summary-article-link')).toBe(true)
       expect(articleIcons).toHaveLength(1)
       expect(articleIcons[0].getAttribute('aria-hidden')).toBe('true')
@@ -92,11 +97,62 @@ describe('SummaryMarkdown article links', () => {
     expect(target.classList.contains('article-anchor-highlight')).toBe(false)
   })
 
+  it('creates a semantic return anchor and completes the round trip without changing history', () => {
+    history.replaceState(null, '', '/articles/1')
+    const target = addArticleTarget()
+    const historyLength = history.length
+    render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
+    const source = screen.getByRole('link', { name: '跳转原文' })
+
+    fireEvent.click(source, { detail: 1 })
+
+    const back = screen.getByRole('link', { name: '跳回 AI 总结' })
+    expect(back.textContent).toBe('↩⌖')
+    expect(back.getAttribute('href')).toBe(`#${source.id}`)
+    expect(location.hash).toBe('')
+    expect(history.length).toBe(historyLength)
+    expect(scrollIntoView).toHaveBeenNthCalledWith(1, { behavior: 'smooth', block: 'center' })
+
+    fireEvent.click(back, { detail: 1 })
+
+    expect(scrollIntoView).toHaveBeenNthCalledWith(2, { behavior: 'smooth', block: 'center' })
+    expect(document.querySelector('.article-anchor-return-link')).toBeNull()
+    expect(target.classList.contains('article-anchor-highlight')).toBe(true)
+    expect(location.hash).toBe('')
+    expect(history.length).toBe(historyLength)
+  })
+
+  it('moves the single return anchor to the latest summary source', () => {
+    addArticleTarget('article-section-001')
+    addArticleTarget('article-section-002')
+    render(<SummaryMarkdown source={'[First](#article-section-001)\n\n[Second](#article-section-002)'} />)
+    const [first, second] = screen.getAllByRole('link', { name: '跳转原文' })
+
+    fireEvent.click(first, { detail: 1 })
+    fireEvent.click(second, { detail: 1 })
+
+    expect(document.querySelectorAll('.article-anchor-return-link')).toHaveLength(1)
+    expect(screen.getByRole('link', { name: '跳回 AI 总结' }).getAttribute('href'))
+      .toBe(`#${second.id}`)
+  })
+
+  it('removes the return anchor when its summary source unmounts', () => {
+    addArticleTarget()
+    const view = render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
+    fireEvent.click(screen.getByRole('link', { name: '跳转原文' }), { detail: 1 })
+    expect(screen.getByRole('link', { name: '跳回 AI 总结' })).toBeTruthy()
+
+    view.unmount()
+
+    expect(document.querySelector('.article-anchor-return-link')).toBeNull()
+  })
+
   it('safely consumes a valid href whose body target is absent', () => {
     render(<SummaryMarkdown source="[Missing](#article-section-001)" />)
 
     expect(fireEvent.click(screen.getByRole('link', { name: '跳转原文' }), { detail: 1 })).toBe(false)
     expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(document.querySelector('.article-anchor-return-link')).toBeNull()
   })
 
   it.each([
