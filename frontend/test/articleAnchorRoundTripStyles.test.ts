@@ -9,4 +9,12 @@ describe('article anchor round-trip styles', () => {
 
     expect(rule).not.toMatch(/transform\s*:/)
   })
+
+  it('sizes the summary article link around its label and icon', () => {
+    const css = readFileSync(resolve('src/index.css'), 'utf8')
+    const rule = css.match(/\.summary-article-link\s*\{[^}]+\}/)?.[0] ?? ''
+
+    expect(rule).toMatch(/display:\s*inline-flex/)
+    expect(rule).not.toMatch(/(?:^|[;{])\s*width\s*:/)
+  })
 })

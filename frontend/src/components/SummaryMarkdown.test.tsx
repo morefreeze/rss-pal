@@ -55,17 +55,20 @@ describe('SummaryMarkdown article links', () => {
   })
 
   it.each(['查看原文', '跳转原文', '任意文案'])(
-    'renders the stored article reference %s as one icon-only semantic anchor',
+    'renders the stored article reference %s as the normalized label and icon',
     (storedLabel) => {
       render(<SummaryMarkdown source={`[${storedLabel}](#article-section-001)`} />)
 
       const articleLink = screen.getByRole('link', { name: '跳转原文' })
+      const articleLabels = articleLink.querySelectorAll('.summary-article-link-label')
       const articleIcons = articleLink.querySelectorAll('.summary-article-link-icon')
-      expect(articleLink.textContent).toBe('⌖')
+      expect(articleLink.textContent).toBe('跳转原文⌖')
       expect(articleLink.id).toMatch(/^summary-article-source-/)
       expect(articleLink.getAttribute('href')).toBe('#article-section-001')
       expect(articleLink.getAttribute('title')).toBe('跳转原文')
       expect(articleLink.classList.contains('summary-article-link')).toBe(true)
+      expect(articleLabels).toHaveLength(1)
+      expect(articleLabels[0].textContent).toBe('跳转原文')
       expect(articleIcons).toHaveLength(1)
       expect(articleIcons[0].getAttribute('aria-hidden')).toBe('true')
     },
@@ -98,6 +101,7 @@ describe('SummaryMarkdown article links', () => {
   })
 
   it('creates a semantic return anchor and completes the round trip without changing history', () => {
+    vi.useFakeTimers()
     history.replaceState(null, '', '/articles/1')
     const target = addArticleTarget()
     const historyLength = history.length
@@ -118,6 +122,11 @@ describe('SummaryMarkdown article links', () => {
     expect(scrollIntoView).toHaveBeenNthCalledWith(2, { behavior: 'smooth', block: 'center' })
     expect(document.querySelector('.article-anchor-return-link')).toBeNull()
     expect(target.classList.contains('article-anchor-highlight')).toBe(true)
+    expect(source.classList.contains('article-anchor-highlight')).toBe(true)
+    act(() => vi.advanceTimersByTime(6_999))
+    expect(source.classList.contains('article-anchor-highlight')).toBe(true)
+    act(() => vi.advanceTimersByTime(101))
+    expect(source.classList.contains('article-anchor-highlight')).toBe(false)
     expect(location.hash).toBe('')
     expect(history.length).toBe(historyLength)
   })
