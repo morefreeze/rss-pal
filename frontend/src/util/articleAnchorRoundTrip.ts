@@ -28,7 +28,7 @@ function finalContentRect(target: HTMLElement): DOMRect | null {
   range.selectNodeContents(target)
   if (typeof range.getClientRects !== 'function') return null
   const rects = Array.from(range.getClientRects()).filter(rect => rect.width > 0 || rect.height > 0)
-  return rects.at(-1) ?? null
+  return rects[rects.length - 1] ?? null
 }
 
 export function clearArticleAnchorRoundTrip(source?: HTMLAnchorElement): void {
