@@ -75,7 +75,9 @@ export function startArticleAnchorRoundTrip(
       returnLink.style.left = `${fitsAfterText
         ? afterTextLeft
         : Math.min(Math.max(contentRect.right - returnWidth, RETURN_LINK_VIEWPORT_MARGIN), maxLeft)}px`
-      returnLink.style.top = `${fitsAfterText ? contentRect.top : contentRect.bottom + 2}px`
+      returnLink.style.top = `${fitsAfterText
+        ? Math.max(contentRect.top - RETURN_LINK_GAP, RETURN_LINK_VIEWPORT_MARGIN)
+        : contentRect.bottom + 2}px`
       return
     }
 

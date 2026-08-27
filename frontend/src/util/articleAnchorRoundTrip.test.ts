@@ -103,7 +103,35 @@ describe('article anchor round trip', () => {
 
     const back = document.querySelector<HTMLAnchorElement>('.article-anchor-return-link')!
     expect(back.style.left).toBe('144px')
-    expect(back.style.top).toBe('55px')
+    expect(back.style.top).toBe('51px')
+  })
+
+  it('moves the return anchor below the final line when it cannot fit beside the text', () => {
+    const source = addAnchor('summary-article-source-1')
+    const target = addTarget()
+    target.append('A destination sentence that reaches the viewport edge')
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(160)
+    const range = document.createRange()
+    Object.defineProperty(range, 'getClientRects', {
+      value: () => [{
+        x: 20,
+        y: 55,
+        left: 20,
+        top: 55,
+        right: 150,
+        bottom: 75,
+        width: 130,
+        height: 20,
+        toJSON: () => ({}),
+      }],
+    })
+    vi.spyOn(document, 'createRange').mockReturnValue(range)
+
+    startArticleAnchorRoundTrip(source, target)
+
+    const back = document.querySelector<HTMLAnchorElement>('.article-anchor-return-link')!
+    expect(back.style.left).toBe('114px')
+    expect(back.style.top).toBe('77px')
   })
 
   it('uses instant scrolling and focuses the source for keyboard activation', () => {
