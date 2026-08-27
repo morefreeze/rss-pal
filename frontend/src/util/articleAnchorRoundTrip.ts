@@ -91,4 +91,3 @@ export function startArticleAnchorRoundTrip(
   activeRoundTrip = { source, cleanup }
   updatePosition()
 }
-
