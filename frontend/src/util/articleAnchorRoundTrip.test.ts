@@ -165,4 +165,15 @@ describe('article anchor round trip', () => {
     expect(document.querySelector('.article-anchor-return-link')).toBeNull()
     expect(location.hash).toBe('')
   })
+
+  it('cleans up when the target detaches before the next layout update', () => {
+    const source = addAnchor('summary-article-source-1')
+    const target = addTarget()
+    startArticleAnchorRoundTrip(source, target)
+    target.remove()
+
+    window.dispatchEvent(new Event('scroll'))
+
+    expect(document.querySelector('.article-anchor-return-link')).toBeNull()
+  })
 })
