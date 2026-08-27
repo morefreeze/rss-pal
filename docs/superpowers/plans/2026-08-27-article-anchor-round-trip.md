@@ -184,4 +184,3 @@ Check desktop and mobile widths: `⌖` aligns with summary prose; `↩⌖` sits 
 - [ ] **Step 5: Report evidence**
 
 Report focused tests, full-suite count, build result, commit SHAs, exact files changed, and any live-UI boundary. Do not push or deploy unless separately requested.
-
