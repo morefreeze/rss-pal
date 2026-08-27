@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,11 +14,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type articleContentFetcher interface {
+	FetchContentFresh(context.Context, string) (string, error)
+	FindMediaInHTML(context.Context, string) *rss.MediaInfo
+}
+
 type ContentHandler struct {
 	articleRepo    *repository.ArticleRepository
 	feedRepo       *repository.FeedRepository
 	fetcher        *rss.Fetcher
-	contentFetcher *rss.ContentFetcher
+	contentFetcher articleContentFetcher
 }
 
 func NewContentHandler(articleRepo *repository.ArticleRepository, feedRepo *repository.FeedRepository, fetcher *rss.Fetcher) *ContentHandler {
@@ -56,7 +62,7 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 		return
 	}
 
-	content, err := h.contentFetcher.FetchContent(c.Request.Context(), article.URL)
+	content, err := h.fetchFreshContent(c.Request.Context(), article.URL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -80,6 +86,10 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 	h.tryBackfillMedia(c, article)
 
 	c.JSON(http.StatusOK, gin.H{"content": content})
+}
+
+func (h *ContentHandler) fetchFreshContent(ctx context.Context, target string) (string, error) {
+	return h.contentFetcher.FetchContentFresh(ctx, target)
 }
 
 // tryBackfillMedia attempts to fill media_* columns for an article when they
