@@ -34,6 +34,12 @@ type mcpResponse struct {
 	} `json:"error"`
 }
 
+type zaiReaderResult struct {
+	Title   string          `json:"title"`
+	Content string          `json:"content"`
+	Error   json.RawMessage `json:"error"`
+}
+
 func newZAIReader(apiKey, endpoint string, client *http.Client) *zaiReader {
 	if endpoint == "" {
 		endpoint = defaultZAIReaderMCPURL
@@ -145,13 +151,9 @@ func (r *zaiReader) fetch(ctx context.Context, target string, noCache bool) (Con
 		return ContentResult{}, errors.New("z.ai reader tool call: missing text result")
 	}
 
-	var readerResult struct {
-		Title   string          `json:"title"`
-		Content string          `json:"content"`
-		Error   json.RawMessage `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(nestedText), &readerResult); err != nil {
-		return ContentResult{}, errors.New("z.ai reader tool call: malformed reader result")
+	readerResult, err := decodeZAIReaderResult(nestedText)
+	if err != nil {
+		return ContentResult{}, err
 	}
 	if len(readerResult.Error) > 0 && string(readerResult.Error) != "null" {
 		return ContentResult{}, errors.New("z.ai reader tool call: reader returned an error")
@@ -161,6 +163,23 @@ func (r *zaiReader) fetch(ctx context.Context, target string, noCache bool) (Con
 	}
 
 	return ContentResult{Content: readerResult.Content, Title: readerResult.Title}, nil
+}
+
+func decodeZAIReaderResult(text string) (zaiReaderResult, error) {
+	raw := []byte(text)
+	for range 2 {
+		var result zaiReaderResult
+		if err := json.Unmarshal(raw, &result); err == nil {
+			return result, nil
+		}
+
+		var wrapped string
+		if err := json.Unmarshal(raw, &wrapped); err != nil {
+			break
+		}
+		raw = []byte(wrapped)
+	}
+	return zaiReaderResult{}, errors.New("z.ai reader tool call: malformed reader result")
 }
 
 func (r *zaiReader) call(ctx context.Context, stage string, payload any, sessionID string) (mcpResponse, string, error) {
