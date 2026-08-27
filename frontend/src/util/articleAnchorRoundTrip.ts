@@ -51,6 +51,10 @@ export function startArticleAnchorRoundTrip(
   document.body.append(returnLink)
 
   const updatePosition = () => {
+    if (!source.isConnected || !target.isConnected) {
+      clearArticleAnchorRoundTrip(source)
+      return
+    }
     const targetRect = target.getBoundingClientRect()
     const outsideViewport = targetRect.bottom < 0
       || targetRect.top > window.innerHeight
