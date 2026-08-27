@@ -819,7 +819,7 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
   font-size: 12px;
   line-height: 1;
   text-decoration: none;
-  transform: translate(-100%, -35%);
+  transform: translateY(-25%);
 }
 .article-anchor-return-link:hover,
 .article-anchor-return-link:focus-visible {

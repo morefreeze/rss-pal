@@ -1,4 +1,7 @@
 const RETURN_LABEL = '跳回 AI 总结'
+const RETURN_LINK_GAP = 4
+const RETURN_LINK_VIEWPORT_MARGIN = 8
+const RETURN_LINK_FALLBACK_WIDTH = 36
 
 type ActiveRoundTrip = {
   source: HTMLAnchorElement
@@ -17,6 +20,15 @@ function isPlainPrimaryClick(event: MouseEvent): boolean {
     && !event.ctrlKey
     && !event.shiftKey
     && !event.altKey
+}
+
+function finalContentRect(target: HTMLElement): DOMRect | null {
+  if (!target.hasChildNodes()) return null
+  const range = document.createRange()
+  range.selectNodeContents(target)
+  if (typeof range.getClientRects !== 'function') return null
+  const rects = Array.from(range.getClientRects()).filter(rect => rect.width > 0 || rect.height > 0)
+  return rects.at(-1) ?? null
 }
 
 export function clearArticleAnchorRoundTrip(source?: HTMLAnchorElement): void {
@@ -39,14 +51,35 @@ export function startArticleAnchorRoundTrip(
   document.body.append(returnLink)
 
   const updatePosition = () => {
-    const rect = target.getBoundingClientRect()
-    const outsideViewport = rect.bottom < 0
-      || rect.top > window.innerHeight
-      || rect.right < 0
-      || rect.left > window.innerWidth
+    const targetRect = target.getBoundingClientRect()
+    const outsideViewport = targetRect.bottom < 0
+      || targetRect.top > window.innerHeight
+      || targetRect.right < 0
+      || targetRect.left > window.innerWidth
     returnLink.hidden = outsideViewport
-    returnLink.style.left = `${Math.min(Math.max(rect.right, 8), window.innerWidth - 8)}px`
-    returnLink.style.top = `${Math.max(rect.top, 8)}px`
+
+    const contentRect = finalContentRect(target)
+    const returnWidth = returnLink.getBoundingClientRect().width || RETURN_LINK_FALLBACK_WIDTH
+    const maxLeft = Math.max(
+      RETURN_LINK_VIEWPORT_MARGIN,
+      window.innerWidth - returnWidth - RETURN_LINK_VIEWPORT_MARGIN,
+    )
+
+    if (contentRect) {
+      const afterTextLeft = contentRect.right + RETURN_LINK_GAP
+      const fitsAfterText = afterTextLeft + returnWidth <= window.innerWidth - RETURN_LINK_VIEWPORT_MARGIN
+      returnLink.style.left = `${fitsAfterText
+        ? afterTextLeft
+        : Math.min(Math.max(contentRect.right - returnWidth, RETURN_LINK_VIEWPORT_MARGIN), maxLeft)}px`
+      returnLink.style.top = `${fitsAfterText ? contentRect.top : contentRect.bottom + 2}px`
+      return
+    }
+
+    returnLink.style.left = `${Math.min(
+      Math.max(targetRect.right - returnWidth, RETURN_LINK_VIEWPORT_MARGIN),
+      maxLeft,
+    )}px`
+    returnLink.style.top = `${Math.max(targetRect.top, RETURN_LINK_VIEWPORT_MARGIN)}px`
   }
 
   const onClick = (event: MouseEvent) => {

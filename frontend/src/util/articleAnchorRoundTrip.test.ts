@@ -68,7 +68,7 @@ describe('article anchor round trip', () => {
     expect(back?.getAttribute('href')).toBe('#summary-article-source-1')
     expect(back?.getAttribute('aria-label')).toBe('跳回 AI 总结')
     expect(back?.getAttribute('title')).toBe('跳回 AI 总结')
-    expect(back?.style.left).toBe('220px')
+    expect(back?.style.left).toBe('184px')
     expect(back?.style.top).toBe('40px')
 
     fireEvent.click(back!, { detail: 1 })
@@ -77,6 +77,33 @@ describe('article anchor round trip', () => {
     expect(document.querySelector('.article-anchor-return-link')).toBeNull()
     expect(location.hash).toBe('')
     expect(history.length).toBe(historyLength)
+  })
+
+  it('positions the return anchor after the final rendered text line', () => {
+    const source = addAnchor('summary-article-source-1')
+    const target = addTarget()
+    target.append('A wrapped destination sentence')
+    const range = document.createRange()
+    Object.defineProperty(range, 'getClientRects', {
+      value: () => [{
+        x: 20,
+        y: 55,
+        left: 20,
+        top: 55,
+        right: 140,
+        bottom: 75,
+        width: 120,
+        height: 20,
+        toJSON: () => ({}),
+      }],
+    })
+    vi.spyOn(document, 'createRange').mockReturnValue(range)
+
+    startArticleAnchorRoundTrip(source, target)
+
+    const back = document.querySelector<HTMLAnchorElement>('.article-anchor-return-link')!
+    expect(back.style.left).toBe('144px')
+    expect(back.style.top).toBe('55px')
   })
 
   it('uses instant scrolling and focuses the source for keyboard activation', () => {
