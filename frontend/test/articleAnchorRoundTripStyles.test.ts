@@ -10,4 +10,3 @@ describe('article anchor round-trip styles', () => {
     expect(rule).not.toMatch(/transform\s*:/)
   })
 })
-
