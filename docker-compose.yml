@@ -69,6 +69,8 @@ services:
       AUTH_PASSWORD: ${AUTH_PASSWORD:?AUTH_PASSWORD required in .env}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required in .env}
       JINA_API_KEY: ${JINA_API_KEY}
+      ZAI_READER_API_KEY: ${ZAI_READER_API_KEY:-}
+      ZAI_READER_MCP_URL: ${ZAI_READER_MCP_URL:-}
       SERVER_PORT: 8080
       RSSHUB_BASE_URL: http://rsshub:1200
       YOUTUBE_POT_PROVIDER_URL: http://youtube-pot:4416
@@ -113,6 +115,8 @@ services:
       AI_VISION_CACHE_DIR: ${AI_VISION_CACHE_DIR:-/backups/ai_summary_cache}
       AI_VISION_CACHE_TTL_HOURS: ${AI_VISION_CACHE_TTL_HOURS:-24}
       JINA_API_KEY: ${JINA_API_KEY}
+      ZAI_READER_API_KEY: ${ZAI_READER_API_KEY:-}
+      ZAI_READER_MCP_URL: ${ZAI_READER_MCP_URL:-}
       RSSHUB_BASE_URL: http://rsshub:1200
       BACKUP_DIR: /backups
     depends_on:
