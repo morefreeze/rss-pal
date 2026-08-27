@@ -39,9 +39,13 @@ var mdConverter = htmltomd.NewConverter(
 // fallback is exercised before an article gets flagged for endless re-fetching.
 const jinaFallbackMinChars = 300
 
+const defaultJinaReaderBaseURL = "https://r.jina.ai/"
+
 type ContentFetcher struct {
-	client     *http.Client
-	jinaAPIKey string
+	client      *http.Client
+	jinaAPIKey  string
+	jinaBaseURL string
+	reader      *zaiReader
 }
 
 type ContentResult struct {
@@ -50,19 +54,31 @@ type ContentResult struct {
 }
 
 func NewContentFetcher() *ContentFetcher {
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
 	return &ContentFetcher{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		jinaAPIKey: os.Getenv("JINA_API_KEY"),
+		client:      client,
+		jinaAPIKey:  os.Getenv("JINA_API_KEY"),
+		jinaBaseURL: defaultJinaReaderBaseURL,
+		reader:      newZAIReader(os.Getenv("ZAI_READER_API_KEY"), os.Getenv("ZAI_READER_MCP_URL"), client),
 	}
 }
 
-// FetchContent fetches and extracts main content from a URL. If the direct
-// fetch is blocked (non-2xx, e.g. Cloudflare 403) or yields too little text
-// (likely a JS-rendered page), it falls back to Jina Reader (r.jina.ai).
+// FetchContent fetches and extracts main content from a URL. If direct
+// extraction is insufficient, it tries Z.ai Web Reader and then Jina Reader.
 func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, error) {
 	result, err := f.FetchContentWithMetadata(ctx, url)
+	if err != nil {
+		return "", err
+	}
+	return result.Content, nil
+}
+
+// FetchContentFresh follows the same route as FetchContent but tells Z.ai Web
+// Reader to bypass its cache. It is reserved for explicit manual re-fetches.
+func (f *ContentFetcher) FetchContentFresh(ctx context.Context, url string) (string, error) {
+	result, err := f.fetchContentWithMetadata(ctx, url, true)
 	if err != nil {
 		return "", err
 	}
@@ -73,26 +89,37 @@ func (f *ContentFetcher) FetchContent(ctx context.Context, url string) (string, 
 // page metadata. The content behavior matches FetchContent; Title is best
 // effort and may be empty when only a fallback reader succeeds.
 func (f *ContentFetcher) FetchContentWithMetadata(ctx context.Context, url string) (ContentResult, error) {
-	result, status, err := f.fetchDirect(ctx, url)
-	if err != nil {
-		// Network-level failure — try Jina before giving up.
-		if jc, jerr := f.fetchViaJina(ctx, url); jerr == nil && jc != "" {
-			return ContentResult{Content: jc}, nil
-		}
-		return ContentResult{}, err
-	}
+	return f.fetchContentWithMetadata(ctx, url, false)
+}
 
-	if status == http.StatusOK && len(result.Content) >= jinaFallbackMinChars {
+func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url string, noReaderCache bool) (ContentResult, error) {
+	result, status, err := f.fetchDirect(ctx, url)
+	if err == nil && status == http.StatusOK && len(result.Content) >= jinaFallbackMinChars {
 		return result, nil
 	}
 
-	// Direct fetch was blocked or extracted too little — try Jina Reader.
+	if f.reader != nil && f.reader.apiKey != "" {
+		readerResult, readerErr := f.reader.fetch(ctx, url, noReaderCache)
+		if readerErr == nil {
+			readerResult.Content = normalizeReaderMarkdown(readerResult.Content)
+			if readerResult.Title == "" {
+				readerResult.Title = result.Title
+			}
+			return readerResult, nil
+		}
+		log.Printf("Z.ai Reader fallback failed for %s: %v", url, readerErr)
+	}
+
+	// Reader is unavailable or failed — retain Jina as the final fallback.
 	if jc, jerr := f.fetchViaJina(ctx, url); jerr == nil && jc != "" {
 		return ContentResult{Content: jc, Title: result.Title}, nil
 	} else if jerr != nil {
 		log.Printf("Jina fallback failed for %s: %v", url, jerr)
 	}
 
+	if err != nil {
+		return ContentResult{}, err
+	}
 	return result, nil
 }
 
@@ -244,7 +271,11 @@ func (f *ContentFetcher) fetchViaJina(ctx context.Context, target string) (strin
 }
 
 func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string) (string, error) {
-	endpoint := "https://r.jina.ai/" + target
+	baseURL := f.jinaBaseURL
+	if baseURL == "" {
+		baseURL = defaultJinaReaderBaseURL
+	}
+	endpoint := baseURL + target
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return "", err
@@ -269,9 +300,12 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 		return "", err
 	}
 
-	content := escapeAmbiguousMathDollars(flattenImageAltBlankLines(stripJinaMathShadow(strings.TrimSpace(string(body)))))
-	content = limitContent(content, 50000)
-	return content, nil
+	return normalizeReaderMarkdown(string(body)), nil
+}
+
+func normalizeReaderMarkdown(content string) string {
+	content = escapeAmbiguousMathDollars(flattenImageAltBlankLines(stripJinaMathShadow(strings.TrimSpace(content))))
+	return limitContent(content, 50000)
 }
 
 // limitContent enforces a byte ceiling without splitting a UTF-8 code point or
