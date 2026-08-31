@@ -61,16 +61,14 @@ func TestProviderClientRejectsOversizedAndResolvesOnlyConfiguredRSSHubPath(t *te
 		_, _ = io.WriteString(w, strings.Repeat("x", 9))
 	}))
 	defer server.Close()
-	client := testProviderClient(server.Client())
-	client.MaxBodyBytes = 8
+	client := newProviderClientForTest(server.Client(), func(raw string) (*url.URL, error) { return url.Parse(raw) }, "", 8, "")
 	if _, err := client.Fetch(context.Background(), server.URL, "", ""); err == nil {
 		t.Fatal("Fetch() oversized body unexpectedly succeeded")
 	}
-	client.RSSHubBaseURL = server.URL
-	if _, err := client.Fetch(context.Background(), "/reddit/subreddit/golang", "", ""); err == nil {
+	withBase := newProviderClientForTest(server.Client(), func(raw string) (*url.URL, error) { return url.Parse(raw) }, server.URL, 8, "")
+	if _, err := withBase.Fetch(context.Background(), "/reddit/subreddit/golang", "", ""); err == nil {
 		t.Fatal("relative RSSHub request should still surface oversized body")
 	}
-	client.RSSHubBaseURL = ""
 	if _, err := client.Fetch(context.Background(), "/reddit/subreddit/golang", "", ""); err == nil {
 		t.Fatal("relative endpoint without RSSHub base unexpectedly succeeded")
 	}
@@ -87,5 +85,13 @@ func TestProviderClientRejectsEndpointCredentialsBeforeRequest(t *testing.T) {
 }
 
 func testProviderClient(client *http.Client) ProviderClient {
-	return ProviderClient{Client: client, ValidateURL: func(raw string) (*url.URL, error) { return url.Parse(raw) }, MaxBodyBytes: 4 << 20}
+	return newProviderClientForTest(client, func(raw string) (*url.URL, error) { return url.Parse(raw) }, "", 4<<20, "")
+}
+
+// newProviderClientForTest is test-only dependency injection for httptest;
+// production callers must use NewProviderClient.
+func newProviderClientForTest(doer interface {
+	Do(*http.Request) (*http.Response, error)
+}, validator func(string) (*url.URL, error), rssHubBaseURL string, maxBodyBytes int64, userAgent string) ProviderClient {
+	return ProviderClient{doer: doer, validateURL: validator, rssHubBaseURL: rssHubBaseURL, maxBodyBytes: maxBodyBytes, userAgent: userAgent}
 }

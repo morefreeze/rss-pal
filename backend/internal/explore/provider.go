@@ -51,13 +51,13 @@ const (
 // ProviderClient safely fetches public registry documents. Tests can inject a
 // client and validator; production defaults retain the shared httpx defenses.
 type ProviderClient struct {
-	Client interface {
+	doer interface {
 		Do(*http.Request) (*http.Response, error)
 	}
-	ValidateURL   func(string) (*url.URL, error)
-	RSSHubBaseURL string
-	MaxBodyBytes  int64
-	UserAgent     string
+	validateURL   func(string) (*url.URL, error)
+	rssHubBaseURL string
+	maxBodyBytes  int64
+	userAgent     string
 }
 
 type ProviderFetchResult struct {
@@ -68,7 +68,7 @@ type ProviderFetchResult struct {
 }
 
 func NewProviderClient(rssHubBaseURL string) ProviderClient {
-	return ProviderClient{Client: httpx.NewClient(20 * time.Second), ValidateURL: httpx.ValidateURL, RSSHubBaseURL: rssHubBaseURL, MaxBodyBytes: defaultProviderBodyBytes, UserAgent: providerUserAgent}
+	return ProviderClient{doer: httpx.NewClient(20 * time.Second), validateURL: httpx.ValidateURL, rssHubBaseURL: rssHubBaseURL, maxBodyBytes: defaultProviderBodyBytes, userAgent: providerUserAgent}
 }
 
 func (c ProviderClient) Fetch(ctx context.Context, endpoint, etag, lastModified string) (ProviderFetchResult, error) {
@@ -80,14 +80,14 @@ func (c ProviderClient) Fetch(ctx context.Context, endpoint, etag, lastModified 
 	if err != nil || parsed.User != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return ProviderFetchResult{}, fmt.Errorf("invalid provider endpoint")
 	}
-	validate := c.ValidateURL
+	validate := c.validateURL
 	if validate == nil {
 		validate = httpx.ValidateURL
 	}
 	if _, err := validate(endpoint); err != nil {
 		return ProviderFetchResult{}, fmt.Errorf("validate provider endpoint: %w", err)
 	}
-	client := c.Client
+	client := c.doer
 	if client == nil {
 		client = httpx.NewClient(20 * time.Second)
 	}
@@ -95,7 +95,7 @@ func (c ProviderClient) Fetch(ctx context.Context, endpoint, etag, lastModified 
 	if err != nil {
 		return ProviderFetchResult{}, err
 	}
-	userAgent := c.UserAgent
+	userAgent := c.userAgent
 	if userAgent == "" {
 		userAgent = providerUserAgent
 	}
@@ -118,7 +118,7 @@ func (c ProviderClient) Fetch(ctx context.Context, endpoint, etag, lastModified 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return ProviderFetchResult{}, fmt.Errorf("provider response status %d", response.StatusCode)
 	}
-	limit := c.MaxBodyBytes
+	limit := c.maxBodyBytes
 	if limit <= 0 {
 		limit = defaultProviderBodyBytes
 	}
@@ -140,10 +140,10 @@ func (c ProviderClient) resolveEndpoint(endpoint string) (string, error) {
 	if u.IsAbs() {
 		return u.String(), nil
 	}
-	if !strings.HasPrefix(endpoint, "/") || c.RSSHubBaseURL == "" {
+	if !strings.HasPrefix(endpoint, "/") || c.rssHubBaseURL == "" {
 		return "", fmt.Errorf("relative provider endpoint requires RSSHub base URL")
 	}
-	base, err := url.Parse(c.RSSHubBaseURL)
+	base, err := url.Parse(c.rssHubBaseURL)
 	if err != nil || !base.IsAbs() {
 		return "", fmt.Errorf("invalid RSSHub base URL")
 	}
@@ -205,6 +205,9 @@ func NormalizeCandidates(input []Candidate) []Candidate {
 func normalizePublicURL(raw string) (string, bool) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+		return "", false
+	}
+	if isPrivateHost(u.Hostname()) {
 		return "", false
 	}
 	return util.NormalizeURL(u.String()), true

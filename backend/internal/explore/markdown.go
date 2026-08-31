@@ -2,6 +2,7 @@ package explore
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -14,7 +15,7 @@ func (GitHubAwesomeAdapter) Kind() string { return "github_awesome" }
 func (GitHubAwesomeAdapter) Parse(provider Provider, body []byte) ([]Candidate, error) {
 	text := string(body)
 	matches := markdownLinkPattern.FindAllStringSubmatchIndex(text, -1)
-	candidates := make([]Candidate, 0, len(matches))
+	byDomain := make(map[string]Candidate, len(matches))
 	for _, match := range matches {
 		if match[0] > 0 && text[match[0]-1] == '!' {
 			continue
@@ -28,9 +29,22 @@ func (GitHubAwesomeAdapter) Parse(provider Provider, body []byte) ([]Candidate, 
 		if !ok || ignoredAwesomeURL(normalized) {
 			continue
 		}
-		candidates = append(candidates, Candidate{ExternalKey: normalized, FeedURL: normalized, Title: title, Topic: provider.Topic, Tags: []string{provider.Topic}})
+		domain := hostOf(normalized)
+		candidate, exists := byDomain[domain]
+		if !exists {
+			candidate = Candidate{ExternalKey: domain, FeedURL: normalized, Title: title, Topic: provider.Topic, Tags: []string{provider.Topic}}
+		} else if normalized < candidate.FeedURL {
+			candidate.FeedURL, candidate.Title = normalized, title
+		}
+		candidate.OccurrenceCount++
+		byDomain[domain] = candidate
 	}
-	return NormalizeCandidates(candidates), nil
+	candidates := make([]Candidate, 0, len(byDomain))
+	for _, candidate := range byDomain {
+		candidates = append(candidates, candidate)
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].FeedURL < candidates[j].FeedURL })
+	return candidates, nil
 }
 
 var markdownLinkPattern = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
