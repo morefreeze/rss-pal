@@ -72,10 +72,13 @@ describe('ExploreSourceDrawer', () => {
   it('opens as a mobile bottom sheet and closes on outside click or Escape', async () => {
     breakpoint.value = 'phone'
     render(<ExploreSourceDrawer />)
-    fireEvent.click(await screen.findByRole('button', { name: '查看 2 个候选源' }))
+    const handle = await screen.findByRole('button', { name: '查看 2 个候选源' })
+    fireEvent.click(handle)
     expect(screen.getByRole('dialog').getAttribute('data-placement')).toBe('bottom')
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '关闭候选订阅源' }))
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(handle)
 
     fireEvent.click(screen.getByRole('button', { name: '查看 2 个候选源' }))
     fireEvent.pointerDown(screen.getByTestId('explore-drawer-backdrop'))

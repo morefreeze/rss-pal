@@ -24,7 +24,10 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set())
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const handleRef = useRef<HTMLButtonElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLElement>(null)
+  const wasOpenRef = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -45,6 +48,20 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
     document.body.style.overflow = 'hidden'
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false)
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? [])
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     document.addEventListener('keydown', onKeyDown)
     closeRef.current?.focus()
@@ -52,6 +69,11 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
     }
+  }, [open])
+
+  useEffect(() => {
+    if (!open && wasOpenRef.current) handleRef.current?.focus()
+    wasOpenRef.current = open
   }, [open])
 
   const selectedIDs = useMemo(
@@ -104,10 +126,12 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
   return (
     <>
       <button
+        ref={handleRef}
         type="button"
         className={`explore-source-handle explore-source-handle--${breakpoint === 'phone' ? 'mobile' : 'desktop'}`}
         aria-label={`查看 ${sources.length} 个候选源`}
         aria-expanded={open}
+        aria-controls="explore-source-drawer"
         onClick={() => { setError(null); setOpen(true) }}
       >
         <span aria-hidden="true">☰</span>
@@ -122,6 +146,8 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
             onPointerDown={() => setOpen(false)}
           />
           <aside
+            ref={drawerRef}
+            id="explore-source-drawer"
             role="dialog"
             aria-modal="true"
             aria-label="候选订阅源"
