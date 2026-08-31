@@ -7,7 +7,7 @@
 首版必须同时满足以下目标：
 
 - 推荐主要由用户已订阅的来源决定，阅读、收藏、点赞和兴趣画像只做轻量排序修正。
-- 候选来源优先取自已验证目录，不足时再联网发现并校验新来源。
+- 候选来源由多个公开、持续更新的站点目录自动聚合，并由系统持续校验；管理员不负责补充候选供给。
 - 探索文章和正式订阅数据严格分开，阅读探索文章绝不隐式订阅。
 - 页面默认可立即打开；推荐计算和联网抓取在后台完成。
 - 北京时间 08:00–24:00 的活跃时段内每 3 小时更新一次，00:00–08:00 不更新。
@@ -19,8 +19,18 @@
 
 候选池采用两层结构：
 
-1. 已验证来源：现有 `recommended_feeds` 目录，以及后来通过相同校验流程进入目录的公开来源。
-2. 联网发现来源：从用户相关站点、文章外链和页面中的 RSS 声明继续发现，验证通过后进入公共候选目录。
+1. 自动注册表聚合：持续同步公开 OPML、博客目录、GitHub Awesome 列表和 Reddit 主题流中的外部站点，再统一执行 feed autodiscovery 与校验。
+2. 个性化关联发现：从用户相关站点、文章外链和页面中的 RSS 声明继续发现，验证通过后进入公共候选缓存。
+
+首版内置多个相互独立的公开供给源：
+
+- [`plenaryapp/awesome-rss-feeds`](https://github.com/plenaryapp/awesome-rss-feeds) 的分类及国家 OPML；
+- [`timqian/chinese-independent-blogs`](https://github.com/timqian/chinese-independent-blogs) 的 `feed.opml`；
+- [`ooh.directory`](https://ooh.directory/) 的分类、最近新增和最近更新博客；
+- 经现有 RSSHub 访问的 Reddit 主题流，从持续出现的外部链接中发现博客和站点；
+- 与用户高权重主题对应的 GitHub Awesome 列表，抽取其中的站点 URL 后执行 RSS autodiscovery。
+
+这些是自动同步的 provider，不是需要管理员逐条维护的推荐清单。任何一个 provider 失效都不能阻断候选供给；系统保留每个 provider 的最后成功结果，并继续使用其他 provider。
 
 排序信号按以下优先级使用：
 
@@ -49,7 +59,7 @@
 
 ### 冷启动
 
-用户没有订阅或订阅信息不足时，探索页直接展示人工维护的优质来源及其最近文章，不要求先完成设置。页面同时提供兴趣标签，用户选择后从下一批快照开始调整推荐。
+用户没有订阅或订阅信息不足时，探索页直接展示自动注册表中通过校验、持续更新且健康度较高的来源及其最近文章，不要求先完成设置。页面同时提供兴趣标签，用户选择后从下一批快照开始调整推荐。
 
 兴趣标签通过探索反馈存储为显式 `boost_topic`，不混入隐式行为权重。
 
@@ -88,16 +98,23 @@
 
 Source Profiler 不负责发现 URL，也不直接写推荐快照。
 
-### 2. Source Discoverer
+### 2. Registry Aggregator and Source Discoverer
 
-返回待校验的来源候选。首版实现两类 discoverer，并保留统一接口以便将来接入搜索服务：
+Registry Aggregator 持续同步外部来源清单，Source Discoverer 根据用户画像从聚合结果和关联站点中返回待校验候选。首版实现统一 provider 接口及以下适配器：
 
-- `CatalogDiscoverer`：从 `recommended_feeds` 选择与订阅画像匹配的已验证来源。
-- `RelatedSiteDiscoverer`：检查相关站点首页的 `<link rel="alternate">`，并从近期相关文章的外部链接中选择有限数量的站点，再对这些站点执行 feed autodiscovery。
+- `OPMLRegistryAdapter`：读取 versioned OPML，例如 Awesome RSS Feeds 和中文独立博客列表。
+- `DirectoryAdapter`：读取带分类、最近新增或最近更新页面的公开博客目录，例如 ooh.directory。
+- `RedditLinkStreamAdapter`：通过现有 RSSHub 读取内置主题 subreddit 流，统计持续出现的外部域名，再执行 feed autodiscovery；不把 Reddit 帖子本身当作博客源。
+- `GitHubAwesomeAdapter`：读取与高权重主题对应的 Awesome 列表，抽取站点 URL，再发现其 RSS。
+- `RelatedSiteDiscoverer`：检查相关站点首页的 `<link rel="alternate">`，并从近期相关文章的外部链接中选择有限数量的站点，再执行 feed autodiscovery。
 
-首版不依赖新的第三方搜索服务。Discoverer 只提出候选 URL，不能绕过后续安全和内容校验。
+provider 清单由版本化的默认 manifest 初始化，内容更新由上游目录持续提供，不需要管理员逐条新增订阅源。管理员只保留紧急禁用 provider、域名或恶意来源的能力，不参与普通来源验证和供给。
 
-联网发现不得持久化“由哪个用户、哪篇私人文章发现”这类来源信息。公共目录只记录通用发现方式，例如 `catalog`、`site_alternate` 或 `related_link`。
+Registry Aggregator 在每个用户快照时段前 30 分钟同步一次，使用 ETag / Last-Modified 避免重复下载。provider 连续失败时启用退避和熔断；其最后成功 observation 仍可使用，但超过 7 天未成功同步的 provider 不再单独证明一个新来源可推荐。
+
+首版不依赖新的第三方搜索服务。任何 adapter 只提出候选 URL，不能绕过后续安全和内容校验。
+
+关联发现不得持久化“由哪个用户、哪篇私人文章发现”这类来源信息。公共缓存只记录通用 observation，例如 provider、provider 内的公开 key、首次/最近观察时间和公开分类。
 
 ### 3. Source Validator and Cache Fetcher
 
@@ -110,8 +127,10 @@ Source Profiler 不负责发现 URL，也不直接写推荐快照。
 - 请求有连接、响应和总耗时上限，并限制响应体大小。
 - 能解析为受支持的 RSS、Atom 或 HTML feed。
 - 规范化 URL 后不与现有候选源或用户当前可见订阅重复。
-- 至少存在 2 篇可解析文章，且至少 1 篇在最近 90 天内发布；人工目录可显式豁免新鲜度条件。
+- 至少存在 2 篇可解析文章，且至少 1 篇在最近 90 天内发布；任何 provider 都不能豁免新鲜度和健康检查。
 - 标题和文章 URL 合法，抓取未持续失败。
+
+来源还必须具备可解释的外部 observation：来自结构化 OPML、博客目录或高质量 Awesome 列表，或最近 30 天内被两个独立 provider 观察到，或在同一 Reddit/相关链接流中被多个独立帖子重复引用。单次偶然外链不足以让一个来源进入冷启动池；与用户订阅直接关联的 `<link rel="alternate">` 可以作为个性化候选，但仍需通过全部安全、活跃度和内容校验。
 
 校验失败的来源不进入用户快照。已有来源暂时抓取失败时更新健康状态，但保留上一次成功缓存；持续失败后标为不可推荐。
 
@@ -137,6 +156,38 @@ Ranker 输出候选源分数、主要主题和简短可解释理由。AI 可以�
 
 ## 数据模型
 
+### `explore_registry_providers`
+
+保存全局 provider 配置与同步状态：
+
+- `id`、稳定 `provider_key`
+- `provider_kind`：`opml`、`directory`、`reddit_stream`、`github_awesome`、`related_site`
+- `endpoint`
+- `topic`，可为空
+- `sync_interval_minutes`
+- `enabled`
+- `etag`、`last_modified`
+- `last_sync_at`、`last_success_at`
+- `consecutive_failures`、`last_error`
+- `created_at`、`updated_at`
+
+默认 provider 由迁移中的版本化 manifest 初始化。`enabled` 用于故障隔离或安全禁用，不把管理员变成内容供给者。
+
+### `explore_source_observations`
+
+记录一个公开候选源被哪些 provider 观察到：
+
+- `id`
+- `source_id`，引用 `recommended_feeds`
+- `provider_id`，引用 `explore_registry_providers`
+- `external_key`，provider 内稳定标识
+- `provider_tags`
+- `first_seen_at`、`last_seen_at`
+- `occurrence_count`
+- 唯一键 `(provider_id, external_key, source_id)`
+
+一个来源可以同时来自多个 provider。Ranker 使用 provider 独立性、观察新鲜度和重复出现次数评估供给置信度。
+
 ### 扩展 `recommended_feeds`
 
 保留现有表作为全局候选源目录，新增：
@@ -145,7 +196,6 @@ Ranker 输出候选源分数、主要主题和简短可解释理由。AI 可以�
 | --- | --- |
 | `site_url` | 来源站点首页，可为空 |
 | `normalized_url` | 用于去重的规范化 feed URL，唯一 |
-| `discovery_method` | `catalog`、`site_alternate` 或 `related_link` |
 | `validation_status` | `pending`、`valid`、`invalid` |
 | `verified_at` | 最近一次通过完整校验的时间 |
 | `last_checked_at` | 最近一次健康检查时间 |
@@ -153,8 +203,10 @@ Ranker 输出候选源分数、主要主题和简短可解释理由。AI 可以�
 | `etag` / `last_modified` | 条件请求缓存字段 |
 | `health_score` | 0–1 的健康分 |
 | `last_error` | 最近错误的裁剪文本 |
+| `first_discovered_at` | 首次被任一 provider 或关联发现器观察到的时间 |
+| `last_observed_at` | 最近一次外部 observation 时间 |
 
-现有 `is_broken` 字段暂时保留兼容；新逻辑以 `validation_status` 和 `health_score` 为准。迁移时对已有目录行填充规范化 URL，标为 `valid`，后续由 worker 重新校验。
+现有 `is_broken` 字段暂时保留兼容；新逻辑以 `validation_status`、`health_score` 和有效 observation 为准。迁移时只为已有行填充规范化 URL 并把状态设为 `pending`；它们必须被自动 provider 再次观察到并由 worker 完成内容、活跃度和安全校验，不能因为历史人工录入直接成为可推荐来源。
 
 ### `explore_articles`
 
@@ -236,7 +288,7 @@ USING (app_rls_bypass() OR user_id = app_current_user_id())
 WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 ```
 
-它们必须加入 `rls_leak_test.go` 和迁移烟测矩阵。`recommended_feeds` 与 `explore_articles` 是全局公开内容缓存，不保存用户画像，不启用用户 RLS；只能通过已认证 API 读取正文。
+它们必须加入 `rls_leak_test.go` 和迁移烟测矩阵。`explore_registry_providers`、`explore_source_observations`、`recommended_feeds` 与 `explore_articles` 是全局公开供给或内容缓存，不保存用户画像，不启用用户 RLS；只能通过已认证 API 读取正文。
 
 ### 正式订阅 URL 唯一性
 
@@ -385,7 +437,7 @@ WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 
 - 单个来源失败只影响该来源，不中止整个批次。
 - AI 失败使用确定性画像和理由模板。
-- 联网发现失败只使用已验证目录。
+- 某个 provider 失败时使用其他 provider 和该 provider 的最后成功 observation；全部 provider 暂时失败时继续使用上一次已校验的公共候选缓存。
 - 整批发布失败继续读取上一批 `done` 快照。
 - 批量订阅使用事务，避免部分成功。
 - 同一刷新时段由数据库唯一键防重；抢占失败的 worker 读取现有批次状态，不重复执行。
@@ -394,7 +446,7 @@ WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 
 缓存保留策略：
 
-- 每个候选来源保留最近 50 篇且不超过 30 天的探索文章；人工目录中长期低频来源可保留最新 5 篇。
+- 每个候选来源保留最近 50 篇且不超过 30 天的探索文章；合法的长期低频来源可保留最新 5 篇，但仍需定期通过健康检查。
 - 探索批次保留 30 天。
 - 原始探索事件保留 180 天；超期事件删除。
 - 删除公共候选文章前，确保它不再被保留期内的可访问批次使用。
@@ -406,9 +458,10 @@ WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 - `Asia/Shanghai` 六个时段、跨日边界、晚启动补做和 00:00–08:00 禁止更新。
 - `(user_id, slot_at)` 幂等、并发抢占、失败批次和旧快照回退。
 - 来源画像权重顺序：订阅信号高于行为信号，显式反馈高于二者。
-- Catalog 和 RelatedSite 两种 discoverer；`rel=alternate`、相关外链数量限制和重复 URL。
+- OPML、Directory、RedditLinkStream、GitHubAwesome 和 RelatedSite adapters；ETag 条件同步、provider 退避、stale provider、`rel=alternate`、相关外链数量限制和重复 URL。
+- 多 provider observation 合并、结构化目录单源准入、重复外链门槛和单个 provider 失效时持续供给。
 - SSRF：私网 IP、回环、非 HTTP 协议、凭据 URL、重定向到私网和响应过大。
-- RSS 校验、新鲜度、人工目录豁免、健康度退化和恢复。
+- RSS 校验、新鲜度无豁免、健康度退化和恢复。
 - `published` / `captured` 两种排序与现有文章排序 helper 共用；来源多样性调整稳定且不打乱同源内部顺序。
 - 单个与批量订阅幂等；缓存文章复制；批量失败整批回滚。
 - 两个用户可以分别订阅同一 URL，共享 feed 不重复创建。
@@ -454,7 +507,7 @@ WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 4. 单个和批量订阅后，来源进入正式订阅且缓存文章立即可见。
 5. 隐藏源和降低主题推荐即时生效并可撤销。
 6. 每日六个刷新时段准确、幂等；夜间 8 小时不更新。
-7. AI、联网发现或单个来源失败时仍有可用结果。
+7. AI、单个 provider、联网发现或单个来源失败时仍有可用结果，普通候选供给不依赖管理员补充。
 8. 多用户画像不泄漏，且不同用户可订阅同一个公开 URL。
 
 ## 非目标
