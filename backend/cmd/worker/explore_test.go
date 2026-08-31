@@ -48,6 +48,25 @@ type fakeExploreRegistry struct {
 	err     error
 }
 
+type fakeExploreDueCatalog struct{ sources []model.ExploreSource }
+
+func (catalog *fakeExploreDueCatalog) ListDueSources(time.Time, time.Time, int) ([]model.ExploreSource, error) {
+	return catalog.sources, nil
+}
+
+type fakeExploreEnqueuer struct {
+	mu    sync.Mutex
+	tasks []repository.ExploreQueueTask
+}
+
+func (queue *fakeExploreEnqueuer) Enqueue(sourceID int, taskType string, priority int) (*repository.ExploreQueueTask, error) {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	task := repository.ExploreQueueTask{SourceID: sourceID, TaskType: taskType, Priority: priority}
+	queue.tasks = append(queue.tasks, task)
+	return &task, nil
+}
+
 func (registry *fakeExploreRegistry) SyncDue(_ context.Context, now time.Time) ([]explorelogic.ProviderSyncResult, error) {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
@@ -232,6 +251,27 @@ func TestExploreCycleRunsProviderSyncThirtyMinutesBeforeSlotAndClaimsOncePerWind
 	}
 	if limits[0] != 500 {
 		t.Fatalf("claim limit = %d, want 500", limits[0])
+	}
+}
+
+func TestScheduledExploreRegistryEnqueuesDueValidationAndRefreshDespiteProviderFailure(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 30, 0, 0, exploreTestShanghai)
+	base := &fakeExploreRegistry{err: errors.New("provider unavailable")}
+	catalog := &fakeExploreDueCatalog{sources: []model.ExploreSource{
+		{ID: 4, ValidationStatus: model.ExploreValidationPending},
+		{ID: 8, ValidationStatus: model.ExploreValidationValid},
+	}}
+	queue := &fakeExploreEnqueuer{}
+	scheduler := &scheduledExploreRegistry{registry: base, catalog: catalog, queue: queue}
+	if _, err := scheduler.SyncDue(context.Background(), now); err == nil {
+		t.Fatal("provider failure should remain observable")
+	}
+	if len(queue.tasks) != 2 {
+		t.Fatalf("scheduled tasks = %+v", queue.tasks)
+	}
+	if queue.tasks[0].SourceID != 4 || queue.tasks[0].TaskType != repository.ExploreTaskValidateSource ||
+		queue.tasks[1].SourceID != 8 || queue.tasks[1].TaskType != repository.ExploreTaskRefreshArticles {
+		t.Fatalf("scheduled task mapping = %+v", queue.tasks)
 	}
 }
 
