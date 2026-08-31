@@ -51,9 +51,9 @@ func TestExploreCatalogStateAndUpsertSQLPreserveRecoveryPath(t *testing.T) {
 			name:  "nullable article fields preserve last good values",
 			query: exploreArticleUpsertSQL,
 			required: []string{
-				"content=COALESCE(EXCLUDED.content,explore_articles.content)",
-				"excerpt=COALESCE(EXCLUDED.excerpt,explore_articles.excerpt)",
-				"published_at=COALESCE(EXCLUDED.published_at,explore_articles.published_at)",
+				"COALESCE(EXCLUDED.content,explore_articles.content)",
+				"COALESCE(EXCLUDED.excerpt,explore_articles.excerpt)",
+				"COALESCE(EXCLUDED.published_at,explore_articles.published_at)",
 			},
 		},
 	} {
@@ -80,16 +80,79 @@ func TestExploreCatalogBulkWriteLocksCanonicalSourceBeforeRetention(t *testing.T
 	}
 }
 
+func TestExploreCatalogDueSQLRequiresEnabledObservation(t *testing.T) {
+	for _, fragment := range []string{
+		"EXISTS (",
+		"explore_source_observations observation",
+		"explore_registry_providers provider",
+		"observation.source_id = source.id",
+		"provider.enabled",
+	} {
+		if !strings.Contains(exploreDueSourcesSQL, fragment) {
+			t.Errorf("due-source SQL missing %q", fragment)
+		}
+	}
+}
+
+func TestExploreCatalogConditionalRequestSQLSeparates200And304(t *testing.T) {
+	for name, query := range map[string]string{
+		"validation 200": exploreValidationValidSQL,
+		"refresh 200":    exploreFetchSuccessSQL,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, fragment := range []string{"etag=NULLIF($3,'')", "last_modified=NULLIF($4,'')"} {
+				if !strings.Contains(query, fragment) {
+					t.Errorf("200 SQL missing %q", fragment)
+				}
+			}
+		})
+	}
+	for _, fragment := range []string{"last_checked_at=$2", "last_fetched_at=$2", "health_score=1"} {
+		if !strings.Contains(exploreFetchNotModifiedSQL, fragment) {
+			t.Errorf("304 SQL missing %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{"etag=", "last_modified="} {
+		if strings.Contains(exploreFetchNotModifiedSQL, forbidden) {
+			t.Errorf("304 SQL unexpectedly mutates validator with %q", forbidden)
+		}
+	}
+}
+
+func TestExploreCatalogArticleUpsertIsFetchedAtMonotonic(t *testing.T) {
+	if count := strings.Count(exploreArticleUpsertSQL, "EXCLUDED.fetched_at >= explore_articles.fetched_at"); count < 7 {
+		t.Fatalf("article upsert only guards %d replacement fields by fetched_at", count)
+	}
+	if strings.Contains(exploreArticleUpsertSQL, "DO UPDATE SET\n") && strings.Contains(exploreArticleUpsertSQL, "WHERE explore_articles.fetched_at") {
+		t.Fatal("article upsert WHERE can suppress RETURNING existing id")
+	}
+}
+
+func TestExploreCatalogUpsertArticlesRejectsMoreThan50BeforeTransaction(t *testing.T) {
+	repo := NewExploreCatalogRepository(nil)
+	tooMany := make([]model.ExploreArticle, 51)
+	if err := repo.UpsertArticles(1, tooMany, time.Now()); !errors.Is(err, ErrExploreArticleBatchTooLarge) {
+		t.Fatalf("51 articles err=%v", err)
+	}
+	atLimit := make([]model.ExploreArticle, 50)
+	if err := repo.UpsertArticles(1, atLimit, time.Now()); errors.Is(err, ErrExploreArticleBatchTooLarge) {
+		t.Fatalf("50 articles rejected as too large: %v", err)
+	}
+}
+
 func TestExploreCatalogLoadsCanonicalSourceAndProviderObservations(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	sourceID := insertCatalogSource(t, db, "https://catalog.example/feed", model.ExploreValidationPending, nil, nil)
 
 	providerIDs := make([]int, 2)
-	for index, fixture := range []struct{ key, kind string }{{"catalog-opml", model.ExploreProviderKindOPML}, {"catalog-reddit", model.ExploreProviderKindRedditStream}} {
+	for index, fixture := range []struct {
+		key, kind string
+		enabled   bool
+	}{{"catalog-opml", model.ExploreProviderKindOPML, true}, {"catalog-reddit", model.ExploreProviderKindRedditStream, false}} {
 		if err := db.QueryRow(`
-			INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, topic)
-			VALUES ($1, $2, $3, 'go') RETURNING id`, fixture.key, fixture.kind, "https://registry.example/"+fixture.key).Scan(&providerIDs[index]); err != nil {
+			INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, topic, enabled)
+			VALUES ($1, $2, $3, 'go', $4) RETURNING id`, fixture.key, fixture.kind, "https://registry.example/"+fixture.key, fixture.enabled).Scan(&providerIDs[index]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -116,6 +179,9 @@ func TestExploreCatalogLoadsCanonicalSourceAndProviderObservations(t *testing.T)
 	if catalog.Observations[0].ProviderKind != model.ExploreProviderKindRedditStream || catalog.Observations[1].ProviderKind != model.ExploreProviderKindOPML {
 		t.Fatalf("provider kinds/order=%+v", catalog.Observations)
 	}
+	if catalog.Observations[0].ProviderEnabled || !catalog.Observations[1].ProviderEnabled {
+		t.Fatalf("disabled observation was hidden or mislabeled: %+v", catalog.Observations)
+	}
 }
 
 func TestExploreCatalogListsOnlyDueCanonicalSources(t *testing.T) {
@@ -130,17 +196,29 @@ func TestExploreCatalogListsOnlyDueCanonicalSources(t *testing.T) {
 	validID := insertCatalogSource(t, db, "https://valid.example/feed", model.ExploreValidationValid, &old, &old)
 	_ = insertCatalogSource(t, db, "https://recent-failure.example/feed", model.ExploreValidationValid, &fresh, &old)
 	_ = insertCatalogSource(t, db, "https://fresh.example/feed", model.ExploreValidationValid, &fresh, &fresh)
+	noObservationID := insertCatalogSource(t, db, "https://no-observation.example/feed", model.ExploreValidationPending, &old, nil)
+	disabledOnlyID := insertCatalogSource(t, db, "https://disabled-only.example/feed", model.ExploreValidationPending, &old, nil)
+	enabledProviderID := insertCatalogProvider(t, db, "due-enabled", true)
+	disabledProviderID := insertCatalogProvider(t, db, "due-disabled", false)
+	insertCatalogObservation(t, db, enabledProviderID, pendingID, "pending-enabled", old)
+	insertCatalogObservation(t, db, enabledProviderID, validID, "valid-enabled", old)
+	insertCatalogObservation(t, db, disabledProviderID, disabledOnlyID, "disabled-only", old)
 
 	due, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(due) != 2 || due[0].ID != pendingID || due[1].ID != validID {
-		t.Fatalf("due=%+v invalidIDs=%d,%d", due, invalidID, oldInvalidID)
+		t.Fatalf("due=%+v invalidIDs=%d,%d noObservationID=%d disabledOnlyID=%d", due, invalidID, oldInvalidID, noObservationID, disabledOnlyID)
 	}
 	limited, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), 1)
 	if err != nil || len(limited) != 1 || limited[0].ID != pendingID {
 		t.Fatalf("limited=%+v err=%v", limited, err)
+	}
+	insertCatalogObservation(t, db, enabledProviderID, disabledOnlyID, "new-enabled", fresh)
+	due, err = NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), 10)
+	if err != nil || len(due) != 3 || due[1].ID != disabledOnlyID {
+		t.Fatalf("new enabled observation did not restore source: due=%+v err=%v", due, err)
 	}
 }
 
@@ -149,6 +227,8 @@ func TestExploreCatalogTransitionsHealthWithoutDeletingLastGoodCache(t *testing.
 	defer cleanup()
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	sourceID := insertCatalogSource(t, db, "https://health.example/feed", model.ExploreValidationPending, nil, nil)
+	providerID := insertCatalogProvider(t, db, "health-enabled", true)
+	insertCatalogObservation(t, db, providerID, sourceID, "health-source", now)
 	repo := NewExploreCatalogRepository(db)
 	if err := repo.MarkValidationPending(sourceID); err != nil {
 		t.Fatal(err)
@@ -213,6 +293,52 @@ func TestExploreCatalogTransitionsHealthWithoutDeletingLastGoodCache(t *testing.
 	}
 	if status != model.ExploreValidationValid || score != 1 || isBroken || etag != `"v2"` || modified == "" || !fetchedAt.Equal(recoveredAt) {
 		t.Fatalf("recovered status=%q score=%v broken=%t etag=%q modified=%q fetched=%v", status, score, isBroken, etag, modified, fetchedAt)
+	}
+}
+
+func TestExploreCatalogConditionalRequestValidatorState(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	sourceID := insertCatalogSource(t, db, "https://validators.example/feed", model.ExploreValidationPending, nil, nil)
+	repo := NewExploreCatalogRepository(db)
+	if _, err := db.Exec(`UPDATE recommended_feeds SET etag='stale-tag',last_modified='stale-date' WHERE id=$1`, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkValidationValid(sourceID, now, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var etag, modified sql.NullString
+	if err := db.QueryRow(`SELECT etag,last_modified FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&etag, &modified); err != nil {
+		t.Fatal(err)
+	}
+	if etag.Valid || modified.Valid {
+		t.Fatalf("200 without validators retained stale state: etag=%v modified=%v", etag, modified)
+	}
+	if _, err := db.Exec(`UPDATE recommended_feeds SET etag='keep-tag',last_modified='keep-date',health_score=0,is_broken=true WHERE id=$1`, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	notModifiedAt := now.Add(time.Hour)
+	if err := repo.RecordFetchNotModified(sourceID, notModifiedAt); err != nil {
+		t.Fatal(err)
+	}
+	var checkedAt, fetchedAt time.Time
+	var score float64
+	var broken bool
+	if err := db.QueryRow(`SELECT etag,last_modified,last_checked_at,last_fetched_at,health_score,is_broken FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&etag, &modified, &checkedAt, &fetchedAt, &score, &broken); err != nil {
+		t.Fatal(err)
+	}
+	if etag.String != "keep-tag" || modified.String != "keep-date" || !checkedAt.Equal(notModifiedAt) || !fetchedAt.Equal(notModifiedAt) || score != 1 || broken {
+		t.Fatalf("304 state etag=%v modified=%v checked=%v fetched=%v score=%v broken=%t", etag, modified, checkedAt, fetchedAt, score, broken)
+	}
+	if err := repo.RecordFetchSuccess(sourceID, now.Add(2*time.Hour), "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT etag,last_modified FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&etag, &modified); err != nil {
+		t.Fatal(err)
+	}
+	if etag.Valid || modified.Valid {
+		t.Fatalf("refresh 200 without validators retained stale state: etag=%v modified=%v", etag, modified)
 	}
 }
 
@@ -284,6 +410,21 @@ func TestExploreCatalogArticleUpsertAndExactRetention(t *testing.T) {
 	if !gotContent.Valid || gotContent.String != "" || !gotExcerpt.Valid || gotExcerpt.String != "" {
 		t.Fatalf("explicit empty strings were not persisted: content=%v excerpt=%v", gotContent, gotExcerpt)
 	}
+	staleContent, staleExcerpt := "stale content", "stale excerpt"
+	stale := first
+	stale.Title, stale.URL, stale.Content, stale.Excerpt = "stale title", "https://low-frequency.example/stale", &staleContent, &staleExcerpt
+	stale.FetchedAt = now.Add(-time.Hour)
+	stale.PublishedAt = ptrTime(now)
+	staleID, err := repo.UpsertArticle(stale)
+	if err != nil || staleID != firstID {
+		t.Fatalf("older upsert id=%d want=%d err=%v", staleID, firstID, err)
+	}
+	if err := db.QueryRow(`SELECT title,url,content,excerpt,published_at,fetched_at FROM explore_articles WHERE id=$1`, firstID).Scan(&gotTitle, &gotURL, &gotContent, &gotExcerpt, &gotPublished, &stale.FetchedAt); err != nil {
+		t.Fatal(err)
+	}
+	if gotTitle != "updated" || gotURL != first.URL || gotContent.String != "" || gotExcerpt.String != "" || !gotPublished.Equal(oldPublished) || !stale.FetchedAt.Equal(now) {
+		t.Fatalf("older result overwrote newer row title=%q url=%q content=%v excerpt=%v published=%v fetched=%v", gotTitle, gotURL, gotContent, gotExcerpt, gotPublished, stale.FetchedAt)
+	}
 
 	insertCatalogArticles(t, db, validID, now.Add(-41*24*time.Hour), 7)
 	insertCatalogArticles(t, db, invalidID, now.Add(-40*24*time.Hour), 8)
@@ -332,6 +473,27 @@ func insertCatalogSource(t *testing.T, db *sql.DB, feedURL, status string, check
 		t.Fatal(err)
 	}
 	return id
+}
+
+func insertCatalogProvider(t *testing.T, db *sql.DB, key string, enabled bool) int {
+	t.Helper()
+	var id int
+	if err := db.QueryRow(`
+		INSERT INTO explore_registry_providers (provider_key,provider_kind,endpoint,enabled)
+		VALUES ($1,'opml',$2,$3) RETURNING id`, key, "https://registry.example/"+key, enabled).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func insertCatalogObservation(t *testing.T, db *sql.DB, providerID, sourceID int, externalKey string, observedAt time.Time) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO explore_source_observations
+		(provider_id,source_id,external_key,first_seen_at,last_seen_at)
+		VALUES ($1,$2,$3,$4,$4)`, providerID, sourceID, externalKey, observedAt); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func insertCatalogArticles(t *testing.T, db *sql.DB, sourceID int, newest time.Time, count int) {
