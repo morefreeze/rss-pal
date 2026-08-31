@@ -354,6 +354,9 @@ func truncateRunes(value string, limit int) string {
 }
 
 func validateExploreSnapshotSources(values []ExploreSnapshotSourceInput) error {
+	if len(values) == 0 {
+		return fmt.Errorf("%w: at least one source is required", ErrInvalidExploreSnapshot)
+	}
 	if len(values) > MaxExploreSnapshotSources {
 		return fmt.Errorf("%w: at most %d sources", ErrInvalidExploreSnapshot, MaxExploreSnapshotSources)
 	}

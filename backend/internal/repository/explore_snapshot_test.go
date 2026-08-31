@@ -33,7 +33,7 @@ func TestValidateExploreSnapshotSources(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "valid", values: valid},
-		{name: "empty is valid", values: nil},
+		{name: "empty is invalid", values: nil, wantErr: true},
 		{name: "at most twelve", values: tooMany, wantErr: true},
 		{name: "positive source", values: []ExploreSnapshotSourceInput{{SourceID: 0}}, wantErr: true},
 		{name: "unique source", values: []ExploreSnapshotSourceInput{{SourceID: 1}, {SourceID: 1}}, wantErr: true},
@@ -258,7 +258,7 @@ func TestExploreSnapshotPublishIsAtomicFencedAndLatestDoneWins(t *testing.T) {
 	if err := db.QueryRow(`SELECT generation_token IS NULL FROM explore_batches WHERE id=$1`, batch.ID).Scan(&tokenCleared); err != nil || !tokenCleared {
 		t.Fatalf("done batch retained token cleared=%t err=%v", tokenCleared, err)
 	}
-	if _, err := repo.Publish(claim.Batch.ID, claim.GenerationToken, nil); !errors.Is(err, ErrExploreSnapshotFence) {
+	if _, err := repo.Publish(claim.Batch.ID, claim.GenerationToken, []ExploreSnapshotSourceInput{{SourceID: validA}}); !errors.Is(err, ErrExploreSnapshotFence) {
 		t.Fatalf("done batch reopened: %v", err)
 	}
 	if err := repo.Fail(claim.Batch.ID, claim.GenerationToken, errors.New("late failure")); !errors.Is(err, ErrExploreSnapshotFence) {
@@ -272,6 +272,16 @@ func TestExploreSnapshotPublishIsAtomicFencedAndLatestDoneWins(t *testing.T) {
 	if err != nil || !acquired {
 		t.Fatalf("newer claim=%+v acquired=%t err=%v", newer, acquired, err)
 	}
+	if _, err := repo.Publish(newer.Batch.ID, newer.GenerationToken, nil); !errors.Is(err, ErrInvalidExploreSnapshot) {
+		t.Fatalf("empty snapshot publish error=%v", err)
+	}
+	var newerStatus string
+	if err := db.QueryRow(`SELECT status FROM explore_batches WHERE id=$1`, newer.Batch.ID).Scan(&newerStatus); err != nil || newerStatus != model.ExploreBatchPending {
+		t.Fatalf("empty publish changed batch status=%q err=%v", newerStatus, err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM explore_batch_sources WHERE batch_id=$1`, newer.Batch.ID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("empty publish wrote rows count=%d err=%v", count, err)
+	}
 	latest, sources, err := repo.LatestDone(userID)
 	if err != nil || latest.ID != claim.Batch.ID {
 		t.Fatalf("latest=%+v err=%v", latest, err)
@@ -279,11 +289,22 @@ func TestExploreSnapshotPublishIsAtomicFencedAndLatestDoneWins(t *testing.T) {
 	if got := []int{sources[0].SourceID, sources[1].SourceID}; !reflect.DeepEqual(got, []int{validB, validA}) || sources[0].Rank != 1 || sources[1].Rank != 2 {
 		t.Fatalf("ranked sources=%+v", sources)
 	}
-	if err := repo.Fail(newer.Batch.ID, newer.GenerationToken, errors.New("newer failed")); err != nil {
+	if _, err := repo.Publish(newer.Batch.ID, newer.GenerationToken, []ExploreSnapshotSourceInput{{SourceID: validA, Score: 3}}); err != nil {
+		t.Fatalf("valid retry after empty publish: %v", err)
+	}
+	latest, sources, err = repo.LatestDone(userID)
+	if err != nil || latest.ID != newer.Batch.ID || len(sources) != 1 || sources[0].SourceID != validA {
+		t.Fatalf("valid retry did not become latest: latest=%+v sources=%+v err=%v", latest, sources, err)
+	}
+	failed, acquired, err := repo.Claim(userID, claim.Batch.SlotAt.Add(6*time.Hour), now.Add(6*time.Hour), time.Hour)
+	if err != nil || !acquired {
+		t.Fatalf("failed claim=%+v acquired=%t err=%v", failed, acquired, err)
+	}
+	if err := repo.Fail(failed.Batch.ID, failed.GenerationToken, errors.New("newer failed")); err != nil {
 		t.Fatal(err)
 	}
 	latest, _, err = repo.LatestDone(userID)
-	if err != nil || latest.ID != claim.Batch.ID {
+	if err != nil || latest.ID != newer.Batch.ID {
 		t.Fatalf("failed batch hid latest done: latest=%+v err=%v", latest, err)
 	}
 }
