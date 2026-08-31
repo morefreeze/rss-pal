@@ -13,11 +13,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	_ "golang.org/x/image/webp" // register WebP decoder (WeChat wx_fmt=other is WebP)
 	"image"
 	_ "image/gif" // register GIF decoder
 	"image/jpeg"
 	_ "image/png" // register PNG decoder
-	_ "golang.org/x/image/webp" // register WebP decoder (WeChat wx_fmt=other is WebP)
 	"io"
 	"log"
 	"net/http"
@@ -51,6 +51,10 @@ type Config struct {
 	// httpx.ValidateURL. Tests inject an allow-loopback variant so they can
 	// fetch from httptest.NewServer without tripping the SSRF guard.
 	Validate func(raw string) (*url.URL, error)
+
+	// Client optionally supplies the HTTP client for tests. Production leaves it
+	// nil, which always selects the strict SSRF-pinning httpx.NewClient.
+	Client *http.Client
 }
 
 var localArticleImageRE = regexp.MustCompile(`^/api/articles/(\d+)/images/(\d+)\.([a-z0-9]+)$`)
@@ -70,7 +74,10 @@ func FetchAndStore(ctx context.Context, articleID int, urls []string, cfg Config
 		cfg.MaxLongSide = 1024
 	}
 
-	client := httpx.NewClient(downloadTimeout)
+	client := cfg.Client
+	if client == nil {
+		client = httpx.NewClient(downloadTimeout)
+	}
 	paths = make([]string, 0, len(urls))
 	gotURLs = make([]string, 0, len(urls))
 	for idx, raw := range urls {
