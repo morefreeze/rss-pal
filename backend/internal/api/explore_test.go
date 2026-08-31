@@ -201,6 +201,24 @@ func TestExploreHandlerClearsOnlyNegativeFeedbackForAuthenticatedUser(t *testing
 	}
 }
 
+func TestExploreHandlerDetailIncludesSubscriptionState(t *testing.T) {
+	store := &fakeExploreStore{detail: &repository.ExploreArticleDetail{
+		ID: 23, SourceID: 7, Title: "candidate", IsSubscribed: true,
+	}}
+	router := exploreTestRouter(newExploreHandlerWithStore(store, time.Now))
+	w := performExploreRequest(router, http.MethodGet, "/api/explore/articles/23", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["is_subscribed"] != true {
+		t.Fatalf("subscription state missing: %s", w.Body.String())
+	}
+}
+
 func TestExploreHandlerRejectsInvalidFeedbackInterestAndEventEnums(t *testing.T) {
 	store := &fakeExploreStore{}
 	router := exploreTestRouter(newExploreHandlerWithStore(store, time.Now))

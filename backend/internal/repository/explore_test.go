@@ -238,6 +238,9 @@ func TestExploreRepositoryDetailVisibilityAndEventDenoising(t *testing.T) {
 	if err != nil || detail.ID != articleID || detail.Content == nil {
 		t.Fatalf("visible detail=(%+v,%v)", detail, err)
 	}
+	if detail.IsSubscribed {
+		t.Fatal("candidate-only detail reported subscribed")
+	}
 	if _, err := repo.GetVisibleArticle(otherUserID, articleID); !errors.Is(err, ErrExploreNotFound) {
 		t.Fatalf("cross-user detail=%v want not found", err)
 	}
@@ -266,8 +269,12 @@ func TestExploreRepositoryDetailVisibilityAndEventDenoising(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO feeds (url,title,owner_id) VALUES ('https://detail.example/feed','formal',$1)`, userID); err != nil {
 		t.Fatalf("insert formal feed: %v", err)
 	}
-	if _, err := repo.GetVisibleArticle(userID, articleID); err != nil {
+	detail, err = repo.GetVisibleArticle(userID, articleID)
+	if err != nil {
 		t.Fatalf("formal subscription should grant detail: %v", err)
+	}
+	if !detail.IsSubscribed {
+		t.Fatal("formal subscription detail did not report subscribed")
 	}
 }
 

@@ -27,6 +27,15 @@ function cleanTitle(title: string | undefined | null): string {
   return (title ?? '').replace(/\s+/g, ' ').trim()
 }
 
+export function resolveDetailPreviewTitle(
+  articleId: number,
+  state?: ArticleTitleLocationState | null,
+): string | undefined {
+  const preview = state?.articlePreview
+  if (preview?.id !== articleId) return undefined
+  return cleanTitle(preview.title) || undefined
+}
+
 export function buildDocumentTitle(pageTitle: string): string {
   const title = cleanTitle(pageTitle)
   if (!title || title === APP_TITLE) return APP_TITLE
@@ -49,22 +58,16 @@ export function getRoutePageTitle(
   const articleMatch = pathname.match(/^\/articles\/(\d+)$/)
   if (articleMatch) {
     const articleId = Number(articleMatch[1])
-    const preview = state?.articlePreview
-    if (preview?.id === articleId) {
-      const previewTitle = cleanTitle(preview.title)
-      if (previewTitle) return previewTitle
-    }
+    const previewTitle = resolveDetailPreviewTitle(articleId, state)
+    if (previewTitle) return previewTitle
     return `文章 ${articleId}`
   }
 
   const exploreArticleMatch = pathname.match(/^\/explore\/articles\/(\d+)$/)
   if (exploreArticleMatch) {
     const articleId = Number(exploreArticleMatch[1])
-    const preview = state?.articlePreview
-    if (preview?.id === articleId) {
-      const previewTitle = cleanTitle(preview.title)
-      if (previewTitle) return previewTitle
-    }
+    const previewTitle = resolveDetailPreviewTitle(articleId, state)
+    if (previewTitle) return previewTitle
     return `探索文章 ${articleId}`
   }
 
