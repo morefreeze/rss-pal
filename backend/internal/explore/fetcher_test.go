@@ -45,7 +45,7 @@ func rssItem(title, link string, published time.Time) string {
 }
 
 func validConfidenceRequest(rawURL string) SourceFetchRequest {
-	return SourceFetchRequest{URL: rawURL, DirectProfile: true}
+	return SourceFetchRequest{URL: rawURL, Mode: SourceFetchValidate, DirectProfile: true}
 }
 
 func TestSourceFetchDirectRSSAndAtom(t *testing.T) {
@@ -189,7 +189,8 @@ func TestSourceFetchValidationAndArticleNormalization(t *testing.T) {
 		{"one item", validRSS(rssItem("One", "https://9.9.9.9/one", now)), 0, true},
 		{"all stale", validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-91*24*time.Hour)) + rssItem("Two", "https://9.9.9.9/two", now.Add(-365*24*time.Hour))), 0, true},
 		{"one recent", validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-90*24*time.Hour)) + rssItem("Two", "https://9.9.9.9/two", now.Add(-365*24*time.Hour))), 2, false},
-		{"future is not stale", validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(24*time.Hour)) + rssItem("Two", "https://9.9.9.9/two", time.Time{})), 2, false},
+		{"future within clock skew", validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(24*time.Hour)) + rssItem("Two", "https://9.9.9.9/two", time.Time{})), 2, false},
+		{"future beyond clock skew", validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(24*time.Hour+time.Second)) + rssItem("Two", "https://9.9.9.9/two", time.Time{})), 0, true},
 		{"recent updated date counts", `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Feed</title><entry><title>One</title><link href="https://9.9.9.9/one"/><published>` + now.Add(-365*24*time.Hour).Format(time.RFC3339) + `</published><updated>` + now.Add(-time.Hour).Format(time.RFC3339) + `</updated></entry><entry><title>Two</title><link href="https://9.9.9.9/two"/></entry></feed>`, 2, false},
 		{"reject unsafe malformed and duplicate urls", validRSS(rssItem("Good", "https://9.9.9.9/post?utm_source=x", now) + rssItem("Duplicate", "https://9.9.9.9/post", now.Add(-time.Hour)) + rssItem("Private", "http://127.0.0.1/x", now) + rssItem("Credential", "https://u:p@9.9.9.9/x", now) + rssItem("Malformed", "://", now) + rssItem("Second", "https://9.9.9.9/second", now)), 2, false},
 	}
@@ -209,6 +210,54 @@ func TestSourceFetchValidationAndArticleNormalization(t *testing.T) {
 				t.Fatalf("got articles=%d err=%v", len(result.Articles), err)
 			}
 		})
+	}
+}
+
+func TestSourceRefreshSkipsNewSourceConfidenceAndActivityGates(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		body string
+		want int
+	}{
+		{name: "one old article", body: validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-365*24*time.Hour))), want: 1},
+		{name: "all old articles", body: validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-365*24*time.Hour)) + rssItem("Two", "https://9.9.9.9/two", now.Add(-400*24*time.Hour))), want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			fetcher := sourceFetcherForTest(now, func(req *http.Request) (*http.Response, error) {
+				calls++
+				return sourceResponse(req, http.StatusOK, "application/rss+xml", tc.body), nil
+			})
+			staleSuccess := now.Add(-8 * 24 * time.Hour)
+			result, err := fetcher.Fetch(context.Background(), SourceFetchRequest{
+				URL:  "https://8.8.8.8/feed",
+				Mode: SourceFetchRefresh,
+				Evidence: []ObservationEvidence{{
+					ProviderID: 1, ProviderKind: "opml", Enabled: true,
+					ProviderLastSuccessAt: &staleSuccess, LastSeenAt: now.Add(-31 * 24 * time.Hour), OccurrenceCount: 1,
+				}},
+			})
+			if err != nil || len(result.Articles) != tc.want || calls != 1 {
+				t.Fatalf("refresh result=%#v calls=%d err=%v", result, calls, err)
+			}
+		})
+	}
+}
+
+func TestSourceRefreshNotModifiedDoesNotRequireCurrentEvidence(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	fetcher := sourceFetcherForTest(now, func(req *http.Request) (*http.Response, error) {
+		if req.Header.Get("If-None-Match") != `"old"` {
+			t.Fatalf("missing refresh validator: %v", req.Header)
+		}
+		return sourceResponse(req, http.StatusNotModified, "", ""), nil
+	})
+	result, err := fetcher.Fetch(context.Background(), SourceFetchRequest{
+		URL: "https://8.8.8.8/feed", Mode: SourceFetchRefresh, ETag: `"old"`,
+	})
+	if err != nil || !result.NotModified {
+		t.Fatalf("refresh 304 result=%#v err=%v", result, err)
 	}
 }
 

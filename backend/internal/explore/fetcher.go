@@ -24,6 +24,7 @@ const (
 	maxDiscoveryCandidates = 4
 	maxExploreArticles     = 50
 	maxExploreTitleBytes   = 500
+	maxArticleClockSkew    = 24 * time.Hour
 )
 
 // ErrInsufficientSourceConfidence lets the queue processor distinguish a
@@ -114,8 +115,16 @@ func sourceError(kind SourceFetchErrorKind, format string, args ...any) error {
 	return &sourceFetchError{kind: kind, err: fmt.Errorf(format, args...)}
 }
 
+type SourceFetchMode string
+
+const (
+	SourceFetchValidate SourceFetchMode = "validate"
+	SourceFetchRefresh  SourceFetchMode = "refresh"
+)
+
 type SourceFetchRequest struct {
 	URL           string
+	Mode          SourceFetchMode
 	ETag          string
 	LastModified  string
 	Evidence      []ObservationEvidence
@@ -148,13 +157,14 @@ func (f *SourceFetcher) Fetch(ctx context.Context, request SourceFetchRequest) (
 	if f != nil && f.now != nil {
 		now = f.now()
 	}
-	if !HasSourceConfidence(now, request.Evidence, request.DirectProfile) {
+	requireValidation := request.Mode != SourceFetchRefresh
+	if requireValidation && !HasSourceConfidence(now, request.Evidence, request.DirectProfile) {
 		return SourceFetchResult{}, sourceError(SourceFetchTerminal, "%w", ErrInsufficientSourceConfidence)
 	}
-	return f.fetch(ctx, request.URL, request.ETag, request.LastModified, now, true)
+	return f.fetch(ctx, request.URL, request.ETag, request.LastModified, now, true, requireValidation)
 }
 
-func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified string, now time.Time, allowDiscovery bool) (SourceFetchResult, error) {
+func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified string, now time.Time, allowDiscovery, requireValidation bool) (SourceFetchResult, error) {
 	headers := make(http.Header)
 	if etag != "" {
 		headers.Set("If-None-Match", etag)
@@ -221,7 +231,7 @@ func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified st
 		result.NotModified = true
 		return result, nil
 	}
-	articles, recognizedFeed, parseErr := parseExploreFeed(response.Body, result.FeedURL, now)
+	articles, recognizedFeed, parseErr := parseExploreFeed(response.Body, result.FeedURL, now, requireValidation)
 	if recognizedFeed {
 		if parseErr != nil {
 			return SourceFetchResult{}, sourceError(SourceFetchTerminal, "parse source: %w", parseErr)
@@ -239,7 +249,7 @@ func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified st
 		}
 		var retryable error
 		for _, candidate := range candidates {
-			candidateResult, candidateErr := f.fetch(ctx, candidate, "", "", now, false)
+			candidateResult, candidateErr := f.fetch(ctx, candidate, "", "", now, false, requireValidation)
 			if candidateErr == nil {
 				return candidateResult, nil
 			}
@@ -367,7 +377,7 @@ func insertLexicographicTop(values map[string]struct{}, value string, limit int)
 	delete(values, largest)
 }
 
-func parseExploreFeed(body []byte, feedURL string, fetchedAt time.Time) ([]model.ExploreArticle, bool, error) {
+func parseExploreFeed(body []byte, feedURL string, fetchedAt time.Time, requireValidation bool) ([]model.ExploreArticle, bool, error) {
 	parsed, err := gofeed.NewParser().ParseString(string(body))
 	if err != nil {
 		return nil, false, err
@@ -392,19 +402,22 @@ func parseExploreFeed(body []byte, feedURL string, fetchedAt time.Time) ([]model
 		articles = append(articles, article)
 	}
 	sort.Slice(articles, func(i, j int) bool { return articleBefore(articles[i], articles[j]) })
-	if len(articles) < 2 {
-		return nil, true, errors.New("feed must contain at least two parseable articles")
-	}
-	cutoff := fetchedAt.Add(-90 * 24 * time.Hour)
-	recent := false
-	for _, article := range articles {
-		if article.PublishedAt != nil && !article.PublishedAt.Before(cutoff) {
-			recent = true
-			break
+	if requireValidation {
+		if len(articles) < 2 {
+			return nil, true, errors.New("feed must contain at least two parseable articles")
 		}
-	}
-	if !recent {
-		return nil, true, errors.New("feed has no article published or updated in the last 90 days")
+		cutoff := fetchedAt.Add(-90 * 24 * time.Hour)
+		futureLimit := fetchedAt.Add(maxArticleClockSkew)
+		recent := false
+		for _, article := range articles {
+			if article.PublishedAt != nil && !article.PublishedAt.Before(cutoff) && !article.PublishedAt.After(futureLimit) {
+				recent = true
+				break
+			}
+		}
+		if !recent {
+			return nil, true, errors.New("feed has no article published or updated in the last 90 days")
+		}
 	}
 	if len(articles) > maxExploreArticles {
 		articles = articles[:maxExploreArticles]

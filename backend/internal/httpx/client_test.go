@@ -505,6 +505,30 @@ func TestFetchBoundedReportsFinalResponseURL(t *testing.T) {
 	}
 }
 
+func TestFetchBoundedRejectsUnsafeRedirectWithOrdinaryClient(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if requests == 1 {
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{"Location": []string{"http://127.0.0.1/private"}},
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Request: req}, nil
+	})}
+
+	_, err := FetchBounded(context.Background(), client, "https://8.8.8.8/start", nil, 2)
+	if err == nil || !strings.Contains(err.Error(), "redirect rejected") {
+		t.Fatalf("unsafe redirect err=%v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("unsafe redirect reached transport: requests=%d", requests)
+	}
+}
+
 func TestFetchBoundedRejectsResponseOverLimit(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("fives")), Request: req}, nil

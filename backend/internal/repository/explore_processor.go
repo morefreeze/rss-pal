@@ -187,8 +187,8 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		}
 		return tx.Commit()
 	}
-	if result.FeedURL == "" || len(result.Articles) < 2 {
-		return persistExploreTerminalResult(tx, catalog, queue, task, owner, checkedAt, errors.New("successful source response requires a feed URL and at least two articles"))
+	if err := validateExploreTaskResult(task.TaskType, result); err != nil {
+		return persistExploreTerminalResult(tx, catalog, queue, task, owner, checkedAt, err)
 	}
 
 	canonicalID := task.SourceID
@@ -253,10 +253,12 @@ const (
 func buildExploreSourceFetchRequest(source ExploreCatalogSource, task ExploreQueueTask) explore.SourceFetchRequest {
 	request := explore.SourceFetchRequest{
 		URL:           source.Source.URL,
-		DirectProfile: task.Priority >= ExplorePriorityDirectProfile,
+		Mode:          explore.SourceFetchValidate,
+		DirectProfile: task.TaskType == ExploreTaskValidateSource && task.Priority >= ExplorePriorityDirectProfile,
 		Evidence:      make([]explore.ObservationEvidence, 0, len(source.Observations)),
 	}
 	if task.TaskType == ExploreTaskRefreshArticles {
+		request.Mode = explore.SourceFetchRefresh
 		if source.Source.ETag != nil {
 			request.ETag = *source.Source.ETag
 		}
@@ -294,15 +296,25 @@ func decideExploreTaskNetwork(taskType, sourceStatus string) exploreTaskNetworkD
 	}
 }
 
-func decideExploreTaskFailure(_ string, attempts int, err error) exploreTaskFailureDecision {
-	if errors.Is(err, explore.ErrInsufficientSourceConfidence) && attempts >= 3 {
-		return exploreTaskInvalidate
-	}
+func decideExploreTaskFailure(taskType string, attempts int, err error) exploreTaskFailureDecision {
 	if errors.Is(err, explore.ErrInsufficientSourceConfidence) {
+		if taskType == ExploreTaskValidateSource && attempts >= 3 {
+			return exploreTaskInvalidate
+		}
 		return exploreTaskRetry
 	}
 	if explore.ClassifySourceFetchError(err) == explore.SourceFetchRetryable {
 		return exploreTaskRetry
 	}
 	return exploreTaskInvalidate
+}
+
+func validateExploreTaskResult(taskType string, result explore.SourceFetchResult) error {
+	if result.FeedURL == "" {
+		return errors.New("successful source response requires a feed URL")
+	}
+	if taskType == ExploreTaskValidateSource && len(result.Articles) < 2 {
+		return errors.New("successful source validation requires at least two articles")
+	}
+	return nil
 }
