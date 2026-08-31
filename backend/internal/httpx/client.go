@@ -150,6 +150,9 @@ type FetchResult struct {
 	StatusCode int
 	Header     http.Header
 	Body       []byte
+	// FinalURL is the response request URL after redirects. It lets callers
+	// resolve relative document references without weakening redirect checks.
+	FinalURL string
 }
 
 // FetchBounded validates and fetches a public URL with an explicitly supplied
@@ -192,7 +195,11 @@ func FetchBounded(ctx context.Context, client *http.Client, rawURL string, heade
 	if int64(len(body)) > limit {
 		return nil, ErrResponseTooLarge
 	}
-	result := &FetchResult{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: body}
+	finalURL := u.String()
+	if response.Request != nil && response.Request.URL != nil {
+		finalURL = response.Request.URL.String()
+	}
+	result := &FetchResult{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: body, FinalURL: finalURL}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return result, fmt.Errorf("unexpected HTTP status %d", response.StatusCode)
 	}
