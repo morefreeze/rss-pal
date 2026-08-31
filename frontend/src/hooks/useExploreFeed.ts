@@ -11,6 +11,24 @@ import {
 } from '../api/client'
 
 const DEFAULT_PAGE_SIZE = 20
+const EXPOSURE_SESSION_KEY = 'exploreReportedExposures'
+
+function reportedExposures(): Set<number> {
+  try {
+    const values = JSON.parse(sessionStorage.getItem(EXPOSURE_SESSION_KEY) || '[]')
+    return new Set(Array.isArray(values) ? values.filter(Number.isInteger) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function persistReportedExposures(values: Set<number>) {
+  try {
+    sessionStorage.setItem(EXPOSURE_SESSION_KEY, JSON.stringify(Array.from(values)))
+  } catch {
+    // Session storage can be unavailable or full; in-memory de-noising remains.
+  }
+}
 
 interface ExploreFeedOptions {
   pageSize?: number
@@ -48,7 +66,7 @@ export function useExploreFeed({
   const [dampenedTopics, setDampenedTopics] = useState<Set<string>>(() => new Set())
   const [knownTopics, setKnownTopics] = useState<string[]>([])
   const requestGenerationRef = useRef(0)
-  const exposedRef = useRef(new Set<number>())
+  const exposedRef = useRef(reportedExposures())
 
   const requestPage = useCallback(async (nextOffset: number, reset: boolean, requestGeneration: number) => {
     if (reset) {
@@ -108,6 +126,7 @@ export function useExploreFeed({
   const recordExposure = useCallback(async (articleID: number) => {
     if (exposedRef.current.has(articleID)) return
     exposedRef.current.add(articleID)
+    persistReportedExposures(exposedRef.current)
     try {
       await recordExploreArticleEvent(articleID, 'exposure')
     } catch {
