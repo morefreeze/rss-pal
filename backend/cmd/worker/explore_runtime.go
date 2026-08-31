@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -20,11 +21,16 @@ const exploreCandidateInputLimit = 2000
 
 func newProductionExploreCycle(db *sql.DB, cfg *config.Config) *exploreCycle {
 	queue := newSQLExploreQueue(db)
-	registry := &explorelogic.Registry{
+	baseRegistry := &explorelogic.Registry{
 		Store:    repository.NewExploreRegistryRepository(db),
 		Queue:    repository.NewExploreRegistryQueue(queue.repo),
 		Client:   explorelogic.NewProviderClient(cfg.RSSHub.BaseURL),
 		Adapters: explorelogic.DefaultProviderAdapters(),
+	}
+	registry := &scheduledExploreRegistry{
+		registry: baseRegistry,
+		catalog:  repository.NewExploreCatalogRepository(db),
+		queue:    queue.repo,
 	}
 	inputs := &sqlExploreRankInputs{db: db}
 	snapshots := &exploreSnapshotCoordinator{
@@ -48,6 +54,39 @@ func newProductionExploreCycle(db *sql.DB, cfg *config.Config) *exploreCycle {
 type sqlExploreQueue struct {
 	db   *sql.DB
 	repo *repository.ExploreQueueRepository
+}
+
+type exploreDueSourceCatalog interface {
+	ListDueSources(time.Time, time.Time, int) ([]model.ExploreSource, error)
+}
+
+type exploreQueueEnqueuer interface {
+	Enqueue(int, string, int) (*repository.ExploreQueueTask, error)
+}
+
+// scheduledExploreRegistry keeps source refresh scheduling independent from
+// provider health. Even when a provider download fails, already-observed due
+// sources continue to enter the durable queue for validation or refresh.
+type scheduledExploreRegistry struct {
+	registry exploreRegistrySyncer
+	catalog  exploreDueSourceCatalog
+	queue    exploreQueueEnqueuer
+}
+
+func (scheduler *scheduledExploreRegistry) SyncDue(ctx context.Context, now time.Time) ([]explorelogic.ProviderSyncResult, error) {
+	results, syncErr := scheduler.registry.SyncDue(ctx, now)
+	due, dueErr := scheduler.catalog.ListDueSources(now.Add(-30*time.Minute), now.Add(-3*time.Hour), exploreMaxBatchLimit)
+	var enqueueErr error
+	for _, source := range due {
+		taskType, priority := repository.ExploreTaskValidateSource, repository.ExplorePriorityStructuredProvider
+		if source.ValidationStatus == model.ExploreValidationValid {
+			taskType, priority = repository.ExploreTaskRefreshArticles, repository.ExplorePriorityRefresh
+		}
+		if _, err := scheduler.queue.Enqueue(source.ID, taskType, priority); err != nil {
+			enqueueErr = errors.Join(enqueueErr, err)
+		}
+	}
+	return results, errors.Join(syncErr, dueErr, enqueueErr)
 }
 
 func newSQLExploreQueue(db *sql.DB) *sqlExploreQueue {
