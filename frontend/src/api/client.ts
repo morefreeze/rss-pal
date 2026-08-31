@@ -468,6 +468,8 @@ export interface ExploreSource {
   reason: string
   health_score?: number
   validation_status: ExploreValidationStatus
+  is_broken?: boolean
+  merged_into_source_id?: number
   recent_article_count: number
   selected: boolean
   is_hidden: boolean

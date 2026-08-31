@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   getExplore: vi.fn(),
   getExploreSources: vi.fn(),
   recordExploreArticleEvent: vi.fn(),
+  replaceExploreInterests: vi.fn(),
   subscribeExploreSource: vi.fn(),
   subscribeExploreSources: vi.fn(),
 }))
@@ -88,6 +89,7 @@ describe('ExplorePage', () => {
     api.recordExploreArticleEvent.mockResolvedValue({ recorded: true })
     api.createExploreFeedback.mockResolvedValue({ id: 90 })
     api.deleteExploreFeedback.mockResolvedValue(undefined)
+    api.replaceExploreInterests.mockResolvedValue({ interests: [] })
   })
 
   it('defaults to published descending, switches sort/order/topic, and requests another page', async () => {
@@ -152,6 +154,28 @@ describe('ExplorePage', () => {
     expect(screen.getByRole('alert').textContent).toContain('探索内容加载失败')
   })
 
+  it('lets a cold-start user choose fixed interests and retry saving them inline', async () => {
+    api.getExplore.mockResolvedValue(response({
+      snapshot: { ...response().snapshot, id: 0 },
+      articles: [],
+    }))
+    api.replaceExploreInterests
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ interests: [] })
+    renderPage()
+
+    expect(await screen.findByRole('group', { name: '选择探索兴趣' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '编程' }))
+    fireEvent.click(screen.getByRole('button', { name: '安全' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存兴趣' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('兴趣保存失败')
+    expect(screen.getByRole('button', { name: '编程' }).getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: '保存兴趣' }))
+    await waitFor(() => expect(api.replaceExploreInterests).toHaveBeenLastCalledWith(['programming', 'security']))
+    expect((await screen.findByRole('status')).textContent).toContain('兴趣已保存')
+  })
+
   it('renders exploration metadata and opens a candidate without subscribing', async () => {
     renderPage('/explore?topic=%E5%B7%A5%E7%A8%8B&sort=published&order=desc')
     expect(await screen.findByAltText('Article 1 缩略图')).toBeTruthy()
@@ -162,6 +186,17 @@ describe('ExplorePage', () => {
     expect(api.recordExploreArticleEvent).toHaveBeenCalledWith(1, 'click')
     expect(api.subscribeExploreSource).not.toHaveBeenCalled()
     expect(api.subscribeExploreSources).not.toHaveBeenCalled()
+  })
+
+  it.each(['Enter', ' '])('does not open an article when %j is pressed on its menu button', async key => {
+    renderPage()
+    await screen.findByText('Article 1')
+    const menu = screen.getByRole('button', { name: 'Article 1 的更多操作' })
+
+    fireEvent.keyDown(menu, { key })
+
+    expect(screen.queryByTestId('detail-state')).toBeNull()
+    expect(api.recordExploreArticleEvent).not.toHaveBeenCalledWith(1, 'click')
   })
 
   it('optimistically hides a source and restores its original position from undo', async () => {
@@ -177,6 +212,63 @@ describe('ExplorePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '撤销' }))
     await waitFor(() => expect(screen.getAllByRole('article').map(node => node.getAttribute('aria-label')))
       .toEqual(['Article 1', 'Article 2', 'Article 3']))
+  })
+
+  it('offers a persistent undo entry when feedback empties the unfiltered stream', async () => {
+    api.getExplore.mockResolvedValue(response({
+      articles: [article(1, 7), article(3, 7)],
+    }))
+    renderPage()
+    await screen.findByText('Article 1')
+    fireEvent.click(screen.getByRole('button', { name: 'Article 1 的更多操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '隐藏此源' }))
+
+    const undo = await screen.findByRole('button', { name: '撤销最近反馈' })
+    expect(screen.getByText('反馈已隐藏当前候选文章')).toBeTruthy()
+    fireEvent.click(undo)
+
+    await waitFor(() => expect(screen.getAllByRole('article').map(node => node.getAttribute('aria-label')))
+      .toEqual(['Article 1', 'Article 3']))
+  })
+
+  it('clears every feedback created in this page session when several actions empty the stream', async () => {
+    api.getExplore.mockResolvedValue(response({
+      articles: [article(1, 7), article(2, 8)],
+    }))
+    api.createExploreFeedback
+      .mockResolvedValueOnce({ id: 91 })
+      .mockResolvedValueOnce({ id: 92 })
+    renderPage()
+    await screen.findByText('Article 1')
+    fireEvent.click(screen.getByRole('button', { name: 'Article 1 的更多操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '隐藏此源' }))
+    await waitFor(() => expect(screen.queryByText('Article 1')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Article 2 的更多操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '隐藏此源' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '清除本次反馈（2）' }))
+
+    await waitFor(() => expect(screen.getAllByRole('article').map(node => node.getAttribute('aria-label')))
+      .toEqual(['Article 1', 'Article 2']))
+    expect(api.deleteExploreFeedback.mock.calls.map(([id]) => id)).toEqual([92, 91])
+  })
+
+  it('keeps the empty-state undo available when deleting feedback fails, then allows retry', async () => {
+    api.getExplore.mockResolvedValue(response({ articles: [article(1, 7)] }))
+    api.deleteExploreFeedback
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(undefined)
+    renderPage()
+    await screen.findByText('Article 1')
+    fireEvent.click(screen.getByRole('button', { name: 'Article 1 的更多操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '隐藏此源' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '撤销最近反馈' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('撤销失败')
+    expect(screen.getByRole('button', { name: '撤销最近反馈' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '撤销最近反馈' }))
+    expect(await screen.findByText('Article 1')).toBeTruthy()
   })
 
   it('rolls back failed topic dampening and reports the error', async () => {

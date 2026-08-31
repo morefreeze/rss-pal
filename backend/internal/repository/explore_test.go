@@ -127,6 +127,22 @@ func TestExploreRepositoryPageFeedbackVisibilityAndPagination(t *testing.T) {
 	if err != nil || len(sources) != 2 || sources[0].Rank != 1 || sources[0].RecentArticleCount != 3 {
 		t.Fatalf("sources=(%+v,%v)", sources, err)
 	}
+	if _, err := db.Exec(`UPDATE recommended_feeds SET is_broken=true WHERE id=$1`, sourceA); err != nil {
+		t.Fatalf("mark broken: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE recommended_feeds SET validation_status='invalid',merged_into_source_id=$2 WHERE id=$1`, sourceB, sourceA); err != nil {
+		t.Fatalf("mark merged: %v", err)
+	}
+	sources, err = repo.GetSources(userID)
+	if err != nil || !sources[0].IsBroken || sources[1].MergedIntoSourceID == nil || *sources[1].MergedIntoSourceID != sourceA {
+		t.Fatalf("source catalog states=(%+v,%v)", sources, err)
+	}
+	if _, err := db.Exec(`UPDATE recommended_feeds SET is_broken=false WHERE id=$1`, sourceA); err != nil {
+		t.Fatalf("restore broken state: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE recommended_feeds SET validation_status='valid',merged_into_source_id=NULL WHERE id=$1`, sourceB); err != nil {
+		t.Fatalf("restore merged state: %v", err)
+	}
 	if _, err := db.Exec(`INSERT INTO explore_batches(user_id,slot_at,status) VALUES ($1,$2,'pending')`, userID, now.Add(3*time.Hour)); err != nil {
 		t.Fatalf("insert pending batch: %v", err)
 	}
