@@ -24,7 +24,7 @@ services:
       retries: 5
 
   # Runs once after PostgreSQL is ready so existing database volumes receive
-  # heartbeat schema 037 before either service accesses it.
+  # the current subscription Explore schema before either service accesses it.
   status-migrate:
     image: postgres:15-alpine
     environment:
@@ -37,7 +37,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/037_service_heartbeats.sql"]
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/038_subscription_explore.sql"]
 
   api:
     restart: unless-stopped
