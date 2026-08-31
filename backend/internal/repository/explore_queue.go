@@ -299,6 +299,11 @@ func expectExploreLeaseTransition(result sql.Result, err error, taskID int) erro
 	return nil
 }
 func clipExploreError(cause error) string {
+	return ClipExploreError(cause)
+}
+
+// ClipExploreError bounds persisted errors without splitting UTF-8 runes.
+func ClipExploreError(cause error) string {
 	if cause == nil {
 		return ""
 	}
