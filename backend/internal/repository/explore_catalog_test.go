@@ -135,8 +135,14 @@ func TestExploreCatalogUpsertArticlesRejectsMoreThan50BeforeTransaction(t *testi
 		t.Fatalf("51 articles err=%v", err)
 	}
 	atLimit := make([]model.ExploreArticle, 50)
-	if err := repo.UpsertArticles(1, atLimit, time.Now()); errors.Is(err, ErrExploreArticleBatchTooLarge) {
-		t.Fatalf("50 articles rejected as too large: %v", err)
+	if err := repo.UpsertArticles(1, atLimit, time.Now()); err == nil || err.Error() != "txOrBegin: Querier is neither *sql.Tx nor *sql.DB" {
+		t.Fatalf("50 articles did not pass size gate into transaction setup: %v", err)
+	}
+}
+
+func TestExploreCatalogSourceNotFoundErrorIsConsistent(t *testing.T) {
+	if got := exploreSourceNotFoundError(42).Error(); got != "explore source 42 not found" {
+		t.Fatalf("not-found error=%q", got)
 	}
 }
 
@@ -459,6 +465,21 @@ func TestExploreCatalogArticleUpsertAndExactRetention(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT title,url,content,excerpt FROM explore_articles WHERE id=$1`, firstID).Scan(&gotTitle, &gotURL, &gotContent, &gotExcerpt); err != sql.ErrNoRows {
 		t.Fatalf("old upserted article should be trimmed after retention, got title=%q url=%q content=%v excerpt=%v err=%v", gotTitle, gotURL, gotContent, gotExcerpt, err)
+	}
+}
+
+func TestExploreCatalogStandaloneRetentionDistinguishesMissingAndEmptySource(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	repo := NewExploreCatalogRepository(db)
+	emptySourceID := insertCatalogSource(t, db, "https://empty-retention.example/feed", model.ExploreValidationValid, &now, &now)
+	if err := repo.RetainArticles(emptySourceID, now); err != nil {
+		t.Fatalf("existing empty source retention: %v", err)
+	}
+	missingSourceID := emptySourceID + 100000
+	if err := repo.RetainArticles(missingSourceID, now); err == nil || err.Error() != fmt.Sprintf("explore source %d not found", missingSourceID) {
+		t.Fatalf("missing source retention err=%v", err)
 	}
 }
 

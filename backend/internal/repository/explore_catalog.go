@@ -283,8 +283,7 @@ func (r *ExploreCatalogRepository) UpsertArticles(sourceID int, articles []model
 	}
 	defer rollback()
 	txRepo := r.WithQuerier(q)
-	var lockedSourceID int
-	if err := q.QueryRow(exploreSourceWriteLockSQL, sourceID).Scan(&lockedSourceID); err != nil {
+	if err := lockExploreSourceForWrite(q, sourceID); err != nil {
 		return err
 	}
 	for index := range articles {
@@ -298,7 +297,7 @@ func (r *ExploreCatalogRepository) UpsertArticles(sourceID int, articles []model
 			return err
 		}
 	}
-	if err := txRepo.RetainArticles(sourceID, retainedAt); err != nil {
+	if err := retainExploreArticles(q, sourceID, retainedAt); err != nil {
 		return err
 	}
 	return commit()
@@ -308,7 +307,31 @@ func (r *ExploreCatalogRepository) RetainArticles(sourceID int, retainedAt time.
 	if sourceID <= 0 {
 		return errors.New("explore source id must be positive")
 	}
-	_, err := r.db.Exec(exploreArticleRetentionSQL, sourceID, retainedAt.Add(-30*24*time.Hour))
+	q, commit, rollback, err := txOrBegin(r.db)
+	if err != nil {
+		return err
+	}
+	defer rollback()
+	if err := lockExploreSourceForWrite(q, sourceID); err != nil {
+		return err
+	}
+	if err := retainExploreArticles(q, sourceID, retainedAt); err != nil {
+		return err
+	}
+	return commit()
+}
+
+func retainExploreArticles(q Querier, sourceID int, retainedAt time.Time) error {
+	_, err := q.Exec(exploreArticleRetentionSQL, sourceID, retainedAt.Add(-30*24*time.Hour))
+	return err
+}
+
+func lockExploreSourceForWrite(q Querier, sourceID int) error {
+	var lockedSourceID int
+	err := q.QueryRow(exploreSourceWriteLockSQL, sourceID).Scan(&lockedSourceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return exploreSourceNotFoundError(sourceID)
+	}
 	return err
 }
 
@@ -395,7 +418,11 @@ func expectExploreSourceUpdate(result sql.Result, err error, sourceID int) error
 		return err
 	}
 	if count != 1 {
-		return fmt.Errorf("explore source %d not found", sourceID)
+		return exploreSourceNotFoundError(sourceID)
 	}
 	return nil
+}
+
+func exploreSourceNotFoundError(sourceID int) error {
+	return fmt.Errorf("explore source %d not found", sourceID)
 }
