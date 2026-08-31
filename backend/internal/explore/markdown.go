@@ -2,7 +2,6 @@ package explore
 
 import (
 	"regexp"
-	"sort"
 	"strings"
 )
 
@@ -13,10 +12,22 @@ type GitHubAwesomeAdapter struct{}
 func (GitHubAwesomeAdapter) Kind() string { return "github_awesome" }
 
 func (GitHubAwesomeAdapter) Parse(provider Provider, body []byte) ([]Candidate, error) {
+	if err := checkProviderBody(body); err != nil {
+		return nil, err
+	}
 	text := string(body)
-	matches := markdownLinkPattern.FindAllStringSubmatchIndex(text, -1)
-	byDomain := make(map[string]Candidate, len(matches))
-	for _, match := range matches {
+	collector := newCandidateCollector(maxProviderCandidates, func(candidate Candidate) string { return candidate.ExternalKey })
+	for cursor := 0; cursor < len(text); {
+		match := markdownLinkPattern.FindStringSubmatchIndex(text[cursor:])
+		if match == nil {
+			break
+		}
+		for index := range match {
+			if match[index] >= 0 {
+				match[index] += cursor
+			}
+		}
+		cursor = match[1]
 		if match[0] > 0 && text[match[0]-1] == '!' {
 			continue
 		}
@@ -30,21 +41,9 @@ func (GitHubAwesomeAdapter) Parse(provider Provider, body []byte) ([]Candidate, 
 			continue
 		}
 		domain := hostOf(normalized)
-		candidate, exists := byDomain[domain]
-		if !exists {
-			candidate = Candidate{ExternalKey: domain, FeedURL: normalized, Title: title, Topic: provider.Topic, Tags: []string{provider.Topic}}
-		} else if normalized < candidate.FeedURL {
-			candidate.FeedURL, candidate.Title = normalized, title
-		}
-		candidate.OccurrenceCount++
-		byDomain[domain] = candidate
+		collector.add(Candidate{ExternalKey: domain, FeedURL: normalized, Title: title, Topic: provider.Topic, Tags: []string{provider.Topic}, OccurrenceCount: 1})
 	}
-	candidates := make([]Candidate, 0, len(byDomain))
-	for _, candidate := range byDomain {
-		candidates = append(candidates, candidate)
-	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].FeedURL < candidates[j].FeedURL })
-	return candidates, nil
+	return collector.candidates(), nil
 }
 
 var markdownLinkPattern = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)

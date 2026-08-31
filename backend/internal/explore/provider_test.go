@@ -2,10 +2,12 @@ package explore
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -29,6 +31,30 @@ func TestNormalizeCandidatesRejectsUnsafeURLsAndDeduplicatesDeterministically(t 
 	}
 	if got, want := candidates[0].ExternalKey, "one"; got != want {
 		t.Errorf("ExternalKey = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeCandidatesKeepsLexicallySmallestCanonicalFeedURLsRegardlessOfInputOrder(t *testing.T) {
+	input := make([]Candidate, 0, 2100)
+	for i := 2099; i >= 0; i-- {
+		input = append(input, Candidate{ExternalKey: fmt.Sprintf("key-%04d", i), FeedURL: fmt.Sprintf("https://feeds.example/%04d?utm_source=x", i)})
+	}
+	reversed := append([]Candidate(nil), input...)
+	for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
+		reversed[i], reversed[j] = reversed[j], reversed[i]
+	}
+	got, gotReversed := NormalizeCandidates(input), NormalizeCandidates(reversed)
+	if len(got) != maxProviderCandidates || got[0].FeedURL != "https://feeds.example/0000" || got[len(got)-1].FeedURL != "https://feeds.example/1999" {
+		t.Fatalf("normalized candidates = %d, first/last = %#v / %#v", len(got), got[0], got[len(got)-1])
+	}
+	if !reflect.DeepEqual(got, gotReversed) {
+		t.Fatal("NormalizeCandidates depends on input order")
+	}
+}
+
+func TestProviderBodyLimitRejectsFourMiBPlusOne(t *testing.T) {
+	if err := checkProviderBody(make([]byte, defaultProviderBodyBytes+1)); err == nil {
+		t.Fatal("checkProviderBody accepted body over four MiB")
 	}
 }
 

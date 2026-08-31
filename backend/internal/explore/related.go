@@ -2,9 +2,7 @@ package explore
 
 import (
 	"bytes"
-	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -15,8 +13,8 @@ import (
 type RelatedSiteDiscoverer struct{}
 
 func (RelatedSiteDiscoverer) Discover(pageURL string, body []byte) ([]Candidate, error) {
-	if len(body) > defaultProviderBodyBytes {
-		return nil, fmt.Errorf("related page exceeds %d bytes", defaultProviderBodyBytes)
+	if err := checkProviderBody(body); err != nil {
+		return nil, err
 	}
 	base, ok := normalizePublicURL(pageURL)
 	if !ok {
@@ -24,7 +22,8 @@ func (RelatedSiteDiscoverer) Discover(pageURL string, body []byte) ([]Candidate,
 	}
 	baseURL, _ := url.Parse(base)
 	baseHost := hostOf(base)
-	declared, external := []Candidate{}, map[string]Candidate{}
+	declared := newCandidateCollector(20, func(candidate Candidate) string { return candidate.FeedURL })
+	external := newCandidateCollector(10, func(candidate Candidate) string { return candidate.ExternalKey })
 	tokenizer := html.NewTokenizer(bytes.NewReader(body))
 	for {
 		tokenType := tokenizer.Next()
@@ -45,7 +44,7 @@ func (RelatedSiteDiscoverer) Discover(pageURL string, body []byte) ([]Candidate,
 				continue
 			}
 			if resolved, ok := resolvePublicURL(baseURL, href); ok {
-				declared = append(declared, Candidate{ExternalKey: resolved, FeedURL: resolved, SiteURL: base, Title: baseHost})
+				declared.add(Candidate{ExternalKey: resolved, FeedURL: resolved, SiteURL: base, Title: baseHost, OccurrenceCount: 1})
 			}
 		case "a":
 			href, found := htmlAttribute(token, "href")
@@ -57,24 +56,10 @@ func (RelatedSiteDiscoverer) Discover(pageURL string, body []byte) ([]Candidate,
 				continue
 			}
 			domain := hostOf(resolved)
-			if _, exists := external[domain]; !exists {
-				external[domain] = Candidate{ExternalKey: domain, FeedURL: resolved, SiteURL: resolved, Title: domain}
-			}
+			external.add(Candidate{ExternalKey: domain, FeedURL: resolved, SiteURL: resolved, Title: domain, OccurrenceCount: 1})
 		}
 	}
-	declared = NormalizeCandidates(declared)
-	if len(declared) > 20 {
-		declared = declared[:20]
-	}
-	list := make([]Candidate, 0, len(external))
-	for _, candidate := range external {
-		list = append(list, candidate)
-	}
-	sort.Slice(list, func(i, j int) bool { return list[i].FeedURL < list[j].FeedURL })
-	if len(list) > 10 {
-		list = list[:10]
-	}
-	return append(declared, list...), nil
+	return append(declared.candidates(), external.candidates()...), nil
 }
 
 func isFeedDeclaration(token html.Token) bool {

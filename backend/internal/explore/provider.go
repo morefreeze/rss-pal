@@ -168,51 +168,22 @@ func (c ProviderClient) resolveEndpoint(endpoint string) (string, error) {
 // NormalizeCandidates rejects unsafe URLs and coalesces candidates by their
 // canonical feed URL. The lexically smallest stable key wins public metadata.
 func NormalizeCandidates(input []Candidate) []Candidate {
-	byURL := make(map[string]Candidate, maxProviderCandidates)
+	collector := newCandidateCollector(maxProviderCandidates, func(candidate Candidate) string { return candidate.FeedURL })
 	for _, raw := range input {
 		raw, ok := normalizeCandidate(raw)
 		if !ok {
 			continue
 		}
-		feedURL := raw.FeedURL
-		if _, exists := byURL[feedURL]; !exists && len(byURL) >= maxProviderCandidates {
-			continue
-		}
-		if previous, exists := byURL[feedURL]; exists {
-			previous.OccurrenceCount = safeOccurrenceAdd(previous.OccurrenceCount, raw.OccurrenceCount)
-			previous.Tags = uniqueStrings(append(previous.Tags, raw.Tags...))
-			if raw.ExternalKey < previous.ExternalKey {
-				previous.ExternalKey = raw.ExternalKey
-				if raw.Title != "" {
-					previous.Title = raw.Title
-				}
-				if raw.SiteURL != "" {
-					previous.SiteURL = raw.SiteURL
-				}
-				if raw.Topic != "" {
-					previous.Topic = raw.Topic
-				}
-			}
-			byURL[feedURL] = previous
-			continue
-		}
-		raw.Tags = uniqueStrings(raw.Tags)
-		byURL[feedURL] = raw
+		collector.add(raw)
 	}
-	out := make([]Candidate, 0, maxProviderCandidates)
-	for _, c := range byURL {
-		out = append(out, c)
+	return collector.candidates()
+}
+
+func checkProviderBody(body []byte) error {
+	if len(body) > defaultProviderBodyBytes {
+		return fmt.Errorf("provider body exceeds %d bytes", defaultProviderBodyBytes)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].FeedURL == out[j].FeedURL {
-			return out[i].ExternalKey < out[j].ExternalKey
-		}
-		return out[i].FeedURL < out[j].FeedURL
-	})
-	if len(out) > maxProviderCandidates {
-		out = out[:maxProviderCandidates]
-	}
-	return out
+	return nil
 }
 
 // ValidateCandidate is the repository's defensive boundary for values that
