@@ -183,7 +183,21 @@ func FetchBounded(ctx context.Context, client *http.Client, rawURL string, heade
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", UserAgent)
 	}
-	response, err := client.Do(req)
+	requestClient := *client
+	previousRedirectCheck := client.CheckRedirect
+	requestClient.CheckRedirect = func(redirect *http.Request, via []*http.Request) error {
+		if _, err := ValidateURL(redirect.URL.String()); err != nil {
+			return fmt.Errorf("redirect rejected: %w", err)
+		}
+		if previousRedirectCheck != nil {
+			return previousRedirectCheck(redirect, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("too many redirects")
+		}
+		return nil
+	}
+	response, err := requestClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

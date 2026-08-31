@@ -71,7 +71,7 @@ func TestBuildExploreSourceFetchRequestMapsEvidenceAndTaskPolicy(t *testing.T) {
 	}
 
 	validate := buildExploreSourceFetchRequest(source, ExploreQueueTask{TaskType: ExploreTaskValidateSource, Priority: ExplorePriorityDirectProfile})
-	if validate.URL != source.Source.URL || validate.ETag != "" || validate.LastModified != "" || !validate.DirectProfile {
+	if validate.URL != source.Source.URL || validate.Mode != explore.SourceFetchValidate || validate.ETag != "" || validate.LastModified != "" || !validate.DirectProfile {
 		t.Fatalf("validate request=%+v", validate)
 	}
 	if len(validate.Evidence) != 1 || validate.Evidence[0].ProviderID != 17 || validate.Evidence[0].ProviderKind != "reddit_stream" || !validate.Evidence[0].Enabled || validate.Evidence[0].ProviderLastSuccessAt != &providerSuccess || !validate.Evidence[0].LastSeenAt.Equal(lastSeen) || validate.Evidence[0].OccurrenceCount != 3 {
@@ -79,7 +79,7 @@ func TestBuildExploreSourceFetchRequestMapsEvidenceAndTaskPolicy(t *testing.T) {
 	}
 
 	refresh := buildExploreSourceFetchRequest(source, ExploreQueueTask{TaskType: ExploreTaskRefreshArticles, Priority: ExplorePriorityRefresh})
-	if refresh.ETag != etag || refresh.LastModified != modified || refresh.DirectProfile {
+	if refresh.Mode != explore.SourceFetchRefresh || refresh.ETag != etag || refresh.LastModified != modified || refresh.DirectProfile {
 		t.Fatalf("refresh request=%+v", refresh)
 	}
 }
@@ -121,8 +121,21 @@ func TestExploreTaskOutcomeRetriesInsufficientConfidenceBeforeThirdFailure(t *te
 	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 2, err); got != exploreTaskRetry {
 		t.Fatalf("early insufficient refresh decision=%q", got)
 	}
-	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 3, err); got != exploreTaskInvalidate {
-		t.Fatalf("third insufficient refresh decision=%q", got)
+	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 3, err); got != exploreTaskRetry {
+		t.Fatalf("refresh confidence must not become terminal, decision=%q", got)
+	}
+}
+
+func TestExploreTaskResultValidationKeepsRefreshPolicySeparate(t *testing.T) {
+	one := explore.SourceFetchResult{FeedURL: "https://source.example/feed", Articles: []model.ExploreArticle{{Title: "one"}}}
+	if err := validateExploreTaskResult(ExploreTaskValidateSource, one); err == nil {
+		t.Fatal("validation accepted fewer than two articles")
+	}
+	if err := validateExploreTaskResult(ExploreTaskRefreshArticles, one); err != nil {
+		t.Fatalf("refresh rejected a syntactically valid one-article result: %v", err)
+	}
+	if err := validateExploreTaskResult(ExploreTaskRefreshArticles, explore.SourceFetchResult{}); err == nil {
+		t.Fatal("refresh accepted a missing feed URL")
 	}
 }
 
