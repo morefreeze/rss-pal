@@ -51,13 +51,16 @@ func newRLSFixture(t *testing.T) (*rlsFixture, func()) {
 		t.Fatalf("seed articleShared: %v", err)
 	}
 	var providerID, sourceID int
-	if err := privDB.QueryRow(`INSERT INTO explore_registry_providers (provider_key, endpoint, kind, topic) VALUES ('rls-fixture', 'https://example.test/fixture', 'opml', 'test') RETURNING id`).Scan(&providerID); err != nil {
+	if err := privDB.QueryRow(`INSERT INTO recommended_feeds (url, title, category, language) VALUES ('https://example.test/feed', 'fixture', 'test', 'en') RETURNING id`).Scan(&sourceID); err != nil {
+		t.Fatalf("seed recommended source: %v", err)
+	}
+	if err := privDB.QueryRow(`INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, sync_interval_minutes) VALUES ('rls-fixture', 'opml', 'https://example.test/fixture', 360) RETURNING id`).Scan(&providerID); err != nil {
 		t.Fatalf("seed explore provider: %v", err)
 	}
-	if err := privDB.QueryRow(`INSERT INTO explore_source_observations (provider_id, source_url, normalized_url, title) VALUES ($1, 'https://example.test/feed', 'https://example.test/feed', 'fixture') RETURNING id`, providerID).Scan(&sourceID); err != nil {
+	if _, err := privDB.Exec(`INSERT INTO explore_source_observations (provider_id, source_id, external_key) VALUES ($1, $2, 'fixture')`, providerID, sourceID); err != nil {
 		t.Fatalf("seed explore source: %v", err)
 	}
-	if _, err := privDB.Exec(`INSERT INTO explore_articles (source_observation_id, title, url, normalized_url) VALUES ($1, 'fixture article', 'https://example.test/article', 'https://example.test/article')`, sourceID); err != nil {
+	if _, err := privDB.Exec(`INSERT INTO explore_articles (source_id, title, url, normalized_url) VALUES ($1, 'fixture article', 'https://example.test/article', 'https://example.test/article')`, sourceID); err != nil {
 		t.Fatalf("seed explore article: %v", err)
 	}
 	return f, func() { cleanupApp(); cleanupSchema() }
@@ -207,22 +210,22 @@ func TestRLS_PrivateTablesAreScoped(t *testing.T) {
 		},
 		{
 			name:     "explore_batches",
-			seedSQL:  `INSERT INTO explore_batches (user_id) VALUES ($2)`,
+			seedSQL:  `INSERT INTO explore_batches (user_id, slot_at, status) VALUES ($2, NOW(), 'pending')`,
 			countSQL: `SELECT COUNT(*) FROM explore_batches`,
 		},
 		{
 			name: "explore_batch_sources",
-			seedSQL: `WITH b AS (INSERT INTO explore_batches (user_id) VALUES ($2) RETURNING id)
-				INSERT INTO explore_batch_sources (batch_id, source_observation_id, rank, score)
-				SELECT b.id, s.id, 1, 1.0 FROM b
-				CROSS JOIN (SELECT id FROM explore_source_observations ORDER BY id LIMIT 1) s
+			seedSQL: `WITH b AS (INSERT INTO explore_batches (user_id, slot_at, status) VALUES ($2, NOW(), 'pending') RETURNING id)
+				INSERT INTO explore_batch_sources (user_id, batch_id, source_id, rank, score)
+				SELECT $2, b.id, s.id, 1, 1.0 FROM b
+				CROSS JOIN (SELECT id FROM recommended_feeds ORDER BY id LIMIT 1) s
 				LIMIT 1`,
 			countSQL: `SELECT COUNT(*) FROM explore_batch_sources`,
 		},
 		{
 			name: "explore_feedback",
-			seedSQL: `INSERT INTO explore_feedback (user_id, source_observation_id, feedback_type)
-				SELECT $2, id, 'hide_source' FROM explore_source_observations ORDER BY id LIMIT 1`,
+			seedSQL: `INSERT INTO explore_feedback (user_id, source_id, feedback_type)
+				SELECT $2, id, 'hide_source' FROM recommended_feeds ORDER BY id LIMIT 1`,
 			countSQL: `SELECT COUNT(*) FROM explore_feedback`,
 		},
 		{
