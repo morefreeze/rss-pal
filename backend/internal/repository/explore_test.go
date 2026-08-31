@@ -315,13 +315,15 @@ func TestExploreRepositoryClearNegativeFeedbackPreservesInterestsAndOtherUsers(t
 	userID, otherUserID := insertExploreUsers(t, db)
 	sourceID := insertExploreSource(t, db, "https://clear-feedback.example/feed", "clear-feedback")
 
+	if _, err := db.Exec(`INSERT INTO explore_feedback(user_id,source_id,feedback_type) VALUES ($1,$3,'hide_source'),($2,$3,'hide_source')`, userID, otherUserID, sourceID); err != nil {
+		t.Fatalf("seed source feedback: %v", err)
+	}
 	if _, err := db.Exec(`
-		INSERT INTO explore_feedback(user_id,source_id,feedback_type) VALUES ($1,$3,'hide_source'),($2,$3,'hide_source');
 		INSERT INTO explore_feedback(user_id,topic,feedback_type) VALUES
 			($1,'programming','dampen_topic'),($1,'security','boost_topic'),
 			($2,'programming','dampen_topic'),($2,'security','boost_topic')
-	`, userID, otherUserID, sourceID); err != nil {
-		t.Fatalf("seed feedback: %v", err)
+	`, userID, otherUserID); err != nil {
+		t.Fatalf("seed topic feedback: %v", err)
 	}
 
 	deleted, err := NewExploreRepository(db).ClearNegativeFeedback(userID)
