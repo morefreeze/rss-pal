@@ -15,6 +15,7 @@ type Config struct {
 	JWT      JWTConfig
 	RSSHub   RSSHubConfig
 	Backup   BackupConfig
+	Explore  ExploreConfig
 }
 
 type BackupConfig struct {
@@ -79,6 +80,12 @@ type RSSHubConfig struct {
 	BaseURL string
 }
 
+// ExploreConfig controls bounded dispatcher work for subscription discovery.
+type ExploreConfig struct {
+	FetchBatchLimit  int
+	FetchConcurrency int
+}
+
 func Load() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -123,6 +130,10 @@ func Load() *Config {
 		Backup: BackupConfig{
 			Dir: getEnv("BACKUP_DIR", "/backups"),
 		},
+		Explore: ExploreConfig{
+			FetchBatchLimit:  getEnvIntBounded("EXPLORE_FETCH_BATCH_LIMIT", 500, 1, 500),
+			FetchConcurrency: getEnvIntBounded("EXPLORE_FETCH_CONCURRENCY", 5, 1, 0),
+		},
 	}
 }
 
@@ -140,6 +151,16 @@ func getEnvInt(key string, defaultValue int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
+		return defaultValue
+	}
+	return n
+}
+
+// getEnvIntBounded returns defaultValue unless key contains an integer at
+// least minValue and, when maxValue is positive, no greater than maxValue.
+func getEnvIntBounded(key string, defaultValue, minValue, maxValue int) int {
+	n, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || n < minValue || (maxValue > 0 && n > maxValue) {
 		return defaultValue
 	}
 	return n
