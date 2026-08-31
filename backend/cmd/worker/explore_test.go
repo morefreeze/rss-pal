@@ -437,7 +437,7 @@ func TestExploreSnapshotCoordinatorReportsFreshUnownedPendingForRetry(t *testing
 	}
 }
 
-func TestExploreSnapshotCoordinatorTreatsPersistedFailureAsTerminal(t *testing.T) {
+func TestExploreSnapshotCoordinatorRetriesPersistedFailure(t *testing.T) {
 	store := &fakeSnapshotStore{
 		claim:      &repository.ExploreSnapshotClaim{Batch: model.ExploreBatch{ID: 52, UserID: 7, Status: model.ExploreBatchPending}},
 		claimOwned: true,
@@ -447,8 +447,49 @@ func TestExploreSnapshotCoordinatorTreatsPersistedFailureAsTerminal(t *testing.T
 		store: store, logger: log.New(&bytes.Buffer{}, "", 0),
 	}
 	result := runner.GenerateAll(context.Background(), time.Date(2026, 9, 1, 8, 0, 0, 0, exploreTestShanghai), time.Now())
-	if result.FailedPersisted != 1 || result.NeedsRetry() {
-		t.Fatalf("result = %+v, want one persisted terminal failure", result)
+	if result.FailedPersisted != 1 || !result.NeedsRetry() {
+		t.Fatalf("result = %+v, want one retryable persisted failure", result)
+	}
+}
+
+func TestExploreCycleRetriesPersistedSnapshotFailureThenClosesGuardAfterSuccess(t *testing.T) {
+	now := time.Date(2026, 9, 1, 8, 0, 0, 0, exploreTestShanghai)
+	slot := explorelogic.ExploreScheduleAt(now).SlotAt
+	store := &recoveringSnapshotStore{status: model.ExploreBatchPending}
+	runner := &exploreSnapshotCoordinator{
+		users:    &fakeExploreUsers{ids: []int{7}},
+		profiles: &recoveringRankInputs{now: now},
+		store:    store,
+		logger:   log.New(&bytes.Buffer{}, "", 0),
+	}
+	clock := &fakeExploreClock{now: now}
+	cycle := newExploreCycle(exploreCycleDeps{
+		clock: clock, registry: &fakeExploreRegistry{}, queue: &fakeExploreQueue{},
+		taskHandler: &fakeExploreTaskHandler{}, snapshots: runner, owner: "worker-test",
+		logger: log.New(&bytes.Buffer{}, "", 0),
+	})
+	t.Cleanup(func() {
+		if t.Failed() {
+			status, claims, failures, publishes := store.snapshot()
+			t.Logf("final snapshot store state: status=%s claims=%d failures=%d publishes=%d", status, claims, failures, publishes)
+		}
+	})
+
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool {
+		status, _, failures, _ := store.snapshot()
+		return status == model.ExploreBatchFailed && failures == 1 && !exploreSnapshotSlotMarked(cycle, slot)
+	})
+	clock.now = now.Add(time.Minute)
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool {
+		status, claims, _, publishes := store.snapshot()
+		return status == model.ExploreBatchDone && claims == 2 && publishes == 1 && exploreSnapshotSlotMarked(cycle, slot)
+	})
+	cycle.Run(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if _, claims, _, publishes := store.snapshot(); claims != 2 || publishes != 1 {
+		t.Fatalf("closed successful slot ran again: claims=%d publishes=%d", claims, publishes)
 	}
 }
 
@@ -541,6 +582,70 @@ func (inputs *fakeExploreRankInputs) LoadProfile(context.Context, int, time.Time
 }
 func (inputs *fakeExploreRankInputs) LoadCandidates(context.Context, time.Time) ([]explorelogic.RankCandidate, error) {
 	return nil, nil
+}
+
+type recoveringRankInputs struct {
+	mu    sync.Mutex
+	calls int
+	now   time.Time
+}
+
+func (inputs *recoveringRankInputs) LoadProfile(context.Context, int, time.Time) (explorelogic.ProfileInput, error) {
+	inputs.mu.Lock()
+	defer inputs.mu.Unlock()
+	inputs.calls++
+	if inputs.calls == 1 {
+		return explorelogic.ProfileInput{}, errors.New("profile temporarily unavailable")
+	}
+	return explorelogic.ProfileInput{}, nil
+}
+
+func (inputs *recoveringRankInputs) LoadCandidates(context.Context, time.Time) ([]explorelogic.RankCandidate, error) {
+	return []explorelogic.RankCandidate{{
+		SourceID: 9, Title: "Reliable source", Domain: "example.com", Topic: "engineering",
+		ValidationStatus: model.ExploreValidationValid, HealthScore: 1,
+		Articles: []explorelogic.RankArticle{{ID: 19, Title: "Recent article", PublishedAt: inputs.now.Add(-time.Hour), FetchedAt: inputs.now}},
+	}}, nil
+}
+
+type recoveringSnapshotStore struct {
+	mu        sync.Mutex
+	status    string
+	claims    int
+	failures  int
+	publishes int
+}
+
+func (store *recoveringSnapshotStore) Claim(userID int, slotAt, _ time.Time, _ time.Duration) (*repository.ExploreSnapshotClaim, bool, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.claims++
+	return &repository.ExploreSnapshotClaim{Batch: model.ExploreBatch{ID: 52, UserID: userID, SlotAt: slotAt, Status: store.status}}, true, nil
+}
+
+func (store *recoveringSnapshotStore) Publish(_ int, _ repository.ExploreSnapshotGenerationToken, values []repository.ExploreSnapshotSourceInput) (*model.ExploreBatch, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(values) == 0 {
+		return nil, errors.New("empty snapshot")
+	}
+	store.publishes++
+	store.status = model.ExploreBatchDone
+	return &model.ExploreBatch{ID: 52, Status: model.ExploreBatchDone, SourceCount: len(values)}, nil
+}
+
+func (store *recoveringSnapshotStore) Fail(_ int, _ repository.ExploreSnapshotGenerationToken, _ error) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.failures++
+	store.status = model.ExploreBatchFailed
+	return nil
+}
+
+func (store *recoveringSnapshotStore) snapshot() (string, int, int, int) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.status, store.claims, store.failures, store.publishes
 }
 
 type fakeSnapshotStore struct {
