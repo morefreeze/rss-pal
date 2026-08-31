@@ -58,6 +58,8 @@ describe('useExploreFeed', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     sessionStorage.clear()
+    localStorage.clear()
+    localStorage.setItem('user', JSON.stringify({ id: 11, username: 'alice', is_admin: false }))
     api.getExplore.mockResolvedValue(response([]))
     api.recordExploreArticleEvent.mockResolvedValue({ recorded: true })
   })
@@ -83,6 +85,18 @@ describe('useExploreFeed', () => {
       sort: 'published',
       order: 'desc',
     })
+    expect(result.current.articles.map(item => item.id)).toEqual([1, 2, 3])
+  })
+
+  it('deduplicates repeated article ids inside one incoming page', async () => {
+    api.getExplore
+      .mockResolvedValueOnce(response([article(1)], true))
+      .mockResolvedValueOnce(response([article(2), article(2), article(3)]))
+
+    const { result } = renderHook(() => useExploreFeed({ pageSize: 1 }))
+    await waitFor(() => expect(result.current.articles.map(item => item.id)).toEqual([1]))
+    await act(async () => { await result.current.loadMore() })
+
     expect(result.current.articles.map(item => item.id)).toEqual([1, 2, 3])
   })
 
@@ -130,6 +144,55 @@ describe('useExploreFeed', () => {
     expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(1)
   })
 
+  it('isolates persisted exposure de-noising between signed-in users', async () => {
+    api.getExplore.mockResolvedValue(response([article(4)]))
+    const first = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(first.result.current.articles).toHaveLength(1))
+    await act(async () => { await first.result.current.recordExposure(4) })
+    first.unmount()
+
+    localStorage.setItem('user', JSON.stringify({ id: 12, username: 'bob', is_admin: false }))
+    const second = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(second.result.current.articles).toHaveLength(1))
+    await act(async () => { await second.result.current.recordExposure(4) })
+
+    expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(2)
+  })
+
+  it('persists an exposure only after the API accepts it and allows retry after failure', async () => {
+    api.getExplore.mockResolvedValue(response([article(4)]))
+    api.recordExploreArticleEvent
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ recorded: true })
+    const { result } = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(result.current.articles).toHaveLength(1))
+
+    await act(async () => { await result.current.recordExposure(4) })
+    expect(sessionStorage.getItem('exploreReportedExposures:11')).toBeNull()
+    await act(async () => { await result.current.recordExposure(4) })
+
+    expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(2)
+    expect(sessionStorage.getItem('exploreReportedExposures:11')).toBe('[4]')
+  })
+
+  it('coalesces concurrent exposure requests for the same article', async () => {
+    const exposure = deferred<{ recorded: boolean }>()
+    api.getExplore.mockResolvedValue(response([article(4)]))
+    api.recordExploreArticleEvent.mockReturnValue(exposure.promise)
+    const { result } = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(result.current.articles).toHaveLength(1))
+
+    let first!: Promise<void>
+    let second!: Promise<void>
+    act(() => {
+      first = result.current.recordExposure(4)
+      second = result.current.recordExposure(4)
+    })
+    expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(1)
+    exposure.resolve({ recorded: true })
+    await act(async () => { await Promise.all([first, second]) })
+  })
+
   it('rolls back failed hide feedback without changing original ordering', async () => {
     api.getExplore.mockResolvedValue(response([article(1, 7), article(2, 8), article(3, 7)]))
     api.createExploreFeedback.mockRejectedValue(new Error('offline'))
@@ -172,5 +235,39 @@ describe('useExploreFeed', () => {
     })
     await act(async () => { await undo() })
     expect(result.current.articles.map(item => item.id)).toEqual([1, 2, 3])
+  })
+
+  it('automatically loads another page when local feedback hides every visible article', async () => {
+    api.getExplore
+      .mockResolvedValueOnce(response([article(1, 7)], true))
+      .mockResolvedValueOnce(response([article(2, 8)]))
+    api.createExploreFeedback.mockResolvedValue({ id: 93 })
+    const { result } = renderHook(() => useExploreFeed({ pageSize: 20 }))
+    await waitFor(() => expect(result.current.articles.map(item => item.id)).toEqual([1]))
+
+    await act(async () => { await result.current.hideSource(7) })
+
+    await waitFor(() => expect(api.getExplore).toHaveBeenNthCalledWith(2, expect.objectContaining({ offset: 20 })))
+    await waitFor(() => expect(result.current.articles.map(item => item.id)).toEqual([2]))
+  })
+
+  it('stops automatic empty-page loading after a bounded number of pages', async () => {
+    api.getExplore.mockResolvedValue(response([], true))
+    renderHook(() => useExploreFeed({ pageSize: 20 }))
+
+    await waitFor(() => expect(api.getExplore).toHaveBeenCalledTimes(6))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(api.getExplore).toHaveBeenCalledTimes(6)
+  })
+
+  it('does not retry an automatically loaded page after it fails', async () => {
+    api.getExplore
+      .mockResolvedValueOnce(response([], true))
+      .mockRejectedValueOnce(new Error('offline'))
+    const { result } = renderHook(() => useExploreFeed({ pageSize: 20 }))
+
+    await waitFor(() => expect(result.current.error).toContain('探索内容加载失败'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(api.getExplore).toHaveBeenCalledTimes(2)
   })
 })
