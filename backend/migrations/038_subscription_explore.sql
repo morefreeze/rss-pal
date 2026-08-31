@@ -18,14 +18,27 @@ ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS last_error TEXT;
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS first_discovered_at TIMESTAMP;
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS last_observed_at TIMESTAMP;
 
-UPDATE recommended_feeds
+WITH normalized AS (
+    SELECT id,
+           btrim(url) AS trimmed_url,
+           regexp_match(
+               btrim(url),
+               '^(https?)://([^/?#]*)(.*)$',
+               'i'
+           ) AS url_parts
+      FROM recommended_feeds
+     WHERE normalized_url IS NULL
+)
+UPDATE recommended_feeds feed
    SET normalized_url = CASE
-       WHEN btrim(url) ~* '^https?://' THEN
-           lower(substring(btrim(url) FROM '^(https?://[^/?#]*)'))
-           || substring(btrim(url) FROM '^https?://[^/?#]*(.*)$')
-       ELSE btrim(url)
+       WHEN normalized.url_parts IS NOT NULL THEN
+           lower(normalized.url_parts[1]) || '://'
+           || lower(normalized.url_parts[2])
+           || normalized.url_parts[3]
+       ELSE normalized.trimmed_url
    END
- WHERE normalized_url IS NULL;
+  FROM normalized
+ WHERE feed.id = normalized.id;
 UPDATE recommended_feeds
    SET validation_status = 'pending'
  WHERE validation_status IS NULL;

@@ -259,7 +259,7 @@ func TestMigration038_UpgradePathPreservesPathCaseAndRuntimeState(t *testing.T) 
 	defer cleanup()
 
 	for _, url := range []string{
-		"https://Example.com/Feed?Token=ABC",
+		"HTTPS://Example.com/Feed?Token=ABC",
 		"https://example.com/feed?Token=ABC",
 	} {
 		if _, err := db.Exec(`INSERT INTO recommended_feeds (url, title, category, language) VALUES ($1, $1, 'test', 'en')`, url); err != nil {
@@ -282,7 +282,10 @@ func TestMigration038_UpgradePathPreservesPathCaseAndRuntimeState(t *testing.T) 
 		}
 		got = append(got, normalized)
 	}
-	want := []string{"https://example.com/Feed?Token=ABC", "https://example.com/feed?Token=ABC"}
+	want := []string{
+		"https://example.com/Feed?Token=ABC",
+		"https://example.com/feed?Token=ABC",
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalized URLs: got %v, want %v", got, want)
 	}
