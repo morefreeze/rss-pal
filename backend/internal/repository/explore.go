@@ -113,6 +113,8 @@ type ExploreSourceItem struct {
 	Reason             string   `json:"reason"`
 	HealthScore        *float64 `json:"health_score,omitempty"`
 	ValidationStatus   string   `json:"validation_status"`
+	IsBroken           bool     `json:"is_broken"`
+	MergedIntoSourceID *int     `json:"merged_into_source_id,omitempty"`
 	RecentArticleCount int      `json:"recent_article_count"`
 	Selected           bool     `json:"selected"`
 	IsHidden           bool     `json:"is_hidden"`
@@ -342,7 +344,7 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 		SELECT source.id, source.title, source.url, source.site_url,
 		       batch_source.rank, COALESCE(batch_source.topic, ''),
 		       COALESCE(batch_source.reason, ''), source.health_score,
-		       source.validation_status,
+		       source.validation_status, source.is_broken, source.merged_into_source_id,
 		       (SELECT COUNT(*) FROM explore_articles article WHERE article.source_id=source.id),
 		       false,
 		       EXISTS (SELECT 1 FROM explore_feedback feedback
@@ -366,6 +368,7 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 		if err := rows.Scan(
 			&item.ID, &item.Title, &item.URL, &item.SiteURL, &item.Rank, &item.Topic,
 			&item.Reason, &item.HealthScore, &item.ValidationStatus,
+			&item.IsBroken, &item.MergedIntoSourceID,
 			&item.RecentArticleCount, &item.Selected, &item.IsHidden, &item.IsSubscribed,
 		); err != nil {
 			return nil, err

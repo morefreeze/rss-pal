@@ -121,6 +121,27 @@ func TestExploreHandlerListRejectsUnknownSortAndOrder(t *testing.T) {
 	}
 }
 
+func TestExploreHandlerSourcesExposeUnsubscribableCatalogState(t *testing.T) {
+	mergedInto := 9
+	store := &fakeExploreStore{sources: []repository.ExploreSourceItem{{
+		ID: 7, Title: "retired", ValidationStatus: model.ExploreValidationInvalid,
+		IsBroken: true, MergedIntoSourceID: &mergedInto,
+	}}}
+	router := exploreTestRouter(newExploreHandlerWithStore(store, time.Now))
+
+	w := performExploreRequest(router, http.MethodGet, "/api/explore/sources", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 1 || payload[0]["is_broken"] != true || payload[0]["merged_into_source_id"] != float64(mergedInto) {
+		t.Fatalf("source state missing: %s", w.Body.String())
+	}
+}
+
 func TestExploreHandlerListAcceptsDirAliasAndRejectsConflictingDirection(t *testing.T) {
 	store := &fakeExploreStore{page: &repository.ExplorePage{}}
 	router := exploreTestRouter(newExploreHandlerWithStore(store, time.Now))

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getExploreSources,
   subscribeExploreSource,
@@ -12,9 +12,16 @@ interface Props {
 }
 
 function healthLabel(source: ExploreSource) {
-  if (source.validation_status !== 'valid') return '待校验'
+  if (source.merged_into_source_id != null) return '已合并'
+  if (source.is_broken) return '已失效'
+  if (source.validation_status === 'pending') return '待校验'
+  if (source.validation_status === 'invalid') return '无效'
   if (source.health_score == null) return '健康'
   return source.health_score >= 0.8 ? '健康' : source.health_score >= 0.5 ? '一般' : '需关注'
+}
+
+function canSubscribe(source: ExploreSource) {
+  return source.validation_status === 'valid' && !source.is_broken && source.merged_into_source_id == null
 }
 
 export default function ExploreSourceDrawer({ onSubscribed }: Props) {
@@ -24,23 +31,36 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set())
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loadingSources, setLoadingSources] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const handleRef = useRef<HTMLButtonElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const drawerRef = useRef<HTMLElement>(null)
   const wasOpenRef = useRef(false)
+  const loadGenerationRef = useRef(0)
 
-  useEffect(() => {
-    let active = true
-    getExploreSources()
-      .then(items => {
-        if (!active) return
+  const loadSources = useCallback(async () => {
+    const generation = ++loadGenerationRef.current
+    setLoadingSources(true)
+    setLoadError(null)
+    try {
+      const items = await getExploreSources()
+      if (generation !== loadGenerationRef.current) return
         const next = items ?? []
         setSources(next)
-        setSelected(new Set(next.filter(item => item.selected && !item.is_subscribed).map(item => item.id)))
-      })
-      .catch(() => { if (active) setSources([]) })
-    return () => { active = false }
+        setSelected(new Set(next.filter(item => item.selected && !item.is_subscribed && canSubscribe(item)).map(item => item.id)))
+    } catch {
+      if (generation !== loadGenerationRef.current) return
+      setLoadError('候选源加载失败，请重试')
+    } finally {
+      if (generation === loadGenerationRef.current) setLoadingSources(false)
+    }
   }, [])
+
+  useEffect(() => {
+    void loadSources()
+    return () => { loadGenerationRef.current += 1 }
+  }, [loadSources])
 
   useEffect(() => {
     if (!open) return
@@ -77,7 +97,7 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
   }, [open])
 
   const selectedIDs = useMemo(
-    () => sources.filter(source => selected.has(source.id) && !source.is_subscribed).map(source => source.id),
+    () => sources.filter(source => selected.has(source.id) && !source.is_subscribed && canSubscribe(source)).map(source => source.id),
     [selected, sources],
   )
 
@@ -95,6 +115,7 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
   }
 
   const subscribeOne = async (source: ExploreSource) => {
+    if (!canSubscribe(source) || source.is_subscribed) return
     setPending(true)
     setError(null)
     try {
@@ -129,13 +150,13 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
         ref={handleRef}
         type="button"
         className={`explore-source-handle explore-source-handle--${breakpoint === 'phone' ? 'mobile' : 'desktop'}`}
-        aria-label={`查看 ${sources.length} 个候选源`}
+        aria-label={loadingSources ? '候选源加载中' : loadError ? '查看候选源（加载失败）' : `查看 ${sources.length} 个候选源`}
         aria-expanded={open}
         aria-controls="explore-source-drawer"
         onClick={() => { setError(null); setOpen(true) }}
       >
         <span aria-hidden="true">☰</span>
-        <span>{sources.length} 个候选源</span>
+        <span>{loadingSources ? '加载中' : loadError ? '加载失败' : `${sources.length} 个候选源`}</span>
       </button>
 
       {open && (
@@ -163,8 +184,15 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
             </header>
 
             {error && <div role="alert" className="explore-inline-error">{error}</div>}
+            {loadError && (
+              <div role="alert" className="explore-inline-error">
+                <span>{loadError}</span>
+                <button type="button" className="secondary" aria-label="重试加载候选源" onClick={() => void loadSources()}>重试</button>
+              </div>
+            )}
 
             <div className="explore-source-list">
+              {loadingSources && <p role="status" className="text-muted">正在加载候选源…</p>}
               {sources.map(source => (
                 <section key={source.id} className="explore-source-item">
                   <div className="explore-source-item__heading">
@@ -172,8 +200,8 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
                       <input
                         type="checkbox"
                         aria-label={`选择 ${source.title}`}
-                        checked={selected.has(source.id) && !source.is_subscribed}
-                        disabled={source.is_subscribed || pending}
+                        checked={selected.has(source.id) && !source.is_subscribed && canSubscribe(source)}
+                        disabled={source.is_subscribed || !canSubscribe(source) || pending}
                         onChange={event => setSelected(current => {
                           const next = new Set(current)
                           if (event.target.checked) next.add(source.id)
@@ -196,14 +224,14 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
                     <button
                       type="button"
                       className="secondary"
-                      disabled={pending}
+                      disabled={pending || !canSubscribe(source)}
                       aria-label={`订阅 ${source.title}`}
                       onClick={() => void subscribeOne(source)}
-                    >订阅</button>
+                    >{canSubscribe(source) ? '订阅' : '暂不可订阅'}</button>
                   )}
                 </section>
               ))}
-              {sources.length === 0 && <p className="text-muted">当前没有可管理的候选源</p>}
+              {!loadingSources && !loadError && sources.length === 0 && <p className="text-muted">当前没有可管理的候选源</p>}
             </div>
 
             <footer className="explore-source-drawer__footer">

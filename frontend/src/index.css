@@ -1272,6 +1272,9 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
   font-size: 13px;
 }
 .explore-notice--cold { align-items: flex-start; flex-direction: column; }
+.explore-interest-picker { display: flex; flex-wrap: wrap; gap: 7px; }
+.explore-interest-picker button { min-height: 34px; padding: 5px 11px; border-radius: 999px; font-size: 12px; }
+.explore-interest-actions { display: flex; gap: 12px; align-items: center; }
 .explore-notice--warning { background: color-mix(in srgb, #f59e0b 14%, var(--surface)); }
 .explore-inline-error {
   margin-bottom: 12px;

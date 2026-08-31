@@ -130,4 +130,43 @@ describe('ExploreSourceDrawer', () => {
     expect((screen.getByRole('checkbox', { name: '选择 Pragmatic Engineer' }) as HTMLInputElement).checked).toBe(true)
     expect(screen.getByRole('dialog')).toBeTruthy()
   })
+
+  it('shows an accessible load error and retries instead of presenting a false empty state', async () => {
+    api.getExploreSources
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(sources)
+    render(<ExploreSourceDrawer />)
+    const handle = await screen.findByRole('button', { name: /查看候选源/ })
+    fireEvent.click(handle)
+
+    expect((await screen.findByRole('alert')).textContent).toContain('候选源加载失败')
+    expect(screen.queryByText('当前没有可管理的候选源')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '重试加载候选源' }))
+
+    expect(await screen.findByText('Pragmatic Engineer')).toBeTruthy()
+    expect(api.getExploreSources).toHaveBeenCalledTimes(2)
+  })
+
+  it('disables pending, invalid, broken, and merged sources with explicit health states', async () => {
+    api.getExploreSources.mockResolvedValue([
+      { ...sources[0], id: 10, title: 'Pending Source', validation_status: 'pending', selected: true },
+      { ...sources[0], id: 11, title: 'Invalid Source', validation_status: 'invalid', selected: true },
+      { ...sources[0], id: 12, title: 'Broken Source', is_broken: true, selected: true },
+      { ...sources[0], id: 13, title: 'Merged Source', merged_into_source_id: 7, selected: true },
+      { ...sources[0], id: 14, title: 'Healthy Source', selected: true },
+    ])
+    render(<ExploreSourceDrawer />)
+    fireEvent.click(await screen.findByRole('button', { name: '查看 5 个候选源' }))
+
+    expect(screen.getByText('待校验')).toBeTruthy()
+    expect(screen.getByText('无效')).toBeTruthy()
+    expect(screen.getByText('已失效')).toBeTruthy()
+    expect(screen.getByText('已合并')).toBeTruthy()
+    for (const title of ['Pending Source', 'Invalid Source', 'Broken Source', 'Merged Source']) {
+      expect((screen.getByRole('checkbox', { name: `选择 ${title}` }) as HTMLInputElement).disabled).toBe(true)
+      expect((screen.getByRole('button', { name: `订阅 ${title}` }) as HTMLButtonElement).disabled).toBe(true)
+    }
+    expect((screen.getByRole('checkbox', { name: '选择 Healthy Source' }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('button', { name: '订阅已选 1 个' }) as HTMLButtonElement).disabled).toBe(false)
+  })
 })

@@ -90,6 +90,7 @@ export default function ExploreArticleCard({
       className="card explore-article-card"
       onClick={open}
       onKeyDown={event => {
+        if (event.currentTarget !== event.target) return
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
           open()
