@@ -83,7 +83,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_recommended_feeds_normalized_url
 CREATE TABLE IF NOT EXISTS explore_registry_providers (
     id SERIAL PRIMARY KEY,
     provider_key VARCHAR(100) NOT NULL UNIQUE,
-    provider_kind VARCHAR(32) NOT NULL,
+    provider_kind VARCHAR(32) NOT NULL CHECK (provider_kind IN ('opml', 'directory', 'reddit_stream', 'github_awesome', 'related_site')),
     endpoint VARCHAR(2048) NOT NULL,
     topic VARCHAR(100),
     sync_interval_minutes INTEGER NOT NULL DEFAULT 360 CHECK (sync_interval_minutes > 0),
@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS explore_batches (
     error_message TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMP,
+    CONSTRAINT explore_batches_id_user_id_key UNIQUE (id, user_id),
     UNIQUE (user_id, slot_at)
 );
 CREATE INDEX IF NOT EXISTS idx_explore_batches_user_created_at
@@ -181,13 +182,17 @@ CREATE INDEX IF NOT EXISTS idx_explore_batches_user_created_at
 CREATE TABLE IF NOT EXISTS explore_batch_sources (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    batch_id INTEGER NOT NULL REFERENCES explore_batches(id) ON DELETE CASCADE,
+    batch_id INTEGER NOT NULL,
     source_id INTEGER NOT NULL REFERENCES recommended_feeds(id) ON DELETE CASCADE,
     rank INTEGER NOT NULL CHECK (rank > 0),
     score DOUBLE PRECISION NOT NULL DEFAULT 0,
     topic VARCHAR(100),
     reason TEXT,
-    UNIQUE (batch_id, source_id)
+    UNIQUE (batch_id, source_id),
+    CONSTRAINT explore_batch_sources_batch_id_user_id_fkey
+        FOREIGN KEY (batch_id, user_id)
+        REFERENCES explore_batches(id, user_id)
+        ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_explore_batch_sources_batch_rank
     ON explore_batch_sources (batch_id, rank);
@@ -255,9 +260,9 @@ VALUES
     ('plenary-tech-opml', 'opml', 'https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Tech.opml', 'technology', 360),
     ('plenary-webdev-opml', 'opml', 'https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Web%20Development.opml', 'web-development', 360),
     ('chinese-independent', 'opml', 'https://raw.githubusercontent.com/timqian/chinese-independent-blogs/master/feed.opml', 'chinese-independent', 360),
-    ('ooh-recently-added', 'rss', 'https://ooh.directory/feeds/recently-added.xml', 'recently-added', 360),
-    ('reddit-programming', 'rsshub', '/reddit/subreddit/programming', 'programming', 360),
-    ('awesome-selfhosted', 'markdown', 'https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md', 'self-hosted', 360)
+    ('ooh-recently-added', 'directory', 'https://ooh.directory/feeds/recently-added.xml', 'recently-added', 360),
+    ('reddit-programming', 'reddit_stream', '/reddit/subreddit/programming', 'programming', 360),
+    ('awesome-selfhosted', 'github_awesome', 'https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md', 'self-hosted', 360)
 ON CONFLICT (provider_key) DO UPDATE
     SET provider_kind = EXCLUDED.provider_kind,
         endpoint = EXCLUDED.endpoint,

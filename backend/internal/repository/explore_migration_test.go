@@ -2,6 +2,8 @@ package repository_test
 
 import (
 	"database/sql"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -46,7 +48,7 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 		{"explore_articles", "explore_articles_source_id_fkey", "recommended_feeds"},
 		{"explore_batches", "explore_batches_user_id_fkey", "users"},
 		{"explore_batch_sources", "explore_batch_sources_user_id_fkey", "users"},
-		{"explore_batch_sources", "explore_batch_sources_batch_id_fkey", "explore_batches"},
+		{"explore_batch_sources", "explore_batch_sources_batch_id_user_id_fkey", "explore_batches"},
 		{"explore_batch_sources", "explore_batch_sources_source_id_fkey", "recommended_feeds"},
 		{"explore_feedback", "explore_feedback_user_id_fkey", "users"},
 		{"explore_feedback", "explore_feedback_source_id_fkey", "recommended_feeds"},
@@ -76,6 +78,20 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 	}
 	if !strings.Contains(batchSourcePolicy, "user_id") || strings.Contains(batchSourcePolicy, "explore_batches") {
 		t.Errorf("explore_batch_sources must use direct user_id RLS policy, got %q", batchSourcePolicy)
+	}
+	var batchesOwnerKey bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'explore_batches'::regclass AND conname = 'explore_batches_id_user_id_key')`).Scan(&batchesOwnerKey); err != nil {
+		t.Fatalf("explore_batches owner key: %v", err)
+	}
+	if !batchesOwnerKey {
+		t.Error("explore_batches must expose UNIQUE(id, user_id) for the composite child FK")
+	}
+	var legacyBatchOnlyFK bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'explore_batch_sources'::regclass AND conname = 'explore_batch_sources_batch_id_fkey')`).Scan(&legacyBatchOnlyFK); err != nil {
+		t.Fatalf("legacy batch FK lookup: %v", err)
+	}
+	if legacyBatchOnlyFK {
+		t.Error("explore_batch_sources retains bypassable batch_id-only FK")
 	}
 
 	for _, provider := range exploreProviderSeeds {
@@ -115,6 +131,9 @@ func TestMigration038_ExploreChecksAndUniqueIndexes(t *testing.T) {
 	var providerID, articleID, batchID int
 	if err := db.QueryRow(`INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, sync_interval_minutes) VALUES ('explore-checks', 'opml', 'https://example.test/checks', 360) RETURNING id`).Scan(&providerID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, sync_interval_minutes) VALUES ('invalid-kind', 'invalid', 'https://example.test/invalid', 360)`); err == nil {
+		t.Fatal("provider accepted an unknown provider_kind")
 	}
 	if _, err := db.Exec(`INSERT INTO explore_source_observations (provider_id, source_id, external_key) VALUES ($1, $2, 'checks')`, providerID, sourceID); err != nil {
 		t.Fatal(err)
@@ -175,6 +194,16 @@ func TestMigration038_ExploreChecksAndUniqueIndexes(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO explore_batch_sources (user_id, batch_id, source_id, rank, score) VALUES ($1, $2, $3, 2, 2)`, userID, batchID, sourceID); err == nil {
 		t.Fatal("batch sources accepted duplicate batch/source")
 	}
+	var otherUserID, otherBatchID int
+	if err := db.QueryRow(`INSERT INTO users (username, password_hash) VALUES ('explore-other-user', 'x') RETURNING id`).Scan(&otherUserID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO explore_batches (user_id, slot_at, status) VALUES ($1, NOW(), 'pending') RETURNING id`, otherUserID).Scan(&otherBatchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_batch_sources (user_id, batch_id, source_id, rank, score) VALUES ($1, $2, $3, 1, 1)`, userID, otherBatchID, sourceID); err == nil {
+		t.Fatal("batch source accepted a user different from its batch owner")
+	}
 	if _, err := db.Exec(`INSERT INTO explore_feedback (user_id, source_id, feedback_type) VALUES ($1, $2, 'hide_source')`, userID, sourceID); err != nil {
 		t.Fatal(err)
 	}
@@ -196,18 +225,28 @@ func TestMigration038_ProviderSeedConflictPreservesRuntimeState(t *testing.T) {
 	if _, err := db.Exec(`UPDATE explore_registry_providers SET enabled = false, etag = 'keep-etag', last_modified = 'keep-last-modified', last_sync_at = NOW(), last_success_at = NOW(), consecutive_failures = 7, last_error = 'keep-error' WHERE provider_key = $1`, seed.key); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, topic, sync_interval_minutes) VALUES ($1, 'replacement', 'https://replacement.test', 'replacement', 1) ON CONFLICT (provider_key) DO UPDATE SET provider_kind = EXCLUDED.provider_kind, endpoint = EXCLUDED.endpoint, topic = EXCLUDED.topic, sync_interval_minutes = EXCLUDED.sync_interval_minutes`, seed.key); err != nil {
-		t.Fatal(err)
+	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "038_subscription_explore.sql"))
+	if err != nil {
+		t.Fatalf("read real migration: %v", err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("re-run real migration: %v", err)
 	}
 	var enabled bool
+	var kind, endpoint string
+	var topic *string
+	var interval int
 	var etag, lastModified, lastError string
 	var failures int
 	var lastSync, lastSuccess time.Time
-	if err := db.QueryRow(`SELECT enabled, etag, last_modified, last_sync_at, last_success_at, consecutive_failures, last_error FROM explore_registry_providers WHERE provider_key = $1`, seed.key).Scan(&enabled, &etag, &lastModified, &lastSync, &lastSuccess, &failures, &lastError); err != nil {
+	if err := db.QueryRow(`SELECT enabled, provider_kind, endpoint, topic, sync_interval_minutes, etag, last_modified, last_sync_at, last_success_at, consecutive_failures, last_error FROM explore_registry_providers WHERE provider_key = $1`, seed.key).Scan(&enabled, &kind, &endpoint, &topic, &interval, &etag, &lastModified, &lastSync, &lastSuccess, &failures, &lastError); err != nil {
 		t.Fatal(err)
 	}
+	if kind != seed.kind || endpoint != seed.endpoint || topic == nil || *topic != seed.topic || interval != seed.interval {
+		t.Fatalf("real migration did not restore seed values: kind=%q endpoint=%q topic=%v interval=%d", kind, endpoint, topic, interval)
+	}
 	if enabled || etag != "keep-etag" || lastModified != "keep-last-modified" || lastSync.IsZero() || lastSuccess.IsZero() || failures != 7 || lastError != "keep-error" {
-		t.Fatalf("seed conflict overwrote runtime state: enabled=%t etag=%q last_modified=%q last_sync=%v last_success=%v failures=%d last_error=%q", enabled, etag, lastModified, lastSync, lastSuccess, failures, lastError)
+		t.Fatalf("real migration overwrote runtime state: enabled=%t etag=%q last_modified=%q last_sync=%v last_success=%v failures=%d last_error=%q", enabled, etag, lastModified, lastSync, lastSuccess, failures, lastError)
 	}
 }
 
@@ -244,9 +283,9 @@ var exploreProviderSeeds = []providerSeed{
 	{"plenary-tech-opml", "opml", "https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Tech.opml", "technology", 360},
 	{"plenary-webdev-opml", "opml", "https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Web%20Development.opml", "web-development", 360},
 	{"chinese-independent", "opml", "https://raw.githubusercontent.com/timqian/chinese-independent-blogs/master/feed.opml", "chinese-independent", 360},
-	{"ooh-recently-added", "rss", "https://ooh.directory/feeds/recently-added.xml", "recently-added", 360},
-	{"reddit-programming", "rsshub", "/reddit/subreddit/programming", "programming", 360},
-	{"awesome-selfhosted", "markdown", "https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md", "self-hosted", 360},
+	{"ooh-recently-added", "directory", "https://ooh.directory/feeds/recently-added.xml", "recently-added", 360},
+	{"reddit-programming", "reddit_stream", "/reddit/subreddit/programming", "programming", 360},
+	{"awesome-selfhosted", "github_awesome", "https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md", "self-hosted", 360},
 }
 
 func assertExactColumns(t *testing.T, db interface {

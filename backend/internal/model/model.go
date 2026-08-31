@@ -3,6 +3,12 @@ package model
 import "time"
 
 const (
+	ExploreProviderKindOPML          = "opml"
+	ExploreProviderKindDirectory     = "directory"
+	ExploreProviderKindRedditStream  = "reddit_stream"
+	ExploreProviderKindGitHubAwesome = "github_awesome"
+	ExploreProviderKindRelatedSite   = "related_site"
+
 	ExploreValidationPending = "pending"
 	ExploreValidationValid   = "valid"
 	ExploreValidationInvalid = "invalid"
