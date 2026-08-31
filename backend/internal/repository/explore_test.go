@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -10,6 +11,31 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
+
+func TestExploreArticleListItemBoundsUnicodeExcerptAndOmitsContent(t *testing.T) {
+	prefix := strings.Repeat("界", 500)
+	item := normalizeExploreArticleListItem(ExploreArticleListItem{
+		ID:      1,
+		Excerpt: prefix + "尾巴",
+	})
+
+	if !strings.HasPrefix(item.Excerpt, prefix) {
+		t.Fatalf("excerpt lost its Unicode prefix: %q", item.Excerpt)
+	}
+	if got := len([]rune(item.Excerpt)); got != 500 {
+		t.Fatalf("excerpt runes=%d want=500", got)
+	}
+	if !json.Valid([]byte(`{"excerpt":"` + item.Excerpt + `"}`)) {
+		t.Fatalf("excerpt is not valid JSON-safe UTF-8: %q", item.Excerpt)
+	}
+	encoded, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), `"content"`) {
+		t.Fatalf("list DTO leaked content: %s", encoded)
+	}
+}
 
 func TestBuildExplorePageQueryLimitsEachSourceToRecentFiveBeforeRequestedOrdering(t *testing.T) {
 	query := strings.Join(strings.Fields(buildExplorePageQuery(ExploreListParams{
@@ -262,6 +288,127 @@ func TestExploreRepositoryInterestsReplaceAndTopicFeedbackFilter(t *testing.T) {
 		t.Fatalf("dampened topic was not immediately filtered: %+v", page.Articles)
 	}
 }
+
+func TestLockExploreInterestReplacementUsesStablePerUserAdvisoryKey(t *testing.T) {
+	recorder := &exploreInterestLockRecorder{}
+	if err := lockExploreInterestReplacement(recorder, 42); err != nil {
+		t.Fatalf("lockExploreInterestReplacement: %v", err)
+	}
+	if got, want := strings.Join(strings.Fields(recorder.query), " "), "SELECT pg_advisory_xact_lock($1,$2)"; got != want {
+		t.Fatalf("lock query=%q want=%q", got, want)
+	}
+	if len(recorder.args) != 2 || recorder.args[0] != exploreInterestReplacementAdvisoryNamespace || recorder.args[1] != 42 {
+		t.Fatalf("lock args=%v want namespace=%d userID=42", recorder.args, exploreInterestReplacementAdvisoryNamespace)
+	}
+}
+
+func TestExploreRepositoryConcurrentInterestReplacementSerializesPerUserOnly(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	userID, otherUserID := insertExploreUsers(t, db)
+
+	firstTx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstTx.Rollback()
+	if _, err := NewExploreRepository(db).WithQuerier(firstTx).ReplaceInterests(userID, []string{"programming"}); err != nil {
+		t.Fatalf("first ReplaceInterests: %v", err)
+	}
+
+	// The namespace/user pair must not serialize a different user's replacement.
+	otherTx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherTx.Rollback()
+	otherDone := make(chan error, 1)
+	go func() {
+		_, replaceErr := NewExploreRepository(db).WithQuerier(otherTx).ReplaceInterests(otherUserID, []string{"security"})
+		otherDone <- replaceErr
+	}()
+	select {
+	case err := <-otherDone:
+		if err != nil {
+			t.Fatalf("different-user replacement: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("different-user replacement was blocked by another user's lock")
+	}
+	if err := otherTx.Commit(); err != nil {
+		t.Fatalf("commit different-user replacement: %v", err)
+	}
+
+	secondTx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondTx.Rollback()
+	if _, err := secondTx.Exec(`SET LOCAL lock_timeout = '3s'`); err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() {
+		_, replaceErr := NewExploreRepository(db).WithQuerier(secondTx).ReplaceInterests(userID, []string{"health"})
+		secondDone <- replaceErr
+	}()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("same-user replacement completed before the first transaction committed: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := firstTx.Commit(); err != nil {
+		t.Fatalf("commit first replacement: %v", err)
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("second ReplaceInterests: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("same-user replacement did not resume after the first commit")
+	}
+	if err := secondTx.Commit(); err != nil {
+		t.Fatalf("commit second replacement: %v", err)
+	}
+
+	rows, err := db.Query(`SELECT topic FROM explore_feedback WHERE user_id=$1 AND feedback_type='boost_topic' ORDER BY topic`, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var topics []string
+	for rows.Next() {
+		var topic string
+		if err := rows.Scan(&topic); err != nil {
+			t.Fatal(err)
+		}
+		topics = append(topics, topic)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 1 || topics[0] != "health" {
+		t.Fatalf("final interests=%v want last committed replacement [health]", topics)
+	}
+}
+
+type exploreInterestLockRecorder struct {
+	query string
+	args  []interface{}
+}
+
+func (r *exploreInterestLockRecorder) Exec(query string, args ...interface{}) (sql.Result, error) {
+	r.query = query
+	r.args = append([]interface{}(nil), args...)
+	return exploreNoopResult{}, nil
+}
+
+type exploreNoopResult struct{}
+
+func (exploreNoopResult) LastInsertId() (int64, error) { return 0, nil }
+func (exploreNoopResult) RowsAffected() (int64, error) { return 0, nil }
 
 type exploreTestBatchSource struct {
 	sourceID int
