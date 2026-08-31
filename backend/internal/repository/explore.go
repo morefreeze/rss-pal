@@ -11,8 +11,14 @@ import (
 )
 
 const (
-	MaxExplorePageSize        = 50
-	ExploreExposureDedupeTime = 10 * time.Minute
+	MaxExplorePageSize         = 50
+	MaxExploreListExcerptRunes = 500
+	ExploreExposureDedupeTime  = 10 * time.Minute
+
+	// 0x45585049 is ASCII "EXPI". Combined with user_id through PostgreSQL's
+	// two-int advisory-lock namespace, it serializes only one user's interest
+	// replacement while leaving other users independent.
+	exploreInterestReplacementAdvisoryNamespace = 0x45585049
 )
 
 var (
@@ -174,6 +180,7 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 			rows.Close()
 			return nil, err
 		}
+		item = normalizeExploreArticleListItem(item)
 		articles = append(articles, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -194,6 +201,14 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 		return nil, err
 	}
 	return page, nil
+}
+
+func normalizeExploreArticleListItem(item ExploreArticleListItem) ExploreArticleListItem {
+	runes := []rune(item.Excerpt)
+	if len(runes) > MaxExploreListExcerptRunes {
+		item.Excerpt = string(runes[:MaxExploreListExcerptRunes])
+	}
+	return item
 }
 
 func buildExplorePageQuery(params ExploreListParams) string {
@@ -531,6 +546,9 @@ func (r *ExploreRepository) ReplaceInterests(userID int, topics []string) ([]mod
 		return nil, err
 	}
 	defer rollback()
+	if err := lockExploreInterestReplacement(tx, userID); err != nil {
+		return nil, err
+	}
 	if _, err := tx.Exec(`DELETE FROM explore_feedback WHERE user_id=$1 AND feedback_type='boost_topic'`, userID); err != nil {
 		return nil, err
 	}
@@ -553,6 +571,15 @@ func (r *ExploreRepository) ReplaceInterests(userID int, topics []string) ([]mod
 		return nil, err
 	}
 	return result, nil
+}
+
+type exploreInterestLockExecutor interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}
+
+func lockExploreInterestReplacement(db exploreInterestLockExecutor, userID int) error {
+	_, err := db.Exec(`SELECT pg_advisory_xact_lock($1,$2)`, exploreInterestReplacementAdvisoryNamespace, userID)
+	return err
 }
 
 func (r *ExploreRepository) RecordArticleEvent(userID, articleID int, eventType string, occurredAt time.Time) (bool, error) {
