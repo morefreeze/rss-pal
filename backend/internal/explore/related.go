@@ -59,6 +59,9 @@ func (RelatedSiteDiscoverer) Discover(pageURL string, body []byte) ([]Candidate,
 		}
 	}
 	declared = NormalizeCandidates(declared)
+	if len(declared) > 20 {
+		declared = declared[:20]
+	}
 	list := make([]Candidate, 0, len(external))
 	for _, candidate := range external {
 		list = append(list, candidate)

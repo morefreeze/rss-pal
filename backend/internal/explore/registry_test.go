@@ -55,6 +55,9 @@ type registryStoreStub struct {
 	providers           []RegistryProvider
 	upserts             []Candidate
 	successes, failures []int
+	successETags        []string
+	successErr          error
+	failureErr          error
 }
 
 func (s *registryStoreStub) LoadDueProviders(time.Time) ([]RegistryProvider, error) {
@@ -64,13 +67,14 @@ func (s *registryStoreStub) UpsertCandidate(_ int, candidate Candidate, _ time.T
 	s.upserts = append(s.upserts, candidate)
 	return 42, nil
 }
-func (s *registryStoreStub) RecordSuccess(id int, _ time.Time, _, _ string) error {
+func (s *registryStoreStub) RecordSuccess(id int, _ time.Time, etag, _ string) error {
 	s.successes = append(s.successes, id)
-	return nil
+	s.successETags = append(s.successETags, etag)
+	return s.successErr
 }
 func (s *registryStoreStub) RecordFailure(id int, _ time.Time, _ error) error {
 	s.failures = append(s.failures, id)
-	return nil
+	return s.failureErr
 }
 
 type registryQueueStub struct {
