@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
+  clearExploreNegativeFeedback,
   replaceExploreInterests,
   type ExploreArticleListItem,
   type ExploreOrder,
@@ -48,6 +49,7 @@ export default function ExplorePage() {
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [feedbackError, setFeedbackError] = useState<string | null>(null)
   const [feedbackUndos, setFeedbackUndos] = useState<UndoFeedback[]>([])
+  const [feedbackClearing, setFeedbackClearing] = useState(false)
   const [selectedInterests, setSelectedInterests] = useState<Set<string>>(() => new Set())
   const [interestSaving, setInterestSaving] = useState(false)
   const [interestError, setInterestError] = useState<string | null>(null)
@@ -132,6 +134,21 @@ export default function ExplorePage() {
   const clearSessionFeedback = async () => {
     for (const undo of [...feedbackUndos].reverse()) {
       if (!await undoFeedback(undo)) break
+    }
+  }
+
+  const clearNegativeFeedback = async () => {
+    if (feedbackClearing) return
+    setFeedbackClearing(true)
+    setFeedbackError(null)
+    try {
+      await clearExploreNegativeFeedback()
+      setFeedbackUndos([])
+      await feed.reload()
+    } catch {
+      setFeedbackError('清除反馈失败，请重试')
+    } finally {
+      setFeedbackClearing(false)
     }
   }
 
@@ -252,21 +269,25 @@ export default function ExplorePage() {
             <span>可能被筛选或反馈隐藏了。</span>
             <button type="button" className="secondary" aria-label="清除主题筛选" onClick={() => pickTopic('')}>清除筛选</button>
           </div>
-        ) : feed.articles.length === 0 && latestUndo && !feed.error ? (
+        ) : feed.articles.length === 0 && !feed.topic ? (
           <div className="card explore-empty-state">
-            <strong>反馈已隐藏当前候选文章</strong>
-            <span>可以撤销最近一次反馈，恢复原来的文章位置。</span>
-            <button type="button" className="secondary" aria-label="撤销最近反馈" onClick={() => void undoFeedback(latestUndo)}>撤销最近反馈</button>
-            {feedbackUndos.length > 1 && (
+            <strong>{latestUndo ? '反馈已隐藏当前候选文章' : '暂时没有候选文章'}</strong>
+            <span>{latestUndo ? '可以撤销最近一次反馈，恢复原来的文章位置。' : '新来源验证后会自动出现在这里。'}</span>
+            {latestUndo && <button type="button" className="secondary" aria-label="撤销最近反馈" onClick={() => void undoFeedback(latestUndo)}>撤销最近反馈</button>}
+            {latestUndo && feedbackUndos.length > 1 && (
               <button type="button" className="secondary" aria-label={`清除本次反馈（${feedbackUndos.length}）`} onClick={() => void clearSessionFeedback()}>
                 清除本次反馈（{feedbackUndos.length}）
               </button>
             )}
-          </div>
-        ) : feed.articles.length === 0 && !feed.error ? (
-          <div className="card explore-empty-state">
-            <strong>暂时没有候选文章</strong>
-            <span>新来源验证后会自动出现在这里。</span>
+            <button type="button" className="secondary" aria-label="清除隐藏/少推荐反馈" disabled={feedbackClearing} onClick={() => void clearNegativeFeedback()}>
+              {feedbackClearing ? '清除中…' : '清除隐藏/少推荐反馈'}
+            </button>
+            {feed.error && (
+              <button type="button" className="secondary" onClick={() => void (feed.hasMore ? feed.continueLoading() : feed.reload())}>重试加载</button>
+            )}
+            {!feed.error && feed.hasMore && feed.automaticLoadLimitReached && (
+              <button type="button" className="secondary" onClick={() => void feed.continueLoading()}>继续加载</button>
+            )}
           </div>
         ) : (
           <>

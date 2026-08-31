@@ -507,6 +507,10 @@ export interface ExploreInterestsResponse {
   interests: ExploreFeedback[]
 }
 
+export interface ExploreClearFeedbackResponse {
+  deleted_count: number
+}
+
 export interface ExploreArticleEventResponse {
   recorded: boolean
 }
@@ -539,6 +543,9 @@ export const createExploreFeedback = (input: ExploreFeedbackInput) =>
 
 export const deleteExploreFeedback = (id: number) =>
   api.delete(`/explore/feedback/${id}`).then(() => undefined)
+
+export const clearExploreNegativeFeedback = () =>
+  api.delete<ExploreClearFeedbackResponse>('/explore/feedback').then(res => res.data)
 
 export const replaceExploreInterests = (topics: string[]) =>
   api.put<ExploreInterestsResponse>('/explore/interests', { topics }).then(res => res.data)
