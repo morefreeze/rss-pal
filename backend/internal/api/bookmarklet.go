@@ -483,9 +483,6 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 		content = b.String()
 	}
 
-	if len(content) > 50000 {
-		content = content[:50000] + "..."
-	}
 	return strings.TrimSpace(content), nil
 }
 
@@ -498,4 +495,3 @@ func GenerateBookmarkletToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
-
