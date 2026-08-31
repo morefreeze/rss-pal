@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/lib/pq"
 )
 
@@ -149,26 +151,55 @@ func (inputs *sqlExploreRankInputs) ListUserIDs(ctx context.Context) ([]int, err
 func (inputs *sqlExploreRankInputs) LoadProfile(ctx context.Context, userID int, now time.Time) (explorelogic.ProfileInput, error) {
 	profile := explorelogic.ProfileInput{Now: now}
 	rows, err := inputs.db.QueryContext(ctx, `
-		SELECT COALESCE(source.id,0), COALESCE(feed.title,''), feed.url
+		SELECT COALESCE(feed.title,''), feed.url
 		FROM feeds feed
-		LEFT JOIN recommended_feeds source ON source.normalized_url=feed.url
 		WHERE feed.owner_id IS NULL OR feed.owner_id=$1
 		ORDER BY feed.id`, userID)
 	if err != nil {
 		return profile, err
 	}
+	subscriptionIndexes := make(map[string][]int)
 	for rows.Next() {
 		var item explorelogic.SubscriptionSignalInput
 		var rawURL string
-		if err := rows.Scan(&item.SourceID, &item.Title, &rawURL); err != nil {
+		if err := rows.Scan(&item.Title, &rawURL); err != nil {
 			rows.Close()
 			return profile, err
 		}
 		item.Domain = exploreURLDomain(rawURL)
+		normalizedURL := normalizeExploreFeedURL(rawURL)
+		subscriptionIndexes[normalizedURL] = append(subscriptionIndexes[normalizedURL], len(profile.Subscriptions))
 		profile.Subscriptions = append(profile.Subscriptions, item)
 	}
 	if err := closeExploreRows(rows); err != nil {
 		return profile, err
+	}
+	if len(subscriptionIndexes) > 0 {
+		normalizedURLs := make([]string, 0, len(subscriptionIndexes))
+		for normalizedURL := range subscriptionIndexes {
+			normalizedURLs = append(normalizedURLs, normalizedURL)
+		}
+		sort.Strings(normalizedURLs)
+		rows, err = inputs.db.QueryContext(ctx, `
+			SELECT id,normalized_url FROM recommended_feeds
+			WHERE normalized_url=ANY($1)`, pq.Array(normalizedURLs))
+		if err != nil {
+			return profile, err
+		}
+		for rows.Next() {
+			var sourceID int
+			var normalizedURL string
+			if err := rows.Scan(&sourceID, &normalizedURL); err != nil {
+				rows.Close()
+				return profile, err
+			}
+			for _, index := range subscriptionIndexes[normalizedURL] {
+				profile.Subscriptions[index].SourceID = sourceID
+			}
+		}
+		if err := closeExploreRows(rows); err != nil {
+			return profile, err
+		}
 	}
 
 	rows, err = inputs.db.QueryContext(ctx, `
@@ -379,4 +410,8 @@ func exploreURLDomain(raw string) string {
 		return ""
 	}
 	return strings.ToLower(parsed.Hostname())
+}
+
+func normalizeExploreFeedURL(raw string) string {
+	return util.NormalizeURL(strings.TrimSpace(raw))
 }
