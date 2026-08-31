@@ -103,6 +103,9 @@ export default function ExploreArticlePage() {
     setSubscribing(false)
     setArticle(null)
     setSubscribed(Boolean(preview?.is_subscribed))
+    // React Router preserves window scroll across client-side navigation.
+    // A list's scroll offset must never become this article's read progress.
+    window.scrollTo(0, 0)
     void loadArticle()
     return () => {
       loadGenerationRef.current += 1

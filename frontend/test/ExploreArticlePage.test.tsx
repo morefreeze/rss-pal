@@ -90,6 +90,10 @@ function deferred<T>() {
 describe('ExploreArticlePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
+    })
     localStorage.clear()
     document.title = 'RSS Pal'
     api.getExploreArticle.mockResolvedValue(detail)
@@ -136,6 +140,18 @@ describe('ExploreArticlePage', () => {
         [23, 'completed_read'],
       ])
     })
+  })
+
+  it('resets inherited list scroll before measuring candidate completion', async () => {
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1400 })
+    renderPage({
+      pathname: '/explore/articles/23',
+      state: { from: '/explore?topic=engineering', articlePreview: preview },
+    })
+
+    await screen.findByRole('heading', { name: 'A safer candidate reader' })
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0)
+    expect(api.recordExploreArticleEvent).not.toHaveBeenCalledWith(23, 'completed_read')
   })
 
   it('returns to the exact Explore list state but rejects unsafe or non-list paths', async () => {
