@@ -448,6 +448,8 @@ export interface ExploreArticleListItem {
   topic: string
   reason: string
   is_subscribed: boolean
+  // Optional because older servers and feeds without media omit it.
+  thumbnail_url?: string
 }
 
 export interface ExploreListResponse {
