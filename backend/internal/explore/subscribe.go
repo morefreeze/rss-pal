@@ -215,15 +215,9 @@ const copyExploreArticleUpsertSQL = `
 	VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 	ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL AND NOT is_clip
 	DO UPDATE SET
-		summary_brief=CASE WHEN
-			(articles.title,articles.content,articles.published_at,articles.fetched_at)
-			IS DISTINCT FROM
-			(EXCLUDED.title,EXCLUDED.content,EXCLUDED.published_at,EXCLUDED.fetched_at)
+		summary_brief=CASE WHEN articles.content IS DISTINCT FROM EXCLUDED.content
 			THEN NULL ELSE articles.summary_brief END,
-		summary_detailed=CASE WHEN
-			(articles.title,articles.content,articles.published_at,articles.fetched_at)
-			IS DISTINCT FROM
-			(EXCLUDED.title,EXCLUDED.content,EXCLUDED.published_at,EXCLUDED.fetched_at)
+		summary_detailed=CASE WHEN articles.content IS DISTINCT FROM EXCLUDED.content
 			THEN NULL ELSE articles.summary_detailed END,
 		title=EXCLUDED.title,
 		content=EXCLUDED.content,
@@ -234,13 +228,9 @@ const copyExploreArticleUpsertSQL = `
 
 const copyExploreSharedArticleUpdateSQL = `
 	UPDATE articles
-	SET summary_brief=CASE WHEN
-			(articles.title,articles.content,articles.published_at,articles.fetched_at)
-			IS DISTINCT FROM ($2,$4,$5,$6)
+	SET summary_brief=CASE WHEN articles.content IS DISTINCT FROM $4
 			THEN NULL ELSE articles.summary_brief END,
-		summary_detailed=CASE WHEN
-			(articles.title,articles.content,articles.published_at,articles.fetched_at)
-			IS DISTINCT FROM ($2,$4,$5,$6)
+		summary_detailed=CASE WHEN articles.content IS DISTINCT FROM $4
 			THEN NULL ELSE articles.summary_detailed END,
 		title=$2,content=$4,published_at=$5,fetched_at=$6,
 		word_count=$7,reading_minutes=$8
