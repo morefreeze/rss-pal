@@ -59,7 +59,7 @@ type exploreSnapshotGenerationResult struct {
 }
 
 func (result exploreSnapshotGenerationResult) NeedsRetry() bool {
-	return result.Pending > 0 || result.FailWriteErrors > 0 || result.TransientErrors > 0
+	return result.FailedPersisted > 0 || result.Pending > 0 || result.FailWriteErrors > 0 || result.TransientErrors > 0
 }
 
 type exploreCycleDeps struct {
