@@ -57,6 +57,7 @@ function deferred<T>() {
 describe('useExploreFeed', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
     api.getExplore.mockResolvedValue(response([]))
     api.recordExploreArticleEvent.mockResolvedValue({ recorded: true })
   })
@@ -114,6 +115,19 @@ describe('useExploreFeed', () => {
     })
     expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(1)
     expect(api.recordExploreArticleEvent).toHaveBeenCalledWith(1, 'exposure')
+  })
+
+  it('keeps exposure de-noising when the page remounts in the same browser session', async () => {
+    api.getExplore.mockResolvedValue(response([article(4)]))
+    const first = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(first.result.current.articles).toHaveLength(1))
+    await act(async () => { await first.result.current.recordExposure(4) })
+    first.unmount()
+
+    const second = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(second.result.current.articles).toHaveLength(1))
+    await act(async () => { await second.result.current.recordExposure(4) })
+    expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(1)
   })
 
   it('rolls back failed hide feedback without changing original ordering', async () => {
