@@ -23,9 +23,15 @@ type exploreStore interface {
 	RecordArticleEvent(userID, articleID int, eventType string, occurredAt time.Time) (bool, error)
 }
 
+type exploreSubscriber interface {
+	SubscribeOne(userID, sourceID int) (explorelogic.SubscribeResult, error)
+	Subscribe(userID int, sourceIDs []int) ([]explorelogic.SubscribeResult, error)
+}
+
 type ExploreHandler struct {
-	storeFor func(*gin.Context) exploreStore
-	now      func() time.Time
+	storeFor      func(*gin.Context) exploreStore
+	subscriberFor func(*gin.Context) exploreSubscriber
+	now           func() time.Time
 }
 
 func NewExploreHandler(repo *repository.ExploreRepository) *ExploreHandler {
@@ -35,8 +41,22 @@ func NewExploreHandler(repo *repository.ExploreRepository) *ExploreHandler {
 	}
 }
 
+func NewExploreHandlerWithSubscriber(repo *repository.ExploreRepository, subscriber *explorelogic.SubscribeService) *ExploreHandler {
+	handler := NewExploreHandler(repo)
+	handler.subscriberFor = func(c *gin.Context) exploreSubscriber { return subscriber.WithCtx(c) }
+	return handler
+}
+
 func newExploreHandlerWithStore(store exploreStore, now func() time.Time) *ExploreHandler {
 	return &ExploreHandler{storeFor: func(*gin.Context) exploreStore { return store }, now: now}
+}
+
+func newExploreHandlerWithStores(store exploreStore, subscriber exploreSubscriber, now func() time.Time) *ExploreHandler {
+	return &ExploreHandler{
+		storeFor:      func(*gin.Context) exploreStore { return store },
+		subscriberFor: func(*gin.Context) exploreSubscriber { return subscriber },
+		now:           now,
+	}
 }
 
 func (h *ExploreHandler) GetExplore(c *gin.Context) {
@@ -254,6 +274,64 @@ func (h *ExploreHandler) RecordArticleEvent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"recorded": recorded})
 }
 
+func (h *ExploreHandler) SubscribeSource(c *gin.Context) {
+	sourceID, ok := positiveExploreID(c, "id")
+	if !ok {
+		return
+	}
+	if h.subscriberFor == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	result, err := h.subscriberFor(c).SubscribeOne(getUserID(c), sourceID)
+	if err != nil {
+		writeExploreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		FeedID         int  `json:"feed_id"`
+		Created        bool `json:"created"`
+		CopiedArticles int  `json:"copied_articles"`
+	}{FeedID: result.FeedID, Created: result.Created, CopiedArticles: result.CopiedArticles})
+}
+
+func (h *ExploreHandler) SubscribeSources(c *gin.Context) {
+	var request struct {
+		SourceIDs []int `json:"source_ids"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || !validExploreSubscribeIDs(request.SourceIDs) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_ids must contain unique positive ids"})
+		return
+	}
+	if h.subscriberFor == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	results, err := h.subscriberFor(c).Subscribe(getUserID(c), request.SourceIDs)
+	if err != nil {
+		writeExploreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
+func validExploreSubscribeIDs(sourceIDs []int) bool {
+	if len(sourceIDs) == 0 || len(sourceIDs) > explorelogic.MaxSubscribeSources {
+		return false
+	}
+	seen := make(map[int]struct{}, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		if sourceID <= 0 {
+			return false
+		}
+		if _, duplicate := seen[sourceID]; duplicate {
+			return false
+		}
+		seen[sourceID] = struct{}{}
+	}
+	return true
+}
+
 func validExploreEventType(value string) bool {
 	return value == model.ExploreArticleEventExposure ||
 		value == model.ExploreArticleEventClick ||
@@ -273,9 +351,12 @@ func writeExploreError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, repository.ErrExploreNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "explore resource not found"})
+	case errors.Is(err, explorelogic.ErrSubscribeSourceUnavailable):
+		c.JSON(http.StatusNotFound, gin.H{"error": "explore source not found"})
 	case errors.Is(err, repository.ErrInvalidExploreFeedback),
 		errors.Is(err, repository.ErrInvalidExploreEvent),
-		errors.Is(err, repository.ErrInvalidExploreInterest):
+		errors.Is(err, repository.ErrInvalidExploreInterest),
+		errors.Is(err, explorelogic.ErrInvalidSubscribeRequest):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
