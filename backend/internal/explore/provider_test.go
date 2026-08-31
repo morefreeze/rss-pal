@@ -2,6 +2,7 @@ package explore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,163 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestProviderClientUsesTrustedDoerOnlyForRootRelativeRSSHubEndpoint(t *testing.T) {
+	publicCalls, trustedCalls, validationCalls := 0, 0, 0
+	publicDoer := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		publicCalls++
+		return nil, errors.New("public doer must not be used")
+	})
+	trustedDoer := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		trustedCalls++
+		if got, want := request.URL.String(), "http://rsshub:1200/reddit/subreddit/golang?limit=20"; got != want {
+			t.Fatalf("trusted request URL = %q, want %q", got, want)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("rsshub"))}, nil
+	})
+	client := newProviderClientWithTrustedForTest(publicDoer, trustedDoer, func(raw string) (*url.URL, error) {
+		validationCalls++
+		return nil, errors.New("public validator must not be used")
+	}, "http://rsshub:1200", 32, "")
+
+	result, err := client.Fetch(t.Context(), "/reddit/subreddit/golang?limit=20", "", "")
+	if err != nil || string(result.Body) != "rsshub" {
+		t.Fatalf("result = %#v, err = %v", result, err)
+	}
+	if publicCalls != 0 || validationCalls != 0 || trustedCalls != 1 {
+		t.Fatalf("public calls = %d, validation calls = %d, trusted calls = %d", publicCalls, validationCalls, trustedCalls)
+	}
+}
+
+func TestProviderClientAbsolutePrivateEndpointNeverUsesTrustedRSSHubBypass(t *testing.T) {
+	publicCalls, trustedCalls, validationCalls := 0, 0, 0
+	client := newProviderClientWithTrustedForTest(
+		roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			publicCalls++
+			return nil, errors.New("unexpected request")
+		}),
+		roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			trustedCalls++
+			return nil, errors.New("unexpected request")
+		}),
+		func(string) (*url.URL, error) { validationCalls++; return nil, errors.New("blocked address") },
+		"http://rsshub:1200", 32, "",
+	)
+
+	if _, err := client.Fetch(t.Context(), "http://127.0.0.1/private-feed", "", ""); err == nil {
+		t.Fatal("absolute private provider URL unexpectedly succeeded")
+	}
+	if validationCalls != 1 || publicCalls != 0 || trustedCalls != 0 {
+		t.Fatalf("validation calls = %d, public calls = %d, trusted calls = %d", validationCalls, publicCalls, trustedCalls)
+	}
+}
+
+func TestProviderClientRejectsInvalidRSSHubBaseBeforeRequest(t *testing.T) {
+	for _, base := range []string{
+		"rsshub:1200",
+		"ftp://rsshub:1200",
+		"http://user:secret@rsshub:1200",
+		"http:///missing-host",
+		"http://rsshub:0",
+		"http://rsshub:bad",
+		"http://rsshub:99999",
+		"http://rsshub:1200/?token=secret",
+		"http://rsshub:1200/#fragment",
+	} {
+		t.Run(base, func(t *testing.T) {
+			client := NewProviderClient(base)
+			if _, err := client.Fetch(t.Context(), "/reddit/r/golang", "", ""); err == nil {
+				t.Fatalf("invalid base %q unexpectedly succeeded", base)
+			}
+		})
+	}
+}
+
+func TestProviderClientRejectsRSSHubAuthorityEscapesBeforeRequest(t *testing.T) {
+	called := false
+	client := newProviderClientWithTrustedForTest(
+		roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			called = true
+			return nil, errors.New("unexpected request")
+		}),
+		roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			called = true
+			return nil, errors.New("unexpected request")
+		}),
+		func(raw string) (*url.URL, error) { return url.Parse(raw) },
+		"http://rsshub:1200", 32, "",
+	)
+	for _, endpoint := range []string{
+		"//evil.example/feed",
+		`/\\evil.example/feed`,
+		"/%2f%2fevil.example/feed",
+		"/feed#fragment",
+		"user:secret@evil.example/feed",
+	} {
+		if _, err := client.Fetch(t.Context(), endpoint, "", ""); err == nil {
+			t.Errorf("authority escape %q unexpectedly succeeded", endpoint)
+		}
+	}
+	if called {
+		t.Fatal("malicious relative endpoint reached a provider doer")
+	}
+}
+
+func TestProviderClientTrustedRSSHubRedirectsStayOnConfiguredOrigin(t *testing.T) {
+	crossOrigin := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("cross-origin redirect must not be followed")
+	}))
+	defer crossOrigin.Close()
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/same":
+			http.Redirect(w, request, "/final", http.StatusFound)
+		case "/final":
+			_, _ = io.WriteString(w, "same-origin")
+		case "/cross":
+			http.Redirect(w, request, crossOrigin.URL+"/feed", http.StatusFound)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	client := NewProviderClient(server.URL)
+	result, err := client.Fetch(t.Context(), "/same", "", "")
+	if err != nil || string(result.Body) != "same-origin" {
+		t.Fatalf("same-origin result = %#v, err = %v", result, err)
+	}
+	if _, err := client.Fetch(t.Context(), "/cross", "", ""); err == nil {
+		t.Fatal("cross-origin RSSHub redirect unexpectedly succeeded")
+	}
+}
+
+func TestProviderClientTrustedRSSHubPreservesConditionalAndStatusHandling(t *testing.T) {
+	doer := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if got := request.Header.Get("If-None-Match"); got != `"old"` {
+			t.Fatalf("If-None-Match = %q", got)
+		}
+		if got := request.Header.Get("If-Modified-Since"); got != "yesterday" {
+			t.Fatalf("If-Modified-Since = %q", got)
+		}
+		status := http.StatusNotModified
+		if request.URL.Path == "/unavailable" {
+			status = http.StatusServiceUnavailable
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ignored"))}, nil
+	})
+	client := newProviderClientWithTrustedForTest(nil, doer, nil, "http://rsshub:1200", 32, "")
+
+	result, err := client.Fetch(t.Context(), "/not-modified", `"old"`, "yesterday")
+	if err != nil || !result.NotModified || len(result.Body) != 0 {
+		t.Fatalf("304 result = %#v, err = %v", result, err)
+	}
+	if _, err := client.Fetch(t.Context(), "/unavailable", `"old"`, "yesterday"); err == nil {
+		t.Fatal("trusted RSSHub non-2xx response unexpectedly succeeded")
+	}
+}
 
 func TestNormalizeCandidatesRejectsUnsafeURLsAndDeduplicatesDeterministically(t *testing.T) {
 	candidates := NormalizeCandidates([]Candidate{
@@ -119,5 +277,12 @@ func testProviderClient(client *http.Client) ProviderClient {
 func newProviderClientForTest(doer interface {
 	Do(*http.Request) (*http.Response, error)
 }, validator func(string) (*url.URL, error), rssHubBaseURL string, maxBodyBytes int64, userAgent string) ProviderClient {
-	return ProviderClient{doer: doer, validateURL: validator, rssHubBaseURL: rssHubBaseURL, maxBodyBytes: maxBodyBytes, userAgent: userAgent}
+	return newProviderClientWithTrustedForTest(doer, doer, validator, rssHubBaseURL, maxBodyBytes, userAgent)
+}
+
+func newProviderClientWithTrustedForTest(publicDoer, trustedDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}, validator func(string) (*url.URL, error), rssHubBaseURL string, maxBodyBytes int64, userAgent string) ProviderClient {
+	origin, baseErr := parseRSSHubBaseURL(rssHubBaseURL)
+	return ProviderClient{publicDoer: publicDoer, trustedDoer: trustedDoer, validateURL: validator, rssHubOrigin: origin, rssHubBaseErr: baseErr, maxBodyBytes: maxBodyBytes, userAgent: userAgent}
 }

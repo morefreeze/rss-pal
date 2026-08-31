@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -63,11 +64,15 @@ const (
 // ProviderClient safely fetches public registry documents. Tests can inject a
 // client and validator; production defaults retain the shared httpx defenses.
 type ProviderClient struct {
-	doer interface {
+	publicDoer interface {
+		Do(*http.Request) (*http.Response, error)
+	}
+	trustedDoer interface {
 		Do(*http.Request) (*http.Response, error)
 	}
 	validateURL   func(string) (*url.URL, error)
-	rssHubBaseURL string
+	rssHubOrigin  *url.URL
+	rssHubBaseErr error
 	maxBodyBytes  int64
 	userAgent     string
 }
@@ -80,30 +85,54 @@ type ProviderFetchResult struct {
 }
 
 func NewProviderClient(rssHubBaseURL string) ProviderClient {
-	return ProviderClient{doer: httpx.NewClient(20 * time.Second), validateURL: httpx.ValidateURL, rssHubBaseURL: rssHubBaseURL, maxBodyBytes: defaultProviderBodyBytes, userAgent: providerUserAgent}
+	origin, baseErr := parseRSSHubBaseURL(rssHubBaseURL)
+	var trustedDoer interface {
+		Do(*http.Request) (*http.Response, error)
+	}
+	if origin != nil {
+		trustedDoer = newTrustedProviderHTTPClient(origin, 20*time.Second)
+	}
+	return ProviderClient{
+		publicDoer:    httpx.NewClient(20 * time.Second),
+		trustedDoer:   trustedDoer,
+		validateURL:   httpx.ValidateURL,
+		rssHubOrigin:  origin,
+		rssHubBaseErr: baseErr,
+		maxBodyBytes:  defaultProviderBodyBytes,
+		userAgent:     providerUserAgent,
+	}
 }
 
 func (c ProviderClient) Fetch(ctx context.Context, endpoint, etag, lastModified string) (ProviderFetchResult, error) {
-	endpoint, err := c.resolveEndpoint(endpoint)
+	parsed, trusted, err := c.resolveEndpoint(endpoint)
 	if err != nil {
 		return ProviderFetchResult{}, err
 	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.User != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if parsed.User != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return ProviderFetchResult{}, fmt.Errorf("invalid provider endpoint")
 	}
-	validate := c.validateURL
-	if validate == nil {
-		validate = httpx.ValidateURL
+	var client interface {
+		Do(*http.Request) (*http.Response, error)
 	}
-	if _, err := validate(endpoint); err != nil {
-		return ProviderFetchResult{}, fmt.Errorf("validate provider endpoint: %w", err)
+	if trusted {
+		client = c.trustedDoer
+		if client == nil {
+			client = newTrustedProviderHTTPClient(c.rssHubOrigin, 20*time.Second)
+		}
+	} else {
+		validate := c.validateURL
+		if validate == nil {
+			validate = httpx.ValidateURL
+		}
+		if _, err := validate(parsed.String()); err != nil {
+			return ProviderFetchResult{}, fmt.Errorf("validate provider endpoint: %w", err)
+		}
+		client = c.publicDoer
+		if client == nil {
+			client = httpx.NewClient(20 * time.Second)
+		}
 	}
-	client := c.doer
-	if client == nil {
-		client = httpx.NewClient(20 * time.Second)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return ProviderFetchResult{}, err
 	}
@@ -144,25 +173,98 @@ func (c ProviderClient) Fetch(ctx context.Context, endpoint, etag, lastModified 
 	return result, nil
 }
 
-func (c ProviderClient) resolveEndpoint(endpoint string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(endpoint))
+func (c ProviderClient) resolveEndpoint(endpoint string) (*url.URL, bool, error) {
+	raw := strings.TrimSpace(endpoint)
+	u, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("parse provider endpoint: %w", err)
+		return nil, false, fmt.Errorf("parse provider endpoint: %w", err)
 	}
 	if u.IsAbs() {
-		return u.String(), nil
+		return u, false, nil
 	}
-	if u.Scheme != "" || u.Host != "" {
-		return "", fmt.Errorf("provider endpoint must be an absolute path or absolute URL")
+	if u.Scheme != "" || u.Host != "" || u.User != nil || u.Opaque != "" {
+		return nil, false, fmt.Errorf("provider endpoint must be an absolute path or absolute URL")
 	}
-	if !strings.HasPrefix(endpoint, "/") || c.rssHubBaseURL == "" {
-		return "", fmt.Errorf("relative provider endpoint requires RSSHub base URL")
+	if !isSafeRSSHubPath(raw, u) {
+		return nil, false, fmt.Errorf("invalid RSSHub provider path")
 	}
-	base, err := url.Parse(c.rssHubBaseURL)
-	if err != nil || !base.IsAbs() {
-		return "", fmt.Errorf("invalid RSSHub base URL")
+	if c.rssHubBaseErr != nil {
+		return nil, false, c.rssHubBaseErr
 	}
-	return base.ResolveReference(u).String(), nil
+	if c.rssHubOrigin == nil {
+		return nil, false, fmt.Errorf("relative provider endpoint requires RSSHub base URL")
+	}
+	resolved := c.rssHubOrigin.ResolveReference(u)
+	if resolved.User != nil || !sameProviderOrigin(c.rssHubOrigin, resolved) {
+		return nil, false, fmt.Errorf("RSSHub provider endpoint escaped configured origin")
+	}
+	return resolved, true, nil
+}
+
+func parseRSSHubBaseURL(raw string) (*url.URL, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if strings.Contains(raw, "\\") {
+		return nil, fmt.Errorf("invalid RSSHub base URL")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Hostname() == "" || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return nil, fmt.Errorf("invalid RSSHub base URL")
+	}
+	if strings.HasSuffix(u.Host, ":") {
+		return nil, fmt.Errorf("invalid RSSHub base URL")
+	}
+	if port := u.Port(); port != "" {
+		parsed, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || parsed == 0 {
+			return nil, fmt.Errorf("invalid RSSHub base URL")
+		}
+	}
+	return &url.URL{Scheme: u.Scheme, Host: u.Host}, nil
+}
+
+func isSafeRSSHubPath(raw string, u *url.URL) bool {
+	if u == nil || u.Fragment != "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.Contains(raw, "\\") {
+		return false
+	}
+	rawPath := raw
+	if query := strings.IndexByte(rawPath, '?'); query >= 0 {
+		rawPath = rawPath[:query]
+	}
+	lowerPath := strings.ToLower(rawPath)
+	return !strings.Contains(lowerPath, "%2f") && !strings.Contains(lowerPath, "%5c")
+}
+
+func sameProviderOrigin(want, got *url.URL) bool {
+	return want != nil && got != nil && strings.EqualFold(want.Scheme, got.Scheme) && strings.EqualFold(want.Host, got.Host)
+}
+
+func newTrustedProviderHTTPClient(origin *url.URL, timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          20,
+		MaxIdleConnsPerHost:   5,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}
+	client := &http.Client{Transport: transport, Timeout: timeout}
+	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("too many redirects")
+		}
+		if request.URL.User != nil || !sameProviderOrigin(origin, request.URL) {
+			return errors.New("RSSHub redirect escaped configured origin")
+		}
+		return nil
+	}
+	return client
 }
 
 // NormalizeCandidates rejects unsafe URLs and coalesces candidates by their
