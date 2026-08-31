@@ -65,6 +65,9 @@ func (r Registry) SyncDue(ctx context.Context, now time.Time) ([]ProviderSyncRes
 	if r.Store == nil {
 		return nil, fmt.Errorf("registry store is required")
 	}
+	if r.Queue == nil {
+		return nil, fmt.Errorf("registry queue is required")
+	}
 	providers, err := r.Store.LoadDueProviders(now)
 	if err != nil {
 		return nil, err
@@ -74,6 +77,12 @@ func (r Registry) SyncDue(ctx context.Context, now time.Time) ([]ProviderSyncRes
 		results = append(results, r.syncOne(ctx, now, provider))
 	}
 	return results, nil
+}
+
+// IsRegistryProviderStale reports whether a provider has not succeeded in the
+// last seven days. The exact seven-day boundary remains fresh.
+func IsRegistryProviderStale(provider RegistryProvider, now time.Time) bool {
+	return provider.LastSuccessAt == nil || now.Sub(*provider.LastSuccessAt) > 7*24*time.Hour
 }
 
 func (r Registry) syncOne(ctx context.Context, now time.Time, provider RegistryProvider) ProviderSyncResult {

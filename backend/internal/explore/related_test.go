@@ -28,8 +28,8 @@ func TestRelatedSiteDiscovererPrefersDeclaredFeedAndBoundsExternalSites(t *testi
 
 func TestRedditLinkStreamAdapterAggregatesExternalDomains(t *testing.T) {
 	const document = `<rss><channel>
- <item><link>https://www.reddit.com/r/golang/comments/1</link><description><![CDATA[<a href="https://Blog.Example/posts/one?utm_source=r">one</a><img src="https://cdn.example/p.png">]]></description></item>
- <item><link>https://rsshub.app/reddit/subreddit/golang</link><content><![CDATA[See https://blog.example/posts/two and https://other.example/a]]></content></item>
+ <item><link>https://www.reddit.com/r/golang/comments/1</link><description><![CDATA[<a href="https://Blog.Example/posts/z?utm_source=r">one</a><img src="https://cdn.example/p.png">]]></description></item>
+ <item><link>https://rsshub.app/reddit/subreddit/golang</link><content><![CDATA[See https://blog.example/posts/a and https://other.example/a]]></content></item>
 </channel></rss>`
 	got, err := (RedditLinkStreamAdapter{}).Parse(Provider{Topic: "golang"}, []byte(document))
 	if err != nil {
@@ -38,7 +38,7 @@ func TestRedditLinkStreamAdapterAggregatesExternalDomains(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("candidate count = %d, want 2: %#v", len(got), got)
 	}
-	if got[0].FeedURL != "https://blog.example/posts/one" || got[0].OccurrenceCount != 2 || got[0].ExternalKey != "blog.example" {
+	if got[0].FeedURL != "https://blog.example/posts/a" || got[0].OccurrenceCount != 2 || got[0].ExternalKey != "blog.example" {
 		t.Errorf("blog candidate = %#v", got[0])
 	}
 	if got[1].FeedURL != "https://other.example/a" || got[1].OccurrenceCount != 1 {

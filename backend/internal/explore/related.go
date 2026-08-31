@@ -73,11 +73,32 @@ func (RelatedSiteDiscoverer) Discover(pageURL string, body []byte) ([]Candidate,
 func isFeedDeclaration(token html.Token) bool {
 	rel, hasRel := htmlAttribute(token, "rel")
 	typeValue, hasType := htmlAttribute(token, "type")
-	if !hasRel || !hasType || !strings.Contains(strings.ToLower(rel), "alternate") {
+	if !hasRel || !hasType || !hasASCIIToken(rel, "alternate") {
 		return false
 	}
 	typeValue = strings.ToLower(strings.TrimSpace(typeValue))
 	return typeValue == "application/rss+xml" || typeValue == "application/atom+xml"
+}
+
+func hasASCIIToken(value, want string) bool {
+	for start := 0; start < len(value); {
+		for start < len(value) && isASCIIWhitespace(value[start]) {
+			start++
+		}
+		end := start
+		for end < len(value) && !isASCIIWhitespace(value[end]) {
+			end++
+		}
+		if start < end && strings.EqualFold(value[start:end], want) {
+			return true
+		}
+		start = end
+	}
+	return false
+}
+
+func isASCIIWhitespace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r' || value == '\f'
 }
 
 func htmlAttribute(token html.Token, name string) (string, bool) {

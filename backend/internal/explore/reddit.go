@@ -34,10 +34,14 @@ func (RedditLinkStreamAdapter) Parse(provider Provider, body []byte) ([]Candidat
 			}
 			domain := hostOf(normalized)
 			candidate, found := byDomain[domain]
+			occurrences := 1
+			if found {
+				occurrences = candidate.OccurrenceCount + 1
+			}
 			if !found || normalized < candidate.FeedURL {
 				candidate = Candidate{ExternalKey: domain, FeedURL: normalized, Title: domain, Topic: provider.Topic, Tags: []string{provider.Topic}}
 			}
-			candidate.OccurrenceCount++
+			candidate.OccurrenceCount = occurrences
 			byDomain[domain] = candidate
 		}
 	}
