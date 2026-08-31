@@ -260,14 +260,20 @@ describe('useExploreFeed', () => {
     expect(api.getExplore).toHaveBeenCalledTimes(6)
   })
 
-  it('does not retry an automatically loaded page after it fails', async () => {
+  it('keeps a failed automatic page reachable for an explicit retry', async () => {
     api.getExplore
       .mockResolvedValueOnce(response([], true))
       .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response([article(9)]))
     const { result } = renderHook(() => useExploreFeed({ pageSize: 20 }))
 
     await waitFor(() => expect(result.current.error).toContain('探索内容加载失败'))
-    await new Promise(resolve => setTimeout(resolve, 20))
     expect(api.getExplore).toHaveBeenCalledTimes(2)
+    expect(result.current.hasMore).toBe(true)
+
+    await act(async () => { await result.current.continueLoading() })
+    expect(api.getExplore).toHaveBeenCalledTimes(3)
+    expect(result.current.error).toBeNull()
+    expect(result.current.articles.map(item => item.id)).toEqual([9])
   })
 })

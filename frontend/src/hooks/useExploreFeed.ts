@@ -87,7 +87,8 @@ export function useExploreFeed({
   const automaticEmptyLoadsRef = useRef(0)
   const exposureKeyRef = useRef(exposureSessionKey())
   const exposedRef = useRef(reportedExposures(exposureKeyRef.current))
-  const exposureInFlightRef = useRef(new Map<number, Promise<void>>())
+  const exposureInFlightRef = useRef(new Map<number, Promise<boolean>>())
+  const [automaticLoadLimitReached, setAutomaticLoadLimitReached] = useState(false)
 
   const requestPage = useCallback(async (nextOffset: number, reset: boolean, requestGeneration: number) => {
     requestInFlightGenerationRef.current = requestGeneration
@@ -98,6 +99,7 @@ export function useExploreFeed({
       setHasMore(false)
     } else {
       setLoadingMore(true)
+      setError(null)
     }
 
     try {
@@ -121,7 +123,6 @@ export function useExploreFeed({
     } catch {
       if (requestGeneration !== requestGenerationRef.current) return
       setError('探索内容加载失败，请稍后重试')
-      setHasMore(false)
     } finally {
       if (requestGeneration === requestGenerationRef.current) {
         requestInFlightGenerationRef.current = null
@@ -131,18 +132,31 @@ export function useExploreFeed({
     }
   }, [order, pageSize, sort, topic])
 
-  useEffect(() => {
+  const reload = useCallback(async () => {
     const nextGeneration = ++requestGenerationRef.current
     automaticEmptyLoadsRef.current = 0
+    setAutomaticLoadLimitReached(false)
+    setHiddenSources(new Set())
+    setDampenedTopics(new Set())
     setGeneration(nextGeneration)
     setOffset(0)
-    void requestPage(0, true, nextGeneration)
+    await requestPage(0, true, nextGeneration)
   }, [requestPage])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
 
   const loadMore = useCallback(async () => {
     if (!hasMore || loading || loadingMore || requestInFlightGenerationRef.current === requestGenerationRef.current) return
     await requestPage(offset + pageSize, false, requestGenerationRef.current)
   }, [hasMore, loading, loadingMore, offset, pageSize, requestPage])
+
+  const continueLoading = useCallback(async () => {
+    automaticEmptyLoadsRef.current = 0
+    setAutomaticLoadLimitReached(false)
+    await loadMore()
+  }, [loadMore])
 
   const articles = useMemo(() => baseArticles.filter(article =>
     !hiddenSources.has(article.source_id) && !dampenedTopics.has(article.topic),
@@ -151,22 +165,27 @@ export function useExploreFeed({
   useEffect(() => {
     if (articles.length > 0 || !hasMore || loading || loadingMore || error) return
     if (requestInFlightGenerationRef.current === requestGenerationRef.current) return
-    if (automaticEmptyLoadsRef.current >= MAX_AUTOMATIC_EMPTY_PAGE_LOADS) return
+    if (automaticEmptyLoadsRef.current >= MAX_AUTOMATIC_EMPTY_PAGE_LOADS) {
+      setAutomaticLoadLimitReached(true)
+      return
+    }
     automaticEmptyLoadsRef.current += 1
     void loadMore()
   }, [articles.length, error, hasMore, loadMore, loading, loadingMore, offset])
 
-  const recordExposure = useCallback((articleID: number): Promise<void> => {
-    if (exposedRef.current.has(articleID)) return Promise.resolve()
+  const recordExposure = useCallback((articleID: number): Promise<boolean> => {
+    if (exposedRef.current.has(articleID)) return Promise.resolve(true)
     const pending = exposureInFlightRef.current.get(articleID)
     if (pending) return pending
     const request = recordExploreArticleEvent(articleID, 'exposure')
       .then(() => {
         exposedRef.current.add(articleID)
         persistReportedExposures(exposureKeyRef.current, exposedRef.current)
+        return true
       })
       .catch(() => {
         // Exposure is a low-weight signal and must never interrupt reading.
+        return false
       })
       .finally(() => {
         exposureInFlightRef.current.delete(articleID)
@@ -233,12 +252,15 @@ export function useExploreFeed({
     loading,
     loadingMore,
     hasMore,
+    automaticLoadLimitReached,
     error,
     requestGeneration: generation,
     setSort,
     setOrder,
     setTopic: (value: string) => setTopicState(value),
     loadMore,
+    continueLoading,
+    reload,
     recordExposure,
     recordClick,
     hideSource,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   api,
+  clearExploreNegativeFeedback,
   createExploreFeedback,
   deleteExploreFeedback,
   getExplore,
@@ -15,7 +16,7 @@ import {
 afterEach(() => vi.restoreAllMocks())
 
 describe('Explore API client', () => {
-  it('maps all nine Explore operations to their authenticated API endpoints', async () => {
+  it('maps all ten Explore operations to their authenticated API endpoints', async () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue({ data: { kind: 'get' } })
     const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { kind: 'post' } })
     const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { kind: 'put' } })
@@ -26,6 +27,7 @@ describe('Explore API client', () => {
     await getExploreArticle(23)
     await createExploreFeedback({ feedback_type: 'hide_source', source_id: 7 })
     await deleteExploreFeedback(17)
+    await clearExploreNegativeFeedback()
     await replaceExploreInterests(['programming', 'security'])
     await recordExploreArticleEvent(23, 'completed_read')
     await subscribeExploreSource(7)
@@ -39,7 +41,8 @@ describe('Explore API client', () => {
     expect(post).toHaveBeenNthCalledWith(1, '/explore/feedback', {
       feedback_type: 'hide_source', source_id: 7,
     })
-    expect(remove).toHaveBeenCalledWith('/explore/feedback/17')
+    expect(remove).toHaveBeenNthCalledWith(1, '/explore/feedback/17')
+    expect(remove).toHaveBeenNthCalledWith(2, '/explore/feedback')
     expect(put).toHaveBeenCalledWith('/explore/interests', {
       topics: ['programming', 'security'],
     })

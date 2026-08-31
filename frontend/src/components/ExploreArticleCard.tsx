@@ -6,7 +6,7 @@ interface Props {
   sort: ExploreSort
   loadMoreRef?: React.RefObject<HTMLDivElement>
   onOpen: (article: ExploreArticleListItem) => void
-  onExposure: (articleID: number) => Promise<void>
+  onExposure: (articleID: number) => Promise<boolean>
   onHideSource: (sourceID: number) => void
   onDampenTopic: (topic: string) => void
 }
@@ -35,13 +35,24 @@ export default function ExploreArticleCard({
     const element = cardRef.current
     if (!element || typeof IntersectionObserver === 'undefined') return
     let timer: ReturnType<typeof setTimeout> | null = null
+    let requestInFlight = false
+    let stopped = false
     const observer = new IntersectionObserver(entries => {
       const visible = entries.some(entry => entry.isIntersecting && entry.intersectionRatio >= 0.5)
-      if (visible && timer == null) {
+      if (visible && timer == null && !requestInFlight) {
         timer = setTimeout(() => {
           timer = null
+          requestInFlight = true
           void onExposure(article.id)
-          observer.disconnect()
+            .then(recorded => {
+              if (!stopped && recorded) observer.disconnect()
+            })
+            .catch(() => {
+              // Keep observing so leaving and re-entering can retry.
+            })
+            .finally(() => {
+              requestInFlight = false
+            })
         }, 10_000)
       } else if (!visible && timer != null) {
         clearTimeout(timer)
@@ -50,6 +61,7 @@ export default function ExploreArticleCard({
     }, { threshold: [0, 0.5, 1] })
     observer.observe(element)
     return () => {
+      stopped = true
       if (timer != null) clearTimeout(timer)
       observer.disconnect()
     }

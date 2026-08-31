@@ -6,6 +6,7 @@ import Toaster from '../src/components/Toaster'
 import type { ExploreArticleListItem, ExploreListResponse } from '../src/api/client'
 
 const api = vi.hoisted(() => ({
+  clearExploreNegativeFeedback: vi.fn(),
   createExploreFeedback: vi.fn(),
   deleteExploreFeedback: vi.fn(),
   getExplore: vi.fn(),
@@ -88,6 +89,7 @@ describe('ExplorePage', () => {
     api.getExploreSources.mockResolvedValue([])
     api.recordExploreArticleEvent.mockResolvedValue({ recorded: true })
     api.createExploreFeedback.mockResolvedValue({ id: 90 })
+    api.clearExploreNegativeFeedback.mockResolvedValue({ deleted_count: 0 })
     api.deleteExploreFeedback.mockResolvedValue(undefined)
     api.replaceExploreInterests.mockResolvedValue({ interests: [] })
   })
@@ -279,5 +281,41 @@ describe('ExplorePage', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '少推荐这类内容' }))
     expect(await screen.findByText('Article 1')).toBeTruthy()
     expect((await screen.findByRole('alert')).textContent).toContain('反馈失败，已恢复')
+  })
+
+  it('recovers an unfiltered empty stream from feedback saved in an earlier login and retries failures', async () => {
+    api.getExplore
+      .mockResolvedValueOnce(response({ articles: [] }))
+      .mockResolvedValueOnce(response({ articles: [article(9)] }))
+    api.clearExploreNegativeFeedback
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ deleted_count: 2 })
+    renderPage()
+
+    const clear = await screen.findByRole('button', { name: '清除隐藏/少推荐反馈' })
+    fireEvent.click(clear)
+    expect((await screen.findByRole('alert')).textContent).toContain('清除反馈失败')
+    expect(screen.getByRole('button', { name: '清除隐藏/少推荐反馈' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '清除隐藏/少推荐反馈' }))
+    expect(await screen.findByText('Article 9')).toBeTruthy()
+    expect(api.clearExploreNegativeFeedback).toHaveBeenCalledTimes(2)
+    expect(api.getExplore).toHaveBeenCalledTimes(2)
+  })
+
+  it('offers continue loading after five automatic empty pages and reveals later candidates', async () => {
+    api.getExplore
+      .mockResolvedValueOnce(response({ articles: [], has_more: true }))
+      .mockResolvedValueOnce(response({ articles: [], has_more: true }))
+      .mockResolvedValueOnce(response({ articles: [], has_more: true }))
+      .mockResolvedValueOnce(response({ articles: [], has_more: true }))
+      .mockResolvedValueOnce(response({ articles: [], has_more: true }))
+      .mockResolvedValueOnce(response({ articles: [], has_more: true }))
+      .mockResolvedValueOnce(response({ articles: [article(10)], has_more: false }))
+    renderPage()
+
+    await waitFor(() => expect(api.getExplore).toHaveBeenCalledTimes(6))
+    fireEvent.click(screen.getByRole('button', { name: '继续加载' }))
+    expect(await screen.findByText('Article 10')).toBeTruthy()
   })
 })
