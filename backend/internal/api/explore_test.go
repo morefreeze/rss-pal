@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	explorelogic "github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,26 @@ type fakeExploreStore struct {
 	deleteID      int
 	eventCreated  bool
 	err           error
+}
+
+type fakeExploreSubscriber struct {
+	results       []explorelogic.SubscribeResult
+	lastUserID    int
+	lastSourceIDs []int
+	err           error
+}
+
+func (f *fakeExploreSubscriber) SubscribeOne(userID, sourceID int) (explorelogic.SubscribeResult, error) {
+	f.lastUserID, f.lastSourceIDs = userID, []int{sourceID}
+	if len(f.results) == 0 {
+		return explorelogic.SubscribeResult{}, f.err
+	}
+	return f.results[0], f.err
+}
+
+func (f *fakeExploreSubscriber) Subscribe(userID int, sourceIDs []int) ([]explorelogic.SubscribeResult, error) {
+	f.lastUserID, f.lastSourceIDs = userID, append([]int(nil), sourceIDs...)
+	return f.results, f.err
 }
 
 func (f *fakeExploreStore) GetPage(userID int, params repository.ExploreListParams) (*repository.ExplorePage, error) {
@@ -186,6 +207,59 @@ func TestExploreHandlerMapsVisibilityErrorsToNotFound(t *testing.T) {
 	}
 }
 
+func TestExploreHandlerSubscribeSingleAndBatchDTOs(t *testing.T) {
+	subscriber := &fakeExploreSubscriber{results: []explorelogic.SubscribeResult{
+		{SourceID: 7, FeedID: 70, Created: true, CopiedArticles: 3},
+		{SourceID: 8, FeedID: 80, Created: false, CopiedArticles: 2},
+	}}
+	handler := newExploreHandlerWithStores(&fakeExploreStore{}, subscriber, time.Now)
+	router := exploreTestRouter(handler)
+
+	w := performExploreRequest(router, http.MethodPost, "/api/explore/sources/7/subscribe", nil)
+	if w.Code != http.StatusOK || subscriber.lastUserID != 42 || len(subscriber.lastSourceIDs) != 1 || subscriber.lastSourceIDs[0] != 7 {
+		t.Fatalf("single status=%d user=%d ids=%v body=%s", w.Code, subscriber.lastUserID, subscriber.lastSourceIDs, w.Body.String())
+	}
+	if w.Body.String() != "{\"feed_id\":70,\"created\":true,\"copied_articles\":3}" {
+		t.Fatalf("single DTO=%s", w.Body.String())
+	}
+
+	w = performExploreRequest(router, http.MethodPost, "/api/explore/sources/subscribe-batch", map[string]any{"source_ids": []int{7, 8}})
+	if w.Code != http.StatusOK || len(subscriber.lastSourceIDs) != 2 {
+		t.Fatalf("batch status=%d ids=%v body=%s", w.Code, subscriber.lastSourceIDs, w.Body.String())
+	}
+	var body struct {
+		Results []explorelogic.SubscribeResult `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || len(body.Results) != 2 || body.Results[1].SourceID != 8 {
+		t.Fatalf("batch DTO=%+v err=%v body=%s", body, err, w.Body.String())
+	}
+}
+
+func TestExploreHandlerSubscribeValidatesInputAndMapsUnavailable(t *testing.T) {
+	subscriber := &fakeExploreSubscriber{err: explorelogic.ErrSubscribeSourceUnavailable}
+	router := exploreTestRouter(newExploreHandlerWithStores(&fakeExploreStore{}, subscriber, time.Now))
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodPost, "/api/explore/sources/0/subscribe", nil},
+		{http.MethodPost, "/api/explore/sources/subscribe-batch", map[string]any{"source_ids": []int{}}},
+		{http.MethodPost, "/api/explore/sources/subscribe-batch", map[string]any{"source_ids": []int{7, 7}}},
+		{http.MethodPost, "/api/explore/sources/subscribe-batch", map[string]any{"source_ids": []int{7, -1}}},
+	} {
+		w := performExploreRequest(router, tc.method, tc.path, tc.body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s status=%d want=400 body=%s", tc.path, w.Code, w.Body.String())
+		}
+	}
+	w := performExploreRequest(router, http.MethodPost, "/api/explore/sources/9/subscribe", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unavailable status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func exploreTestRouter(handler *ExploreHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -200,6 +274,8 @@ func exploreTestRouter(handler *ExploreHandler) *gin.Engine {
 	router.DELETE("/api/explore/feedback/:id", handler.DeleteFeedback)
 	router.PUT("/api/explore/interests", handler.ReplaceInterests)
 	router.POST("/api/explore/articles/:id/events", handler.RecordArticleEvent)
+	router.POST("/api/explore/sources/:id/subscribe", handler.SubscribeSource)
+	router.POST("/api/explore/sources/subscribe-batch", handler.SubscribeSources)
 	return router
 }
 
