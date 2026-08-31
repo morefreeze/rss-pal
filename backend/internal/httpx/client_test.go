@@ -489,6 +489,22 @@ func TestFetchBoundedReturnsExactLimitAndRequestHeaders(t *testing.T) {
 	}
 }
 
+func TestFetchBoundedReportsFinalResponseURL(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		finalRequest := req.Clone(req.Context())
+		finalRequest.URL, _ = url.Parse("https://8.8.8.8/final/feed.xml")
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Request: finalRequest}, nil
+	})}
+
+	result, err := FetchBounded(context.Background(), client, "https://8.8.8.8/start", nil, 2)
+	if err != nil {
+		t.Fatalf("FetchBounded failed: %v", err)
+	}
+	if result.FinalURL != "https://8.8.8.8/final/feed.xml" {
+		t.Fatalf("FinalURL = %q", result.FinalURL)
+	}
+}
+
 func TestFetchBoundedRejectsResponseOverLimit(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("fives")), Request: req}, nil
