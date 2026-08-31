@@ -7,16 +7,14 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
-	"github.com/lib/pq"
 )
 
 const (
-	ExploreTaskValidateSource  = "validate_source"
-	ExploreTaskRefreshArticles = "refresh_articles"
+	ExploreTaskValidateSource  = model.ExploreFetchTaskValidateSource
+	ExploreTaskRefreshArticles = model.ExploreFetchTaskRefreshArticles
 
-	// Higher values are selected first. Age is added by ClaimRun so old work
-	// eventually outranks continuously arriving higher-priority work.
 	ExplorePriorityDirectProfile      = 400
 	ExplorePriorityStructuredProvider = 300
 	ExplorePriorityRefresh            = 200
@@ -24,93 +22,64 @@ const (
 
 	exploreDispatcherAdvisoryLock int64 = 498571936210
 	maxExploreClaim                     = 500
+	maxExplorePriority                  = 10000
 )
 
-var ErrExploreDispatcherBusy = errors.New("explore dispatcher is already claiming work")
+var (
+	ErrExploreDispatcherBusy = errors.New("explore dispatcher is already claiming work")
+	ErrExploreLeaseNotHeld   = errors.New("explore lease is not held by this owner or has expired")
+)
 
-type ExploreQueueTask struct {
-	ID             int
-	SourceID       int
-	TaskType       string
-	Status         string
-	Priority       int
-	NotBefore      time.Time
-	Attempts       int
-	RunID          sql.NullInt64
-	LeaseOwner     sql.NullString
-	LeaseExpiresAt sql.NullTime
-	LastError      sql.NullString
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	CompletedAt    sql.NullTime
-}
+// Keep repository callers compatible while making model the sole source of
+// persisted Explore shapes and enum values.
+type ExploreQueueTask = model.ExploreFetchTask
+type ExploreFetchRun = model.ExploreFetchRun
 
-type ExploreFetchRun struct {
-	ID           int
-	WindowAt     time.Time
-	Status       string
-	ClaimedCount int
-	StartedAt    sql.NullTime
-	CompletedAt  sql.NullTime
-	WorkerID     sql.NullString
-}
-
-// ExploreQueueRepository owns dispatcher-facing queue operations. ClaimRun
-// deliberately uses the original *sql.DB because it is a worker operation,
-// not a request-scoped transaction.
 type ExploreQueueRepository struct {
 	db    Querier
 	rawDB *sql.DB
-	now   func() time.Time
 }
 
 func NewExploreQueueRepository(db *sql.DB) *ExploreQueueRepository {
-	return &ExploreQueueRepository{db: db, rawDB: db, now: time.Now}
+	return &ExploreQueueRepository{db: db, rawDB: db}
 }
 
 func (r *ExploreQueueRepository) WithCtx(c ctxkey.CtxGetter) *ExploreQueueRepository {
 	if v, ok := c.Get(ctxkey.Tx); ok {
 		if q, ok := v.(Querier); ok {
-			return &ExploreQueueRepository{db: q, rawDB: r.rawDB, now: r.now}
+			return &ExploreQueueRepository{db: q, rawDB: r.rawDB}
 		}
 	}
 	return r
 }
 
-// WithClock exists for deterministic queue tests. Production uses time.Now.
-func (r *ExploreQueueRepository) WithClock(now func() time.Time) *ExploreQueueRepository {
-	if now == nil {
-		now = time.Now
-	}
-	return &ExploreQueueRepository{db: r.db, rawDB: r.rawDB, now: now}
-}
-
 func (r *ExploreQueueRepository) Enqueue(sourceID int, taskType string, priority int) (*ExploreQueueTask, error) {
-	row := r.db.QueryRow(`
+	return scanExploreQueueTask(r.db.QueryRow(`
 		INSERT INTO explore_fetch_queue (source_id, task_type, priority)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (source_id, task_type) WHERE status IN ('pending', 'leased')
-		DO UPDATE SET priority = GREATEST(explore_fetch_queue.priority, EXCLUDED.priority),
-		              updated_at = NOW()
+		DO UPDATE SET priority = GREATEST(explore_fetch_queue.priority, EXCLUDED.priority), updated_at = CURRENT_TIMESTAMP
 		RETURNING id, source_id, task_type, status, priority, not_before, attempts,
 		          run_id, lease_owner, lease_expires_at, last_error, created_at, updated_at, completed_at
-	`, sourceID, taskType, priority)
-	return scanExploreQueueTask(row)
+	`, sourceID, taskType, sanitizeExplorePriority(priority)))
 }
 
-// ClaimRun claims at most 500 fresh pending tasks across every process for one
-// window. A window run is immutable after its first claim, including zero work.
-func (r *ExploreQueueRepository) ClaimRun(windowAt time.Time, owner string, leaseExpiresAt time.Time, batchLimit int) (*ExploreFetchRun, []ExploreQueueTask, error) {
+// ClaimRun atomically claims a globally capped fresh batch. A non-empty run
+// intentionally remains running for Task8's finalization; a zero-work run is
+// sealed done so that the same logical window never appends later work.
+func (r *ExploreQueueRepository) ClaimRun(windowAt time.Time, owner string, leaseDuration time.Duration, batchLimit int) (*ExploreFetchRun, []ExploreQueueTask, error) {
 	if r.rawDB == nil {
 		return nil, nil, errors.New("explore ClaimRun requires a database handle")
 	}
-	limit := sanitizeExploreLimit(batchLimit)
+	seconds, err := exploreLeaseSeconds(leaseDuration)
+	if err != nil {
+		return nil, nil, err
+	}
 	tx, err := r.rawDB.Begin()
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-
 	var locked bool
 	if err := tx.QueryRow(`SELECT pg_try_advisory_xact_lock($1)`, exploreDispatcherAdvisoryLock).Scan(&locked); err != nil {
 		return nil, nil, err
@@ -118,12 +87,11 @@ func (r *ExploreQueueRepository) ClaimRun(windowAt time.Time, owner string, leas
 	if !locked {
 		return nil, nil, ErrExploreDispatcherBusy
 	}
-
 	run, inserted, err := insertOrLockExploreRun(tx, windowAt, owner)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !inserted || run.ClaimedCount != 0 || run.Status != "running" {
+	if !inserted || run.ClaimedCount != 0 || run.Status != model.ExploreFetchRunRunning {
 		if err := tx.Commit(); err != nil {
 			return nil, nil, err
 		}
@@ -131,20 +99,31 @@ func (r *ExploreQueueRepository) ClaimRun(windowAt time.Time, owner string, leas
 	}
 
 	rows, err := tx.Query(`
+		WITH candidate AS (
+			SELECT id FROM explore_fetch_queue
+			WHERE status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP
+			ORDER BY priority::BIGINT + FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600)::BIGINT DESC,
+			         priority DESC, created_at ASC, id ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT $1
+		), claimed AS (
+			UPDATE explore_fetch_queue q
+			SET status = 'leased', run_id = $2, lease_owner = $3,
+			    lease_expires_at = CURRENT_TIMESTAMP + make_interval(secs => $4), updated_at = CURRENT_TIMESTAMP
+			FROM candidate c WHERE q.id = c.id
+			RETURNING q.id, q.source_id, q.task_type, q.status, q.priority, q.not_before, q.attempts,
+			          q.run_id, q.lease_owner, q.lease_expires_at, q.last_error, q.created_at, q.updated_at, q.completed_at
+		)
 		SELECT id, source_id, task_type, status, priority, not_before, attempts,
 		       run_id, lease_owner, lease_expires_at, last_error, created_at, updated_at, completed_at
-		FROM explore_fetch_queue
-		WHERE status = 'pending' AND run_id IS NULL AND not_before <= NOW()
-		ORDER BY priority + FLOOR(EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600)::INTEGER DESC,
+		FROM claimed
+		ORDER BY priority::BIGINT + FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600)::BIGINT DESC,
 		         priority DESC, created_at ASC, id ASC
-		FOR UPDATE SKIP LOCKED
-		LIMIT $1
-	`, limit)
+	`, sanitizeExploreLimit(batchLimit), run.ID, owner, seconds)
 	if err != nil {
 		return nil, nil, err
 	}
 	var tasks []ExploreQueueTask
-	var ids []int64
 	for rows.Next() {
 		task, err := scanExploreQueueTask(rows)
 		if err != nil {
@@ -152,35 +131,18 @@ func (r *ExploreQueueRepository) ClaimRun(windowAt time.Time, owner string, leas
 			return nil, nil, err
 		}
 		tasks = append(tasks, *task)
-		ids = append(ids, int64(task.ID))
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return nil, nil, err
 	}
 	rows.Close()
-	if len(ids) > 0 {
-		if _, err := tx.Exec(`
-			UPDATE explore_fetch_queue
-			SET status = 'leased', run_id = $1, lease_owner = $2, lease_expires_at = $3, updated_at = NOW()
-			WHERE id = ANY($4)
-		`, run.ID, owner, leaseExpiresAt, pq.Array(ids)); err != nil {
-			return nil, nil, err
-		}
-		for i := range tasks {
-			tasks[i].Status = "leased"
-			tasks[i].RunID = sql.NullInt64{Int64: int64(run.ID), Valid: true}
-			tasks[i].LeaseOwner = sql.NullString{String: owner, Valid: true}
-			tasks[i].LeaseExpiresAt = sql.NullTime{Time: leaseExpiresAt, Valid: true}
-		}
-	}
-	run.ClaimedCount = len(tasks)
 	if len(tasks) == 0 {
-		run.Status = "done"
-		if _, err := tx.Exec(`UPDATE explore_fetch_runs SET status = 'done', completed_at = NOW() WHERE id = $1`, run.ID); err != nil {
-			return nil, nil, err
-		}
-	} else if _, err := tx.Exec(`UPDATE explore_fetch_runs SET claimed_count = $2 WHERE id = $1`, run.ID, len(tasks)); err != nil {
+		run, err = updateExploreRun(tx, `UPDATE explore_fetch_runs SET status = 'done', completed_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING `, run.ID)
+	} else {
+		run, err = updateExploreRun(tx, `UPDATE explore_fetch_runs SET claimed_count = $2 WHERE id = $1 RETURNING `, run.ID, len(tasks))
+	}
+	if err != nil {
 		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -193,7 +155,9 @@ func (r *ExploreQueueRepository) ListLeased(runID int, owner string) ([]ExploreQ
 	rows, err := r.db.Query(`
 		SELECT id, source_id, task_type, status, priority, not_before, attempts,
 		       run_id, lease_owner, lease_expires_at, last_error, created_at, updated_at, completed_at
-		FROM explore_fetch_queue WHERE run_id = $1 AND status = 'leased' AND lease_owner = $2 ORDER BY id
+		FROM explore_fetch_queue
+		WHERE run_id = $1 AND status = 'leased' AND lease_owner = $2 AND lease_expires_at > CURRENT_TIMESTAMP
+		ORDER BY id
 	`, runID, owner)
 	if err != nil {
 		return nil, err
@@ -210,46 +174,49 @@ func (r *ExploreQueueRepository) ListLeased(runID int, owner string) ([]ExploreQ
 	return tasks, rows.Err()
 }
 
-func (r *ExploreQueueRepository) Complete(taskID int) error {
+func (r *ExploreQueueRepository) Complete(taskID int, owner string) error {
 	result, err := r.db.Exec(`
-		UPDATE explore_fetch_queue SET status = 'done', completed_at = $2,
-		lease_owner = NULL, lease_expires_at = NULL, updated_at = $2 WHERE id = $1 AND status = 'leased'
-	`, taskID, r.now())
-	return expectExploreTransition(result, err, taskID)
+		UPDATE explore_fetch_queue SET status = 'done', completed_at = CURRENT_TIMESTAMP,
+		lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1 AND status = 'leased' AND lease_owner = $2 AND lease_expires_at > CURRENT_TIMESTAMP
+	`, taskID, owner)
+	return expectExploreLeaseTransition(result, err, taskID)
 }
 
-func (r *ExploreQueueRepository) Invalidate(taskID int, cause error) error {
-	result, err := r.db.Exec(`
-		UPDATE explore_fetch_queue SET status = 'invalid', completed_at = $2, last_error = $3,
-		lease_owner = NULL, lease_expires_at = NULL, updated_at = $2 WHERE id = $1 AND status = 'leased'
-	`, taskID, r.now(), clipExploreError(cause))
-	return expectExploreTransition(result, err, taskID)
-}
-
-// Retry makes a failed leased task eligible for a later run. The first retry
-// waits one minute; each subsequent retry doubles, capped at one hour.
-func (r *ExploreQueueRepository) Retry(taskID int, cause error) error {
+func (r *ExploreQueueRepository) Retry(taskID int, owner string, cause error) error {
 	result, err := r.db.Exec(`
 		UPDATE explore_fetch_queue
 		SET status = 'pending', attempts = attempts + 1,
-		    not_before = $2 + (LEAST(3600, 60 * power(2, attempts)) * INTERVAL '1 second'),
-		    run_id = NULL, lease_owner = NULL, lease_expires_at = NULL,
-		    last_error = $3, updated_at = $2
-		WHERE id = $1 AND status = 'leased'
-	`, taskID, r.now(), clipExploreError(cause))
-	return expectExploreTransition(result, err, taskID)
+		    not_before = CURRENT_TIMESTAMP + (LEAST(3600, 60 * power(2, attempts)) * INTERVAL '1 second'),
+		    run_id = NULL, lease_owner = NULL, lease_expires_at = NULL, last_error = $3, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1 AND status = 'leased' AND lease_owner = $2 AND lease_expires_at > CURRENT_TIMESTAMP
+	`, taskID, owner, clipExploreError(cause))
+	return expectExploreLeaseTransition(result, err, taskID)
 }
 
-// RecoverExpired moves a timed-out lease to another worker without changing
-// its run or that run's fixed claimed_count.
-func (r *ExploreQueueRepository) RecoverExpired(runID int, newOwner string, newExpiry time.Time) ([]ExploreQueueTask, error) {
+func (r *ExploreQueueRepository) Invalidate(taskID int, owner string, cause error) error {
+	result, err := r.db.Exec(`
+		UPDATE explore_fetch_queue SET status = 'invalid', completed_at = CURRENT_TIMESTAMP, last_error = $3,
+		lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1 AND status = 'leased' AND lease_owner = $2 AND lease_expires_at > CURRENT_TIMESTAMP
+	`, taskID, owner, clipExploreError(cause))
+	return expectExploreLeaseTransition(result, err, taskID)
+}
+
+// RecoverExpired only reassigns a still-leased task within its original run;
+// it never consumes or reopens that run's immutable fresh-claim quota.
+func (r *ExploreQueueRepository) RecoverExpired(runID int, newOwner string, leaseDuration time.Duration) ([]ExploreQueueTask, error) {
+	seconds, err := exploreLeaseSeconds(leaseDuration)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.Query(`
 		UPDATE explore_fetch_queue
-		SET lease_owner = $2, lease_expires_at = $3, updated_at = $4
-		WHERE run_id = $1 AND status = 'leased' AND lease_expires_at < $4
+		SET lease_owner = $2, lease_expires_at = CURRENT_TIMESTAMP + make_interval(secs => $3), updated_at = CURRENT_TIMESTAMP
+		WHERE run_id = $1 AND status = 'leased' AND lease_expires_at <= CURRENT_TIMESTAMP
 		RETURNING id, source_id, task_type, status, priority, not_before, attempts,
 		          run_id, lease_owner, lease_expires_at, last_error, created_at, updated_at, completed_at
-	`, runID, newOwner, newExpiry, r.now())
+	`, runID, newOwner, seconds)
 	if err != nil {
 		return nil, err
 	}
@@ -269,10 +236,9 @@ func insertOrLockExploreRun(tx *sql.Tx, windowAt time.Time, owner string) (*Expl
 	run := &ExploreFetchRun{}
 	err := tx.QueryRow(`
 		INSERT INTO explore_fetch_runs (window_at, status, started_at, worker_id)
-		VALUES ($1, 'running', NOW(), $2)
-		ON CONFLICT (window_at) DO NOTHING
-		RETURNING id, window_at, status, claimed_count, started_at, completed_at, worker_id
-	`, windowAt, owner).Scan(&run.ID, &run.WindowAt, &run.Status, &run.ClaimedCount, &run.StartedAt, &run.CompletedAt, &run.WorkerID)
+		VALUES ($1, 'running', CURRENT_TIMESTAMP, $2) ON CONFLICT (window_at) DO NOTHING
+		RETURNING id, window_at, status, claimed_count, started_at, completed_at, worker_id, error_message, created_at
+	`, windowAt, owner).Scan(&run.ID, &run.WindowAt, &run.Status, &run.ClaimedCount, &run.StartedAt, &run.CompletedAt, &run.WorkerID, &run.ErrorMessage, &run.CreatedAt)
 	if err == nil {
 		return run, true, nil
 	}
@@ -280,33 +246,46 @@ func insertOrLockExploreRun(tx *sql.Tx, windowAt time.Time, owner string) (*Expl
 		return nil, false, err
 	}
 	err = tx.QueryRow(`
-		SELECT id, window_at, status, claimed_count, started_at, completed_at, worker_id
+		SELECT id, window_at, status, claimed_count, started_at, completed_at, worker_id, error_message, created_at
 		FROM explore_fetch_runs WHERE window_at = $1 FOR UPDATE
-	`, windowAt).Scan(&run.ID, &run.WindowAt, &run.Status, &run.ClaimedCount, &run.StartedAt, &run.CompletedAt, &run.WorkerID)
-	if err != nil {
-		return nil, false, err
-	}
-	return run, false, nil
+	`, windowAt).Scan(&run.ID, &run.WindowAt, &run.Status, &run.ClaimedCount, &run.StartedAt, &run.CompletedAt, &run.WorkerID, &run.ErrorMessage, &run.CreatedAt)
+	return run, false, err
 }
 
+func updateExploreRun(tx *sql.Tx, prefix string, args ...interface{}) (*ExploreFetchRun, error) {
+	run := &ExploreFetchRun{}
+	err := tx.QueryRow(prefix+`id, window_at, status, claimed_count, started_at, completed_at, worker_id, error_message, created_at`, args...).Scan(
+		&run.ID, &run.WindowAt, &run.Status, &run.ClaimedCount, &run.StartedAt, &run.CompletedAt, &run.WorkerID, &run.ErrorMessage, &run.CreatedAt)
+	return run, err
+}
+
+func exploreLeaseSeconds(duration time.Duration) (float64, error) {
+	if duration <= 0 {
+		return 0, errors.New("explore lease duration must be positive")
+	}
+	return duration.Seconds(), nil
+}
 func sanitizeExploreLimit(limit int) int {
 	if limit <= 0 || limit > maxExploreClaim {
 		return maxExploreClaim
 	}
 	return limit
 }
-
+func sanitizeExplorePriority(priority int) int {
+	if priority < 0 {
+		return 0
+	}
+	if priority > maxExplorePriority {
+		return maxExplorePriority
+	}
+	return priority
+}
 func scanExploreQueueTask(scanner interface{ Scan(...interface{}) error }) (*ExploreQueueTask, error) {
 	task := &ExploreQueueTask{}
-	err := scanner.Scan(&task.ID, &task.SourceID, &task.TaskType, &task.Status, &task.Priority, &task.NotBefore, &task.Attempts,
-		&task.RunID, &task.LeaseOwner, &task.LeaseExpiresAt, &task.LastError, &task.CreatedAt, &task.UpdatedAt, &task.CompletedAt)
-	if err != nil {
-		return nil, err
-	}
-	return task, nil
+	err := scanner.Scan(&task.ID, &task.SourceID, &task.TaskType, &task.Status, &task.Priority, &task.NotBefore, &task.Attempts, &task.RunID, &task.LeaseOwner, &task.LeaseExpiresAt, &task.LastError, &task.CreatedAt, &task.UpdatedAt, &task.CompletedAt)
+	return task, err
 }
-
-func expectExploreTransition(result sql.Result, err error, taskID int) error {
+func expectExploreLeaseTransition(result sql.Result, err error, taskID int) error {
 	if err != nil {
 		return err
 	}
@@ -315,23 +294,22 @@ func expectExploreTransition(result sql.Result, err error, taskID int) error {
 		return err
 	}
 	if n != 1 {
-		return fmt.Errorf("explore task %d is not leased", taskID)
+		return fmt.Errorf("%w: task %d", ErrExploreLeaseNotHeld, taskID)
 	}
 	return nil
 }
-
 func clipExploreError(cause error) string {
 	if cause == nil {
 		return ""
 	}
 	const max = 1000
 	s := cause.Error()
-	if len(s) > max {
-		cut := max
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		return s[:cut]
+	if len(s) <= max {
+		return s
 	}
-	return s
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
