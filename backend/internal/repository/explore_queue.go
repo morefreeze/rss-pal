@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/lib/pq"
@@ -326,7 +327,11 @@ func clipExploreError(cause error) string {
 	const max = 1000
 	s := cause.Error()
 	if len(s) > max {
-		return s[:max]
+		cut := max
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return s[:cut]
 	}
 	return s
 }

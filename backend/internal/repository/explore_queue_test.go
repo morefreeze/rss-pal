@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
@@ -59,6 +61,33 @@ func TestExploreQueueExistingRunNeverAppendsAndLaterWindowClaimsRemainder(t *tes
 	_, remainder, err := repo.ClaimRun(window.Add(time.Minute), "two", time.Now().Add(time.Hour), 500)
 	if err != nil || len(remainder) != 1 {
 		t.Fatalf("later run remainder=%d err=%v", len(remainder), err)
+	}
+}
+
+func TestExploreQueueZeroClaimSealsWindow(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	window := time.Date(2026, 8, 31, 11, 30, 0, 0, time.UTC)
+	run, tasks, err := repo.ClaimRun(window, "one", time.Now().Add(time.Hour), 500)
+	if err != nil || len(tasks) != 0 || run.Status != "done" || run.ClaimedCount != 0 {
+		t.Fatalf("empty claim got run=%+v tasks=%d err=%v", run, len(tasks), err)
+	}
+	sourceID := insertExploreSource(t, db, 1)
+	if _, err := repo.Enqueue(sourceID, repository.ExploreTaskValidateSource, repository.ExplorePriorityRefresh); err != nil {
+		t.Fatal(err)
+	}
+	again, tasks, err := repo.ClaimRun(window, "two", time.Now().Add(time.Hour), 500)
+	if err != nil || again.ID != run.ID || len(tasks) != 0 {
+		t.Fatalf("sealed window reopened: run=%+v tasks=%d err=%v", again, len(tasks), err)
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM explore_fetch_queue WHERE source_id = $1`, sourceID).Scan(&status); err != nil || status != "pending" {
+		t.Fatalf("sealed window changed queued task status=%q err=%v", status, err)
+	}
+	_, tasks, err = repo.ClaimRun(window.Add(time.Minute), "two", time.Now().Add(time.Hour), 500)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("later window did not claim pending task: tasks=%d err=%v", len(tasks), err)
 	}
 }
 
@@ -151,21 +180,45 @@ func TestExploreQueueRecoveryAndTerminalTransitions(t *testing.T) {
 	if err := db.QueryRow(`SELECT r.claimed_count, count(q.id) FROM explore_fetch_runs r LEFT JOIN explore_fetch_queue q ON q.run_id = r.id AND q.status = 'leased' WHERE r.id = $1 GROUP BY r.claimed_count`, run.ID).Scan(&claimed, &sameRun); err != nil || claimed != 3 || sameRun != 3 {
 		t.Fatalf("recovery persisted claim=%d sameRun=%d err=%v", claimed, sameRun, err)
 	}
-	if err := repo.Retry(recovered[0].ID, errors.New("temporary failure")); err != nil {
+	var status string
+	var attempts int
+	var notBefore time.Time
+	var nullRun sql.NullInt64
+	for _, tc := range []struct {
+		attempts int
+		backoff  time.Duration
+	}{{1, time.Minute}, {2, 2 * time.Minute}, {3, 4 * time.Minute}} {
+		if err := repo.Retry(recovered[0].ID, errors.New("temporary failure")); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(`SELECT status, attempts, not_before, run_id FROM explore_fetch_queue WHERE id = $1`, recovered[0].ID).Scan(&status, &attempts, &notBefore, &nullRun); err != nil || status != "pending" || attempts != tc.attempts || nullRun.Valid || !notBefore.Equal(fixedNow.Add(tc.backoff)) {
+			t.Fatalf("retry attempt %d status=%s attempts=%d notBefore=%v run=%+v err=%v", tc.attempts, status, attempts, notBefore, nullRun, err)
+		}
+		if tc.attempts != 3 {
+			if _, err := db.Exec(`UPDATE explore_fetch_queue SET status = 'leased', run_id = $2 WHERE id = $1`, recovered[0].ID, run.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := db.Exec(`UPDATE explore_fetch_queue SET status = 'leased', attempts = 20, run_id = $2 WHERE id = $1`, recovered[0].ID, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Invalidate(recovered[1].ID, errors.New("permanent failure")); err != nil {
+	if err := repo.Retry(recovered[0].ID, errors.New("capped retry")); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT attempts, not_before FROM explore_fetch_queue WHERE id = $1`, recovered[0].ID).Scan(&attempts, &notBefore); err != nil || attempts != 21 || !notBefore.Equal(fixedNow.Add(time.Hour)) {
+		t.Fatalf("capped retry attempts=%d notBefore=%v err=%v", attempts, notBefore, err)
+	}
+	longError := errors.New(strings.Repeat("中🙂", 400))
+	if err := repo.Invalidate(recovered[1].ID, longError); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.Complete(recovered[2].ID); err != nil {
 		t.Fatal(err)
 	}
-	var status string
-	var attempts int
-	var notBefore time.Time
-	var nullRun sql.NullInt64
-	if err := db.QueryRow(`SELECT status, attempts, not_before, run_id FROM explore_fetch_queue WHERE id = $1`, recovered[0].ID).Scan(&status, &attempts, &notBefore, &nullRun); err != nil || status != "pending" || attempts != 1 || nullRun.Valid || !notBefore.Equal(fixedNow.Add(time.Minute)) {
-		t.Fatalf("retry state status=%s attempts=%d notBefore=%v run=%+v err=%v", status, attempts, notBefore, nullRun, err)
+	var persistedError string
+	if err := db.QueryRow(`SELECT last_error FROM explore_fetch_queue WHERE id = $1`, recovered[1].ID).Scan(&persistedError); err != nil || len(persistedError) > 1000 || !utf8.ValidString(persistedError) {
+		t.Fatalf("invalid persisted error len=%d utf8=%t err=%v", len(persistedError), utf8.ValidString(persistedError), err)
 	}
 	for _, tc := range []struct {
 		id   int
