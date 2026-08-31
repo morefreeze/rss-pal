@@ -15,6 +15,7 @@ ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS etag VARCHAR(500);
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS last_modified VARCHAR(500);
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS health_score DOUBLE PRECISION;
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS merged_into_source_id INTEGER;
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS first_discovered_at TIMESTAMP;
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS last_observed_at TIMESTAMP;
 
@@ -73,6 +74,12 @@ ALTER TABLE recommended_feeds ADD CONSTRAINT recommended_feeds_health_score_chec
 ALTER TABLE recommended_feeds ALTER COLUMN normalized_url SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_recommended_feeds_normalized_url
     ON recommended_feeds (normalized_url);
+ALTER TABLE recommended_feeds DROP CONSTRAINT IF EXISTS recommended_feeds_merged_into_source_id_fkey;
+ALTER TABLE recommended_feeds ADD CONSTRAINT recommended_feeds_merged_into_source_id_fkey
+    FOREIGN KEY (merged_into_source_id) REFERENCES recommended_feeds(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_recommended_feeds_merged_into_source_id
+    ON recommended_feeds (merged_into_source_id)
+    WHERE merged_into_source_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS explore_registry_providers (
     id SERIAL PRIMARY KEY,
@@ -213,10 +220,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_explore_feedback_user_topic_type
 CREATE TABLE IF NOT EXISTS explore_article_events (
     id BIGSERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    explore_article_id INTEGER NOT NULL REFERENCES explore_articles(id) ON DELETE CASCADE,
+    explore_article_id INTEGER REFERENCES explore_articles(id) ON DELETE SET NULL,
     event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('exposure', 'click', 'completed_read')),
     occurred_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+ALTER TABLE explore_article_events ALTER COLUMN explore_article_id DROP NOT NULL;
+ALTER TABLE explore_article_events DROP CONSTRAINT IF EXISTS explore_article_events_explore_article_id_fkey;
+ALTER TABLE explore_article_events ADD CONSTRAINT explore_article_events_explore_article_id_fkey
+    FOREIGN KEY (explore_article_id) REFERENCES explore_articles(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_explore_article_events_user_article
     ON explore_article_events (user_id, explore_article_id, occurred_at DESC);
 

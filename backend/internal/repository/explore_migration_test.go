@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
 
@@ -31,7 +32,7 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 		assertExactColumns(t, db, table, want)
 	}
 
-	for _, column := range []string{"site_url", "normalized_url", "validation_status", "verified_at", "last_checked_at", "last_fetched_at", "etag", "last_modified", "health_score", "last_error", "first_discovered_at", "last_observed_at"} {
+	for _, column := range []string{"site_url", "normalized_url", "validation_status", "verified_at", "last_checked_at", "last_fetched_at", "etag", "last_modified", "health_score", "last_error", "merged_into_source_id", "first_discovered_at", "last_observed_at"} {
 		var exists bool
 		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'recommended_feeds' AND column_name = $1)`, column).Scan(&exists); err != nil {
 			t.Fatalf("recommended_feeds.%s lookup: %v", column, err)
@@ -42,6 +43,7 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 	}
 
 	for _, constraint := range []struct{ table, name, target string }{
+		{"recommended_feeds", "recommended_feeds_merged_into_source_id_fkey", "recommended_feeds"},
 		{"explore_source_observations", "explore_source_observations_provider_id_fkey", "explore_registry_providers"},
 		{"explore_source_observations", "explore_source_observations_source_id_fkey", "recommended_feeds"},
 		{"explore_fetch_queue", "explore_fetch_queue_source_id_fkey", "recommended_feeds"},
@@ -106,6 +108,90 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 		if kind != provider.kind || endpoint != provider.endpoint || interval != provider.interval || topic == nil || *topic != provider.topic {
 			t.Errorf("provider %s: got kind=%q endpoint=%q topic=%v interval=%d", provider.key, kind, endpoint, topic, interval)
 		}
+	}
+}
+
+func TestMigration038_CanonicalTombstonesUseExplicitSelfReference(t *testing.T) {
+	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "038_subscription_explore.sql"))
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	definition := string(migration)
+	for _, fragment := range []string{
+		"ADD COLUMN IF NOT EXISTS merged_into_source_id INTEGER",
+		"FOREIGN KEY (merged_into_source_id) REFERENCES recommended_feeds(id) ON DELETE SET NULL",
+		"idx_recommended_feeds_merged_into_source_id",
+	} {
+		if !strings.Contains(definition, fragment) {
+			t.Fatalf("canonical tombstone migration missing %q", fragment)
+		}
+	}
+}
+
+func TestMigration038_ExploreEventsOutliveArticleCache(t *testing.T) {
+	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "038_subscription_explore.sql"))
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	definition := string(migration)
+	if !strings.Contains(definition, "explore_article_id INTEGER REFERENCES explore_articles(id) ON DELETE SET NULL") {
+		t.Fatal("explore article event FK must be nullable and use ON DELETE SET NULL")
+	}
+	for _, fragment := range []string{
+		"ALTER COLUMN explore_article_id DROP NOT NULL",
+		"DROP CONSTRAINT IF EXISTS explore_article_events_explore_article_id_fkey",
+		"FOREIGN KEY (explore_article_id) REFERENCES explore_articles(id) ON DELETE SET NULL",
+	} {
+		if !strings.Contains(definition, fragment) {
+			t.Fatalf("event retention migration is not safe to re-run; missing %q", fragment)
+		}
+	}
+	field, ok := reflect.TypeOf(model.ExploreArticleEvent{}).FieldByName("ExploreArticleID")
+	if !ok || field.Type.Kind() != reflect.Pointer || field.Type.Elem().Kind() != reflect.Int {
+		t.Fatalf("ExploreArticleEvent.ExploreArticleID type=%v, want *int", field.Type)
+	}
+
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	if _, err := db.Exec(`
+		ALTER TABLE explore_article_events DROP CONSTRAINT explore_article_events_explore_article_id_fkey;
+		ALTER TABLE explore_article_events ALTER COLUMN explore_article_id SET NOT NULL;
+		ALTER TABLE explore_article_events ADD CONSTRAINT explore_article_events_explore_article_id_fkey
+			FOREIGN KEY (explore_article_id) REFERENCES explore_articles(id) ON DELETE CASCADE`); err != nil {
+		t.Fatalf("simulate legacy event constraint: %v", err)
+	}
+	if err := testdb.ExecuteMigrationFile(db, "038_subscription_explore.sql"); err != nil {
+		t.Fatalf("reapply 038 over legacy event constraint: %v", err)
+	}
+	var userID, sourceID, articleID, eventID int
+	if err := db.QueryRow(`INSERT INTO users (username,password_hash) VALUES ('event-retention','x') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO recommended_feeds (url,title,category,language,normalized_url) VALUES ('https://event-retention.example/feed','event retention','test','en','https://event-retention.example/feed') RETURNING id`).Scan(&sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO explore_articles (source_id,url,normalized_url,title) VALUES ($1,'https://event-retention.example/article','https://event-retention.example/article','article') RETURNING id`, sourceID).Scan(&articleID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO explore_article_events (user_id,explore_article_id,event_type,occurred_at) VALUES ($1,$2,'click',NOW()-INTERVAL '30 days') RETURNING id`, userID, articleID).Scan(&eventID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM explore_articles WHERE id=$1`, articleID); err != nil {
+		t.Fatal(err)
+	}
+	var retainedArticleID sql.NullInt64
+	if err := db.QueryRow(`SELECT explore_article_id FROM explore_article_events WHERE id=$1`, eventID).Scan(&retainedArticleID); err != nil {
+		t.Fatalf("event was deleted with article cache: %v", err)
+	}
+	if retainedArticleID.Valid {
+		t.Fatalf("deleted article reference retained: %v", retainedArticleID)
+	}
+	var deleteAction string
+	if err := db.QueryRow(`SELECT confdeltype::text FROM pg_constraint WHERE conrelid='explore_article_events'::regclass AND conname='explore_article_events_explore_article_id_fkey'`).Scan(&deleteAction); err != nil {
+		t.Fatal(err)
+	}
+	if deleteAction != "n" {
+		t.Fatalf("event article FK delete action=%q, want SET NULL", deleteAction)
 	}
 }
 
