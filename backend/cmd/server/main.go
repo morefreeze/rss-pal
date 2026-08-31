@@ -8,6 +8,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/api"
 	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/config"
+	explorelogic "github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
@@ -86,6 +87,9 @@ func main() {
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
 	userInterestsRepo := repository.NewUserInterestRepository(db)
 	interestsHandler := api.NewInterestsHandler(prefRepo, articleRepo, templateRepo, userInterestsRepo, summarizer, cfg)
+	exploreRepo := repository.NewExploreRepository(db)
+	exploreSubscriber := explorelogic.NewSubscribeService(db)
+	exploreHandler := api.NewExploreHandlerWithSubscriber(exploreRepo, exploreSubscriber)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo)
 	dailyHandler := api.NewDailyHandler(articleRepo, dailyDigestRepo)
 	briefingHandler := api.NewBriefingHandler(userRepo)
@@ -304,6 +308,7 @@ func main() {
 
 		// Interests (with one-version legacy aliases)
 		registerInterestRoutes(apiGroup, interestsHandler)
+		registerExploreRoutes(apiGroup, exploreHandler)
 
 		// Weekly / daily briefings (worker generates async; API is read-only)
 		apiGroup.GET("/weekly-digest", weeklyHandler.Get)
