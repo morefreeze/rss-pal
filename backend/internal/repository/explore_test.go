@@ -1,14 +1,18 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
 
@@ -302,6 +306,83 @@ func TestExploreRepositoryInterestsReplaceAndTopicFeedbackFilter(t *testing.T) {
 	}
 	if len(page.Articles) != 0 {
 		t.Fatalf("dampened topic was not immediately filtered: %+v", page.Articles)
+	}
+}
+
+func TestExploreRepositoryClearNegativeFeedbackPreservesInterestsAndOtherUsers(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	userID, otherUserID := insertExploreUsers(t, db)
+	sourceID := insertExploreSource(t, db, "https://clear-feedback.example/feed", "clear-feedback")
+
+	if _, err := db.Exec(`
+		INSERT INTO explore_feedback(user_id,source_id,feedback_type) VALUES ($1,$3,'hide_source'),($2,$3,'hide_source');
+		INSERT INTO explore_feedback(user_id,topic,feedback_type) VALUES
+			($1,'programming','dampen_topic'),($1,'security','boost_topic'),
+			($2,'programming','dampen_topic'),($2,'security','boost_topic')
+	`, userID, otherUserID, sourceID); err != nil {
+		t.Fatalf("seed feedback: %v", err)
+	}
+
+	deleted, err := NewExploreRepository(db).ClearNegativeFeedback(userID)
+	if err != nil || deleted != 2 {
+		t.Fatalf("ClearNegativeFeedback=(%d,%v), want (2,nil)", deleted, err)
+	}
+	rows, err := db.Query(`SELECT user_id,feedback_type FROM explore_feedback ORDER BY user_id,feedback_type`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var uid int
+		var feedbackType string
+		if err := rows.Scan(&uid, &feedbackType); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%d:%s", uid, feedbackType))
+	}
+	want := []string{
+		fmt.Sprintf("%d:boost_topic", userID),
+		fmt.Sprintf("%d:boost_topic", otherUserID),
+		fmt.Sprintf("%d:dampen_topic", otherUserID),
+		fmt.Sprintf("%d:hide_source", otherUserID),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("remaining feedback=%v want=%v", got, want)
+	}
+}
+
+func TestExploreRepositoryClearNegativeFeedbackHonorsRLSContext(t *testing.T) {
+	privDB, schema, cleanupSchema := testdb.NewWithSchema(t)
+	defer cleanupSchema()
+	appDB, cleanupApp := testdb.NewAsApp(t, schema)
+	defer cleanupApp()
+	userID := seedExploreSnapshotUser(t, privDB, "clear-feedback-rls-a")
+	otherUserID := seedExploreSnapshotUser(t, privDB, "clear-feedback-rls-b")
+	sourceID := insertExploreSource(t, privDB, "https://clear-feedback-rls.example/feed", "clear-feedback-rls")
+	if _, err := privDB.Exec(`INSERT INTO explore_feedback(user_id,source_id,feedback_type) VALUES ($1,$3,'hide_source'),($2,$3,'hide_source')`, userID, otherUserID, sourceID); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := appDB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`SELECT set_config('app.user_id',$1,true)`, userID); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewExploreRepository(appDB).WithCtx(fakeCtx{ctxkey.Tx: Querier(tx)})
+	if deleted, err := repo.ClearNegativeFeedback(otherUserID); err != nil || deleted != 0 {
+		t.Fatalf("cross-user clear=(%d,%v), want (0,nil)", deleted, err)
+	}
+	if deleted, err := repo.ClearNegativeFeedback(userID); err != nil || deleted != 1 {
+		t.Fatalf("owner clear=(%d,%v), want (1,nil)", deleted, err)
+	}
+	var otherCount int
+	if err := privDB.QueryRow(`SELECT COUNT(*) FROM explore_feedback WHERE user_id=$1`, otherUserID).Scan(&otherCount); err != nil || otherCount != 1 {
+		t.Fatalf("other feedback count=(%d,%v), want 1", otherCount, err)
 	}
 }
 
