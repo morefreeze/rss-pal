@@ -37,6 +37,7 @@ type exploreRegistrySyncer interface {
 }
 
 type exploreQueueDispatcher interface {
+	RecoverExpired(string, time.Duration) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error)
 	ClaimRun(time.Time, string, time.Duration, int) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error)
 	FinishRun(int, error) error
 }
@@ -204,6 +205,21 @@ func (cycle *exploreCycle) runProviderWindow(ctx context.Context, window, now ti
 }
 
 func (cycle *exploreCycle) processQueueWindow(ctx context.Context, window time.Time) {
+	// Drain crashed runs in original-window order before creating a new run.
+	// Recovery preserves run_id and claimed_count, so it never consumes the
+	// current window's fresh quota.
+	for ctx.Err() == nil {
+		run, tasks, err := cycle.deps.queue.RecoverExpired(cycle.deps.owner, cycle.deps.leaseDuration)
+		if err != nil {
+			cycle.deps.logger.Printf("explore queue_recover window=%s error=true", window.Format(time.RFC3339))
+			return
+		}
+		if run == nil || len(tasks) == 0 {
+			break
+		}
+		cycle.processTaskRun(ctx, run, tasks)
+	}
+
 	run, tasks, err := cycle.deps.queue.ClaimRun(window, cycle.deps.owner, cycle.deps.leaseDuration, cycle.deps.batchLimit)
 	if err != nil {
 		cycle.deps.logger.Printf("explore queue_claim window=%s error=true", window.Format(time.RFC3339))
@@ -212,6 +228,10 @@ func (cycle *exploreCycle) processQueueWindow(ctx context.Context, window time.T
 	if run == nil || len(tasks) == 0 {
 		return
 	}
+	cycle.processTaskRun(ctx, run, tasks)
+}
+
+func (cycle *exploreCycle) processTaskRun(ctx context.Context, run *repository.ExploreFetchRun, tasks []repository.ExploreQueueTask) {
 	started := time.Now()
 	jobs := make(chan repository.ExploreQueueTask)
 	var workers sync.WaitGroup
