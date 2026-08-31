@@ -44,10 +44,16 @@ func NewExploreQueueRepository(db *sql.DB) *ExploreQueueRepository {
 	return &ExploreQueueRepository{db: db, rawDB: db}
 }
 
+// WithQuerier binds queue mutations to an existing transaction while keeping
+// the raw pool available for ClaimRun, which owns its transaction lifecycle.
+func (r *ExploreQueueRepository) WithQuerier(db Querier) *ExploreQueueRepository {
+	return &ExploreQueueRepository{db: db, rawDB: r.rawDB}
+}
+
 func (r *ExploreQueueRepository) WithCtx(c ctxkey.CtxGetter) *ExploreQueueRepository {
 	if v, ok := c.Get(ctxkey.Tx); ok {
 		if q, ok := v.(Querier); ok {
-			return &ExploreQueueRepository{db: q, rawDB: r.rawDB}
+			return r.WithQuerier(q)
 		}
 	}
 	return r

@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
+	"github.com/lib/pq"
 )
 
 func TestExploreCatalogRetentionSQLKeepsHardCapAndValidSourceFloor(t *testing.T) {
@@ -128,6 +131,77 @@ func TestExploreCatalogArticleUpsertIsFetchedAtMonotonic(t *testing.T) {
 	}
 }
 
+func TestExploreCatalogMutationSQLUsesMonotonicCheckedAtFence(t *testing.T) {
+	for name, query := range map[string]string{
+		"validation valid":   exploreValidationValidSQL,
+		"validation invalid": exploreValidationInvalidSQL,
+		"fetch failure":      exploreFetchFailureSQL,
+		"fetch success":      exploreFetchSuccessSQL,
+		"fetch not modified": exploreFetchNotModifiedSQL,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(query, "last_checked_at IS NULL OR last_checked_at <= $2") {
+				t.Fatalf("mutation SQL lacks monotonic checked-at fence: %s", query)
+			}
+		})
+	}
+}
+
+func TestExploreCatalogAdoptionSQLPreservesCanonicalMergeInvariants(t *testing.T) {
+	for _, fragment := range []string{"pg_advisory_xact_lock", "FOR UPDATE"} {
+		if !strings.Contains(exploreCanonicalAdvisoryLockSQL+exploreAdoptSourceLockSQL, fragment) {
+			t.Fatalf("adoption locking SQL missing %q", fragment)
+		}
+	}
+	for _, fragment := range []string{
+		"ON CONFLICT (provider_id, external_key, source_id)",
+		"unnest",
+		"ORDER BY tag",
+		"LEAST(",
+		"GREATEST(",
+		"occurrence_count",
+	} {
+		if !strings.Contains(exploreMergeObservationsSQL, fragment) {
+			t.Fatalf("observation merge SQL missing %q", fragment)
+		}
+	}
+	if strings.Contains(exploreMergeObservationsSQL, "occurrence_count+") || strings.Contains(exploreMergeObservationsSQL, "occurrence_count +") {
+		t.Fatal("observation merge adds duplicate evidence counts")
+	}
+	if !strings.Contains(exploreAdoptPairLockSQL, "ORDER BY id FOR UPDATE") {
+		t.Fatal("adoption pair lock is not deterministic")
+	}
+	if !strings.Contains(exploreRegistryCandidateUpsertSQL, "ON CONFLICT (normalized_url)") {
+		t.Fatal("registry source upsert no longer shares canonical identity")
+	}
+}
+
+func TestValidateExploreCanonicalFeedURL(t *testing.T) {
+	valid := []string{
+		"https://example.com/feed",
+		"http://news.example:8080/rss?format=xml",
+		"https://[2001:4860:4860::8888]/feed",
+	}
+	for _, raw := range valid {
+		if err := validateExploreCanonicalFeedURL(raw); err != nil {
+			t.Errorf("valid URL %q: %v", raw, err)
+		}
+	}
+	invalid := []string{
+		"", "ftp://example.com/feed", "https://user:pass@example.com/feed",
+		"https://example.com/feed#fragment", "https://EXAMPLE.com/feed",
+		"https://example.com/feed?utm_source=x", "https://localhost/feed",
+		"https://api.localhost/feed", "http://127.0.0.1/feed", "http://10.0.0.1/feed",
+		"http://[::]/feed", "http://[ff02::1]/feed", "https://example.com/\x00feed",
+		"https://example.com/" + strings.Repeat("x", 2049),
+	}
+	for _, raw := range invalid {
+		if err := validateExploreCanonicalFeedURL(raw); err == nil {
+			t.Errorf("invalid URL accepted: %q", raw)
+		}
+	}
+}
+
 func TestExploreCatalogUpsertArticlesRejectsMoreThan50BeforeTransaction(t *testing.T) {
 	repo := NewExploreCatalogRepository(nil)
 	tooMany := make([]model.ExploreArticle, 51)
@@ -143,6 +217,214 @@ func TestExploreCatalogUpsertArticlesRejectsMoreThan50BeforeTransaction(t *testi
 func TestExploreCatalogSourceNotFoundErrorIsConsistent(t *testing.T) {
 	if got := exploreSourceNotFoundError(42).Error(); got != "explore source 42 not found" {
 		t.Fatalf("not-found error=%q", got)
+	}
+}
+
+func TestExploreCatalogAdoptsCanonicalURLWithoutConflict(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	sourceID := insertCatalogSource(t, db, "https://discovery.example/profile", model.ExploreValidationPending, nil, nil)
+
+	canonicalID, merged, err := NewExploreCatalogRepository(db).AdoptDiscoveredFeed(sourceID, "https://feeds.example/profile.xml")
+	if err != nil || canonicalID != sourceID || merged {
+		t.Fatalf("adopt id=%d merged=%t err=%v", canonicalID, merged, err)
+	}
+	var feedURL, normalizedURL string
+	var siteURL sql.NullString
+	if err := db.QueryRow(`SELECT url,normalized_url,site_url FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&feedURL, &normalizedURL, &siteURL); err != nil {
+		t.Fatal(err)
+	}
+	if feedURL != "https://feeds.example/profile.xml" || normalizedURL != feedURL || siteURL.String != "https://discovery.example/profile" {
+		t.Fatalf("adopted url=%q normalized=%q site=%v", feedURL, normalizedURL, siteURL)
+	}
+}
+
+func TestExploreCatalogAdoptionJoinsOuterTransaction(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	sourceID := insertCatalogSource(t, db, "https://transaction.example/profile", model.ExploreValidationPending, nil, nil)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := NewExploreCatalogRepository(tx).AdoptDiscoveredFeed(sourceID, "https://transaction.example/feed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	var feedURL string
+	if err := db.QueryRow(`SELECT url FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&feedURL); err != nil {
+		t.Fatal(err)
+	}
+	if feedURL != "https://transaction.example/profile" {
+		t.Fatalf("outer rollback retained adopted URL %q", feedURL)
+	}
+}
+
+func TestExploreCatalogMergesCanonicalObservationsAndKeepsLoser(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	loserID := insertCatalogSource(t, db, "https://merge.example/discovered", model.ExploreValidationPending, nil, nil)
+	targetID := insertCatalogSource(t, db, "https://merge.example/feed", model.ExploreValidationValid, &now, &now)
+	if _, err := db.Exec(`UPDATE recommended_feeds SET title='canonical title',etag='target-etag',health_score=1,is_broken=false WHERE id=$1`, targetID); err != nil {
+		t.Fatal(err)
+	}
+	providerID := insertCatalogProvider(t, db, "merge-provider", true)
+	first := now.Add(-48 * time.Hour)
+	last := now.Add(3 * time.Hour)
+	if _, err := db.Exec(`
+		INSERT INTO explore_source_observations
+		(provider_id,source_id,external_key,provider_tags,first_seen_at,last_seen_at,occurrence_count)
+		VALUES
+		($1,$2,'same',ARRAY['go','rss'],$4,$5,4),
+		($1,$3,'same',ARRAY['awesome','go'],$6,$7,7),
+		($1,$3,'loser-only',ARRAY['independent'],$6,$7,2)`,
+		providerID, targetID, loserID, now.Add(-24*time.Hour), now, first, last); err != nil {
+		t.Fatal(err)
+	}
+
+	canonicalID, merged, err := NewExploreCatalogRepository(db).AdoptDiscoveredFeed(loserID, "https://merge.example/feed")
+	if err != nil || canonicalID != targetID || !merged {
+		t.Fatalf("merge id=%d want=%d merged=%t err=%v", canonicalID, targetID, merged, err)
+	}
+	var tags pq.StringArray
+	var firstSeen, lastSeen time.Time
+	var count int
+	if err := db.QueryRow(`
+		SELECT provider_tags,first_seen_at,last_seen_at,occurrence_count
+		FROM explore_source_observations
+		WHERE provider_id=$1 AND source_id=$2 AND external_key='same'`, providerID, targetID).Scan(&tags, &firstSeen, &lastSeen, &count); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(tags, ",") != "awesome,go,rss" || !firstSeen.Equal(first) || !lastSeen.Equal(last) || count != 7 {
+		t.Fatalf("merged tags=%v first=%v last=%v count=%d", tags, firstSeen, lastSeen, count)
+	}
+	var targetObservationCount, loserObservationCount int
+	if err := db.QueryRow(`SELECT count(*) FROM explore_source_observations WHERE source_id=$1`, targetID).Scan(&targetObservationCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM explore_source_observations WHERE source_id=$1`, loserID).Scan(&loserObservationCount); err != nil {
+		t.Fatal(err)
+	}
+	var loserStatus, loserError string
+	var loserHealth float64
+	var loserBroken bool
+	if err := db.QueryRow(`SELECT validation_status,health_score,is_broken,last_error FROM recommended_feeds WHERE id=$1`, loserID).Scan(&loserStatus, &loserHealth, &loserBroken, &loserError); err != nil {
+		t.Fatal(err)
+	}
+	var targetTitle, targetETag, targetStatus string
+	var targetHealth float64
+	if err := db.QueryRow(`SELECT title,etag,validation_status,health_score FROM recommended_feeds WHERE id=$1`, targetID).Scan(&targetTitle, &targetETag, &targetStatus, &targetHealth); err != nil {
+		t.Fatal(err)
+	}
+	if targetObservationCount != 2 || loserObservationCount != 0 || loserStatus != model.ExploreValidationInvalid || loserHealth != 0 || !loserBroken || loserError != fmt.Sprintf("merged into explore source %d", targetID) {
+		t.Fatalf("target obs=%d loser obs=%d loser status=%q health=%v broken=%t error=%q", targetObservationCount, loserObservationCount, loserStatus, loserHealth, loserBroken, loserError)
+	}
+	if targetTitle != "canonical title" || targetETag != "target-etag" || targetStatus != model.ExploreValidationValid || targetHealth != 1 {
+		t.Fatalf("target degraded title=%q etag=%q status=%q health=%v", targetTitle, targetETag, targetStatus, targetHealth)
+	}
+}
+
+func TestExploreCatalogRegistryAndAdoptionConvergeConcurrently(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	db.SetMaxOpenConns(4)
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	sourceID := insertCatalogSource(t, db, "https://race.example/discovery", model.ExploreValidationPending, nil, nil)
+	providerID := insertCatalogProvider(t, db, "race-provider", true)
+	start := make(chan struct{})
+	ids := make(chan int, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		id, _, err := NewExploreCatalogRepository(db).AdoptDiscoveredFeed(sourceID, "https://race.example/feed")
+		ids <- id
+		errs <- err
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		id, err := NewExploreRegistryRepository(db).UpsertCandidate(providerID, explore.Candidate{
+			ExternalKey: "race", FeedURL: "https://race.example/feed", Title: "Race", Topic: "go", OccurrenceCount: 1,
+		}, now)
+		ids <- id
+		errs <- err
+	}()
+	close(start)
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var gotIDs []int
+	for id := range ids {
+		gotIDs = append(gotIDs, id)
+	}
+	if len(gotIDs) != 2 || gotIDs[0] != gotIDs[1] {
+		t.Fatalf("concurrent canonical ids=%v", gotIDs)
+	}
+	var canonicalRows int
+	if err := db.QueryRow(`SELECT count(*) FROM recommended_feeds WHERE normalized_url='https://race.example/feed'`).Scan(&canonicalRows); err != nil {
+		t.Fatal(err)
+	}
+	if canonicalRows != 1 {
+		t.Fatalf("canonical rows=%d", canonicalRows)
+	}
+}
+
+func TestExploreCatalogCheckedAtFenceRejectsStaleOutcomes(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	sourceID := insertCatalogSource(t, db, "https://fence.example/feed", model.ExploreValidationPending, nil, nil)
+	repo := NewExploreCatalogRepository(db)
+	if err := repo.RecordFetchSuccess(sourceID, now, "new-etag", "new-modified"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordFetchFailure(sourceID, now.Add(-time.Minute), errors.New("stale failure")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkValidationInvalid(sourceID, now.Add(-time.Second), errors.New("stale invalid")); err != nil {
+		t.Fatal(err)
+	}
+	var status, etag string
+	var health float64
+	var broken bool
+	var lastError sql.NullString
+	var checkedAt time.Time
+	if err := db.QueryRow(`SELECT validation_status,etag,health_score,is_broken,last_error,last_checked_at FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&status, &etag, &health, &broken, &lastError, &checkedAt); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.ExploreValidationValid || etag != "new-etag" || health != 1 || broken || lastError.Valid || !checkedAt.Equal(now) {
+		t.Fatalf("stale failure overwrote success status=%q etag=%q health=%v broken=%t error=%v checked=%v", status, etag, health, broken, lastError, checkedAt)
+	}
+	terminalAt := now.Add(2 * time.Hour)
+	if err := repo.MarkValidationInvalid(sourceID, terminalAt, errors.New("terminal")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordFetchSuccess(sourceID, terminalAt.Add(-time.Minute), "stale-success", "stale"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkValidationValid(sourceID, terminalAt.Add(-time.Second), "stale-valid", "stale"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT validation_status,etag,health_score,is_broken,last_error,last_checked_at FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&status, &etag, &health, &broken, &lastError, &checkedAt); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.ExploreValidationInvalid || health != 0 || !broken || lastError.String != "terminal" || !checkedAt.Equal(terminalAt) {
+		t.Fatalf("stale success overwrote terminal status=%q etag=%q health=%v broken=%t error=%v checked=%v", status, etag, health, broken, lastError, checkedAt)
+	}
+	missingID := sourceID + 100000
+	if err := repo.RecordFetchFailure(missingID, now, errors.New("missing")); err == nil || err.Error() != exploreSourceNotFoundError(missingID).Error() {
+		t.Fatalf("missing stale-aware mutation err=%v", err)
 	}
 }
 

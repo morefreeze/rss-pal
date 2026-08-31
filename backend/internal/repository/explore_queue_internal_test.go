@@ -31,6 +31,22 @@ func TestClipExploreErrorPreservesUTF8WithinByteLimit(t *testing.T) {
 	}
 }
 
+func TestExploreQueueWithQuerierPreservesRawDatabase(t *testing.T) {
+	raw := &sql.DB{}
+	repo := NewExploreQueueRepository(raw)
+	tx := (*sql.Tx)(nil)
+	bound := repo.WithQuerier(tx)
+	if bound == repo {
+		t.Fatal("WithQuerier returned the mutable original repository")
+	}
+	if bound.db != tx || bound.rawDB != raw {
+		t.Fatalf("bound db=%T raw=%p, want *sql.Tx and raw=%p", bound.db, bound.rawDB, raw)
+	}
+	if repo.db != raw || repo.rawDB != raw {
+		t.Fatal("WithQuerier mutated the original repository")
+	}
+}
+
 func TestExploreQueueClaimRunAdvisoryLockBusyDoesNotMutate(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()

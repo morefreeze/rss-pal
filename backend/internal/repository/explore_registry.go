@@ -11,6 +11,16 @@ import (
 	"github.com/lib/pq"
 )
 
+const exploreRegistryCandidateUpsertSQL = `
+	INSERT INTO recommended_feeds (url, title, category, language, feed_type, site_url, normalized_url, validation_status, first_discovered_at, last_observed_at)
+	VALUES ($1, $2, $3, 'en', 'rss', NULLIF($4, ''), $1, 'pending', $5, $5)
+	ON CONFLICT (normalized_url) DO UPDATE SET
+		title = CASE WHEN NULLIF(EXCLUDED.title, '') IS NULL THEN recommended_feeds.title ELSE EXCLUDED.title END,
+		site_url = COALESCE(NULLIF(EXCLUDED.site_url, ''), recommended_feeds.site_url),
+		category = COALESCE(NULLIF(EXCLUDED.category, ''), recommended_feeds.category),
+		last_observed_at = EXCLUDED.last_observed_at
+	RETURNING id`
+
 // ExploreRegistryRepository persists public provider state and observations.
 type ExploreRegistryRepository struct{ db Querier }
 
@@ -79,16 +89,11 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 		return 0, err
 	}
 	defer rollback()
+	if err := lockExploreCanonicalURL(q, candidate.FeedURL); err != nil {
+		return 0, err
+	}
 	var sourceID int
-	err = q.QueryRow(`
-		INSERT INTO recommended_feeds (url, title, category, language, feed_type, site_url, normalized_url, validation_status, first_discovered_at, last_observed_at)
-		VALUES ($1, $2, $3, 'en', 'rss', NULLIF($4, ''), $1, 'pending', $5, $5)
-		ON CONFLICT (normalized_url) DO UPDATE SET
-			title = CASE WHEN NULLIF(EXCLUDED.title, '') IS NULL THEN recommended_feeds.title ELSE EXCLUDED.title END,
-			site_url = COALESCE(NULLIF(EXCLUDED.site_url, ''), recommended_feeds.site_url),
-			category = COALESCE(NULLIF(EXCLUDED.category, ''), recommended_feeds.category),
-			last_observed_at = EXCLUDED.last_observed_at
-		RETURNING id`, candidate.FeedURL, title, category, candidate.SiteURL, observedAt).Scan(&sourceID)
+	err = q.QueryRow(exploreRegistryCandidateUpsertSQL, candidate.FeedURL, title, category, candidate.SiteURL, observedAt).Scan(&sourceID)
 	if err != nil {
 		return 0, err
 	}

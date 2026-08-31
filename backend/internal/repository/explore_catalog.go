@@ -1,12 +1,18 @@
 package repository
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/lib/pq"
 )
 
@@ -50,7 +56,8 @@ const (
 		    health_score=GREATEST(0,COALESCE(health_score,1)-0.25),
 		    is_broken=(GREATEST(0,COALESCE(health_score,1)-0.25)=0),
 		    last_error=$3
-		WHERE id=$1`
+		WHERE id=$1
+		  AND (last_checked_at IS NULL OR last_checked_at <= $2)`
 
 	exploreFetchSuccessSQL = `
 		UPDATE recommended_feeds
@@ -58,20 +65,55 @@ const (
 		    last_fetched_at=$2, etag=NULLIF($3,''),
 		    last_modified=NULLIF($4,''),
 		    health_score=1, last_error=NULL, is_broken=false
-		WHERE id=$1`
+		WHERE id=$1
+		  AND (last_checked_at IS NULL OR last_checked_at <= $2)`
 
 	exploreValidationValidSQL = `
 		UPDATE recommended_feeds
 		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
 		    etag=NULLIF($3,''), last_modified=NULLIF($4,''),
 		    health_score=1, last_error=NULL, is_broken=false
-		WHERE id=$1`
+		WHERE id=$1
+		  AND (last_checked_at IS NULL OR last_checked_at <= $2)`
+
+	exploreValidationInvalidSQL = `
+		UPDATE recommended_feeds
+		SET validation_status='invalid', last_checked_at=$2, health_score=0,
+		    last_error=$3, is_broken=true
+		WHERE id=$1
+		  AND (last_checked_at IS NULL OR last_checked_at <= $2)`
 
 	exploreFetchNotModifiedSQL = `
 		UPDATE recommended_feeds
 		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
 		    last_fetched_at=$2, health_score=1, last_error=NULL, is_broken=false
-		WHERE id=$1`
+		WHERE id=$1
+		  AND (last_checked_at IS NULL OR last_checked_at <= $2)`
+
+	exploreCanonicalAdvisoryLockSQL = `SELECT pg_advisory_xact_lock($1)`
+
+	exploreAdoptSourceLockSQL = `
+		SELECT url, site_url, normalized_url
+		FROM recommended_feeds WHERE id=$1 FOR UPDATE`
+
+	exploreAdoptPairLockSQL = `
+		SELECT id FROM recommended_feeds
+		WHERE id IN ($1,$2) ORDER BY id FOR UPDATE`
+
+	exploreMergeObservationsSQL = `
+		INSERT INTO explore_source_observations
+		(provider_id, source_id, external_key, provider_tags, first_seen_at, last_seen_at, occurrence_count)
+		SELECT provider_id, $2, external_key, provider_tags, first_seen_at, last_seen_at, occurrence_count
+		FROM explore_source_observations WHERE source_id=$1
+		ON CONFLICT (provider_id, external_key, source_id) DO UPDATE SET
+			provider_tags = ARRAY(
+				SELECT DISTINCT tag
+				FROM unnest(explore_source_observations.provider_tags || EXCLUDED.provider_tags) AS tag
+				ORDER BY tag
+			),
+			first_seen_at = LEAST(explore_source_observations.first_seen_at, EXCLUDED.first_seen_at),
+			last_seen_at = GREATEST(explore_source_observations.last_seen_at, EXCLUDED.last_seen_at),
+			occurrence_count = GREATEST(explore_source_observations.occurrence_count, EXCLUDED.occurrence_count)`
 
 	exploreArticleUpsertSQL = `
 		INSERT INTO explore_articles
@@ -220,37 +262,149 @@ func (r *ExploreCatalogRepository) MarkValidationPending(sourceID int) error {
 
 func (r *ExploreCatalogRepository) MarkValidationValid(sourceID int, checkedAt time.Time, etag, lastModified string) error {
 	result, err := r.db.Exec(exploreValidationValidSQL, sourceID, checkedAt, etag, lastModified)
-	return expectExploreSourceUpdate(result, err, sourceID)
+	return expectExploreSourceMonotonicUpdate(r.db, result, err, sourceID)
 }
 
 // MarkValidationInvalid records a terminal validation outcome without
 // removing conditional request state or the last successfully cached rows.
 func (r *ExploreCatalogRepository) MarkValidationInvalid(sourceID int, checkedAt time.Time, cause error) error {
-	result, err := r.db.Exec(`
-		UPDATE recommended_feeds
-		SET validation_status='invalid', last_checked_at=$2, health_score=0,
-		    last_error=$3, is_broken=true
-		WHERE id=$1`, sourceID, checkedAt, ClipExploreError(cause))
-	return expectExploreSourceUpdate(result, err, sourceID)
+	result, err := r.db.Exec(exploreValidationInvalidSQL, sourceID, checkedAt, ClipExploreError(cause))
+	return expectExploreSourceMonotonicUpdate(r.db, result, err, sourceID)
 }
 
 // RecordFetchFailure atomically degrades health. Four consecutive failures
 // from a healthy source make it ineligible, while its last-good cache remains.
 func (r *ExploreCatalogRepository) RecordFetchFailure(sourceID int, checkedAt time.Time, cause error) error {
 	result, err := r.db.Exec(exploreFetchFailureSQL, sourceID, checkedAt, ClipExploreError(cause))
-	return expectExploreSourceUpdate(result, err, sourceID)
+	return expectExploreSourceMonotonicUpdate(r.db, result, err, sourceID)
 }
 
 func (r *ExploreCatalogRepository) RecordFetchSuccess(sourceID int, fetchedAt time.Time, etag, lastModified string) error {
 	result, err := r.db.Exec(exploreFetchSuccessSQL, sourceID, fetchedAt, etag, lastModified)
-	return expectExploreSourceUpdate(result, err, sourceID)
+	return expectExploreSourceMonotonicUpdate(r.db, result, err, sourceID)
 }
 
 // RecordFetchNotModified records a successful 304 without changing the
 // validators saved from the last 200 response.
 func (r *ExploreCatalogRepository) RecordFetchNotModified(sourceID int, fetchedAt time.Time) error {
 	result, err := r.db.Exec(exploreFetchNotModifiedSQL, sourceID, fetchedAt)
-	return expectExploreSourceUpdate(result, err, sourceID)
+	return expectExploreSourceMonotonicUpdate(r.db, result, err, sourceID)
+}
+
+// AdoptDiscoveredFeed atomically replaces a discovery URL with its canonical
+// feed URL or merges its public evidence into an already-known canonical row.
+// It joins an outer transaction when the repository is transaction-bound.
+func (r *ExploreCatalogRepository) AdoptDiscoveredFeed(sourceID int, canonicalFeedURL string) (canonicalID int, merged bool, err error) {
+	if sourceID <= 0 {
+		return 0, false, errors.New("explore source id must be positive")
+	}
+	if err := validateExploreCanonicalFeedURL(canonicalFeedURL); err != nil {
+		return 0, false, err
+	}
+	q, commit, rollback, err := txOrBegin(r.db)
+	if err != nil {
+		return 0, false, err
+	}
+	defer rollback()
+	if err := lockExploreCanonicalURL(q, canonicalFeedURL); err != nil {
+		return 0, false, err
+	}
+
+	var currentNormalized string
+	if err := q.QueryRow(`SELECT normalized_url FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&currentNormalized); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, exploreSourceNotFoundError(sourceID)
+		}
+		return 0, false, err
+	}
+	if currentNormalized == canonicalFeedURL {
+		if err := lockExploreSourceForWrite(q, sourceID); err != nil {
+			return 0, false, err
+		}
+		if err := commit(); err != nil {
+			return 0, false, err
+		}
+		return sourceID, false, nil
+	}
+
+	var targetID int
+	targetErr := q.QueryRow(`SELECT id FROM recommended_feeds WHERE normalized_url=$1`, canonicalFeedURL).Scan(&targetID)
+	if targetErr != nil && !errors.Is(targetErr, sql.ErrNoRows) {
+		return 0, false, targetErr
+	}
+	if errors.Is(targetErr, sql.ErrNoRows) {
+		var oldURL string
+		var oldSiteURL sql.NullString
+		if err := q.QueryRow(exploreAdoptSourceLockSQL, sourceID).Scan(&oldURL, &oldSiteURL, &currentNormalized); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, false, exploreSourceNotFoundError(sourceID)
+			}
+			return 0, false, err
+		}
+		if currentNormalized != canonicalFeedURL {
+			result, err := q.Exec(`
+				UPDATE recommended_feeds
+				SET site_url=CASE WHEN url <> $2 AND site_url IS NULL THEN url ELSE site_url END,
+				    url=$2, normalized_url=$2
+				WHERE id=$1`, sourceID, canonicalFeedURL)
+			if err := expectExploreSourceUpdate(result, err, sourceID); err != nil {
+				return 0, false, err
+			}
+		}
+		if err := commit(); err != nil {
+			return 0, false, err
+		}
+		return sourceID, false, nil
+	}
+	if targetID == sourceID {
+		if err := lockExploreSourceForWrite(q, sourceID); err != nil {
+			return 0, false, err
+		}
+		if err := commit(); err != nil {
+			return 0, false, err
+		}
+		return sourceID, false, nil
+	}
+	if err := lockExploreSourcePair(q, sourceID, targetID); err != nil {
+		return 0, false, err
+	}
+	// Reconfirm after acquiring both locks. A concurrent adoption using a
+	// different canonical key may have moved the former target while we waited.
+	if err := q.QueryRow(`SELECT normalized_url FROM recommended_feeds WHERE id=$1`, targetID).Scan(&currentNormalized); err != nil {
+		return 0, false, err
+	}
+	if currentNormalized != canonicalFeedURL {
+		result, err := q.Exec(`
+			UPDATE recommended_feeds
+			SET site_url=CASE WHEN url <> $2 AND site_url IS NULL THEN url ELSE site_url END,
+			    url=$2, normalized_url=$2
+			WHERE id=$1`, sourceID, canonicalFeedURL)
+		if err := expectExploreSourceUpdate(result, err, sourceID); err != nil {
+			return 0, false, err
+		}
+		if err := commit(); err != nil {
+			return 0, false, err
+		}
+		return sourceID, false, nil
+	}
+	if _, err := q.Exec(exploreMergeObservationsSQL, sourceID, targetID); err != nil {
+		return 0, false, err
+	}
+	if _, err := q.Exec(`DELETE FROM explore_source_observations WHERE source_id=$1`, sourceID); err != nil {
+		return 0, false, err
+	}
+	mergeMessage := fmt.Sprintf("merged into explore source %d", targetID)
+	result, err := q.Exec(`
+		UPDATE recommended_feeds
+		SET validation_status='invalid', health_score=0, is_broken=true, last_error=$2
+		WHERE id=$1`, sourceID, mergeMessage)
+	if err := expectExploreSourceUpdate(result, err, sourceID); err != nil {
+		return 0, false, err
+	}
+	if err := commit(); err != nil {
+		return 0, false, err
+	}
+	return targetID, true, nil
 }
 
 func (r *ExploreCatalogRepository) UpsertArticle(article model.ExploreArticle) (int, error) {
@@ -419,6 +573,90 @@ func expectExploreSourceUpdate(result sql.Result, err error, sourceID int) error
 	}
 	if count != 1 {
 		return exploreSourceNotFoundError(sourceID)
+	}
+	return nil
+}
+
+func expectExploreSourceMonotonicUpdate(q Querier, result sql.Result, err error, sourceID int) error {
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 1 {
+		return nil
+	}
+	if count != 0 {
+		return fmt.Errorf("explore source %d mutation affected %d rows", sourceID, count)
+	}
+	var exists bool
+	if err := q.QueryRow(`SELECT EXISTS (SELECT 1 FROM recommended_feeds WHERE id=$1)`, sourceID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	return exploreSourceNotFoundError(sourceID)
+}
+
+func lockExploreCanonicalURL(q Querier, canonicalURL string) error {
+	digest := sha256.Sum256([]byte(canonicalURL))
+	lockKey := int64(binary.BigEndian.Uint64(digest[:8]))
+	var ignored interface{}
+	return q.QueryRow(exploreCanonicalAdvisoryLockSQL, lockKey).Scan(&ignored)
+}
+
+func lockExploreSourcePair(q Querier, firstID, secondID int) error {
+	rows, err := q.Query(exploreAdoptPairLockSQL, firstID, secondID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	locked := 0
+	for rows.Next() {
+		var sourceID int
+		if err := rows.Scan(&sourceID); err != nil {
+			return err
+		}
+		locked++
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if locked != 2 {
+		return fmt.Errorf("explore source pair %d,%d not found", firstID, secondID)
+	}
+	return nil
+}
+
+func validateExploreCanonicalFeedURL(raw string) error {
+	if raw == "" || len(raw) > 2048 || strings.ContainsRune(raw, '\x00') {
+		return errors.New("canonical feed URL is empty, too long, or contains NUL")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid canonical feed URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("canonical feed URL must use HTTP or HTTPS")
+	}
+	if parsed.Host == "" || parsed.Hostname() == "" || parsed.User != nil {
+		return errors.New("canonical feed URL must have a host and no credentials")
+	}
+	if util.NormalizeURL(raw) != raw {
+		return errors.New("canonical feed URL must already be normalized")
+	}
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return errors.New("canonical feed URL cannot use localhost")
+	}
+	if address := net.ParseIP(host); address != nil {
+		if address.IsPrivate() || address.IsLoopback() || address.IsUnspecified() ||
+			address.IsMulticast() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() {
+			return errors.New("canonical feed URL cannot use a private or unsafe IP literal")
+		}
 	}
 	return nil
 }
