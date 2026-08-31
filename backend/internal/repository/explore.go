@@ -3,7 +3,6 @@ package repository
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -155,48 +154,10 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 	}
 
 	args := []any{userID, status.ID}
-	topicClause := ""
 	if params.Topic != "" {
 		args = append(args, params.Topic)
-		topicClause = fmt.Sprintf(" AND COALESCE(batch_source.topic, '') = $%d", len(args))
 	}
-	order := ArticleOrderClause(ArticleAliasExplore, params.Sort, params.Dir)
-	query := `
-		SELECT explore_articles.id, explore_articles.source_id, source.title,
-		       explore_articles.title, explore_articles.url,
-		       COALESCE(explore_articles.excerpt, ''), explore_articles.published_at,
-		       explore_articles.fetched_at, COALESCE(batch_source.topic, ''),
-		       COALESCE(batch_source.reason, ''),
-		       EXISTS (
-		           SELECT 1 FROM feeds formal_feed
-		           WHERE formal_feed.url=source.url
-		             AND (formal_feed.owner_id IS NULL OR formal_feed.owner_id=$1)
-		       ) AS is_subscribed
-		FROM explore_batches batch
-		JOIN explore_batch_sources batch_source
-		  ON batch_source.batch_id=batch.id AND batch_source.user_id=$1
-		JOIN recommended_feeds source ON source.id=batch_source.source_id
-		JOIN LATERAL (
-			SELECT explore_articles.* FROM explore_articles
-			WHERE explore_articles.source_id=source.id
-			` + order + `
-			LIMIT 5
-		) explore_articles ON true
-		WHERE batch.id=$2 AND batch.user_id=$1 AND batch.status='done'
-		  AND source.validation_status='valid'
-		  AND source.is_broken=false
-		  AND source.merged_into_source_id IS NULL
-		  AND NOT EXISTS (
-		      SELECT 1 FROM explore_feedback hidden
-		      WHERE hidden.user_id=$1 AND hidden.feedback_type='hide_source'
-		        AND hidden.source_id=source.id
-		  )
-		  AND NOT EXISTS (
-		      SELECT 1 FROM explore_feedback dampened
-		      WHERE dampened.user_id=$1 AND dampened.feedback_type='dampen_topic'
-		        AND dampened.topic=batch_source.topic
-		  )` + topicClause + `
-		` + order + `, explore_articles.id ` + params.Dir.sql()
+	query := buildExplorePageQuery(params)
 
 	rows, err := tx.Query(query, args...)
 	if err != nil {
@@ -233,6 +194,51 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 		return nil, err
 	}
 	return page, nil
+}
+
+func buildExplorePageQuery(params ExploreListParams) string {
+	topicClause := ""
+	if params.Topic != "" {
+		topicClause = " AND COALESCE(batch_source.topic, '') = $3"
+	}
+	requestedOrder := ArticleOrderClause(ArticleAliasExplore, params.Sort, params.Dir)
+	return `
+		SELECT explore_articles.id, explore_articles.source_id, source.title,
+		       explore_articles.title, explore_articles.url,
+		       COALESCE(explore_articles.excerpt, ''), explore_articles.published_at,
+		       explore_articles.fetched_at, COALESCE(batch_source.topic, ''),
+		       COALESCE(batch_source.reason, ''),
+		       EXISTS (
+		           SELECT 1 FROM feeds formal_feed
+		           WHERE formal_feed.url=source.url
+		             AND (formal_feed.owner_id IS NULL OR formal_feed.owner_id=$1)
+		       ) AS is_subscribed
+		FROM explore_batches batch
+		JOIN explore_batch_sources batch_source
+		  ON batch_source.batch_id=batch.id AND batch_source.user_id=$1
+		JOIN recommended_feeds source ON source.id=batch_source.source_id
+		JOIN LATERAL (
+			SELECT explore_articles.* FROM explore_articles
+			WHERE explore_articles.source_id=source.id
+			ORDER BY COALESCE(explore_articles.published_at, explore_articles.fetched_at) DESC,
+			         explore_articles.fetched_at DESC, explore_articles.id DESC
+			LIMIT 5
+		) explore_articles ON true
+		WHERE batch.id=$2 AND batch.user_id=$1 AND batch.status='done'
+		  AND source.validation_status='valid'
+		  AND source.is_broken=false
+		  AND source.merged_into_source_id IS NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM explore_feedback hidden
+		      WHERE hidden.user_id=$1 AND hidden.feedback_type='hide_source'
+		        AND hidden.source_id=source.id
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM explore_feedback dampened
+		      WHERE dampened.user_id=$1 AND dampened.feedback_type='dampen_topic'
+		        AND dampened.topic=batch_source.topic
+		  )` + topicClause + `
+		` + requestedOrder + `, explore_articles.id ` + params.Dir.sql()
 }
 
 func normalizeExploreListParams(params ExploreListParams) ExploreListParams {
