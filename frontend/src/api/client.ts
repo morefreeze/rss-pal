@@ -409,6 +409,149 @@ export interface ArticleDetailResponse {
   fetched_link_urls?: string[]
 }
 
+// Explore uses a public candidate cache and must stay separate from the
+// formal Article/Feed models. In particular, list responses intentionally do
+// not carry full article content; only the authenticated detail endpoint does.
+export type ExploreSort = 'published' | 'captured'
+export type ExploreOrder = 'asc' | 'desc'
+export type ExploreValidationStatus = 'pending' | 'valid' | 'invalid'
+export type ExploreFeedbackType = 'hide_source' | 'dampen_topic' | 'boost_topic'
+export type ExploreArticleEventType = 'exposure' | 'click' | 'completed_read'
+
+export interface ExploreListParams {
+  limit?: number
+  offset?: number
+  sort?: ExploreSort
+  order?: ExploreOrder
+  topic?: string
+}
+
+export interface ExploreSnapshotStatus {
+  id: number
+  slot_at: string
+  completed_at?: string
+  generating: boolean
+  using_fallback: boolean
+  refresh_failed: boolean
+  next_refresh_at?: string
+}
+
+export interface ExploreArticleListItem {
+  id: number
+  source_id: number
+  source_title: string
+  title: string
+  url: string
+  excerpt: string
+  published_at: string | null
+  fetched_at: string
+  topic: string
+  reason: string
+  is_subscribed: boolean
+}
+
+export interface ExploreListResponse {
+  snapshot: ExploreSnapshotStatus
+  articles: ExploreArticleListItem[]
+  has_more: boolean
+}
+
+export interface ExploreSource {
+  id: number
+  title: string
+  url: string
+  site_url?: string
+  rank: number
+  topic: string
+  reason: string
+  health_score?: number
+  validation_status: ExploreValidationStatus
+  recent_article_count: number
+  selected: boolean
+  is_hidden: boolean
+  is_subscribed: boolean
+}
+
+export interface ExploreArticleDetail {
+  id: number
+  source_id: number
+  source_title: string
+  source_url: string
+  site_url?: string
+  title: string
+  url: string
+  content: string | null
+  excerpt?: string
+  published_at: string | null
+  fetched_at: string
+}
+
+export interface ExploreFeedback {
+  id: number
+  user_id: number
+  source_id?: number
+  topic?: string
+  feedback_type: ExploreFeedbackType
+  created_at: string
+}
+
+export type ExploreFeedbackInput =
+  | { feedback_type: 'hide_source'; source_id: number; topic?: never }
+  | { feedback_type: 'dampen_topic' | 'boost_topic'; topic: string; source_id?: never }
+
+export interface ExploreInterestsResponse {
+  interests: ExploreFeedback[]
+}
+
+export interface ExploreArticleEventResponse {
+  recorded: boolean
+}
+
+export interface ExploreSourceSubscribeResult {
+  feed_id: number
+  created: boolean
+  copied_articles: number
+}
+
+export interface ExploreSubscribeResult extends ExploreSourceSubscribeResult {
+  source_id: number
+}
+
+export interface ExploreBatchSubscribeResponse {
+  results: ExploreSubscribeResult[]
+}
+
+export const getExplore = (params?: ExploreListParams) =>
+  api.get<ExploreListResponse>('/explore', { params }).then(res => res.data)
+
+export const getExploreSources = () =>
+  api.get<ExploreSource[]>('/explore/sources').then(res => res.data)
+
+export const getExploreArticle = (id: number) =>
+  api.get<ExploreArticleDetail>(`/explore/articles/${id}`).then(res => res.data)
+
+export const createExploreFeedback = (input: ExploreFeedbackInput) =>
+  api.post<ExploreFeedback>('/explore/feedback', input).then(res => res.data)
+
+export const deleteExploreFeedback = (id: number) =>
+  api.delete(`/explore/feedback/${id}`).then(() => undefined)
+
+export const replaceExploreInterests = (topics: string[]) =>
+  api.put<ExploreInterestsResponse>('/explore/interests', { topics }).then(res => res.data)
+
+export const recordExploreArticleEvent = (id: number, eventType: ExploreArticleEventType) =>
+  api.post<ExploreArticleEventResponse>(`/explore/articles/${id}/events`, {
+    event_type: eventType,
+  }).then(res => res.data)
+
+export const subscribeExploreSource = (id: number) =>
+  api.post<ExploreSourceSubscribeResult>(`/explore/sources/${id}/subscribe`).then(res => res.data)
+
+export const subscribeExploreSources = (sourceIds: number[]) =>
+  api.post<ExploreBatchSubscribeResponse>('/explore/sources/subscribe-batch', {
+    source_ids: sourceIds,
+  }).then(res => res.data)
+
 // Feeds
 export const getFeeds = () =>
   api.get<Feed[]>('/feeds').then(res => res.data)

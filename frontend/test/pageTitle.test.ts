@@ -22,6 +22,14 @@ describe('page title helpers', () => {
     expect(getRoutePageTitle('/interests')).toBe('兴趣')
   })
 
+  it('names explore list and detail paths independently from formal articles', () => {
+    expect(getRoutePageTitle('/explore')).toBe('探索')
+    expect(getRoutePageTitle('/explore/articles/19')).toBe('探索文章 19')
+    expect(getRoutePageTitle('/explore/articles/19', '', {
+      articlePreview: { id: 19, title: '候选文章' },
+    })).toBe('候选文章')
+  })
+
   it('uses article preview titles for article detail history entries', () => {
     const state: ArticleTitleLocationState = {
       articlePreview: {

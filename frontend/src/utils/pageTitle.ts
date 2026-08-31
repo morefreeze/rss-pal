@@ -17,6 +17,7 @@ const STATIC_ROUTE_TITLES: Record<string, string> = {
   '/daily': '每日简报',
   '/weekly': '每周简报',
   '/clip': '网摘',
+  '/explore': '探索',
   '/interests': '兴趣',
   '/stats': '统计',
   '/settings': '设置',
@@ -54,6 +55,17 @@ export function getRoutePageTitle(
       if (previewTitle) return previewTitle
     }
     return `文章 ${articleId}`
+  }
+
+  const exploreArticleMatch = pathname.match(/^\/explore\/articles\/(\d+)$/)
+  if (exploreArticleMatch) {
+    const articleId = Number(exploreArticleMatch[1])
+    const preview = state?.articlePreview
+    if (preview?.id === articleId) {
+      const previewTitle = cleanTitle(preview.title)
+      if (previewTitle) return previewTitle
+    }
+    return `探索文章 ${articleId}`
   }
 
   if (pathname.startsWith('/share/')) return STATIC_ROUTE_TITLES['/share']

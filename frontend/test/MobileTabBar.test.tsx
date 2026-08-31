@@ -16,13 +16,14 @@ describe('MobileTabBar', () => {
       '📰文章',
       '⭐网摘',
       '📡订阅',
-      '📅简报',
+      '🔭探索',
       '⋯更多',
     ])
 
     fireEvent.click(within(nav).getByRole('button', { name: '更多' }))
     const sheet = screen.getByRole('dialog', { name: '更多' })
     expect(within(sheet).getAllByRole('button').map(item => item.textContent?.trim())).toEqual([
+      '📅简报',
       '💡兴趣',
       '📊统计',
       '⚙️设置',
