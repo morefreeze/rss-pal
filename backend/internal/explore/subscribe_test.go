@@ -3,12 +3,32 @@ package explore
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
+
+func TestCopyExploreArticlesSQLMatchesArticleNaturalKeyAndRefreshesDerivedData(t *testing.T) {
+	sqlText := copyExploreArticleCandidatesSQL + copyExploreArticleUpsertSQL +
+		copyExploreSharedArticleUpdateSQL + copyExploreSharedArticleInsertSQL
+	for _, required := range []string{
+		"ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL AND NOT is_clip",
+		"published_at IS NOT NULL",
+		"app_user_shared_floor()",
+		"summary_brief=CASE WHEN",
+		"summary_detailed=CASE WHEN",
+		"word_count=EXCLUDED.word_count",
+		"reading_minutes=EXCLUDED.reading_minutes",
+		"DO NOTHING",
+	} {
+		if !strings.Contains(sqlText, required) {
+			t.Errorf("copy SQL missing %q", required)
+		}
+	}
+}
 
 func TestSubscribePromotesCandidateArticlesWithoutUserSideEffects(t *testing.T) {
 	db, cleanup := testdb.New(t)
@@ -35,12 +55,15 @@ func TestSubscribePromotesCandidateArticlesWithoutUserSideEffects(t *testing.T) 
 	var title, url, content, summaryBrief, summaryDetailed string
 	var gotPublished *time.Time
 	var gotFetched time.Time
+	var wordCount, readingMinutes int
 	var tags []byte
 	if err := db.QueryRow(`
 		SELECT title,url,content,published_at,fetched_at,
-		       COALESCE(summary_brief,''),COALESCE(summary_detailed,''),COALESCE(tags,'{}')::text
+		       COALESCE(summary_brief,''),COALESCE(summary_detailed,''),COALESCE(tags,'{}')::text,
+		       word_count,reading_minutes
 		FROM articles WHERE feed_id=$1`, result.FeedID).Scan(
 		&title, &url, &content, &gotPublished, &gotFetched, &summaryBrief, &summaryDetailed, &tags,
+		&wordCount, &readingMinutes,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +72,9 @@ func TestSubscribePromotesCandidateArticlesWithoutUserSideEffects(t *testing.T) 
 	}
 	if summaryBrief != "" || summaryDetailed != "" || string(tags) != "{}" {
 		t.Fatalf("derived data copied summary=%q/%q tags=%s", summaryBrief, summaryDetailed, tags)
+	}
+	if wordCount != 1 || readingMinutes != 1 {
+		t.Fatalf("metrics=%d/%d want=1/1", wordCount, readingMinutes)
 	}
 	for table := range map[string]struct{}{
 		"explore_article_events": {}, "explore_feedback": {}, "user_preferences": {},
@@ -171,6 +197,159 @@ func TestSubscribeReusesSharedAndConcurrentCallsConverge(t *testing.T) {
 	}
 	if created != 1 {
 		t.Fatalf("created responses=%d want=1", created)
+	}
+}
+
+func TestSubscribeSharedFeedCopiesOnlyArticlesVisibleAtUserFloor(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	userID := seedSubscribeUser(t, db, "subscribe-shared-floor")
+	floor := now.Add(-7 * 24 * time.Hour)
+	if _, err := db.Exec(`UPDATE users SET shared_visible_from=$1 WHERE id=$2`, floor, userID); err != nil {
+		t.Fatal(err)
+	}
+	sourceID := seedSubscribeSource(t, db, userID, "https://shared-floor.example/feed", "Shared", "valid", now)
+	var sharedFeedID int
+	if err := db.QueryRow(`
+		INSERT INTO feeds (url,title) VALUES ('https://shared-floor.example/feed','Shared') RETURNING id`,
+	).Scan(&sharedFeedID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO explore_articles (source_id,url,normalized_url,title,content,published_at,fetched_at)
+		VALUES
+			($1,'https://shared-floor.example/recent','https://shared-floor.example/recent','Recent','recent body',$2,$3),
+			($1,'https://shared-floor.example/conflict','https://shared-floor.example/conflict','Candidate conflict','candidate body',$2,$3),
+			($1,'https://shared-floor.example/old','https://shared-floor.example/old','Old','old body',$4,$3),
+			($1,'https://shared-floor.example/undated','https://shared-floor.example/undated','Undated','undated body',NULL,$3)`,
+		sourceID, floor, now, floor.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO articles (feed_id,url,title,content,published_at)
+		VALUES ($1,'https://shared-floor.example/conflict','Existing hidden conflict','existing body',$2)`,
+		sharedFeedID, floor.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Created || result.FeedID != sharedFeedID || result.CopiedArticles != 1 {
+		t.Fatalf("result=%+v", result)
+	}
+	rows, err := db.Query(`SELECT url,title,content FROM articles WHERE feed_id=$1 ORDER BY url`, sharedFeedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var url, title, content string
+		if err := rows.Scan(&url, &title, &content); err != nil {
+			t.Fatal(err)
+		}
+		switch url {
+		case "https://shared-floor.example/conflict":
+			if title != "Existing hidden conflict" || content != "existing body" {
+				t.Fatalf("hidden conflict was updated title=%q content=%q", title, content)
+			}
+		case "https://shared-floor.example/recent":
+			if title != "Recent" || content != "recent body" {
+				t.Fatalf("recent copy title=%q content=%q", title, content)
+			}
+		default:
+			t.Fatalf("unexpected shared article %q", url)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	var sharedCount int
+	if err := db.QueryRow(`SELECT count(*) FROM articles WHERE feed_id=$1`, sharedFeedID).Scan(&sharedCount); err != nil {
+		t.Fatal(err)
+	}
+	if sharedCount != 2 {
+		t.Fatalf("shared article count=%d want=2", sharedCount)
+	}
+
+	ownedSourceID := seedSubscribeSource(t, db, userID, "https://owned-floor.example/feed", "Owned", "valid", now)
+	if _, err := db.Exec(`
+		INSERT INTO explore_articles (source_id,url,normalized_url,title,content,published_at,fetched_at)
+		VALUES
+			($1,'https://owned-floor.example/old','https://owned-floor.example/old','Old','old body',$2,$3),
+			($1,'https://owned-floor.example/undated','https://owned-floor.example/undated','Undated','undated body',NULL,$3)`,
+		ownedSourceID, floor.Add(-time.Second), now); err != nil {
+		t.Fatal(err)
+	}
+	owned, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, ownedSourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !owned.Created || owned.CopiedArticles != 2 {
+		t.Fatalf("owned result=%+v", owned)
+	}
+}
+
+func TestSubscribeRefreshClearsStaleSummariesAndRecomputesMetrics(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	userID := seedSubscribeUser(t, db, "subscribe-refresh-derived")
+	sourceID := seedSubscribeSource(t, db, userID, "https://refresh-derived.example/feed", "Refresh", "valid", now)
+	published := now.Add(-time.Hour)
+	if _, err := db.Exec(`
+		INSERT INTO explore_articles (source_id,url,normalized_url,title,content,published_at,fetched_at)
+		VALUES ($1,'https://refresh-derived.example/post','https://refresh-derived.example/post','Old title','old body',$2,$3)`,
+		sourceID, published, now); err != nil {
+		t.Fatal(err)
+	}
+	first, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		UPDATE articles SET summary_brief='stale brief',summary_detailed='stale detailed',word_count=999,reading_minutes=99
+		WHERE feed_id=$1`, first.FeedID); err != nil {
+		t.Fatal(err)
+	}
+	newPublished := published.Add(time.Minute)
+	newFetched := now.Add(time.Minute)
+	if _, err := db.Exec(`
+		UPDATE explore_articles
+		SET title='New title',content='<p>Hello <strong>world</strong></p>',published_at=$2,fetched_at=$3
+		WHERE source_id=$1`, sourceID, newPublished, newFetched); err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := NewSubscribeService(db, func() time.Time { return newFetched }).SubscribeOne(userID, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.FeedID != first.FeedID || again.Created || again.CopiedArticles != 1 {
+		t.Fatalf("again=%+v first=%+v", again, first)
+	}
+	var title, content sql.NullString
+	var gotPublished, gotFetched sql.NullTime
+	var brief, detailed sql.NullString
+	var wordCount, readingMinutes int
+	if err := db.QueryRow(`
+		SELECT title,content,published_at,fetched_at,summary_brief,summary_detailed,word_count,reading_minutes
+		FROM articles WHERE feed_id=$1`, first.FeedID).Scan(
+		&title, &content, &gotPublished, &gotFetched, &brief, &detailed, &wordCount, &readingMinutes,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if title.String != "New title" || content.String != "<p>Hello <strong>world</strong></p>" ||
+		!gotPublished.Valid || !gotPublished.Time.Equal(newPublished) || !gotFetched.Valid || !gotFetched.Time.Equal(newFetched) {
+		t.Fatalf("refreshed title=%q content=%q published=%v fetched=%v", title.String, content.String, gotPublished, gotFetched)
+	}
+	if brief.Valid || detailed.Valid {
+		t.Fatalf("stale summaries retained brief=%#v detailed=%#v", brief, detailed)
+	}
+	if wordCount != 2 || readingMinutes != 1 {
+		t.Fatalf("metrics=%d/%d want=2/1", wordCount, readingMinutes)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
+	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/lib/pq"
 )
 
@@ -121,7 +122,7 @@ func (s *SubscribeService) Subscribe(userID int, sourceIDs []int) ([]SubscribeRe
 		if err != nil {
 			return nil, err
 		}
-		copied, err := copyExploreArticles(tx, source.ID, feed.ID)
+		copied, err := copyExploreArticles(tx, userID, source.ID, feed.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -181,27 +182,153 @@ func loadPromotableSources(db Querier, userID int, sourceIDs []int, now time.Tim
 	return sources, rows.Err()
 }
 
-func copyExploreArticles(db Querier, sourceID, feedID int) (int, error) {
-	result, err := db.Exec(`
-		INSERT INTO articles (feed_id,title,url,content,published_at,fetched_at)
-		SELECT $2,title,url,content,published_at,fetched_at
-		FROM explore_articles
-		WHERE source_id=$1
-		ORDER BY id
-		ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL
-		DO UPDATE SET
-			title=EXCLUDED.title,
-			content=EXCLUDED.content,
-			published_at=EXCLUDED.published_at,
-			fetched_at=EXCLUDED.fetched_at`, sourceID, feedID)
+const copyExploreArticleCandidatesSQL = `
+	SELECT article.title,article.url,article.content,article.published_at,article.fetched_at,
+	       target.owner_id,
+	       COALESCE(
+	           CASE WHEN app_current_user_id()=$3 THEN app_user_shared_floor() END,
+	           subscriber.shared_visible_from,
+	           '1970-01-01'::TIMESTAMP
+	       ) AS shared_floor
+	FROM explore_articles article
+	JOIN feeds target ON target.id=$2
+	JOIN users subscriber ON subscriber.id=$3
+	WHERE article.source_id=$1
+	  AND (
+		target.owner_id=$3
+		OR (
+			target.owner_id IS NULL
+			AND article.published_at IS NOT NULL
+			AND article.published_at >= COALESCE(
+				CASE WHEN app_current_user_id()=$3 THEN app_user_shared_floor() END,
+				subscriber.shared_visible_from,
+				'1970-01-01'::TIMESTAMP
+			)
+		)
+	  )
+	ORDER BY article.id
+	FOR SHARE OF target,subscriber`
+
+const copyExploreArticleUpsertSQL = `
+	INSERT INTO articles
+		(feed_id,title,url,content,published_at,fetched_at,word_count,reading_minutes)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+	ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL AND NOT is_clip
+	DO UPDATE SET
+		summary_brief=CASE WHEN
+			(articles.title,articles.content,articles.published_at,articles.fetched_at)
+			IS DISTINCT FROM
+			(EXCLUDED.title,EXCLUDED.content,EXCLUDED.published_at,EXCLUDED.fetched_at)
+			THEN NULL ELSE articles.summary_brief END,
+		summary_detailed=CASE WHEN
+			(articles.title,articles.content,articles.published_at,articles.fetched_at)
+			IS DISTINCT FROM
+			(EXCLUDED.title,EXCLUDED.content,EXCLUDED.published_at,EXCLUDED.fetched_at)
+			THEN NULL ELSE articles.summary_detailed END,
+		title=EXCLUDED.title,
+		content=EXCLUDED.content,
+		published_at=EXCLUDED.published_at,
+		fetched_at=EXCLUDED.fetched_at,
+		word_count=EXCLUDED.word_count,
+		reading_minutes=EXCLUDED.reading_minutes`
+
+const copyExploreSharedArticleUpdateSQL = `
+	UPDATE articles
+	SET summary_brief=CASE WHEN
+			(articles.title,articles.content,articles.published_at,articles.fetched_at)
+			IS DISTINCT FROM ($2,$4,$5,$6)
+			THEN NULL ELSE articles.summary_brief END,
+		summary_detailed=CASE WHEN
+			(articles.title,articles.content,articles.published_at,articles.fetched_at)
+			IS DISTINCT FROM ($2,$4,$5,$6)
+			THEN NULL ELSE articles.summary_detailed END,
+		title=$2,content=$4,published_at=$5,fetched_at=$6,
+		word_count=$7,reading_minutes=$8
+	WHERE feed_id=$1 AND url=$3
+	  AND parent_article_id IS NULL AND NOT is_clip
+	  AND published_at IS NOT NULL AND published_at >= $9`
+
+const copyExploreSharedArticleInsertSQL = `
+	INSERT INTO articles
+		(feed_id,title,url,content,published_at,fetched_at,word_count,reading_minutes)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+	ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL AND NOT is_clip
+	DO NOTHING`
+
+type exploreArticleCopyCandidate struct {
+	title       string
+	url         string
+	content     sql.NullString
+	publishedAt sql.NullTime
+	fetchedAt   time.Time
+	ownerID     sql.NullInt64
+	sharedFloor time.Time
+}
+
+func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) {
+	rows, err := db.Query(copyExploreArticleCandidatesSQL, sourceID, feedID, userID)
 	if err != nil {
 		return 0, err
 	}
-	count, err := result.RowsAffected()
-	if err != nil {
+	candidates := make([]exploreArticleCopyCandidate, 0)
+	for rows.Next() {
+		var candidate exploreArticleCopyCandidate
+		if err := rows.Scan(
+			&candidate.title, &candidate.url, &candidate.content,
+			&candidate.publishedAt, &candidate.fetchedAt,
+			&candidate.ownerID, &candidate.sharedFloor,
+		); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
 		return 0, err
 	}
-	return int(count), nil
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	copied := 0
+	for _, candidate := range candidates {
+		wordCount, readingMinutes := rss.ComputeMetrics(candidate.content.String)
+		var content interface{}
+		if candidate.content.Valid {
+			content = candidate.content.String
+		}
+		var publishedAt interface{}
+		if candidate.publishedAt.Valid {
+			publishedAt = candidate.publishedAt.Time
+		}
+		args := []interface{}{
+			feedID, candidate.title, candidate.url, content, publishedAt,
+			candidate.fetchedAt, wordCount, readingMinutes,
+		}
+		var result sql.Result
+		if candidate.ownerID.Valid {
+			result, err = db.Exec(copyExploreArticleUpsertSQL, args...)
+		} else {
+			result, err = db.Exec(copyExploreSharedArticleUpdateSQL, append(args, candidate.sharedFloor)...)
+			if err == nil {
+				var updated int64
+				updated, err = result.RowsAffected()
+				if err == nil && updated == 0 {
+					result, err = db.Exec(copyExploreSharedArticleInsertSQL, args...)
+				}
+			}
+		}
+		if err != nil {
+			return 0, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		copied += int(count)
+	}
+	return copied, nil
 }
 
 // GetOrCreateOwnerScopedFeed reuses a visible shared feed first. Otherwise it
