@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -80,7 +82,7 @@ func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
 		deps.leaseDuration = exploreDefaultLease
 	}
 	if deps.owner == "" {
-		deps.owner = fmt.Sprintf("worker-%d", os.Getpid())
+		deps.owner = newExploreWorkerOwner()
 	}
 	if deps.logger == nil {
 		deps.logger = log.Default()
@@ -90,6 +92,14 @@ func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
 		providerWindows: make(map[time.Time]struct{}),
 		snapshotSlots:   make(map[time.Time]struct{}),
 	}
+}
+
+func newExploreWorkerOwner() string {
+	random := make([]byte, 8)
+	if _, err := rand.Read(random); err == nil {
+		return fmt.Sprintf("worker-%d-%s", os.Getpid(), hex.EncodeToString(random))
+	}
+	return fmt.Sprintf("worker-%d-%d", os.Getpid(), time.Now().UnixNano())
 }
 
 func (cycle *exploreCycle) Run(ctx context.Context) {
@@ -276,6 +286,7 @@ func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotA
 			continue
 		}
 		ranked := explorelogic.RankExploreCandidates(explorelogic.BuildExploreProfile(profileInput), candidates, now)
+		discarded := len(candidates) - len(ranked)
 		values := make([]repository.ExploreSnapshotSourceInput, len(ranked))
 		for index, value := range ranked {
 			values[index] = repository.ExploreSnapshotSourceInput{SourceID: value.SourceID, Score: value.Score, Topic: value.Topic, Reason: value.Reason}
@@ -283,11 +294,11 @@ func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotA
 		if _, err := runner.store.Publish(claim.Batch.ID, claim.GenerationToken, values); err != nil {
 			failed++
 			_ = runner.store.Fail(claim.Batch.ID, claim.GenerationToken, safeExploreError("snapshot publish failed"))
-			runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s publish_error=true candidates=%d", claim.Batch.ID, userID, slotAt.Format(time.RFC3339), len(values))
+			runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s publish_error=true candidates=%d discarded=%d", claim.Batch.ID, userID, slotAt.Format(time.RFC3339), len(values), discarded)
 			continue
 		}
 		done++
-		runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s candidates=%d", claim.Batch.ID, userID, slotAt.Format(time.RFC3339), len(values))
+		runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s candidates=%d discarded=%d", claim.Batch.ID, userID, slotAt.Format(time.RFC3339), len(values), discarded)
 	}
 	runner.logger.Printf("explore snapshot slot=%s users=%d done=%d failed=%d skipped=%d candidates=%d duration_ms=%d", slotAt.Format(time.RFC3339), len(userIDs), done, failed, skipped, len(candidates), time.Since(started).Milliseconds())
 }

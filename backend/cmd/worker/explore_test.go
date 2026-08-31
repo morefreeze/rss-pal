@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/config"
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
 
 var exploreTestShanghai = time.FixedZone("Asia/Shanghai", 8*60*60)
@@ -280,6 +282,61 @@ func TestExploreSnapshotCoordinatorKeepsLastDoneAfterFailedGeneration(t *testing
 	}
 	if store.lastDone != 41 {
 		t.Fatalf("last done snapshot changed to %d, want 41", store.lastDone)
+	}
+}
+
+func TestSQLExploreQueueFinishRunPersistsBoundedOutcome(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	var doneID, failedID int
+	if err := db.QueryRow(`INSERT INTO explore_fetch_runs(window_at,status) VALUES ($1,'running') RETURNING id`, time.Now()).Scan(&doneID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO explore_fetch_runs(window_at,status) VALUES ($1,'running') RETURNING id`, time.Now().Add(time.Minute)).Scan(&failedID); err != nil {
+		t.Fatal(err)
+	}
+	queue := newSQLExploreQueue(db)
+	if err := queue.FinishRun(doneID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.FinishRun(failedID, errors.New(strings.Repeat("界", 1200))); err != nil {
+		t.Fatal(err)
+	}
+	var doneStatus, failedStatus string
+	var message *string
+	if err := db.QueryRow(`SELECT status FROM explore_fetch_runs WHERE id=$1`, doneID).Scan(&doneStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT status,error_message FROM explore_fetch_runs WHERE id=$1`, failedID).Scan(&failedStatus, &message); err != nil {
+		t.Fatal(err)
+	}
+	if doneStatus != model.ExploreFetchRunDone || failedStatus != model.ExploreFetchRunFailed {
+		t.Fatalf("statuses = %q/%q", doneStatus, failedStatus)
+	}
+	if message == nil || len(*message) > 1000 {
+		t.Fatalf("failed error was not safely bounded: %v", message)
+	}
+}
+
+func TestExploreURLDomain(t *testing.T) {
+	if got := exploreURLDomain("https://WWW.Example.com:8443/feed.xml"); got != "www.example.com" {
+		t.Fatalf("domain = %q", got)
+	}
+	if got := exploreURLDomain("not a url"); got != "" {
+		t.Fatalf("invalid URL domain = %q", got)
+	}
+}
+
+func TestNewProductionExploreCycleUsesValidatedConfig(t *testing.T) {
+	cycle := newProductionExploreCycle(nil, &config.Config{
+		Explore: config.ExploreConfig{FetchBatchLimit: 321, FetchConcurrency: 7},
+		RSSHub:  config.RSSHubConfig{BaseURL: "http://rsshub:1200"},
+	})
+	if cycle.deps.batchLimit != 321 || cycle.deps.fetchConcurrency != 7 {
+		t.Fatalf("production explore deps = limit %d concurrency %d", cycle.deps.batchLimit, cycle.deps.fetchConcurrency)
+	}
+	if cycle.deps.registry == nil || cycle.deps.queue == nil || cycle.deps.taskHandler == nil || cycle.deps.snapshots == nil {
+		t.Fatalf("production explore dependencies are incomplete: %+v", cycle.deps)
 	}
 }
 

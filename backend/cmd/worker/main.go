@@ -98,6 +98,9 @@ func main() {
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(context.Background())
 	defer cancelHeartbeat()
 	startWorkerHeartbeat(heartbeatCtx, heartbeatRepo)
+	exploreCtx, cancelExplore := context.WithCancel(context.Background())
+	defer cancelExplore()
+	startExploreWorker(exploreCtx, newProductionExploreCycle(db, cfg))
 
 	fetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
 	contentFetcher := rss.NewContentFetcher()
