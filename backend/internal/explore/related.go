@@ -2,6 +2,7 @@ package explore
 
 import (
 	"bytes"
+	"fmt"
 	"net/url"
 	"sort"
 	"strings"
@@ -14,6 +15,9 @@ import (
 type RelatedSiteDiscoverer struct{}
 
 func (RelatedSiteDiscoverer) Discover(pageURL string, body []byte) ([]Candidate, error) {
+	if len(body) > defaultProviderBodyBytes {
+		return nil, fmt.Errorf("related page exceeds %d bytes", defaultProviderBodyBytes)
+	}
 	base, ok := normalizePublicURL(pageURL)
 	if !ok {
 		return nil, nil
