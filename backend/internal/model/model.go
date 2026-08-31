@@ -147,6 +147,7 @@ type ExploreBatch struct {
 	Status       string     `json:"status" db:"status"`
 	SourceCount  int        `json:"source_count" db:"source_count"`
 	ErrorMessage *string    `json:"error_message,omitempty" db:"error_message"`
+	StartedAt    *time.Time `json:"started_at,omitempty" db:"started_at"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 }
