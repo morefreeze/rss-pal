@@ -97,6 +97,34 @@ type ExploreFetchTask struct {
 	CompletedAt    *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 }
 
+// ExploreSource is one canonical, globally shared candidate source. Discovery
+// observations refer to this row; they are evidence about a source rather than
+// alternate source records.
+type ExploreSource struct {
+	ID                int        `json:"id" db:"id"`
+	URL               string     `json:"url" db:"url"`
+	Title             string     `json:"title" db:"title"`
+	Description       *string    `json:"description,omitempty" db:"description"`
+	Category          string     `json:"category" db:"category"`
+	Language          string     `json:"language" db:"language"`
+	FeedType          string     `json:"feed_type" db:"feed_type"`
+	IsBroken          bool       `json:"is_broken" db:"is_broken"`
+	SortOrder         int        `json:"sort_order" db:"sort_order"`
+	SiteURL           *string    `json:"site_url,omitempty" db:"site_url"`
+	NormalizedURL     string     `json:"normalized_url" db:"normalized_url"`
+	ValidationStatus  string     `json:"validation_status" db:"validation_status"`
+	VerifiedAt        *time.Time `json:"verified_at,omitempty" db:"verified_at"`
+	LastCheckedAt     *time.Time `json:"last_checked_at,omitempty" db:"last_checked_at"`
+	LastFetchedAt     *time.Time `json:"last_fetched_at,omitempty" db:"last_fetched_at"`
+	ETag              *string    `json:"etag,omitempty" db:"etag"`
+	LastModified      *string    `json:"last_modified,omitempty" db:"last_modified"`
+	HealthScore       *float64   `json:"health_score,omitempty" db:"health_score"`
+	LastError         *string    `json:"last_error,omitempty" db:"last_error"`
+	FirstDiscoveredAt *time.Time `json:"first_discovered_at,omitempty" db:"first_discovered_at"`
+	LastObservedAt    *time.Time `json:"last_observed_at,omitempty" db:"last_observed_at"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+}
+
 type ExploreArticle struct {
 	ID            int        `json:"id" db:"id"`
 	SourceID      int        `json:"source_id" db:"source_id"`
