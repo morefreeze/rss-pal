@@ -488,6 +488,7 @@ export interface ExploreArticleDetail {
   excerpt?: string
   published_at: string | null
   fetched_at: string
+  is_subscribed: boolean
 }
 
 export interface ExploreFeedback {

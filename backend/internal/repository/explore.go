@@ -122,17 +122,18 @@ type ExploreSourceItem struct {
 }
 
 type ExploreArticleDetail struct {
-	ID          int        `json:"id"`
-	SourceID    int        `json:"source_id"`
-	SourceTitle string     `json:"source_title"`
-	SourceURL   string     `json:"source_url"`
-	SiteURL     *string    `json:"site_url,omitempty"`
-	Title       string     `json:"title"`
-	URL         string     `json:"url"`
-	Content     *string    `json:"content"`
-	Excerpt     *string    `json:"excerpt,omitempty"`
-	PublishedAt *time.Time `json:"published_at"`
-	FetchedAt   time.Time  `json:"fetched_at"`
+	ID           int        `json:"id"`
+	SourceID     int        `json:"source_id"`
+	SourceTitle  string     `json:"source_title"`
+	SourceURL    string     `json:"source_url"`
+	SiteURL      *string    `json:"site_url,omitempty"`
+	Title        string     `json:"title"`
+	URL          string     `json:"url"`
+	Content      *string    `json:"content"`
+	Excerpt      *string    `json:"excerpt,omitempty"`
+	PublishedAt  *time.Time `json:"published_at"`
+	FetchedAt    time.Time  `json:"fetched_at"`
+	IsSubscribed bool       `json:"is_subscribed"`
 }
 
 type ExploreFeedbackInput struct {
@@ -383,7 +384,12 @@ func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreAr
 	err := r.db.QueryRow(`
 		SELECT article.id, article.source_id, source.title, source.url, source.site_url,
 		       article.title, article.url, article.content, article.excerpt,
-		       article.published_at, article.fetched_at
+		       article.published_at, article.fetched_at,
+		       EXISTS (
+		           SELECT 1 FROM feeds subscribed_feed
+		           WHERE subscribed_feed.url=source.url
+		             AND (subscribed_feed.owner_id IS NULL OR subscribed_feed.owner_id=$1)
+		       ) AS is_subscribed
 		FROM explore_articles article
 		JOIN recommended_feeds source ON source.id=article.source_id
 		WHERE article.id=$2 AND (
@@ -402,7 +408,7 @@ func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreAr
 	`, userID, articleID).Scan(
 		&detail.ID, &detail.SourceID, &detail.SourceTitle, &detail.SourceURL,
 		&detail.SiteURL, &detail.Title, &detail.URL, &detail.Content, &detail.Excerpt,
-		&detail.PublishedAt, &detail.FetchedAt,
+		&detail.PublishedAt, &detail.FetchedAt, &detail.IsSubscribed,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrExploreNotFound
