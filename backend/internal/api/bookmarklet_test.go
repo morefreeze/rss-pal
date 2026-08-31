@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 )
@@ -114,6 +115,29 @@ func TestExtractContentFromHTML_PreservesContainerWithJunkClass(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+func TestExtractContentFromHTMLPreservesFullUTF8ContentAboveLegacyLimit(t *testing.T) {
+	const tailMarker = "CHAPTER-END-完整"
+	body := strings.Repeat("中", 16667) + tailMarker
+	html := `<html><body><article><p>` + body + `</p></article></body></html>`
+
+	got, err := extractContentFromHTML(html, "https://example.com/book/chapter1/")
+	if err != nil {
+		t.Fatalf("extractContentFromHTML: %v", err)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("extracted content is not valid UTF-8 near the legacy 50,000-byte boundary")
+	}
+	if len(got) <= 50000 {
+		t.Fatalf("extracted content length = %d, want > 50000", len(got))
+	}
+	if !strings.Contains(got, tailMarker) {
+		t.Fatalf("extracted content lost tail marker %q", tailMarker)
+	}
+	if strings.HasSuffix(got, "...") {
+		t.Fatalf("extracted content still has the legacy truncation suffix")
 	}
 }
 
@@ -279,4 +303,3 @@ func TestCountMarkdownImages(t *testing.T) {
 		})
 	}
 }
-
