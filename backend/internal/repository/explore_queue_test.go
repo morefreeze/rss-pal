@@ -154,14 +154,23 @@ func TestExploreQueueLeaseFencingAndRecovery(t *testing.T) {
 	defer cleanup()
 	repo := repository.NewExploreQueueRepository(db)
 	enqueueExploreTasks(t, db, repo, 4, repository.ExplorePriorityRefresh)
-	run, leased, err := repo.ClaimRun(time.Now(), "old", time.Millisecond, 4)
+	run, leased, err := repo.ClaimRun(time.Now(), "old", time.Minute, 4)
 	if err != nil || len(leased) != 4 {
 		t.Fatalf("claim=%d err=%v", len(leased), err)
 	}
 	if visible, err := repo.ListLeased(run.ID, "old"); err != nil || len(visible) != 4 {
 		t.Fatalf("initial visible=%d err=%v", len(visible), err)
 	}
-	time.Sleep(20 * time.Millisecond)
+	result, err := db.Exec(`
+		UPDATE explore_fetch_queue SET lease_expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+		WHERE run_id = $1 AND status = 'leased' AND lease_owner = 'old'
+	`, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 4 {
+		t.Fatalf("force expiry changed=%d err=%v", changed, err)
+	}
 	if visible, err := repo.ListLeased(run.ID, "old"); err != nil || len(visible) != 0 {
 		t.Fatalf("expired visible=%d err=%v", len(visible), err)
 	}
@@ -294,7 +303,12 @@ func assertTaskMatchesDB(t *testing.T, db *sql.DB, task repository.ExploreQueueT
 	if err := db.QueryRow(`SELECT id,source_id,task_type,status,priority,not_before,attempts,run_id,lease_owner,lease_expires_at,last_error,created_at,updated_at,completed_at FROM explore_fetch_queue WHERE id=$1`, task.ID).Scan(&got.ID, &got.SourceID, &got.TaskType, &got.Status, &got.Priority, &got.NotBefore, &got.Attempts, &got.RunID, &got.LeaseOwner, &got.LeaseExpiresAt, &got.LastError, &got.CreatedAt, &got.UpdatedAt, &got.CompletedAt); err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != task.ID || got.Status != task.Status || !got.UpdatedAt.Equal(task.UpdatedAt) || got.LeaseExpiresAt == nil || task.LeaseExpiresAt == nil || !got.LeaseExpiresAt.Equal(*task.LeaseExpiresAt) {
+	if got.ID != task.ID || got.SourceID != task.SourceID || got.TaskType != task.TaskType ||
+		got.Status != task.Status || got.Priority != task.Priority || !got.NotBefore.Equal(task.NotBefore) ||
+		got.Attempts != task.Attempts || !equalIntPtr(got.RunID, task.RunID) ||
+		!equalStringPtr(got.LeaseOwner, task.LeaseOwner) || !equalTimePtr(got.LeaseExpiresAt, task.LeaseExpiresAt) ||
+		!equalStringPtr(got.LastError, task.LastError) || !got.CreatedAt.Equal(task.CreatedAt) ||
+		!got.UpdatedAt.Equal(task.UpdatedAt) || !equalTimePtr(got.CompletedAt, task.CompletedAt) {
 		t.Fatalf("returned task differs db returned=%+v db=%+v", task, got)
 	}
 }
@@ -304,9 +318,24 @@ func assertRunMatchesDB(t *testing.T, db *sql.DB, run *repository.ExploreFetchRu
 	if err := db.QueryRow(`SELECT id,window_at,status,claimed_count,started_at,completed_at,worker_id,error_message,created_at FROM explore_fetch_runs WHERE id=$1`, run.ID).Scan(&got.ID, &got.WindowAt, &got.Status, &got.ClaimedCount, &got.StartedAt, &got.CompletedAt, &got.WorkerID, &got.ErrorMessage, &got.CreatedAt); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != run.Status || got.ClaimedCount != run.ClaimedCount || (got.CompletedAt == nil) != (run.CompletedAt == nil) {
+	if got.ID != run.ID || !got.WindowAt.Equal(run.WindowAt) || got.Status != run.Status ||
+		got.ClaimedCount != run.ClaimedCount || !equalTimePtr(got.StartedAt, run.StartedAt) ||
+		!equalTimePtr(got.CompletedAt, run.CompletedAt) || !equalStringPtr(got.WorkerID, run.WorkerID) ||
+		!equalStringPtr(got.ErrorMessage, run.ErrorMessage) || !got.CreatedAt.Equal(run.CreatedAt) {
 		t.Fatalf("returned run differs returned=%+v db=%+v", run, got)
 	}
+}
+
+func equalIntPtr(a, b *int) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+}
+
+func equalStringPtr(a, b *string) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+}
+
+func equalTimePtr(a, b *time.Time) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && a.Equal(*b))
 }
 func min(a, b int) int {
 	if a < b {
