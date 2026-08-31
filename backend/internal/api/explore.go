@@ -188,7 +188,9 @@ func validExploreFeedbackRequest(input repository.ExploreFeedbackInput) bool {
 	switch input.FeedbackType {
 	case model.ExploreFeedbackHideSource:
 		return input.SourceID != nil && *input.SourceID > 0 && input.Topic == nil
-	case model.ExploreFeedbackDampenTopic, model.ExploreFeedbackBoostTopic:
+	case model.ExploreFeedbackDampenTopic:
+		return input.SourceID == nil && input.Topic != nil && *input.Topic != "" && len([]rune(*input.Topic)) <= 100
+	case model.ExploreFeedbackBoostTopic:
 		return input.SourceID == nil && input.Topic != nil && repository.IsExploreInterest(*input.Topic)
 	default:
 		return false

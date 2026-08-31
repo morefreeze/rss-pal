@@ -127,6 +127,10 @@ func TestExploreHandlerFeedbackInterestsUndoAndEvents(t *testing.T) {
 	if w.Code != http.StatusOK || store.lastFeedback.SourceID == nil || *store.lastFeedback.SourceID != sourceID {
 		t.Fatalf("feedback status=%d input=%+v body=%s", w.Code, store.lastFeedback, w.Body.String())
 	}
+	w = performExploreRequest(router, http.MethodPost, "/api/explore/feedback", map[string]any{"feedback_type": "dampen_topic", "topic": "distributed-systems"})
+	if w.Code != http.StatusOK || store.lastFeedback.Topic == nil || *store.lastFeedback.Topic != "distributed-systems" {
+		t.Fatalf("dampen status=%d input=%+v body=%s", w.Code, store.lastFeedback, w.Body.String())
+	}
 	w = performExploreRequest(router, http.MethodDelete, "/api/explore/feedback/17", nil)
 	if w.Code != http.StatusNoContent || store.deleteID != feedbackID {
 		t.Fatalf("delete status=%d id=%d", w.Code, store.deleteID)
@@ -151,6 +155,7 @@ func TestExploreHandlerRejectsInvalidFeedbackInterestAndEventEnums(t *testing.T)
 	}{
 		{http.MethodPost, "/api/explore/feedback", map[string]any{"feedback_type": "hide_source"}},
 		{http.MethodPost, "/api/explore/feedback", map[string]any{"feedback_type": "unknown", "topic": "programming"}},
+		{http.MethodPost, "/api/explore/feedback", map[string]any{"feedback_type": "boost_topic", "topic": "arbitrary prompt"}},
 		{http.MethodPut, "/api/explore/interests", map[string]any{"topics": []string{"arbitrary prompt"}}},
 		{http.MethodPost, "/api/explore/articles/1/events", map[string]any{"event_type": "share"}},
 	}

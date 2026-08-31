@@ -23,17 +23,17 @@ var (
 	ErrInvalidExploreInterest = errors.New("invalid explore interest")
 )
 
-// ExploreInterestVocabulary is intentionally server-owned. Provider output is
+// exploreInterestVocabulary is intentionally server-owned. Provider output is
 // not accepted as arbitrary profile input through the interests endpoint.
-var ExploreInterestVocabulary = []string{
+var exploreInterestVocabulary = []string{
 	"ai", "ai_eng", "blog", "business", "chinese-independent", "cn_tech",
 	"enterprise", "health", "news", "podcast", "programming", "recently-added",
 	"security", "self-hosted", "technology", "web-development", "youtube",
 }
 
 var exploreInterestSet = func() map[string]struct{} {
-	set := make(map[string]struct{}, len(ExploreInterestVocabulary))
-	for _, value := range ExploreInterestVocabulary {
+	set := make(map[string]struct{}, len(exploreInterestVocabulary))
+	for _, value := range exploreInterestVocabulary {
 		set[value] = struct{}{}
 	}
 	return set
@@ -416,6 +416,25 @@ func (r *ExploreRepository) CreateFeedback(userID int, input ExploreFeedbackInpu
 			return nil, ErrExploreNotFound
 		}
 	}
+	if input.FeedbackType == model.ExploreFeedbackDampenTopic {
+		var visible bool
+		err := r.db.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM explore_batch_sources batch_source
+				JOIN explore_batches batch
+				  ON batch.id=batch_source.batch_id AND batch.user_id=batch_source.user_id
+				WHERE batch_source.user_id=$1 AND batch_source.topic=$2
+				  AND batch.status='done'
+				  AND batch.id=(SELECT id FROM explore_batches WHERE user_id=$1 AND status='done' ORDER BY slot_at DESC,id DESC LIMIT 1)
+			)
+		`, userID, *input.Topic).Scan(&visible)
+		if err != nil {
+			return nil, err
+		}
+		if !visible {
+			return nil, ErrExploreNotFound
+		}
+	}
 	feedback := &model.ExploreFeedback{}
 	var err error
 	if input.SourceID != nil {
@@ -453,7 +472,11 @@ func validateExploreFeedback(input ExploreFeedbackInput) error {
 		if input.SourceID == nil || *input.SourceID <= 0 || input.Topic != nil {
 			return ErrInvalidExploreFeedback
 		}
-	case model.ExploreFeedbackDampenTopic, model.ExploreFeedbackBoostTopic:
+	case model.ExploreFeedbackDampenTopic:
+		if input.SourceID != nil || input.Topic == nil || *input.Topic == "" || len([]rune(*input.Topic)) > 100 {
+			return ErrInvalidExploreFeedback
+		}
+	case model.ExploreFeedbackBoostTopic:
 		if input.SourceID != nil || input.Topic == nil || !IsExploreInterest(*input.Topic) {
 			return ErrInvalidExploreFeedback
 		}

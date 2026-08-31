@@ -182,7 +182,7 @@ func TestExploreRepositoryInterestsReplaceAndTopicFeedbackFilter(t *testing.T) {
 	userID, _ := insertExploreUsers(t, db)
 	sourceID := insertExploreSource(t, db, "https://topics.example/feed", "topics")
 	now := time.Now().UTC().Truncate(time.Second)
-	insertExploreDoneBatch(t, db, userID, now, []exploreTestBatchSource{{sourceID: sourceID, rank: 1, topic: "programming"}})
+	insertExploreDoneBatch(t, db, userID, now, []exploreTestBatchSource{{sourceID: sourceID, rank: 1, topic: "distributed-systems"}})
 	insertExploreArticle(t, db, sourceID, now, "topic")
 	repo := NewExploreRepository(db)
 
@@ -199,8 +199,11 @@ func TestExploreRepositoryInterestsReplaceAndTopicFeedbackFilter(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM explore_feedback WHERE user_id=$1 AND feedback_type='boost_topic'`, userID).Scan(&interestCount); err != nil || interestCount != 2 {
 		t.Fatalf("invalid replace changed prior interests: count=(%d,%v)", interestCount, err)
 	}
-	if _, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackDampenTopic, Topic: strPtr("programming")}); err != nil {
+	if _, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackDampenTopic, Topic: strPtr("distributed-systems")}); err != nil {
 		t.Fatalf("dampen topic: %v", err)
+	}
+	if _, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackDampenTopic, Topic: strPtr("not-in-snapshot")}); !errors.Is(err, ErrExploreNotFound) {
+		t.Fatalf("unauthorized dampen topic=%v want not found", err)
 	}
 	page, err := repo.GetPage(userID, ExploreListParams{Limit: 20, Sort: SortPublished, Dir: SortDesc})
 	if err != nil {
