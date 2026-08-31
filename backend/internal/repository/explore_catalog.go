@@ -16,7 +16,10 @@ import (
 	"github.com/lib/pq"
 )
 
-var ErrExploreArticleBatchTooLarge = errors.New("explore article batch exceeds 50")
+var (
+	ErrExploreArticleBatchTooLarge      = errors.New("explore article batch exceeds 50")
+	ErrExploreCanonicalAdoptionConflict = errors.New("conflicting explore canonical adoption state")
+)
 
 const (
 	maxExploreDueSources = 500
@@ -25,7 +28,7 @@ const (
 		id, url, title, description, category, language, feed_type, is_broken,
 		sort_order, site_url, normalized_url, validation_status, verified_at,
 		last_checked_at, last_fetched_at, etag, last_modified, health_score,
-		last_error, first_discovered_at, last_observed_at, created_at`
+		last_error, merged_into_source_id, first_discovered_at, last_observed_at, created_at`
 
 	exploreArticleRetentionSQL = `
 		WITH ranked AS (
@@ -168,6 +171,21 @@ type ExploreCatalogObservation struct {
 type ExploreCatalogSource struct {
 	Source       model.ExploreSource
 	Observations []ExploreCatalogObservation
+}
+
+type exploreAdoptionDecision string
+
+const (
+	exploreAdoptMergeIntoTarget exploreAdoptionDecision = "merge_into_target"
+	exploreAdoptPreserveSource  exploreAdoptionDecision = "preserve_source"
+	exploreAdoptReturnTarget    exploreAdoptionDecision = "return_target"
+	exploreAdoptFailClosed      exploreAdoptionDecision = "fail_closed"
+)
+
+type exploreAdoptionSourceState struct {
+	NormalizedURL      string
+	ValidationStatus   string
+	MergedIntoSourceID *int
 }
 
 // ExploreCatalogRepository persists the shared Explore catalog. Querier keeps
@@ -368,12 +386,18 @@ func (r *ExploreCatalogRepository) AdoptDiscoveredFeed(sourceID int, canonicalFe
 	if err := lockExploreSourcePair(q, sourceID, targetID); err != nil {
 		return 0, false, err
 	}
-	// Reconfirm after acquiring both locks. A concurrent adoption using a
-	// different canonical key may have moved the former target while we waited.
-	if err := q.QueryRow(`SELECT normalized_url FROM recommended_feeds WHERE id=$1`, targetID).Scan(&currentNormalized); err != nil {
+	// Reconfirm both rows after acquiring the deterministic pair lock. Reverse
+	// A->B and B->A adoptions may have invalidated one side while this
+	// transaction waited; never merge the surviving row back into that loser.
+	sourceState, err := loadExploreAdoptionSourceState(q, sourceID)
+	if err != nil {
 		return 0, false, err
 	}
-	if currentNormalized != canonicalFeedURL {
+	targetState, err := loadExploreAdoptionSourceState(q, targetID)
+	if err != nil {
+		return 0, false, err
+	}
+	if targetState.NormalizedURL != canonicalFeedURL {
 		result, err := q.Exec(`
 			UPDATE recommended_feeds
 			SET site_url=CASE WHEN url <> $2 AND site_url IS NULL THEN url ELSE site_url END,
@@ -387,6 +411,20 @@ func (r *ExploreCatalogRepository) AdoptDiscoveredFeed(sourceID int, canonicalFe
 		}
 		return sourceID, false, nil
 	}
+	switch decideExploreAdoption(sourceID, targetID, sourceState, targetState) {
+	case exploreAdoptPreserveSource:
+		if err := commit(); err != nil {
+			return 0, false, err
+		}
+		return sourceID, false, nil
+	case exploreAdoptReturnTarget:
+		if err := commit(); err != nil {
+			return 0, false, err
+		}
+		return targetID, true, nil
+	case exploreAdoptFailClosed:
+		return 0, false, fmt.Errorf("%w: source %d target %d", ErrExploreCanonicalAdoptionConflict, sourceID, targetID)
+	}
 	if _, err := q.Exec(exploreMergeObservationsSQL, sourceID, targetID); err != nil {
 		return 0, false, err
 	}
@@ -396,8 +434,9 @@ func (r *ExploreCatalogRepository) AdoptDiscoveredFeed(sourceID int, canonicalFe
 	mergeMessage := fmt.Sprintf("merged into explore source %d", targetID)
 	result, err := q.Exec(`
 		UPDATE recommended_feeds
-		SET validation_status='invalid', health_score=0, is_broken=true, last_error=$2
-		WHERE id=$1`, sourceID, mergeMessage)
+		SET validation_status='invalid', health_score=0, is_broken=true,
+		    last_error=$2, merged_into_source_id=$3
+		WHERE id=$1`, sourceID, mergeMessage, targetID)
 	if err := expectExploreSourceUpdate(result, err, sourceID); err != nil {
 		return 0, false, err
 	}
@@ -536,7 +575,7 @@ func scanExploreSource(row rowScanner) (*model.ExploreSource, error) {
 		&source.Language, &feedType, &isBroken, &sortOrder, &siteURL,
 		&source.NormalizedURL, &source.ValidationStatus, &source.VerifiedAt,
 		&source.LastCheckedAt, &source.LastFetchedAt, &etag, &lastModified,
-		&source.HealthScore, &lastError, &source.FirstDiscoveredAt,
+		&source.HealthScore, &lastError, &source.MergedIntoSourceID, &source.FirstDiscoveredAt,
 		&source.LastObservedAt, &source.CreatedAt,
 	)
 	if err != nil {
@@ -629,6 +668,31 @@ func lockExploreSourcePair(q Querier, firstID, secondID int) error {
 		return fmt.Errorf("explore source pair %d,%d not found", firstID, secondID)
 	}
 	return nil
+}
+
+func loadExploreAdoptionSourceState(q Querier, sourceID int) (exploreAdoptionSourceState, error) {
+	var state exploreAdoptionSourceState
+	err := q.QueryRow(`SELECT normalized_url, validation_status, merged_into_source_id FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&state.NormalizedURL, &state.ValidationStatus, &state.MergedIntoSourceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return exploreAdoptionSourceState{}, exploreSourceNotFoundError(sourceID)
+	}
+	return state, err
+}
+
+func decideExploreAdoption(sourceID, targetID int, source, target exploreAdoptionSourceState) exploreAdoptionDecision {
+	if source.MergedIntoSourceID != nil || target.MergedIntoSourceID != nil {
+		if source.MergedIntoSourceID != nil && target.MergedIntoSourceID == nil && *source.MergedIntoSourceID == targetID {
+			return exploreAdoptReturnTarget
+		}
+		if source.MergedIntoSourceID == nil && target.MergedIntoSourceID != nil && *target.MergedIntoSourceID == sourceID {
+			return exploreAdoptPreserveSource
+		}
+		return exploreAdoptFailClosed
+	}
+	if source.ValidationStatus == model.ExploreValidationInvalid && target.ValidationStatus == model.ExploreValidationInvalid {
+		return exploreAdoptFailClosed
+	}
+	return exploreAdoptMergeIntoTarget
 }
 
 func validateExploreCanonicalFeedURL(raw string) error {

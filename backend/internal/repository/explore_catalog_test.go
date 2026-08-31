@@ -176,6 +176,33 @@ func TestExploreCatalogAdoptionSQLPreservesCanonicalMergeInvariants(t *testing.T
 	}
 }
 
+func TestExploreAdoptionDecisionUsesExplicitMergePointers(t *testing.T) {
+	const sourceID, targetID, otherID = 1, 2, 3
+	ptr := func(id int) *int { return &id }
+	for _, tc := range []struct {
+		name           string
+		source, target exploreAdoptionSourceState
+		want           exploreAdoptionDecision
+	}{
+		{"pending into valid", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationPending}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationValid}, exploreAdoptMergeIntoTarget},
+		{"invalid into valid", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationValid}, exploreAdoptMergeIntoTarget},
+		{"valid source adopts ordinary invalid target", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationValid}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid}, exploreAdoptMergeIntoTarget},
+		{"pending source adopts ordinary invalid target", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationPending}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid}, exploreAdoptMergeIntoTarget},
+		{"source already merged into target", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid, MergedIntoSourceID: ptr(targetID)}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationValid}, exploreAdoptReturnTarget},
+		{"target was merged into source", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationValid}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid, MergedIntoSourceID: ptr(sourceID)}, exploreAdoptPreserveSource},
+		{"both invalid without explicit relation fail closed", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid}, exploreAdoptFailClosed},
+		{"source points elsewhere", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid, MergedIntoSourceID: ptr(otherID)}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationValid}, exploreAdoptFailClosed},
+		{"target points elsewhere", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationValid}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid, MergedIntoSourceID: ptr(otherID)}, exploreAdoptFailClosed},
+		{"cycle fails closed", exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid, MergedIntoSourceID: ptr(targetID)}, exploreAdoptionSourceState{ValidationStatus: model.ExploreValidationInvalid, MergedIntoSourceID: ptr(sourceID)}, exploreAdoptFailClosed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decideExploreAdoption(sourceID, targetID, tc.source, tc.target); got != tc.want {
+				t.Fatalf("decision=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateExploreCanonicalFeedURL(t *testing.T) {
 	valid := []string{
 		"https://example.com/feed",
@@ -309,9 +336,10 @@ func TestExploreCatalogMergesCanonicalObservationsAndKeepsLoser(t *testing.T) {
 		t.Fatal(err)
 	}
 	var loserStatus, loserError string
+	var mergedIntoSourceID sql.NullInt64
 	var loserHealth float64
 	var loserBroken bool
-	if err := db.QueryRow(`SELECT validation_status,health_score,is_broken,last_error FROM recommended_feeds WHERE id=$1`, loserID).Scan(&loserStatus, &loserHealth, &loserBroken, &loserError); err != nil {
+	if err := db.QueryRow(`SELECT validation_status,health_score,is_broken,last_error,merged_into_source_id FROM recommended_feeds WHERE id=$1`, loserID).Scan(&loserStatus, &loserHealth, &loserBroken, &loserError, &mergedIntoSourceID); err != nil {
 		t.Fatal(err)
 	}
 	var targetTitle, targetETag, targetStatus string
@@ -319,11 +347,112 @@ func TestExploreCatalogMergesCanonicalObservationsAndKeepsLoser(t *testing.T) {
 	if err := db.QueryRow(`SELECT title,etag,validation_status,health_score FROM recommended_feeds WHERE id=$1`, targetID).Scan(&targetTitle, &targetETag, &targetStatus, &targetHealth); err != nil {
 		t.Fatal(err)
 	}
-	if targetObservationCount != 2 || loserObservationCount != 0 || loserStatus != model.ExploreValidationInvalid || loserHealth != 0 || !loserBroken || loserError != fmt.Sprintf("merged into explore source %d", targetID) {
-		t.Fatalf("target obs=%d loser obs=%d loser status=%q health=%v broken=%t error=%q", targetObservationCount, loserObservationCount, loserStatus, loserHealth, loserBroken, loserError)
+	if targetObservationCount != 2 || loserObservationCount != 0 || loserStatus != model.ExploreValidationInvalid || loserHealth != 0 || !loserBroken || loserError != fmt.Sprintf("merged into explore source %d", targetID) || !mergedIntoSourceID.Valid || int(mergedIntoSourceID.Int64) != targetID {
+		t.Fatalf("target obs=%d loser obs=%d loser status=%q health=%v broken=%t error=%q merged_into=%v", targetObservationCount, loserObservationCount, loserStatus, loserHealth, loserBroken, loserError, mergedIntoSourceID)
 	}
 	if targetTitle != "canonical title" || targetETag != "target-etag" || targetStatus != model.ExploreValidationValid || targetHealth != 1 {
 		t.Fatalf("target degraded title=%q etag=%q status=%q health=%v", targetTitle, targetETag, targetStatus, targetHealth)
+	}
+}
+
+func TestExploreCatalogAdoptsOrdinaryInvalidCanonicalTarget(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	sourceID := insertCatalogSource(t, db, "https://ordinary-invalid.example/discovered", model.ExploreValidationPending, nil, nil)
+	targetURL := "https://ordinary-invalid.example/feed"
+	targetID := insertCatalogSource(t, db, targetURL, model.ExploreValidationInvalid, nil, nil)
+	providerID := insertCatalogProvider(t, db, "ordinary-invalid-provider", true)
+	insertCatalogObservation(t, db, providerID, sourceID, "source", now)
+
+	canonicalID, merged, err := NewExploreCatalogRepository(db).AdoptDiscoveredFeed(sourceID, targetURL)
+	if err != nil || canonicalID != targetID || !merged {
+		t.Fatalf("adopt ordinary invalid target id=%d want=%d merged=%t err=%v", canonicalID, targetID, merged, err)
+	}
+	var targetObservations int
+	if err := db.QueryRow(`SELECT count(*) FROM explore_source_observations WHERE source_id=$1`, targetID).Scan(&targetObservations); err != nil {
+		t.Fatal(err)
+	}
+	var sourceMergedInto sql.NullInt64
+	if err := db.QueryRow(`SELECT merged_into_source_id FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&sourceMergedInto); err != nil {
+		t.Fatal(err)
+	}
+	if targetObservations != 1 || !sourceMergedInto.Valid || int(sourceMergedInto.Int64) != targetID {
+		t.Fatalf("ordinary invalid target observations=%d source merged_into=%v", targetObservations, sourceMergedInto)
+	}
+}
+
+func TestExploreCatalogConcurrentReverseAdoptionKeepsOneCanonicalSource(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	db.SetMaxOpenConns(4)
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	aURL := "https://reverse-adopt.example/a"
+	bURL := "https://reverse-adopt.example/b"
+	aID := insertCatalogSource(t, db, aURL, model.ExploreValidationPending, nil, nil)
+	bID := insertCatalogSource(t, db, bURL, model.ExploreValidationPending, nil, nil)
+	providerID := insertCatalogProvider(t, db, "reverse-adopt-provider", true)
+	insertCatalogObservation(t, db, providerID, aID, "a", now)
+	insertCatalogObservation(t, db, providerID, bID, "b", now)
+
+	start := make(chan struct{})
+	ids := make(chan int, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, request := range []struct {
+		sourceID int
+		target   string
+	}{{aID, bURL}, {bID, aURL}} {
+		request := request
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			id, _, err := NewExploreCatalogRepository(db).AdoptDiscoveredFeed(request.sourceID, request.target)
+			ids <- id
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("reverse adoption failed: %v", err)
+		}
+	}
+	var returned []int
+	for id := range ids {
+		returned = append(returned, id)
+	}
+	if len(returned) != 2 || returned[0] != returned[1] {
+		t.Fatalf("reverse adoption returned competing canonical ids: %v", returned)
+	}
+
+	var validOrPending, invalid, survivorObservations, loserObservations int
+	if err := db.QueryRow(`SELECT count(*) FROM recommended_feeds WHERE id IN ($1,$2) AND validation_status <> 'invalid'`, aID, bID).Scan(&validOrPending); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM recommended_feeds WHERE id IN ($1,$2) AND validation_status = 'invalid'`, aID, bID).Scan(&invalid); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM explore_source_observations WHERE source_id=$1`, returned[0]).Scan(&survivorObservations); err != nil {
+		t.Fatal(err)
+	}
+	loserID := aID
+	if returned[0] == aID {
+		loserID = bID
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM explore_source_observations WHERE source_id=$1`, loserID).Scan(&loserObservations); err != nil {
+		t.Fatal(err)
+	}
+	var loserMergedInto sql.NullInt64
+	if err := db.QueryRow(`SELECT merged_into_source_id FROM recommended_feeds WHERE id=$1`, loserID).Scan(&loserMergedInto); err != nil {
+		t.Fatal(err)
+	}
+	if validOrPending != 1 || invalid != 1 || survivorObservations != 2 || loserObservations != 0 || !loserMergedInto.Valid || int(loserMergedInto.Int64) != returned[0] {
+		t.Fatalf("reverse adoption survivor=%d active=%d invalid=%d survivorObs=%d loserObs=%d loserMergedInto=%v", returned[0], validOrPending, invalid, survivorObservations, loserObservations, loserMergedInto)
 	}
 }
 
