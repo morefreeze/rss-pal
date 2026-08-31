@@ -28,6 +28,20 @@ func TestCopyExploreArticlesSQLMatchesArticleNaturalKeyAndRefreshesDerivedData(t
 			t.Errorf("copy SQL missing %q", required)
 		}
 	}
+	if got := strings.Count(copyExploreArticleUpsertSQL, "articles.content IS DISTINCT FROM EXCLUDED.content"); got != 2 {
+		t.Errorf("owned summary invalidation content checks=%d want=2", got)
+	}
+	if got := strings.Count(copyExploreSharedArticleUpdateSQL, "articles.content IS DISTINCT FROM $4"); got != 2 {
+		t.Errorf("shared summary invalidation content checks=%d want=2", got)
+	}
+	for _, forbidden := range []string{
+		"(articles.title,articles.content,articles.published_at,articles.fetched_at)",
+		"(EXCLUDED.title,EXCLUDED.content,EXCLUDED.published_at,EXCLUDED.fetched_at)",
+	} {
+		if strings.Contains(copyExploreArticleUpsertSQL+copyExploreSharedArticleUpdateSQL, forbidden) {
+			t.Errorf("summary invalidation still depends on non-content tuple %q", forbidden)
+		}
+	}
 }
 
 func TestSubscribePromotesCandidateArticlesWithoutUserSideEffects(t *testing.T) {
@@ -273,6 +287,72 @@ func TestSubscribeSharedFeedCopiesOnlyArticlesVisibleAtUserFloor(t *testing.T) {
 	if sharedCount != 2 {
 		t.Fatalf("shared article count=%d want=2", sharedCount)
 	}
+	if _, err := db.Exec(`
+		UPDATE articles
+		SET summary_brief='shared brief',summary_detailed='shared detailed',word_count=999,reading_minutes=99
+		WHERE feed_id=$1 AND url='https://shared-floor.example/recent'`, sharedFeedID); err != nil {
+		t.Fatal(err)
+	}
+	refetchedAt := now.Add(time.Minute)
+	if _, err := db.Exec(`
+		UPDATE explore_articles SET fetched_at=$2
+		WHERE source_id=$1 AND url='https://shared-floor.example/recent'`, sourceID, refetchedAt); err != nil {
+		t.Fatal(err)
+	}
+	preserved, err := NewSubscribeService(db, func() time.Time { return refetchedAt }).SubscribeOne(userID, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preserved.CopiedArticles != 1 {
+		t.Fatalf("shared fetched-only result=%+v", preserved)
+	}
+	var preservedBrief, preservedDetailed sql.NullString
+	var preservedWordCount, preservedReadingMinutes int
+	if err := db.QueryRow(`
+		SELECT summary_brief,summary_detailed,word_count,reading_minutes
+		FROM articles
+		WHERE feed_id=$1 AND url='https://shared-floor.example/recent'`, sharedFeedID).Scan(
+		&preservedBrief, &preservedDetailed, &preservedWordCount, &preservedReadingMinutes,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !preservedBrief.Valid || preservedBrief.String != "shared brief" ||
+		!preservedDetailed.Valid || preservedDetailed.String != "shared detailed" {
+		t.Fatalf("shared fetched-only refresh cleared summaries brief=%#v detailed=%#v", preservedBrief, preservedDetailed)
+	}
+	if preservedWordCount != 2 || preservedReadingMinutes != 1 {
+		t.Fatalf("shared preserved-content metrics=%d/%d want=2/1", preservedWordCount, preservedReadingMinutes)
+	}
+
+	contentFetchedAt := refetchedAt.Add(time.Minute)
+	if _, err := db.Exec(`
+		UPDATE explore_articles SET content='updated shared body',fetched_at=$2
+		WHERE source_id=$1 AND url='https://shared-floor.example/recent'`, sourceID, contentFetchedAt); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := NewSubscribeService(db, func() time.Time { return contentFetchedAt }).SubscribeOne(userID, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.CopiedArticles != 1 {
+		t.Fatalf("shared content-change result=%+v", changed)
+	}
+	var changedBrief, changedDetailed sql.NullString
+	var changedWordCount, changedReadingMinutes int
+	if err := db.QueryRow(`
+		SELECT summary_brief,summary_detailed,word_count,reading_minutes
+		FROM articles
+		WHERE feed_id=$1 AND url='https://shared-floor.example/recent'`, sharedFeedID).Scan(
+		&changedBrief, &changedDetailed, &changedWordCount, &changedReadingMinutes,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if changedBrief.Valid || changedDetailed.Valid {
+		t.Fatalf("shared content refresh retained summaries brief=%#v detailed=%#v", changedBrief, changedDetailed)
+	}
+	if changedWordCount != 3 || changedReadingMinutes != 1 {
+		t.Fatalf("shared changed-content metrics=%d/%d want=3/1", changedWordCount, changedReadingMinutes)
+	}
 
 	ownedSourceID := seedSubscribeSource(t, db, userID, "https://owned-floor.example/feed", "Owned", "valid", now)
 	if _, err := db.Exec(`
@@ -314,12 +394,11 @@ func TestSubscribeRefreshClearsStaleSummariesAndRecomputesMetrics(t *testing.T) 
 		WHERE feed_id=$1`, first.FeedID); err != nil {
 		t.Fatal(err)
 	}
-	newPublished := published.Add(time.Minute)
 	newFetched := now.Add(time.Minute)
 	if _, err := db.Exec(`
 		UPDATE explore_articles
-		SET title='New title',content='<p>Hello <strong>world</strong></p>',published_at=$2,fetched_at=$3
-		WHERE source_id=$1`, sourceID, newPublished, newFetched); err != nil {
+		SET fetched_at=$2
+		WHERE source_id=$1`, sourceID, newFetched); err != nil {
 		t.Fatal(err)
 	}
 
@@ -330,6 +409,39 @@ func TestSubscribeRefreshClearsStaleSummariesAndRecomputesMetrics(t *testing.T) 
 	if again.FeedID != first.FeedID || again.Created || again.CopiedArticles != 1 {
 		t.Fatalf("again=%+v first=%+v", again, first)
 	}
+	var preservedBrief, preservedDetailed sql.NullString
+	var preservedWordCount, preservedReadingMinutes int
+	if err := db.QueryRow(`
+		SELECT summary_brief,summary_detailed,word_count,reading_minutes
+		FROM articles WHERE feed_id=$1`, first.FeedID).Scan(
+		&preservedBrief, &preservedDetailed, &preservedWordCount, &preservedReadingMinutes,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !preservedBrief.Valid || preservedBrief.String != "stale brief" ||
+		!preservedDetailed.Valid || preservedDetailed.String != "stale detailed" {
+		t.Fatalf("fetched_at-only refresh cleared summaries brief=%#v detailed=%#v", preservedBrief, preservedDetailed)
+	}
+	if preservedWordCount != 2 || preservedReadingMinutes != 1 {
+		t.Fatalf("preserved-content metrics=%d/%d want=2/1", preservedWordCount, preservedReadingMinutes)
+	}
+
+	newPublished := published.Add(time.Minute)
+	contentFetched := newFetched.Add(time.Minute)
+	if _, err := db.Exec(`
+		UPDATE explore_articles
+		SET title='New title',content='<p>Hello <strong>world</strong></p>',published_at=$2,fetched_at=$3
+		WHERE source_id=$1`, sourceID, newPublished, contentFetched); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := NewSubscribeService(db, func() time.Time { return contentFetched }).SubscribeOne(userID, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.FeedID != first.FeedID || changed.Created || changed.CopiedArticles != 1 {
+		t.Fatalf("changed=%+v first=%+v", changed, first)
+	}
+
 	var title, content sql.NullString
 	var gotPublished, gotFetched sql.NullTime
 	var brief, detailed sql.NullString
@@ -342,7 +454,7 @@ func TestSubscribeRefreshClearsStaleSummariesAndRecomputesMetrics(t *testing.T) 
 		t.Fatal(err)
 	}
 	if title.String != "New title" || content.String != "<p>Hello <strong>world</strong></p>" ||
-		!gotPublished.Valid || !gotPublished.Time.Equal(newPublished) || !gotFetched.Valid || !gotFetched.Time.Equal(newFetched) {
+		!gotPublished.Valid || !gotPublished.Time.Equal(newPublished) || !gotFetched.Valid || !gotFetched.Time.Equal(contentFetched) {
 		t.Fatalf("refreshed title=%q content=%q published=%v fetched=%v", title.String, content.String, gotPublished, gotFetched)
 	}
 	if brief.Valid || detailed.Valid {
