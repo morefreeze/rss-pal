@@ -11,6 +11,7 @@
 - 探索文章和正式订阅数据严格分开，阅读探索文章绝不隐式订阅。
 - 页面默认可立即打开；推荐计算和联网抓取在后台完成。
 - 北京时间 08:00–24:00 的活跃时段内每 3 小时更新一次，00:00–08:00 不更新。
+- 推荐来源抓取使用持久化队列；每个抓取轮次全局最多消费 500 个任务，超出部分保留到后续轮次。
 - 多用户的推荐画像、反馈和快照相互隔离；公开候选内容可以安全复用。
 
 ## 已确认的产品规则
@@ -112,11 +113,35 @@ provider 清单由版本化的默认 manifest 初始化，内容更新由上游�
 
 Registry Aggregator 在每个用户快照时段前 30 分钟同步一次，使用 ETag / Last-Modified 避免重复下载。provider 连续失败时启用退避和熔断；其最后成功 observation 仍可使用，但超过 7 天未成功同步的 provider 不再单独证明一个新来源可推荐。
 
+Aggregator 和 Discoverer 只把待校验或待更新的来源幂等写入持久化抓取队列，不直接发起批量网络请求。队列消费者在每个 provider 同步轮次后运行一次；一个轮次全局最多认领 500 个任务。任务超过 500 时继续保持 `pending`，由后续轮次按优先级消费。
+
 首版不依赖新的第三方搜索服务。任何 adapter 只提出候选 URL，不能绕过后续安全和内容校验。
 
 关联发现不得持久化“由哪个用户、哪篇私人文章发现”这类来源信息。公共缓存只记录通用 observation，例如 provider、provider 内的公开 key、首次/最近观察时间和公开分类。
 
-### 3. Source Validator and Cache Fetcher
+### 3. Explore Fetch Queue
+
+抓取队列负责把候选发现与真实网络访问解耦，保证任务不因进程重启、上游突发大量条目或单轮限额而丢失。
+
+生产者先 upsert 一个 `pending` 候选源，再按 `(source_id, task_type)` 幂等入队。首版 `task_type` 包含：
+
+- `validate_source`：安全检查、feed autodiscovery、格式和活跃度校验；
+- `refresh_articles`：刷新已通过校验来源的最近文章。
+
+消费者每轮必须遵循以下硬约束：
+
+- 单个逻辑轮次全局最多认领 500 个任务，不是每个进程各 500 个。
+- 500 是不可突破的硬上限；部署配置只能把单轮额度调低，不能调高到 500 以上。
+- 使用数据库轮次唯一键和 advisory lock 保证同一轮只有一个 dispatcher；多个执行进程也不能合计突破 500。
+- 在事务内使用 `FOR UPDATE SKIP LOCKED LIMIT 500` 认领任务并写入同一个 `run_id`。
+- 500 是任务吞吐上限，不是网络并发数。真实请求由单独的 `EXPLORE_FETCH_CONCURRENCY` 控制，默认 5。
+- 优先级依次为：与当前用户画像直接相关的来源、结构化 provider 新来源、已验证来源刷新、其他关联发现；同优先级按等待时间增加 age boost，避免长期饥饿。
+- 网络或临时上游错误释放为带 `not_before` 的 `pending` 并指数退避；进程崩溃后租约到期的任务可重新认领。
+- 安全校验确定失败或 feed 明确无效时进入终态 `invalid`，不无限重试；任务记录和失败原因仍保留用于诊断。
+
+快照生成不等待队列清空，只使用已成功校验和抓取的公共缓存。队列积压时继续展示上一批可用结果。
+
+### 4. Source Validator and Cache Fetcher
 
 负责安全校验、RSS 解析、健康探测及公共候选文章缓存。它复用现有 RSS 抓取和正文提取能力，但使用探索专属的仓储。
 
@@ -134,7 +159,7 @@ Registry Aggregator 在每个用户快照时段前 30 分钟同步一次，使�
 
 校验失败的来源不进入用户快照。已有来源暂时抓取失败时更新健康状态，但保留上一次成功缓存；持续失败后标为不可推荐。
 
-### 4. Explore Ranker
+### 5. Explore Ranker
 
 每个刷新时段为每位用户生成最多 12 个候选源。每个候选源最多缓存并参与本批展示最近 5 篇文章。
 
@@ -148,7 +173,7 @@ Registry Aggregator 在每个用户快照时段前 30 分钟同步一次，使�
 
 Ranker 输出候选源分数、主要主题和简短可解释理由。AI 可以辅助归纳订阅画像和生成自然语言理由，但 URL 发现、校验、过滤和最终候选集合不依赖 AI 输出。AI 不可用时，系统使用分类、关键词、域名和健康度进行确定性排序。
 
-### 5. Explore Snapshot Publisher
+### 6. Explore Snapshot Publisher
 
 把完整结果作为新快照一次性发布。生成过程先写 `pending` 批次；来源校验、文章缓存和排名全部成功后，在一个事务中写入批次来源并把批次标为 `done`。
 
@@ -187,6 +212,37 @@ Ranker 输出候选源分数、主要主题和简短可解释理由。AI 可以�
 - 唯一键 `(provider_id, external_key, source_id)`
 
 一个来源可以同时来自多个 provider。Ranker 使用 provider 独立性、观察新鲜度和重复出现次数评估供给置信度。
+
+### `explore_fetch_runs`
+
+记录全局抓取轮次并强制 500 上限：
+
+- `id`
+- `window_at`，该 provider 同步轮次的规范化时间，唯一
+- `status`：`running`、`done`、`failed`
+- `claimed_count`，约束为 `0 <= claimed_count <= 500`
+- `started_at`、`completed_at`
+- `worker_id`、`error_message`
+
+dispatcher 必须先创建或锁定当前 `window_at` 的 run，只有持有数据库 advisory lock 的实例可以认领任务。run 已经认领过任务时，其他实例只能恢复租约任务或读取状态，不能再追加第 501 个任务。
+
+### `explore_fetch_queue`
+
+持久化待抓取任务：
+
+- `id`
+- `source_id`，引用 `recommended_feeds`
+- `task_type`：`validate_source`、`refresh_articles`
+- `status`：`pending`、`leased`、`done`、`invalid`
+- `priority`
+- `not_before`
+- `attempts`
+- `run_id`，可为空，引用 `explore_fetch_runs`
+- `lease_owner`、`lease_expires_at`
+- `last_error`
+- `created_at`、`updated_at`、`completed_at`
+
+部分唯一索引保证同一来源和任务类型最多存在一个 `pending` 或 `leased` 任务。重复 observation 只提高已有任务优先级并更新 `updated_at`，保留原 `created_at` 供 age boost 使用，不新增重复请求。
 
 ### 扩展 `recommended_feeds`
 
@@ -288,7 +344,7 @@ USING (app_rls_bypass() OR user_id = app_current_user_id())
 WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 ```
 
-它们必须加入 `rls_leak_test.go` 和迁移烟测矩阵。`explore_registry_providers`、`explore_source_observations`、`recommended_feeds` 与 `explore_articles` 是全局公开供给或内容缓存，不保存用户画像，不启用用户 RLS；只能通过已认证 API 读取正文。
+它们必须加入 `rls_leak_test.go` 和迁移烟测矩阵。`explore_registry_providers`、`explore_source_observations`、`explore_fetch_runs`、`explore_fetch_queue`、`recommended_feeds` 与 `explore_articles` 是全局公开供给、任务或内容缓存，不保存用户画像，不启用用户 RLS；只能通过已认证 API 读取正文。
 
 ### 正式订阅 URL 唯一性
 
@@ -438,6 +494,9 @@ WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 - 单个来源失败只影响该来源，不中止整个批次。
 - AI 失败使用确定性画像和理由模板。
 - 某个 provider 失败时使用其他 provider 和该 provider 的最后成功 observation；全部 provider 暂时失败时继续使用上一次已校验的公共候选缓存。
+- 单轮待抓取任务超过 500 时只认领前 500 个，其余任务保持 `pending`，不得丢弃、标记完成或绕过队列直接抓取。
+- 多 worker 并发启动时由全局 run 和 advisory lock 共同保证该轮总认领数不超过 500。
+- 消费者崩溃时，已租约任务在 `lease_expires_at` 后回到可认领状态；恢复过程仍计入原 run 的 500 上限，不创建额外配额。
 - 整批发布失败继续读取上一批 `done` 快照。
 - 批量订阅使用事务，避免部分成功。
 - 同一刷新时段由数据库唯一键防重；抢占失败的 worker 读取现有批次状态，不重复执行。
@@ -460,6 +519,9 @@ WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 - 来源画像权重顺序：订阅信号高于行为信号，显式反馈高于二者。
 - OPML、Directory、RedditLinkStream、GitHubAwesome 和 RelatedSite adapters；ETag 条件同步、provider 退避、stale provider、`rel=alternate`、相关外链数量限制和重复 URL。
 - 多 provider observation 合并、结构化目录单源准入、重复外链门槛和单个 provider 失效时持续供给。
+- 抓取队列 0、1、499、500、501 和大量积压边界；501 个任务时只认领 500 个且剩余 1 个保持 `pending`。
+- 多消费者竞争同一轮时合计最多认领 500 个；重复生产幂等、优先级与 age boost、失败退避、租约过期和进程重启恢复。
+- `claimed_count` 数据库约束和 dispatcher advisory lock，证明不存在第 501 个任务绕过路径。
 - SSRF：私网 IP、回环、非 HTTP 协议、凭据 URL、重定向到私网和响应过大。
 - RSS 校验、新鲜度无豁免、健康度退化和恢复。
 - `published` / `captured` 两种排序与现有文章排序 helper 共用；来源多样性调整稳定且不打乱同源内部顺序。
@@ -507,8 +569,9 @@ WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id())
 4. 单个和批量订阅后，来源进入正式订阅且缓存文章立即可见。
 5. 隐藏源和降低主题推荐即时生效并可撤销。
 6. 每日六个刷新时段准确、幂等；夜间 8 小时不更新。
-7. AI、单个 provider、联网发现或单个来源失败时仍有可用结果，普通候选供给不依赖管理员补充。
-8. 多用户画像不泄漏，且不同用户可订阅同一个公开 URL。
+7. 每个抓取轮次全局最多消费 500 个任务，超过上限的任务持久化等待，进程重启后不会丢失。
+8. AI、单个 provider、联网发现或单个来源失败时仍有可用结果，普通候选供给不依赖管理员补充。
+9. 多用户画像不泄漏，且不同用户可订阅同一个公开 URL。
 
 ## 非目标
 
