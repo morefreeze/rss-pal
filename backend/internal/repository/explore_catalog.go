@@ -336,13 +336,14 @@ func (r *ExploreCatalogRepository) AdoptDiscoveredFeed(sourceID int, canonicalFe
 		return 0, false, err
 	}
 	if currentNormalized == canonicalFeedURL {
-		if err := lockExploreSourceForWrite(q, sourceID); err != nil {
+		canonicalID, merged, err := resolveExploreSameURLAdoption(q, sourceID)
+		if err != nil {
 			return 0, false, err
 		}
 		if err := commit(); err != nil {
 			return 0, false, err
 		}
-		return sourceID, false, nil
+		return canonicalID, merged, nil
 	}
 
 	var targetID int
@@ -375,13 +376,14 @@ func (r *ExploreCatalogRepository) AdoptDiscoveredFeed(sourceID int, canonicalFe
 		return sourceID, false, nil
 	}
 	if targetID == sourceID {
-		if err := lockExploreSourceForWrite(q, sourceID); err != nil {
+		canonicalID, merged, err := resolveExploreSameURLAdoption(q, sourceID)
+		if err != nil {
 			return 0, false, err
 		}
 		if err := commit(); err != nil {
 			return 0, false, err
 		}
-		return sourceID, false, nil
+		return canonicalID, merged, nil
 	}
 	if err := lockExploreSourcePair(q, sourceID, targetID); err != nil {
 		return 0, false, err
@@ -665,7 +667,7 @@ func lockExploreSourcePair(q Querier, firstID, secondID int) error {
 		return err
 	}
 	if locked != 2 {
-		return fmt.Errorf("explore source pair %d,%d not found", firstID, secondID)
+		return fmt.Errorf("%w: explore source pair %d,%d not found", ErrExploreCanonicalAdoptionConflict, firstID, secondID)
 	}
 	return nil
 }
@@ -677,6 +679,65 @@ func loadExploreAdoptionSourceState(q Querier, sourceID int) (exploreAdoptionSou
 		return exploreAdoptionSourceState{}, exploreSourceNotFoundError(sourceID)
 	}
 	return state, err
+}
+
+// resolveExploreSameURLAdoption distinguishes an ordinary canonical source
+// from a merge tombstone. It reads the direct pointer before taking row locks
+// so a tombstone pair can always be locked in ID order. If an initially
+// ordinary row gains a pointer while waiting for its single-row lock, this
+// attempt fails closed instead of acquiring a second lock out of order.
+func resolveExploreSameURLAdoption(q Querier, sourceID int) (int, bool, error) {
+	source, err := loadExploreAdoptionSourceState(q, sourceID)
+	if err != nil {
+		return 0, false, err
+	}
+	if source.MergedIntoSourceID == nil {
+		if err := lockExploreSourceForWrite(q, sourceID); err != nil {
+			return 0, false, err
+		}
+		lockedSource, err := loadExploreAdoptionSourceState(q, sourceID)
+		if err != nil {
+			return 0, false, err
+		}
+		if lockedSource.MergedIntoSourceID != nil {
+			return 0, false, exploreSameURLAdoptionConflict(sourceID, *lockedSource.MergedIntoSourceID)
+		}
+		return sourceID, false, nil
+	}
+
+	targetID := *source.MergedIntoSourceID
+	if targetID == sourceID {
+		return 0, false, exploreSameURLAdoptionConflict(sourceID, targetID)
+	}
+	if err := lockExploreSourcePair(q, sourceID, targetID); err != nil {
+		return 0, false, err
+	}
+	lockedSource, err := loadExploreAdoptionSourceState(q, sourceID)
+	if err != nil {
+		return 0, false, err
+	}
+	lockedTarget, err := loadExploreAdoptionSourceState(q, targetID)
+	if err != nil {
+		return 0, false, exploreSameURLAdoptionConflict(sourceID, targetID)
+	}
+	if decideExploreSameURLAdoption(sourceID, targetID, lockedSource, lockedTarget) != exploreAdoptReturnTarget {
+		return 0, false, exploreSameURLAdoptionConflict(sourceID, targetID)
+	}
+	return targetID, true, nil
+}
+
+func decideExploreSameURLAdoption(sourceID, targetID int, source, target exploreAdoptionSourceState) exploreAdoptionDecision {
+	if source.MergedIntoSourceID == nil {
+		return exploreAdoptPreserveSource
+	}
+	if sourceID == targetID || *source.MergedIntoSourceID != targetID || target.MergedIntoSourceID != nil {
+		return exploreAdoptFailClosed
+	}
+	return exploreAdoptReturnTarget
+}
+
+func exploreSameURLAdoptionConflict(sourceID, targetID int) error {
+	return fmt.Errorf("%w: same-URL source %d target %d", ErrExploreCanonicalAdoptionConflict, sourceID, targetID)
 }
 
 func decideExploreAdoption(sourceID, targetID int, source, target exploreAdoptionSourceState) exploreAdoptionDecision {

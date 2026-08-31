@@ -203,6 +203,28 @@ func TestExploreAdoptionDecisionUsesExplicitMergePointers(t *testing.T) {
 	}
 }
 
+func TestExploreSameURLAdoptionDecisionRejectsNonRootTargets(t *testing.T) {
+	const sourceID, targetID, otherID = 1, 2, 3
+	ptr := func(id int) *int { return &id }
+	for _, tc := range []struct {
+		name           string
+		source, target exploreAdoptionSourceState
+		want           exploreAdoptionDecision
+	}{
+		{"ordinary source stays canonical", exploreAdoptionSourceState{}, exploreAdoptionSourceState{}, exploreAdoptPreserveSource},
+		{"direct tombstone returns root", exploreAdoptionSourceState{MergedIntoSourceID: ptr(targetID)}, exploreAdoptionSourceState{}, exploreAdoptReturnTarget},
+		{"chain fails closed", exploreAdoptionSourceState{MergedIntoSourceID: ptr(targetID)}, exploreAdoptionSourceState{MergedIntoSourceID: ptr(otherID)}, exploreAdoptFailClosed},
+		{"cycle fails closed", exploreAdoptionSourceState{MergedIntoSourceID: ptr(targetID)}, exploreAdoptionSourceState{MergedIntoSourceID: ptr(sourceID)}, exploreAdoptFailClosed},
+		{"self loop fails closed", exploreAdoptionSourceState{MergedIntoSourceID: ptr(sourceID)}, exploreAdoptionSourceState{}, exploreAdoptFailClosed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decideExploreSameURLAdoption(sourceID, targetID, tc.source, tc.target); got != tc.want {
+				t.Fatalf("decision=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateExploreCanonicalFeedURL(t *testing.T) {
 	valid := []string{
 		"https://example.com/feed",
@@ -263,6 +285,78 @@ func TestExploreCatalogAdoptsCanonicalURLWithoutConflict(t *testing.T) {
 	}
 	if feedURL != "https://feeds.example/profile.xml" || normalizedURL != feedURL || siteURL.String != "https://discovery.example/profile" {
 		t.Fatalf("adopted url=%q normalized=%q site=%v", feedURL, normalizedURL, siteURL)
+	}
+}
+
+func TestExploreCatalogSameURLResolvesOnlyDirectCanonicalTombstone(t *testing.T) {
+	t.Run("ordinary source returns itself", func(t *testing.T) {
+		db, cleanup := testdb.New(t)
+		defer cleanup()
+		feedURL := "https://same-url-ordinary.example/feed"
+		sourceID := insertCatalogSource(t, db, feedURL, model.ExploreValidationPending, nil, nil)
+
+		canonicalID, merged, err := NewExploreCatalogRepository(db).AdoptDiscoveredFeed(sourceID, feedURL)
+		if err != nil || canonicalID != sourceID || merged {
+			t.Fatalf("ordinary same URL id=%d want=%d merged=%t err=%v", canonicalID, sourceID, merged, err)
+		}
+	})
+
+	t.Run("direct tombstone returns root", func(t *testing.T) {
+		db, cleanup := testdb.New(t)
+		defer cleanup()
+		aURL := "https://same-url-tombstone.example/a"
+		bURL := "https://same-url-tombstone.example/b"
+		aID := insertCatalogSource(t, db, aURL, model.ExploreValidationPending, nil, nil)
+		bID := insertCatalogSource(t, db, bURL, model.ExploreValidationValid, nil, nil)
+		repo := NewExploreCatalogRepository(db)
+		if canonicalID, merged, err := repo.AdoptDiscoveredFeed(aID, bURL); err != nil || canonicalID != bID || !merged {
+			t.Fatalf("stage tombstone id=%d want=%d merged=%t err=%v", canonicalID, bID, merged, err)
+		}
+
+		canonicalID, merged, err := repo.AdoptDiscoveredFeed(aID, aURL)
+		if err != nil || canonicalID != bID || !merged {
+			t.Fatalf("same URL tombstone id=%d want root=%d merged=%t err=%v", canonicalID, bID, merged, err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		stage func(t *testing.T, db *sql.DB, aID, bID, cID int)
+	}{
+		{"chain", func(t *testing.T, db *sql.DB, aID, bID, cID int) {
+			_, err := db.Exec(`UPDATE recommended_feeds SET merged_into_source_id=CASE id WHEN $1 THEN $2 WHEN $2 THEN $3 END WHERE id IN ($1,$2)`, aID, bID, cID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"cycle", func(t *testing.T, db *sql.DB, aID, bID, _ int) {
+			_, err := db.Exec(`UPDATE recommended_feeds SET merged_into_source_id=CASE id WHEN $1 THEN $2 WHEN $2 THEN $1 END WHERE id IN ($1,$2)`, aID, bID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"dangling", func(t *testing.T, db *sql.DB, aID, _, _ int) {
+			if _, err := db.Exec(`ALTER TABLE recommended_feeds DROP CONSTRAINT recommended_feeds_merged_into_source_id_fkey`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`UPDATE recommended_feeds SET merged_into_source_id=2147483647 WHERE id=$1`, aID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name+" fails closed", func(t *testing.T) {
+			db, cleanup := testdb.New(t)
+			defer cleanup()
+			aURL := "https://same-url-conflict.example/" + tc.name + "/a"
+			aID := insertCatalogSource(t, db, aURL, model.ExploreValidationInvalid, nil, nil)
+			bID := insertCatalogSource(t, db, "https://same-url-conflict.example/"+tc.name+"/b", model.ExploreValidationInvalid, nil, nil)
+			cID := insertCatalogSource(t, db, "https://same-url-conflict.example/"+tc.name+"/c", model.ExploreValidationValid, nil, nil)
+			tc.stage(t, db, aID, bID, cID)
+
+			if _, _, err := NewExploreCatalogRepository(db).AdoptDiscoveredFeed(aID, aURL); !errors.Is(err, ErrExploreCanonicalAdoptionConflict) {
+				t.Fatalf("same URL %s err=%v want canonical adoption conflict", tc.name, err)
+			}
+		})
 	}
 }
 
