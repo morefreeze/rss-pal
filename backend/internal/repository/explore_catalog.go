@@ -10,6 +10,8 @@ import (
 	"github.com/lib/pq"
 )
 
+var ErrExploreArticleBatchTooLarge = errors.New("explore article batch exceeds 50")
+
 const (
 	maxExploreDueSources = 500
 
@@ -53,9 +55,22 @@ const (
 	exploreFetchSuccessSQL = `
 		UPDATE recommended_feeds
 		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
-		    last_fetched_at=$2, etag=COALESCE(NULLIF($3,''),etag),
-		    last_modified=COALESCE(NULLIF($4,''),last_modified),
+		    last_fetched_at=$2, etag=NULLIF($3,''),
+		    last_modified=NULLIF($4,''),
 		    health_score=1, last_error=NULL, is_broken=false
+		WHERE id=$1`
+
+	exploreValidationValidSQL = `
+		UPDATE recommended_feeds
+		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
+		    etag=NULLIF($3,''), last_modified=NULLIF($4,''),
+		    health_score=1, last_error=NULL, is_broken=false
+		WHERE id=$1`
+
+	exploreFetchNotModifiedSQL = `
+		UPDATE recommended_feeds
+		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
+		    last_fetched_at=$2, health_score=1, last_error=NULL, is_broken=false
 		WHERE id=$1`
 
 	exploreArticleUpsertSQL = `
@@ -63,15 +78,38 @@ const (
 		(source_id,url,normalized_url,title,content,excerpt,published_at,fetched_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (source_id,normalized_url) DO UPDATE SET
-			url=EXCLUDED.url, title=EXCLUDED.title,
-			content=COALESCE(EXCLUDED.content,explore_articles.content),
-			excerpt=COALESCE(EXCLUDED.excerpt,explore_articles.excerpt),
-			published_at=COALESCE(EXCLUDED.published_at,explore_articles.published_at),
-			fetched_at=EXCLUDED.fetched_at, updated_at=CURRENT_TIMESTAMP
+			url=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN EXCLUDED.url ELSE explore_articles.url END,
+			title=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN EXCLUDED.title ELSE explore_articles.title END,
+			content=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.content,explore_articles.content) ELSE explore_articles.content END,
+			excerpt=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.excerpt,explore_articles.excerpt) ELSE explore_articles.excerpt END,
+			published_at=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.published_at,explore_articles.published_at) ELSE explore_articles.published_at END,
+			fetched_at=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN EXCLUDED.fetched_at ELSE explore_articles.fetched_at END,
+			updated_at=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN CURRENT_TIMESTAMP ELSE explore_articles.updated_at END
 		RETURNING id`
 
 	exploreSourceWriteLockSQL = `
 		SELECT id FROM recommended_feeds WHERE id=$1 FOR UPDATE`
+
+	exploreDueSourcesSQL = `
+		SELECT ` + exploreSourceColumns + `
+		FROM recommended_feeds source
+		WHERE EXISTS (
+			SELECT 1
+			FROM explore_source_observations observation
+			JOIN explore_registry_providers provider ON provider.id=observation.provider_id
+			WHERE observation.source_id = source.id AND provider.enabled
+		) AND ((
+			source.validation_status = 'pending'
+			AND (source.last_checked_at IS NULL OR source.last_checked_at <= $1)
+		) OR (
+			source.validation_status = 'valid'
+			AND (COALESCE(source.last_checked_at,source.last_fetched_at) IS NULL
+			     OR COALESCE(source.last_checked_at,source.last_fetched_at) <= $2)
+		))
+		ORDER BY CASE WHEN source.validation_status = 'pending' THEN 0 ELSE 1 END,
+		         CASE WHEN source.validation_status = 'pending' THEN source.last_checked_at ELSE COALESCE(source.last_checked_at,source.last_fetched_at) END ASC NULLS FIRST,
+		         source.id ASC
+		LIMIT $3`
 )
 
 // ExploreCatalogObservation joins public evidence to its provider metadata.
@@ -80,6 +118,7 @@ type ExploreCatalogObservation struct {
 	model.ExploreSourceObservation
 	ProviderKey           string
 	ProviderKind          string
+	ProviderEnabled       bool
 	ProviderTopic         *string
 	ProviderLastSuccessAt *time.Time
 }
@@ -118,7 +157,7 @@ func (r *ExploreCatalogRepository) GetSourceWithObservations(sourceID int) (*Exp
 		       observation.external_key, observation.provider_tags,
 		       observation.first_seen_at, observation.last_seen_at,
 		       observation.occurrence_count, provider.provider_key,
-		       provider.provider_kind, provider.topic, provider.last_success_at
+		       provider.provider_kind, provider.enabled, provider.topic, provider.last_success_at
 		FROM explore_source_observations observation
 		JOIN explore_registry_providers provider ON provider.id = observation.provider_id
 		WHERE observation.source_id = $1
@@ -135,7 +174,7 @@ func (r *ExploreCatalogRepository) GetSourceWithObservations(sourceID int) (*Exp
 			&observation.ID, &observation.ProviderID, &observation.SourceID,
 			&observation.ExternalKey, &tags, &observation.FirstSeenAt,
 			&observation.LastSeenAt, &observation.OccurrenceCount,
-			&observation.ProviderKey, &observation.ProviderKind,
+			&observation.ProviderKey, &observation.ProviderKind, &observation.ProviderEnabled,
 			&observation.ProviderTopic, &observation.ProviderLastSuccessAt,
 		); err != nil {
 			return nil, err
@@ -146,8 +185,8 @@ func (r *ExploreCatalogRepository) GetSourceWithObservations(sourceID int) (*Exp
 	return result, rows.Err()
 }
 
-// ListDueSources returns canonical source rows only. Non-valid sources use
-// their health-check clock; valid sources use their last successful fetch.
+// ListDueSources returns observed canonical rows only. Pending sources use
+// their validation clock; valid sources use the latest check/fetch clock.
 func (r *ExploreCatalogRepository) ListDueSources(validationDueBefore, refreshDueBefore time.Time, limit int) ([]model.ExploreSource, error) {
 	if limit <= 0 {
 		return []model.ExploreSource{}, nil
@@ -155,21 +194,7 @@ func (r *ExploreCatalogRepository) ListDueSources(validationDueBefore, refreshDu
 	if limit > maxExploreDueSources {
 		limit = maxExploreDueSources
 	}
-	rows, err := r.db.Query(`
-		SELECT `+exploreSourceColumns+`
-		FROM recommended_feeds
-		WHERE (
-			validation_status = 'pending'
-			AND (last_checked_at IS NULL OR last_checked_at <= $1)
-		) OR (
-			validation_status = 'valid'
-			AND (COALESCE(last_checked_at,last_fetched_at) IS NULL
-			     OR COALESCE(last_checked_at,last_fetched_at) <= $2)
-		)
-		ORDER BY CASE WHEN validation_status = 'pending' THEN 0 ELSE 1 END,
-		         CASE WHEN validation_status = 'pending' THEN last_checked_at ELSE COALESCE(last_checked_at,last_fetched_at) END ASC NULLS FIRST,
-		         id ASC
-		LIMIT $3`, validationDueBefore, refreshDueBefore, limit)
+	rows, err := r.db.Query(exploreDueSourcesSQL, validationDueBefore, refreshDueBefore, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -194,13 +219,7 @@ func (r *ExploreCatalogRepository) MarkValidationPending(sourceID int) error {
 }
 
 func (r *ExploreCatalogRepository) MarkValidationValid(sourceID int, checkedAt time.Time, etag, lastModified string) error {
-	result, err := r.db.Exec(`
-		UPDATE recommended_feeds
-		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
-		    etag=COALESCE(NULLIF($3,''),etag),
-		    last_modified=COALESCE(NULLIF($4,''),last_modified),
-		    health_score=1, last_error=NULL, is_broken=false
-		WHERE id=$1`, sourceID, checkedAt, etag, lastModified)
+	result, err := r.db.Exec(exploreValidationValidSQL, sourceID, checkedAt, etag, lastModified)
 	return expectExploreSourceUpdate(result, err, sourceID)
 }
 
@@ -227,6 +246,13 @@ func (r *ExploreCatalogRepository) RecordFetchSuccess(sourceID int, fetchedAt ti
 	return expectExploreSourceUpdate(result, err, sourceID)
 }
 
+// RecordFetchNotModified records a successful 304 without changing the
+// validators saved from the last 200 response.
+func (r *ExploreCatalogRepository) RecordFetchNotModified(sourceID int, fetchedAt time.Time) error {
+	result, err := r.db.Exec(exploreFetchNotModifiedSQL, sourceID, fetchedAt)
+	return expectExploreSourceUpdate(result, err, sourceID)
+}
+
 func (r *ExploreCatalogRepository) UpsertArticle(article model.ExploreArticle) (int, error) {
 	if article.SourceID <= 0 || article.URL == "" || article.NormalizedURL == "" || article.Title == "" {
 		return 0, errors.New("source, URL, normalized URL, and title are required")
@@ -245,6 +271,9 @@ func (r *ExploreCatalogRepository) UpsertArticle(article model.ExploreArticle) (
 // called with a pool. When already bound to a transaction it joins that outer
 // transaction without taking ownership of commit or rollback.
 func (r *ExploreCatalogRepository) UpsertArticles(sourceID int, articles []model.ExploreArticle, retainedAt time.Time) error {
+	if len(articles) > 50 {
+		return ErrExploreArticleBatchTooLarge
+	}
 	if sourceID <= 0 {
 		return errors.New("explore source id must be positive")
 	}
