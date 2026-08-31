@@ -319,6 +319,28 @@ func (d SortDir) sql() string {
 	return "DESC"
 }
 
+const (
+	ArticleAliasFormal  = "articles"
+	ArticleAliasExplore = "explore_articles"
+)
+
+// ArticleOrderClause is the single source of truth for chronological article
+// ordering. The alias is deliberately restricted to internal constants: it is
+// interpolated into SQL and must never accept request input.
+func ArticleOrderClause(alias string, sort SortMode, dir SortDir) string {
+	if alias != ArticleAliasFormal && alias != ArticleAliasExplore {
+		return ""
+	}
+	direction := dir.sql()
+	if sort == SortCaptured {
+		return fmt.Sprintf("ORDER BY %s.fetched_at %s", alias, direction)
+	}
+	return fmt.Sprintf(
+		"ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(%s.published_at, %s.fetched_at), %s.fetched_at - INTERVAL '7 days')) %s, COALESCE(%s.published_at, %s.fetched_at) %s",
+		alias, alias, alias, direction, alias, alias, direction,
+	)
+}
+
 func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool, sort SortMode, dir SortDir) ([]model.Article, error) {
 	filter := ArticleFilter{
 		UserID:     userID,
@@ -344,19 +366,7 @@ JOIN feeds ON articles.feed_id = feeds.id` + joins
 		}
 	}
 
-	switch sort {
-	case SortCaptured:
-		// Strict capture-time order: a freshly bookmarked tweet always
-		// appears at the top, even if its published_at is months old.
-		query += fmt.Sprintf(" ORDER BY articles.fetched_at %s LIMIT $%d OFFSET $%d", dir.sql(), nextArg, nextArg+1)
-	default:
-		// Sort by GREATEST(published_at, fetched_at): typical articles
-		// (published ≤ fetched) keep chronological feel, but backfilled articles
-		// from newly-added feeds (old published_at, recent fetched_at) bubble up
-		// briefly so the new subscription is visible on /articles page 1.
-		d := dir.sql()
-		query += fmt.Sprintf(" ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(articles.published_at, articles.fetched_at), articles.fetched_at - INTERVAL '7 days')) %s, COALESCE(articles.published_at, articles.fetched_at) %s LIMIT $%d OFFSET $%d", d, d, nextArg, nextArg+1)
-	}
+	query += fmt.Sprintf(" %s LIMIT $%d OFFSET $%d", ArticleOrderClause(ArticleAliasFormal, sort, dir), nextArg, nextArg+1)
 	args = append(args, limit, offset)
 
 	rows, err := r.db.Query(query, args...)
