@@ -157,11 +157,100 @@ func TestExploreRankColdStartLimitsAndDeterminism(t *testing.T) {
 
 func TestExploreRankSanitizesNonFiniteAndFutureMetadata(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	candidate := rankFixture(1, "topic", nil, "provider", now.Add(365*24*time.Hour))
+	candidate := rankFixture(1, "topic", nil, "provider", now)
 	candidate.HealthScore = math.Inf(1)
 	ranked := RankExploreCandidates(BuildExploreProfile(ProfileInput{Now: now}), []RankCandidate{candidate}, now)
 	if len(ranked) != 1 || math.IsNaN(ranked[0].Score) || math.IsInf(ranked[0].Score, 0) {
 		t.Fatalf("ranked=%+v", ranked)
+	}
+}
+
+func TestExploreRankSourceVariantUsesStrictRawTotalOrder(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	upper := rankFixture(1, "Go", []string{"BackEnd", "systems"}, "Provider", now)
+	upper.Articles[0].Title = "Alpha Article"
+	upper.Articles[0].Tags = []string{"X", "y"}
+	lower := rankFixture(1, "go", []string{"backend", "Systems"}, "Provider", now)
+	lower.Articles[0].Title = "alpha article"
+	lower.Articles[0].Tags = []string{"x", "Y"}
+	profile := BuildExploreProfile(ProfileInput{Now: now, Subscriptions: []SubscriptionSignalInput{{Tags: []string{"backend"}}}})
+	baseline := RankExploreCandidates(profile, []RankCandidate{upper, lower}, now)
+	if len(baseline) != 1 {
+		t.Fatalf("source variants=%+v", baseline)
+	}
+	for seed := int64(1); seed <= 10; seed++ {
+		variants := []RankCandidate{upper, lower}
+		rand.New(rand.NewSource(seed)).Shuffle(len(variants), func(i, j int) { variants[i], variants[j] = variants[j], variants[i] })
+		if got := RankExploreCandidates(profile, variants, now); !reflect.DeepEqual(got, baseline) {
+			t.Fatalf("seed %d changed raw variant winner\nbase=%+v\ngot=%+v", seed, baseline, got)
+		}
+	}
+}
+
+func TestExploreRankArticlesDeduplicatePositiveIDBeforeLimit(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	candidate := rankFixture(1, "topic", nil, "provider", now)
+	candidate.Articles = []RankArticle{
+		{ID: 10, Title: "Alpha", Tags: []string{"X"}, PublishedAt: now},
+		{ID: 10, Title: "alpha", Tags: []string{"x"}, PublishedAt: now},
+		{ID: 0, Title: "invalid zero", PublishedAt: now.Add(time.Hour)},
+		{ID: -1, Title: "invalid negative", PublishedAt: now.Add(time.Hour)},
+		{ID: 11, Title: "eleven", PublishedAt: now.Add(-time.Hour)},
+		{ID: 12, Title: "twelve", PublishedAt: now.Add(-2 * time.Hour)},
+		{ID: 13, Title: "thirteen", PublishedAt: now.Add(-3 * time.Hour)},
+		{ID: 14, Title: "fourteen", PublishedAt: now.Add(-4 * time.Hour)},
+		{ID: 15, Title: "fifteen", PublishedAt: now.Add(-5 * time.Hour)},
+	}
+	profile := BuildExploreProfile(ProfileInput{Now: now})
+	baseline := RankExploreCandidates(profile, []RankCandidate{candidate}, now)
+	if len(baseline) != 1 {
+		t.Fatalf("deduplicated articles=%+v", baseline)
+	}
+	if got := rankArticleIDs(baseline[0].Articles); !reflect.DeepEqual(got, []int{10, 11, 12, 13, 14}) {
+		t.Fatalf("deduplicated article ids=%v", got)
+	}
+	for seed := int64(1); seed <= 10; seed++ {
+		shuffled := candidate
+		shuffled.Articles = append([]RankArticle(nil), candidate.Articles...)
+		rand.New(rand.NewSource(seed)).Shuffle(len(shuffled.Articles), func(i, j int) {
+			shuffled.Articles[i], shuffled.Articles[j] = shuffled.Articles[j], shuffled.Articles[i]
+		})
+		if got := RankExploreCandidates(profile, []RankCandidate{shuffled}, now); !reflect.DeepEqual(got, baseline) {
+			t.Fatalf("seed %d changed article variant winner\nbase=%+v\ngot=%+v", seed, baseline, got)
+		}
+	}
+}
+
+func TestExploreRankArticlesCleanFutureTimesWithFallbackAndBoundary(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	candidate := rankFixture(1, "topic", nil, "provider", now)
+	candidate.Articles = []RankArticle{
+		{ID: 1, Title: "fallback fetched", PublishedAt: now.Add(6 * time.Minute), FetchedAt: now.Add(-time.Hour)},
+		{ID: 2, Title: "future fetched only", FetchedAt: now.Add(6 * time.Minute)},
+		{ID: 3, Title: "clock skew boundary", PublishedAt: now.Add(5 * time.Minute), FetchedAt: now},
+		{ID: 4, Title: "valid published", PublishedAt: now.Add(-2 * time.Hour), FetchedAt: now.Add(6 * time.Minute)},
+		{ID: 5, Title: "both future", PublishedAt: now.Add(6 * time.Minute), FetchedAt: now.Add(7 * time.Minute)},
+		{ID: 6, Title: "both missing"},
+	}
+	ranked := RankExploreCandidates(BuildExploreProfile(ProfileInput{Now: now}), []RankCandidate{candidate}, now)
+	if len(ranked) != 1 || !reflect.DeepEqual(rankArticleIDs(ranked[0].Articles), []int{3, 1, 4}) {
+		t.Fatalf("cleaned future articles=%+v", ranked)
+	}
+	byID := rankArticlesByID(ranked[0].Articles)
+	if !byID[1].PublishedAt.IsZero() || !byID[1].FetchedAt.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("future published did not fall back to fetched: %+v", byID[1])
+	}
+	if !byID[3].PublishedAt.Equal(now.Add(5 * time.Minute)) {
+		t.Fatalf("clock skew boundary was removed: %+v", byID[3])
+	}
+	if !byID[4].FetchedAt.IsZero() || !byID[4].PublishedAt.Equal(now.Add(-2*time.Hour)) {
+		t.Fatalf("future fetched was retained: %+v", byID[4])
+	}
+	cutoff := now.Add(5 * time.Minute)
+	for _, article := range ranked[0].Articles {
+		if article.PublishedAt.After(cutoff) || article.FetchedAt.After(cutoff) {
+			t.Fatalf("future timestamp escaped: %+v", article)
+		}
 	}
 }
 
@@ -221,4 +310,20 @@ func rankedScores(ranked []RankedSource) []float64 {
 		scores[index] = ranked[index].Score
 	}
 	return scores
+}
+
+func rankArticleIDs(articles []RankArticle) []int {
+	ids := make([]int, len(articles))
+	for index := range articles {
+		ids[index] = articles[index].ID
+	}
+	return ids
+}
+
+func rankArticlesByID(articles []RankArticle) map[int]RankArticle {
+	result := make(map[int]RankArticle, len(articles))
+	for _, article := range articles {
+		result[article.ID] = article
+	}
+	return result
 }

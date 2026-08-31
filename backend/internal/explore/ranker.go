@@ -1,6 +1,7 @@
 package explore
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"sort"
@@ -129,6 +130,7 @@ func RankExploreCandidates(profile ExploreProfile, candidates []RankCandidate, n
 			feedbackScore = -4
 		}
 		health := finiteUnit(candidate.HealthScore)
+		candidate.HealthScore = health
 		primaryTopic := normalizeSignalPhrase(candidate.Topic)
 		if primaryTopic == "" {
 			primaryTopic = normalizeSignalPhrase(candidate.Category)
@@ -283,31 +285,82 @@ func observationTopics(observations []RankObservation) []string {
 }
 
 func rankedArticles(input []RankArticle, now time.Time) ([]RankArticle, time.Time) {
-	articles := append([]RankArticle(nil), input...)
+	bestByID := make(map[int]RankArticle, len(input))
+	for _, article := range input {
+		cleaned, ok := cleanRankArticle(article, now)
+		if !ok {
+			continue
+		}
+		current, exists := bestByID[cleaned.ID]
+		if !exists || rankArticleLess(cleaned, current) {
+			bestByID[cleaned.ID] = cleaned
+		}
+	}
+	articles := make([]RankArticle, 0, len(bestByID))
+	for _, article := range bestByID {
+		articles = append(articles, article)
+	}
 	sort.Slice(articles, func(i, j int) bool {
-		left, right := safeArticleTime(articles[i], now), safeArticleTime(articles[j], now)
-		if !left.Equal(right) {
-			return left.After(right)
-		}
-		if articles[i].ID != articles[j].ID {
-			return articles[i].ID < articles[j].ID
-		}
-		return stableRankArticleKey(articles[i]) < stableRankArticleKey(articles[j])
+		return rankArticleLess(articles[i], articles[j])
 	})
 	if len(articles) > MaxRankedArticlesPerSource {
 		articles = articles[:MaxRankedArticlesPerSource]
 	}
 	freshness := time.Time{}
 	if len(articles) > 0 {
-		freshness = safeArticleTime(articles[0], now)
+		freshness = effectiveRankArticleTime(articles[0])
 	}
 	return articles, freshness
+}
+
+func cleanRankArticle(article RankArticle, now time.Time) (RankArticle, bool) {
+	if article.ID <= 0 {
+		return RankArticle{}, false
+	}
+	article.Tags = append([]string(nil), article.Tags...)
+	article.PublishedAt = cleanRankArticleTime(article.PublishedAt, now)
+	article.FetchedAt = cleanRankArticleTime(article.FetchedAt, now)
+	if article.PublishedAt.IsZero() && article.FetchedAt.IsZero() {
+		return RankArticle{}, false
+	}
+	return article, true
+}
+
+func cleanRankArticleTime(value, now time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	value = value.Round(0).UTC()
+	if !now.IsZero() && value.After(now.Add(5*time.Minute)) {
+		return time.Time{}
+	}
+	return value
+}
+
+func rankArticleLess(left, right RankArticle) bool {
+	leftTime, rightTime := effectiveRankArticleTime(left), effectiveRankArticleTime(right)
+	if !leftTime.Equal(rightTime) {
+		return leftTime.After(rightTime)
+	}
+	if left.ID != right.ID {
+		return left.ID < right.ID
+	}
+	return rawRankArticleFingerprint(left) < rawRankArticleFingerprint(right)
+}
+
+func effectiveRankArticleTime(article RankArticle) time.Time {
+	if !article.PublishedAt.IsZero() {
+		return article.PublishedAt
+	}
+	return article.FetchedAt
 }
 
 func boundedRankObservations(input []RankObservation, now time.Time) []RankObservation {
 	observations := make([]RankObservation, 0, len(input))
 	for _, observation := range input {
 		if withinProfileWindow(observation.LastObservedAt, now, 30*24*time.Hour) {
+			observation.LastObservedAt = observation.LastObservedAt.Round(0)
+			observation.Tags = append([]string(nil), observation.Tags...)
 			observations = append(observations, observation)
 		}
 	}
@@ -317,7 +370,10 @@ func boundedRankObservations(input []RankObservation, now time.Time) []RankObser
 		}
 		left := normalizeProviderLabel(observations[i].Provider) + "\x00" + normalizeSignalPhrase(observations[i].Topic) + "\x00" + strings.Join(normalizeSignalList(observations[i].Tags, 20), ",")
 		right := normalizeProviderLabel(observations[j].Provider) + "\x00" + normalizeSignalPhrase(observations[j].Topic) + "\x00" + strings.Join(normalizeSignalList(observations[j].Tags, 20), ",")
-		return left < right
+		if left != right {
+			return left < right
+		}
+		return rawRankObservationFingerprint(observations[i]) < rawRankObservationFingerprint(observations[j])
 	})
 	if len(observations) > maxRankCandidateObservations {
 		observations = observations[:maxRankCandidateObservations]
@@ -334,17 +390,6 @@ func stableRankArticleKey(article RankArticle) string {
 		article.PublishedAt.UTC().Format(time.RFC3339Nano),
 		article.FetchedAt.UTC().Format(time.RFC3339Nano),
 	}, "\x00")
-}
-
-func safeArticleTime(article RankArticle, now time.Time) time.Time {
-	value := article.PublishedAt
-	if value.IsZero() {
-		value = article.FetchedAt
-	}
-	if !now.IsZero() && value.After(now.Add(5*time.Minute)) {
-		return now
-	}
-	return value
 }
 
 func canonicalCandidateProvider(candidate RankCandidate) string {
@@ -406,7 +451,11 @@ func rankCandidateVariantLess(left, right scoredRankCandidate) bool {
 	if !left.freshness.Equal(right.freshness) {
 		return left.freshness.After(right.freshness)
 	}
-	return stableRankCandidateKey(left) < stableRankCandidateKey(right)
+	leftNormalized, rightNormalized := stableRankCandidateKey(left), stableRankCandidateKey(right)
+	if leftNormalized != rightNormalized {
+		return leftNormalized < rightNormalized
+	}
+	return rawRankCandidateFingerprint(left.candidate) < rawRankCandidateFingerprint(right.candidate)
 }
 
 func stableRankCandidateKey(candidate scoredRankCandidate) string {
@@ -431,6 +480,105 @@ func stableRankCandidateKey(candidate scoredRankCandidate) string {
 	sort.Strings(observationParts)
 	parts = append(parts, strings.Join(observationParts, "\x1e"))
 	return strings.Join(parts, "\x00")
+}
+
+func rawRankCandidateFingerprint(candidate RankCandidate) string {
+	fingerprint := make([]byte, 0, 256)
+	fingerprint = appendRankInt(fingerprint, candidate.SourceID)
+	fingerprint = appendRankString(fingerprint, candidate.Title)
+	fingerprint = appendRankString(fingerprint, candidate.Category)
+	fingerprint = appendRankString(fingerprint, candidate.Domain)
+	fingerprint = appendRankString(fingerprint, candidate.Topic)
+	fingerprint = appendRankStrings(fingerprint, candidate.Tags)
+	fingerprint = appendRankString(fingerprint, candidate.ValidationStatus)
+	fingerprint = appendRankBool(fingerprint, candidate.IsBroken)
+	fingerprint = appendRankOptionalInt(fingerprint, candidate.MergedIntoSourceID)
+	fingerprint = appendRankUint64(fingerprint, math.Float64bits(candidate.HealthScore))
+	fingerprint = appendRankString(fingerprint, candidate.Provider)
+	fingerprint = appendRankUint64(fingerprint, uint64(len(candidate.Observations)))
+	for _, observation := range candidate.Observations {
+		fingerprint = appendRankBytes(fingerprint, []byte(rawRankObservationFingerprint(observation)))
+	}
+	fingerprint = appendRankUint64(fingerprint, uint64(len(candidate.Articles)))
+	for _, article := range candidate.Articles {
+		fingerprint = appendRankBytes(fingerprint, []byte(rawRankArticleFingerprint(article)))
+	}
+	return string(fingerprint)
+}
+
+func rawRankObservationFingerprint(observation RankObservation) string {
+	fingerprint := make([]byte, 0, 96)
+	fingerprint = appendRankString(fingerprint, observation.Provider)
+	fingerprint = appendRankString(fingerprint, observation.Topic)
+	fingerprint = appendRankStrings(fingerprint, observation.Tags)
+	fingerprint = appendRankTime(fingerprint, observation.LastObservedAt)
+	return string(fingerprint)
+}
+
+func rawRankArticleFingerprint(article RankArticle) string {
+	fingerprint := make([]byte, 0, 128)
+	fingerprint = appendRankInt(fingerprint, article.ID)
+	fingerprint = appendRankString(fingerprint, article.Title)
+	fingerprint = appendRankString(fingerprint, article.Topic)
+	fingerprint = appendRankStrings(fingerprint, article.Tags)
+	fingerprint = appendRankTime(fingerprint, article.PublishedAt)
+	fingerprint = appendRankTime(fingerprint, article.FetchedAt)
+	return string(fingerprint)
+}
+
+func appendRankString(fingerprint []byte, value string) []byte {
+	return appendRankBytes(fingerprint, []byte(value))
+}
+
+func appendRankStrings(fingerprint []byte, values []string) []byte {
+	fingerprint = appendRankUint64(fingerprint, uint64(len(values)))
+	for _, value := range values {
+		fingerprint = appendRankString(fingerprint, value)
+	}
+	return fingerprint
+}
+
+func appendRankBytes(fingerprint, value []byte) []byte {
+	fingerprint = appendRankUint64(fingerprint, uint64(len(value)))
+	return append(fingerprint, value...)
+}
+
+func appendRankInt(fingerprint []byte, value int) []byte {
+	return appendRankUint64(fingerprint, uint64(int64(value)))
+}
+
+func appendRankOptionalInt(fingerprint []byte, value *int) []byte {
+	if value == nil {
+		return appendRankBool(fingerprint, false)
+	}
+	fingerprint = appendRankBool(fingerprint, true)
+	return appendRankInt(fingerprint, *value)
+}
+
+func appendRankBool(fingerprint []byte, value bool) []byte {
+	if value {
+		return append(fingerprint, 1)
+	}
+	return append(fingerprint, 0)
+}
+
+func appendRankTime(fingerprint []byte, value time.Time) []byte {
+	if value.IsZero() {
+		return appendRankBool(fingerprint, false)
+	}
+	fingerprint = appendRankBool(fingerprint, true)
+	value = value.Round(0)
+	fingerprint = appendRankString(fingerprint, value.Format(time.RFC3339Nano))
+	fingerprint = appendRankString(fingerprint, value.Location().String())
+	zoneName, zoneOffset := value.Zone()
+	fingerprint = appendRankString(fingerprint, zoneName)
+	return appendRankInt(fingerprint, zoneOffset)
+}
+
+func appendRankUint64(fingerprint []byte, value uint64) []byte {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], value)
+	return append(fingerprint, encoded[:]...)
 }
 
 func finiteUnit(value float64) float64 {
