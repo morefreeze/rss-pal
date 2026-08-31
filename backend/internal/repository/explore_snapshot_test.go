@@ -3,9 +3,12 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -62,16 +65,16 @@ func TestExploreSnapshotLatestDoneLocksBatchForConsistentSources(t *testing.T) {
 }
 
 func TestNewExploreGenerationTokenIsOpaqueAndUnique(t *testing.T) {
-	seen := make(map[string]struct{})
+	seen := make(map[ExploreSnapshotGenerationToken]struct{})
 	for i := 0; i < 100; i++ {
 		token, err := newExploreGenerationToken()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(token) != 64 {
-			t.Fatalf("token length=%d", len(token))
+		if len(token.value) != 64 {
+			t.Fatalf("token length=%d", len(token.value))
 		}
-		if _, err := hex.DecodeString(token); err != nil {
+		if _, err := hex.DecodeString(token.value); err != nil {
 			t.Fatalf("token is not hex: %q: %v", token, err)
 		}
 		if _, duplicate := seen[token]; duplicate {
@@ -82,7 +85,8 @@ func TestNewExploreGenerationTokenIsOpaqueAndUnique(t *testing.T) {
 }
 
 func TestExploreSnapshotClaimTokenNeverSerializes(t *testing.T) {
-	encoded, err := json.Marshal(ExploreSnapshotClaim{GenerationToken: "top-secret"})
+	token := ExploreSnapshotGenerationToken{value: "top-secret"}
+	encoded, err := json.Marshal(ExploreSnapshotClaim{GenerationToken: token})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,6 +94,70 @@ func TestExploreSnapshotClaimTokenNeverSerializes(t *testing.T) {
 		t.Fatalf("generation token leaked through JSON: %s", encoded)
 	}
 }
+
+func TestExploreSnapshotClaimTokenNeverFormats(t *testing.T) {
+	const secret = "top-secret-fence-credential"
+	token := ExploreSnapshotGenerationToken{value: secret}
+	claim := ExploreSnapshotClaim{GenerationToken: token}
+
+	var _ fmt.Stringer = token
+	var _ fmt.GoStringer = token
+	for _, value := range []any{token, claim, &claim} {
+		for _, format := range []string{"%v", "%+v", "%#v"} {
+			formatted := fmt.Sprintf(format, value)
+			if strings.Contains(formatted, secret) {
+				t.Fatalf("generation token leaked through format %q for %T: %s", format, value, formatted)
+			}
+		}
+	}
+}
+
+func TestExploreSnapshotPublishChecksFenceBeforePayload(t *testing.T) {
+	exploreSnapshotNoRowsDriverOnce.Do(func() {
+		sql.Register("explore-snapshot-no-rows", exploreSnapshotNoRowsDriver{})
+	})
+	db, err := sql.Open("explore-snapshot-no-rows", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = NewExploreSnapshotRepository(db).Publish(
+		1,
+		ExploreSnapshotGenerationToken{value: "stale-token"},
+		nil,
+	)
+	if !errors.Is(err, ErrExploreSnapshotFence) {
+		t.Fatalf("stale token with invalid payload error=%v, want fence", err)
+	}
+}
+
+type exploreSnapshotNoRowsDriver struct{}
+
+var exploreSnapshotNoRowsDriverOnce sync.Once
+
+func (exploreSnapshotNoRowsDriver) Open(string) (driver.Conn, error) {
+	return exploreSnapshotNoRowsConn{}, nil
+}
+
+type exploreSnapshotNoRowsConn struct{}
+
+func (exploreSnapshotNoRowsConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare is not supported")
+}
+func (exploreSnapshotNoRowsConn) Close() error { return nil }
+func (exploreSnapshotNoRowsConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("begin is not supported")
+}
+func (exploreSnapshotNoRowsConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	return exploreSnapshotNoRows{}, nil
+}
+
+type exploreSnapshotNoRows struct{}
+
+func (exploreSnapshotNoRows) Columns() []string         { return []string{"exists"} }
+func (exploreSnapshotNoRows) Close() error              { return nil }
+func (exploreSnapshotNoRows) Next([]driver.Value) error { return io.EOF }
 
 func TestExploreSnapshotMigrationDefinesGenerationFence(t *testing.T) {
 	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "038_subscription_explore.sql"))
@@ -157,7 +225,7 @@ func TestExploreSnapshotClaimHasSingleOwnerAndRotatesOnlyStaleOrFailed(t *testin
 	close(results)
 	close(errs)
 	owners := 0
-	var originalToken string
+	var originalToken ExploreSnapshotGenerationToken
 	var batchID int
 	for result := range results {
 		if result.acquired {
@@ -176,11 +244,11 @@ func TestExploreSnapshotClaimHasSingleOwnerAndRotatesOnlyStaleOrFailed(t *testin
 	}
 
 	first, acquired, err := repo.Claim(userID, slot, now.Add(30*time.Minute), time.Hour)
-	if err != nil || acquired || first.GenerationToken != "" {
+	if err != nil || acquired || !first.GenerationToken.IsZero() {
 		t.Fatalf("fresh claim leaked ownership: claim=%+v acquired=%t err=%v", first, acquired, err)
 	}
 	stale, acquired, err := repo.Claim(userID, slot, now.Add(2*time.Hour), time.Hour)
-	if err != nil || !acquired || stale.GenerationToken == "" {
+	if err != nil || !acquired || stale.GenerationToken.IsZero() {
 		t.Fatalf("stale adoption claim=%+v acquired=%t err=%v", stale, acquired, err)
 	}
 	if stale.GenerationToken == originalToken {
@@ -235,7 +303,7 @@ func TestExploreSnapshotPublishIsAtomicFencedAndLatestDoneWins(t *testing.T) {
 	if err != nil || !acquired {
 		t.Fatalf("claim=%+v acquired=%t err=%v", claim, acquired, err)
 	}
-	if _, err := repo.Publish(claim.Batch.ID, "wrong-token", []ExploreSnapshotSourceInput{{SourceID: validA}}); !errors.Is(err, ErrExploreSnapshotFence) {
+	if _, err := repo.Publish(claim.Batch.ID, ExploreSnapshotGenerationToken{value: "wrong-token"}, []ExploreSnapshotSourceInput{{SourceID: validA}}); !errors.Is(err, ErrExploreSnapshotFence) {
 		t.Fatalf("wrong-token publish error=%v", err)
 	}
 	for name, sourceID := range map[string]int{"invalid": invalid, "broken": broken, "merged": merged} {

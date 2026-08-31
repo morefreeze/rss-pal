@@ -45,9 +45,27 @@ type ExploreSnapshotSourceInput struct {
 	Reason   string
 }
 
+// ExploreSnapshotGenerationToken is an opaque fence credential. It can be
+// passed back to Publish or Fail, but formatting it never reveals its value.
+type ExploreSnapshotGenerationToken struct {
+	value string
+}
+
+func (ExploreSnapshotGenerationToken) String() string {
+	return "[REDACTED]"
+}
+
+func (ExploreSnapshotGenerationToken) GoString() string {
+	return "repository.ExploreSnapshotGenerationToken{[REDACTED]}"
+}
+
+func (token ExploreSnapshotGenerationToken) IsZero() bool {
+	return token.value == ""
+}
+
 type ExploreSnapshotClaim struct {
-	Batch           model.ExploreBatch `json:"batch"`
-	GenerationToken string             `json:"-"`
+	Batch           model.ExploreBatch             `json:"batch"`
+	GenerationToken ExploreSnapshotGenerationToken `json:"-"`
 }
 
 type ExploreSnapshotRepository struct {
@@ -94,7 +112,7 @@ func (r *ExploreSnapshotRepository) Claim(userID int, slotAt, now time.Time, sta
 		ON CONFLICT (user_id, slot_at) DO NOTHING
 		RETURNING id, user_id, slot_at, status, source_count, error_message,
 		          generation_token, started_at, created_at, completed_at
-	`, userID, slotAt, token, now))
+	`, userID, slotAt, token.value, now))
 	if err == nil {
 		if err := commit(); err != nil {
 			return nil, false, err
@@ -138,7 +156,7 @@ func (r *ExploreSnapshotRepository) Claim(userID int, slotAt, now time.Time, sta
 		WHERE id=$1 AND user_id=$2 AND status<>'done'
 		RETURNING id, user_id, slot_at, status, source_count, error_message,
 		          generation_token, started_at, created_at, completed_at
-	`, batch.ID, userID, token, now))
+	`, batch.ID, userID, token.value, now))
 	if err != nil {
 		return nil, false, err
 	}
@@ -151,9 +169,12 @@ func (r *ExploreSnapshotRepository) Claim(userID int, slotAt, now time.Time, sta
 // Publish validates the complete result before opening its short transaction,
 // locks all current valid canonical sources, rewrites rank, and atomically
 // marks the fenced batch done.
-func (r *ExploreSnapshotRepository) Publish(batchID int, token string, values []ExploreSnapshotSourceInput) (*model.ExploreBatch, error) {
-	if batchID <= 0 || token == "" {
+func (r *ExploreSnapshotRepository) Publish(batchID int, token ExploreSnapshotGenerationToken, values []ExploreSnapshotSourceInput) (*model.ExploreBatch, error) {
+	if batchID <= 0 || token.IsZero() {
 		return nil, ErrExploreSnapshotFence
+	}
+	if err := r.verifyExploreSnapshotFence(batchID, token); err != nil {
+		return nil, err
 	}
 	if err := validateExploreSnapshotSources(values); err != nil {
 		return nil, err
@@ -169,7 +190,7 @@ func (r *ExploreSnapshotRepository) Publish(batchID int, token string, values []
 		FROM explore_batches
 		WHERE id=$1 AND generation_token=$2 AND status='pending'
 		FOR UPDATE
-	`, batchID, token))
+	`, batchID, token.value))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrExploreSnapshotFence
 	}
@@ -218,7 +239,7 @@ func (r *ExploreSnapshotRepository) Publish(batchID int, token string, values []
 		WHERE id=$1 AND generation_token=$2 AND status='pending'
 		RETURNING id, user_id, slot_at, status, source_count, error_message,
 		          generation_token, started_at, created_at, completed_at
-	`, batch.ID, token, len(values)))
+	`, batch.ID, token.value, len(values)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrExploreSnapshotFence
 	}
@@ -231,8 +252,20 @@ func (r *ExploreSnapshotRepository) Publish(batchID int, token string, values []
 	return batch, nil
 }
 
-func (r *ExploreSnapshotRepository) Fail(batchID int, token string, cause error) error {
-	if batchID <= 0 || token == "" {
+func (r *ExploreSnapshotRepository) verifyExploreSnapshotFence(batchID int, token ExploreSnapshotGenerationToken) error {
+	var exists int
+	err := r.db.QueryRow(`
+		SELECT 1 FROM explore_batches
+		WHERE id=$1 AND generation_token=$2 AND status='pending'
+	`, batchID, token.value).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrExploreSnapshotFence
+	}
+	return err
+}
+
+func (r *ExploreSnapshotRepository) Fail(batchID int, token ExploreSnapshotGenerationToken, cause error) error {
+	if batchID <= 0 || token.IsZero() {
 		return ErrExploreSnapshotFence
 	}
 	message := "snapshot generation failed"
@@ -244,7 +277,7 @@ func (r *ExploreSnapshotRepository) Fail(batchID int, token string, cause error)
 		UPDATE explore_batches
 		SET status='failed', error_message=$3, generation_token=NULL, completed_at=CURRENT_TIMESTAMP
 		WHERE id=$1 AND generation_token=$2 AND status='pending'
-	`, batchID, token, message)
+	`, batchID, token.value, message)
 	if err != nil {
 		return err
 	}
@@ -388,10 +421,10 @@ func validateExploreSnapshotSources(values []ExploreSnapshotSourceInput) error {
 	return nil
 }
 
-func newExploreGenerationToken() (string, error) {
+func newExploreGenerationToken() (ExploreSnapshotGenerationToken, error) {
 	value := make([]byte, 32)
 	if _, err := rand.Read(value); err != nil {
-		return "", fmt.Errorf("generate explore snapshot token: %w", err)
+		return ExploreSnapshotGenerationToken{}, fmt.Errorf("generate explore snapshot token: %w", err)
 	}
-	return hex.EncodeToString(value), nil
+	return ExploreSnapshotGenerationToken{value: hex.EncodeToString(value)}, nil
 }
