@@ -122,9 +122,15 @@ func (s *SubscribeService) Subscribe(userID int, sourceIDs []int) ([]SubscribeRe
 		if err != nil {
 			return nil, err
 		}
-		copied, err := copyExploreArticles(tx, userID, source.ID, feed.ID)
-		if err != nil {
-			return nil, err
+		copied := 0
+		// Shared feeds and their articles are global state. A user subscription
+		// only reuses that state; it must never use candidate-cache data to
+		// insert, refresh, or invalidate summaries on the shared feed.
+		if feed.OwnerID != nil {
+			copied, err = copyExploreArticles(tx, userID, source.ID, feed.ID)
+			if err != nil {
+				return nil, err
+			}
 		}
 		bySource[source.ID] = SubscribeResult{
 			SourceID: source.ID, FeedID: feed.ID, Created: created, CopiedArticles: copied,
@@ -183,31 +189,13 @@ func loadPromotableSources(db Querier, userID int, sourceIDs []int, now time.Tim
 }
 
 const copyExploreArticleCandidatesSQL = `
-	SELECT article.title,article.url,article.content,article.published_at,article.fetched_at,
-	       target.owner_id,
-	       COALESCE(
-	           CASE WHEN app_current_user_id()=$3 THEN app_user_shared_floor() END,
-	           subscriber.shared_visible_from,
-	           '1970-01-01'::TIMESTAMP
-	       ) AS shared_floor
+	SELECT article.title,article.url,article.content,article.published_at,article.fetched_at
 	FROM explore_articles article
 	JOIN feeds target ON target.id=$2
-	JOIN users subscriber ON subscriber.id=$3
 	WHERE article.source_id=$1
-	  AND (
-		target.owner_id=$3
-		OR (
-			target.owner_id IS NULL
-			AND article.published_at IS NOT NULL
-			AND article.published_at >= COALESCE(
-				CASE WHEN app_current_user_id()=$3 THEN app_user_shared_floor() END,
-				subscriber.shared_visible_from,
-				'1970-01-01'::TIMESTAMP
-			)
-		)
-	  )
+	  AND target.owner_id=$3
 	ORDER BY article.id
-	FOR SHARE OF target,subscriber`
+	FOR SHARE OF target`
 
 const copyExploreArticleUpsertSQL = `
 	INSERT INTO articles
@@ -226,33 +214,12 @@ const copyExploreArticleUpsertSQL = `
 		word_count=EXCLUDED.word_count,
 		reading_minutes=EXCLUDED.reading_minutes`
 
-const copyExploreSharedArticleUpdateSQL = `
-	UPDATE articles
-	SET summary_brief=CASE WHEN articles.content IS DISTINCT FROM $4
-			THEN NULL ELSE articles.summary_brief END,
-		summary_detailed=CASE WHEN articles.content IS DISTINCT FROM $4
-			THEN NULL ELSE articles.summary_detailed END,
-		title=$2,content=$4,published_at=$5,fetched_at=$6,
-		word_count=$7,reading_minutes=$8
-	WHERE feed_id=$1 AND url=$3
-	  AND parent_article_id IS NULL AND NOT is_clip
-	  AND published_at IS NOT NULL AND published_at >= $9`
-
-const copyExploreSharedArticleInsertSQL = `
-	INSERT INTO articles
-		(feed_id,title,url,content,published_at,fetched_at,word_count,reading_minutes)
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-	ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL AND NOT is_clip
-	DO NOTHING`
-
 type exploreArticleCopyCandidate struct {
 	title       string
 	url         string
 	content     sql.NullString
 	publishedAt sql.NullTime
 	fetchedAt   time.Time
-	ownerID     sql.NullInt64
-	sharedFloor time.Time
 }
 
 func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) {
@@ -266,7 +233,6 @@ func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) 
 		if err := rows.Scan(
 			&candidate.title, &candidate.url, &candidate.content,
 			&candidate.publishedAt, &candidate.fetchedAt,
-			&candidate.ownerID, &candidate.sharedFloor,
 		); err != nil {
 			rows.Close()
 			return 0, err
@@ -296,19 +262,7 @@ func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) 
 			feedID, candidate.title, candidate.url, content, publishedAt,
 			candidate.fetchedAt, wordCount, readingMinutes,
 		}
-		var result sql.Result
-		if candidate.ownerID.Valid {
-			result, err = db.Exec(copyExploreArticleUpsertSQL, args...)
-		} else {
-			result, err = db.Exec(copyExploreSharedArticleUpdateSQL, append(args, candidate.sharedFloor)...)
-			if err == nil {
-				var updated int64
-				updated, err = result.RowsAffected()
-				if err == nil && updated == 0 {
-					result, err = db.Exec(copyExploreSharedArticleInsertSQL, args...)
-				}
-			}
-		}
+		result, err := db.Exec(copyExploreArticleUpsertSQL, args...)
 		if err != nil {
 			return 0, err
 		}

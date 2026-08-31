@@ -12,17 +12,14 @@ import (
 )
 
 func TestCopyExploreArticlesSQLMatchesArticleNaturalKeyAndRefreshesDerivedData(t *testing.T) {
-	sqlText := copyExploreArticleCandidatesSQL + copyExploreArticleUpsertSQL +
-		copyExploreSharedArticleUpdateSQL + copyExploreSharedArticleInsertSQL
+	sqlText := copyExploreArticleCandidatesSQL + copyExploreArticleUpsertSQL
 	for _, required := range []string{
 		"ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL AND NOT is_clip",
-		"published_at IS NOT NULL",
-		"app_user_shared_floor()",
+		"target.owner_id=$3",
 		"summary_brief=CASE WHEN",
 		"summary_detailed=CASE WHEN",
 		"word_count=EXCLUDED.word_count",
 		"reading_minutes=EXCLUDED.reading_minutes",
-		"DO NOTHING",
 	} {
 		if !strings.Contains(sqlText, required) {
 			t.Errorf("copy SQL missing %q", required)
@@ -31,14 +28,14 @@ func TestCopyExploreArticlesSQLMatchesArticleNaturalKeyAndRefreshesDerivedData(t
 	if got := strings.Count(copyExploreArticleUpsertSQL, "articles.content IS DISTINCT FROM EXCLUDED.content"); got != 2 {
 		t.Errorf("owned summary invalidation content checks=%d want=2", got)
 	}
-	if got := strings.Count(copyExploreSharedArticleUpdateSQL, "articles.content IS DISTINCT FROM $4"); got != 2 {
-		t.Errorf("shared summary invalidation content checks=%d want=2", got)
-	}
 	for _, forbidden := range []string{
+		"target.owner_id IS NULL",
+		"app_user_shared_floor()",
+		"shared_visible_from",
 		"(articles.title,articles.content,articles.published_at,articles.fetched_at)",
 		"(EXCLUDED.title,EXCLUDED.content,EXCLUDED.published_at,EXCLUDED.fetched_at)",
 	} {
-		if strings.Contains(copyExploreArticleUpsertSQL+copyExploreSharedArticleUpdateSQL, forbidden) {
+		if strings.Contains(sqlText, forbidden) {
 			t.Errorf("summary invalidation still depends on non-content tuple %q", forbidden)
 		}
 	}
@@ -214,16 +211,14 @@ func TestSubscribeReusesSharedAndConcurrentCallsConverge(t *testing.T) {
 	}
 }
 
-func TestSubscribeSharedFeedCopiesOnlyArticlesVisibleAtUserFloor(t *testing.T) {
+func TestSubscribeSharedFeedNeverMutatesGlobalArticlesAcrossUsers(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
-	userID := seedSubscribeUser(t, db, "subscribe-shared-floor")
-	floor := now.Add(-7 * 24 * time.Hour)
-	if _, err := db.Exec(`UPDATE users SET shared_visible_from=$1 WHERE id=$2`, floor, userID); err != nil {
-		t.Fatal(err)
-	}
+	userID := seedSubscribeUser(t, db, "subscribe-shared-first")
+	otherUserID := seedSubscribeUser(t, db, "subscribe-shared-second")
 	sourceID := seedSubscribeSource(t, db, userID, "https://shared-floor.example/feed", "Shared", "valid", now)
+	otherSourceID := seedSubscribeSource(t, db, otherUserID, "https://shared-floor.example/feed", "Shared", "valid", now)
 	var sharedFeedID int
 	if err := db.QueryRow(`
 		INSERT INTO feeds (url,title) VALUES ('https://shared-floor.example/feed','Shared') RETURNING id`,
@@ -232,143 +227,31 @@ func TestSubscribeSharedFeedCopiesOnlyArticlesVisibleAtUserFloor(t *testing.T) {
 	}
 	if _, err := db.Exec(`
 		INSERT INTO explore_articles (source_id,url,normalized_url,title,content,published_at,fetched_at)
-		VALUES
-			($1,'https://shared-floor.example/recent','https://shared-floor.example/recent','Recent','recent body',$2,$3),
-			($1,'https://shared-floor.example/conflict','https://shared-floor.example/conflict','Candidate conflict','candidate body',$2,$3),
-			($1,'https://shared-floor.example/old','https://shared-floor.example/old','Old','old body',$4,$3),
-			($1,'https://shared-floor.example/undated','https://shared-floor.example/undated','Undated','undated body',NULL,$3)`,
-		sourceID, floor, now, floor.Add(-time.Second)); err != nil {
+		VALUES ($1,'https://shared-floor.example/new','https://shared-floor.example/new','Candidate','candidate body',$2,$2)`,
+		sourceID, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO articles (feed_id,url,title,content,published_at)
-		VALUES ($1,'https://shared-floor.example/conflict','Existing hidden conflict','existing body',$2)`,
-		sharedFeedID, floor.Add(-time.Second)); err != nil {
+		INSERT INTO articles (feed_id,url,title,content,published_at,summary_brief,summary_detailed,word_count,reading_minutes)
+		VALUES ($1,'https://shared-floor.example/existing','Existing','original body',$2,'brief','detailed',77,9)`,
+		sharedFeedID, now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-
-	result, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, sourceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Created || result.FeedID != sharedFeedID || result.CopiedArticles != 1 {
-		t.Fatalf("result=%+v", result)
-	}
-	rows, err := db.Query(`SELECT url,title,content FROM articles WHERE feed_id=$1 ORDER BY url`, sharedFeedID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var url, title, content string
-		if err := rows.Scan(&url, &title, &content); err != nil {
-			t.Fatal(err)
-		}
-		switch url {
-		case "https://shared-floor.example/conflict":
-			if title != "Existing hidden conflict" || content != "existing body" {
-				t.Fatalf("hidden conflict was updated title=%q content=%q", title, content)
-			}
-		case "https://shared-floor.example/recent":
-			if title != "Recent" || content != "recent body" {
-				t.Fatalf("recent copy title=%q content=%q", title, content)
-			}
-		default:
-			t.Fatalf("unexpected shared article %q", url)
+	for _, subscription := range []struct{ userID, sourceID int }{{userID, sourceID}, {otherUserID, otherSourceID}} {
+		result, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(subscription.userID, subscription.sourceID)
+		if err != nil || result.Created || result.FeedID != sharedFeedID || result.CopiedArticles != 0 {
+			t.Fatalf("shared subscription=%+v err=%v", result, err)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	var sharedCount int
-	if err := db.QueryRow(`SELECT count(*) FROM articles WHERE feed_id=$1`, sharedFeedID).Scan(&sharedCount); err != nil {
-		t.Fatal(err)
-	}
-	if sharedCount != 2 {
-		t.Fatalf("shared article count=%d want=2", sharedCount)
-	}
-	if _, err := db.Exec(`
-		UPDATE articles
-		SET summary_brief='shared brief',summary_detailed='shared detailed',word_count=999,reading_minutes=99
-		WHERE feed_id=$1 AND url='https://shared-floor.example/recent'`, sharedFeedID); err != nil {
-		t.Fatal(err)
-	}
-	refetchedAt := now.Add(time.Minute)
-	if _, err := db.Exec(`
-		UPDATE explore_articles SET fetched_at=$2
-		WHERE source_id=$1 AND url='https://shared-floor.example/recent'`, sourceID, refetchedAt); err != nil {
-		t.Fatal(err)
-	}
-	preserved, err := NewSubscribeService(db, func() time.Time { return refetchedAt }).SubscribeOne(userID, sourceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if preserved.CopiedArticles != 1 {
-		t.Fatalf("shared fetched-only result=%+v", preserved)
-	}
-	var preservedBrief, preservedDetailed sql.NullString
-	var preservedWordCount, preservedReadingMinutes int
+	var count, wordCount, readingMinutes int
+	var title, content, brief, detailed string
 	if err := db.QueryRow(`
-		SELECT summary_brief,summary_detailed,word_count,reading_minutes
-		FROM articles
-		WHERE feed_id=$1 AND url='https://shared-floor.example/recent'`, sharedFeedID).Scan(
-		&preservedBrief, &preservedDetailed, &preservedWordCount, &preservedReadingMinutes,
-	); err != nil {
+		SELECT count(*),min(title),min(content),min(summary_brief),min(summary_detailed),min(word_count),min(reading_minutes)
+		FROM articles WHERE feed_id=$1`, sharedFeedID).Scan(&count, &title, &content, &brief, &detailed, &wordCount, &readingMinutes); err != nil {
 		t.Fatal(err)
 	}
-	if !preservedBrief.Valid || preservedBrief.String != "shared brief" ||
-		!preservedDetailed.Valid || preservedDetailed.String != "shared detailed" {
-		t.Fatalf("shared fetched-only refresh cleared summaries brief=%#v detailed=%#v", preservedBrief, preservedDetailed)
-	}
-	if preservedWordCount != 2 || preservedReadingMinutes != 1 {
-		t.Fatalf("shared preserved-content metrics=%d/%d want=2/1", preservedWordCount, preservedReadingMinutes)
-	}
-
-	contentFetchedAt := refetchedAt.Add(time.Minute)
-	if _, err := db.Exec(`
-		UPDATE explore_articles SET content='updated shared body',fetched_at=$2
-		WHERE source_id=$1 AND url='https://shared-floor.example/recent'`, sourceID, contentFetchedAt); err != nil {
-		t.Fatal(err)
-	}
-	changed, err := NewSubscribeService(db, func() time.Time { return contentFetchedAt }).SubscribeOne(userID, sourceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed.CopiedArticles != 1 {
-		t.Fatalf("shared content-change result=%+v", changed)
-	}
-	var changedBrief, changedDetailed sql.NullString
-	var changedWordCount, changedReadingMinutes int
-	if err := db.QueryRow(`
-		SELECT summary_brief,summary_detailed,word_count,reading_minutes
-		FROM articles
-		WHERE feed_id=$1 AND url='https://shared-floor.example/recent'`, sharedFeedID).Scan(
-		&changedBrief, &changedDetailed, &changedWordCount, &changedReadingMinutes,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if changedBrief.Valid || changedDetailed.Valid {
-		t.Fatalf("shared content refresh retained summaries brief=%#v detailed=%#v", changedBrief, changedDetailed)
-	}
-	if changedWordCount != 3 || changedReadingMinutes != 1 {
-		t.Fatalf("shared changed-content metrics=%d/%d want=3/1", changedWordCount, changedReadingMinutes)
-	}
-
-	ownedSourceID := seedSubscribeSource(t, db, userID, "https://owned-floor.example/feed", "Owned", "valid", now)
-	if _, err := db.Exec(`
-		INSERT INTO explore_articles (source_id,url,normalized_url,title,content,published_at,fetched_at)
-		VALUES
-			($1,'https://owned-floor.example/old','https://owned-floor.example/old','Old','old body',$2,$3),
-			($1,'https://owned-floor.example/undated','https://owned-floor.example/undated','Undated','undated body',NULL,$3)`,
-		ownedSourceID, floor.Add(-time.Second), now); err != nil {
-		t.Fatal(err)
-	}
-	owned, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, ownedSourceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !owned.Created || owned.CopiedArticles != 2 {
-		t.Fatalf("owned result=%+v", owned)
+	if count != 1 || title != "Existing" || content != "original body" || brief != "brief" || detailed != "detailed" || wordCount != 77 || readingMinutes != 9 {
+		t.Fatalf("shared global articles changed count=%d title=%q content=%q summaries=%q/%q metrics=%d/%d", count, title, content, brief, detailed, wordCount, readingMinutes)
 	}
 }
 
