@@ -2,6 +2,7 @@ package explore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -90,26 +91,24 @@ func (r Registry) syncOne(ctx context.Context, now time.Time, provider RegistryP
 	adapter, exists := r.Adapters[provider.Kind]
 	if !exists {
 		result.Err = fmt.Errorf("unsupported provider kind %q", provider.Kind)
-		r.recordFailure(provider.ID, now, result.Err)
+		result.Err = errors.Join(result.Err, r.recordFailure(provider.ID, now, result.Err))
 		return result
 	}
 	fetched, err := r.Client.Fetch(ctx, provider.Endpoint, provider.ETag, provider.LastModified)
 	if err != nil {
 		result.Err = err
-		r.recordFailure(provider.ID, now, err)
+		result.Err = errors.Join(result.Err, r.recordFailure(provider.ID, now, err))
 		return result
 	}
 	if fetched.NotModified {
 		result.NotModified = true
-		if err := r.Store.RecordSuccess(provider.ID, now, firstNonEmpty(fetched.ETag, provider.ETag), firstNonEmpty(fetched.LastModified, provider.LastModified)); err != nil {
-			result.Err = err
-		}
+		result.Err = r.recordSuccess(provider, now, fetched)
 		return result
 	}
 	candidates, err := adapter.Parse(Provider{ID: provider.ID, Key: provider.Key, Kind: provider.Kind, Endpoint: provider.Endpoint, Topic: provider.Topic}, fetched.Body)
 	if err != nil {
 		result.Err = err
-		r.recordFailure(provider.ID, now, err)
+		result.Err = errors.Join(result.Err, r.recordFailure(provider.ID, now, err))
 		return result
 	}
 	for _, candidate := range NormalizeCandidates(candidates) {
@@ -119,21 +118,28 @@ func (r Registry) syncOne(ctx context.Context, now time.Time, provider RegistryP
 		}
 		if err != nil {
 			result.Err = err
-			r.recordFailure(provider.ID, now, err)
+			result.Err = errors.Join(result.Err, r.recordFailure(provider.ID, now, err))
 			return result
 		}
 		result.Candidates++
 	}
-	if err := r.Store.RecordSuccess(provider.ID, now, fetched.ETag, fetched.LastModified); err != nil {
-		result.Err = err
-	}
+	result.Err = r.recordSuccess(provider, now, fetched)
 	return result
 }
 
-func (r Registry) recordFailure(providerID int, now time.Time, cause error) {
-	if r.Store != nil {
-		_ = r.Store.RecordFailure(providerID, now, cause)
+func (r Registry) recordFailure(providerID int, now time.Time, cause error) error {
+	if r.Store == nil {
+		return nil
 	}
+	return r.Store.RecordFailure(providerID, now, cause)
+}
+
+func (r Registry) recordSuccess(provider RegistryProvider, now time.Time, fetched ProviderFetchResult) error {
+	err := r.Store.RecordSuccess(provider.ID, now, firstNonEmpty(fetched.ETag, provider.ETag), firstNonEmpty(fetched.LastModified, provider.LastModified))
+	if err == nil {
+		return nil
+	}
+	return errors.Join(err, r.recordFailure(provider.ID, now, err))
 }
 
 func firstNonEmpty(value, fallback string) string {

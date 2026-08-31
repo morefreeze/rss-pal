@@ -55,6 +55,9 @@ func (r *ExploreRegistryRepository) LoadDueProviders(now time.Time) ([]explore.R
 }
 
 func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate explore.Candidate, observedAt time.Time) (int, error) {
+	if err := explore.ValidateCandidate(candidate); err != nil {
+		return 0, fmt.Errorf("invalid explore candidate: %w", err)
+	}
 	if providerID <= 0 || candidate.ExternalKey == "" || candidate.FeedURL == "" {
 		return 0, errors.New("provider, external key, and feed URL are required")
 	}

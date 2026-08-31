@@ -4,6 +4,9 @@ package explore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bytedance/rss-pal/internal/httpx"
 	"github.com/bytedance/rss-pal/internal/util"
@@ -46,6 +50,14 @@ type ProviderAdapter interface {
 const (
 	defaultProviderBodyBytes = 4 << 20
 	providerUserAgent        = "rss-pal-explore/1.0"
+	maxCandidateFeedURLBytes = 2048
+	maxCandidateSiteURLBytes = 2048
+	maxCandidateTitleBytes   = 500
+	maxCandidateTopicBytes   = 100
+	maxCandidateTagCount     = 20
+	maxCandidateKeyBytes     = 500
+	maxProviderCandidates    = 2000
+	maxCandidateOccurrence   = 2147483647
 )
 
 // ProviderClient safely fetches public registry documents. Tests can inject a
@@ -140,6 +152,9 @@ func (c ProviderClient) resolveEndpoint(endpoint string) (string, error) {
 	if u.IsAbs() {
 		return u.String(), nil
 	}
+	if u.Scheme != "" || u.Host != "" {
+		return "", fmt.Errorf("provider endpoint must be an absolute path or absolute URL")
+	}
 	if !strings.HasPrefix(endpoint, "/") || c.rssHubBaseURL == "" {
 		return "", fmt.Errorf("relative provider endpoint requires RSSHub base URL")
 	}
@@ -155,21 +170,13 @@ func (c ProviderClient) resolveEndpoint(endpoint string) (string, error) {
 func NormalizeCandidates(input []Candidate) []Candidate {
 	byURL := make(map[string]Candidate, len(input))
 	for _, raw := range input {
-		feedURL, ok := normalizePublicURL(raw.FeedURL)
+		raw, ok := normalizeCandidate(raw)
 		if !ok {
 			continue
 		}
-		raw.FeedURL = feedURL
-		if siteURL, ok := normalizePublicURL(raw.SiteURL); ok {
-			raw.SiteURL = siteURL
-		} else {
-			raw.SiteURL = ""
-		}
-		if raw.OccurrenceCount < 1 {
-			raw.OccurrenceCount = 1
-		}
+		feedURL := raw.FeedURL
 		if previous, exists := byURL[feedURL]; exists {
-			previous.OccurrenceCount += raw.OccurrenceCount
+			previous.OccurrenceCount = safeOccurrenceAdd(previous.OccurrenceCount, raw.OccurrenceCount)
 			previous.Tags = uniqueStrings(append(previous.Tags, raw.Tags...))
 			if raw.ExternalKey < previous.ExternalKey {
 				previous.ExternalKey = raw.ExternalKey
@@ -199,7 +206,96 @@ func NormalizeCandidates(input []Candidate) []Candidate {
 		}
 		return out[i].FeedURL < out[j].FeedURL
 	})
+	if len(out) > maxProviderCandidates {
+		out = out[:maxProviderCandidates]
+	}
 	return out
+}
+
+// ValidateCandidate is the repository's defensive boundary for values that
+// should already have been normalized by provider adapters.
+func ValidateCandidate(candidate Candidate) error {
+	if candidate.ExternalKey == "" || !utf8.ValidString(candidate.ExternalKey) || len(candidate.ExternalKey) > maxCandidateKeyBytes {
+		return errors.New("invalid candidate external key")
+	}
+	if candidate.FeedURL == "" || !utf8.ValidString(candidate.FeedURL) || len(candidate.FeedURL) > maxCandidateFeedURLBytes {
+		return errors.New("invalid candidate feed URL")
+	}
+	if !utf8.ValidString(candidate.SiteURL) || len(candidate.SiteURL) > maxCandidateSiteURLBytes || !utf8.ValidString(candidate.Title) || len(candidate.Title) > maxCandidateTitleBytes || !utf8.ValidString(candidate.Topic) || len(candidate.Topic) > maxCandidateTopicBytes || len(candidate.Tags) > maxCandidateTagCount {
+		return errors.New("invalid candidate public metadata")
+	}
+	for _, tag := range candidate.Tags {
+		if !utf8.ValidString(tag) || len(tag) > maxCandidateTopicBytes {
+			return errors.New("invalid candidate tag")
+		}
+	}
+	if candidate.OccurrenceCount < 1 || candidate.OccurrenceCount > maxCandidateOccurrence {
+		return errors.New("invalid candidate occurrence count")
+	}
+	return nil
+}
+
+func normalizeCandidate(candidate Candidate) (Candidate, bool) {
+	if !utf8.ValidString(candidate.FeedURL) || len(candidate.FeedURL) > maxCandidateFeedURLBytes {
+		return Candidate{}, false
+	}
+	feedURL, ok := normalizePublicURL(candidate.FeedURL)
+	if !ok || len(feedURL) > maxCandidateFeedURLBytes {
+		return Candidate{}, false
+	}
+	candidate.FeedURL = feedURL
+	if !utf8.ValidString(candidate.SiteURL) || len(candidate.SiteURL) > maxCandidateSiteURLBytes {
+		candidate.SiteURL = ""
+	} else if siteURL, ok := normalizePublicURL(candidate.SiteURL); ok && len(siteURL) <= maxCandidateSiteURLBytes {
+		candidate.SiteURL = siteURL
+	} else {
+		candidate.SiteURL = ""
+	}
+	candidate.Title = clipUTF8(candidate.Title, maxCandidateTitleBytes)
+	candidate.Topic = clipUTF8(candidate.Topic, maxCandidateTopicBytes)
+	if !utf8.ValidString(candidate.ExternalKey) || len(candidate.ExternalKey) > maxCandidateKeyBytes || candidate.ExternalKey == "" {
+		sum := sha256.Sum256([]byte(candidate.ExternalKey + "\x00" + feedURL))
+		candidate.ExternalKey = "sha256:" + hex.EncodeToString(sum[:])
+	}
+	tags := make([]string, 0, maxCandidateTagCount)
+	seen := map[string]struct{}{}
+	for _, tag := range candidate.Tags {
+		tag = clipUTF8(tag, maxCandidateTopicBytes)
+		if tag != "" {
+			if _, ok := seen[tag]; !ok {
+				seen[tag] = struct{}{}
+				tags = append(tags, tag)
+				if len(tags) == maxCandidateTagCount {
+					break
+				}
+			}
+		}
+	}
+	candidate.Tags = uniqueStrings(tags)
+	if candidate.OccurrenceCount < 1 {
+		candidate.OccurrenceCount = 1
+	}
+	if candidate.OccurrenceCount > maxCandidateOccurrence {
+		candidate.OccurrenceCount = maxCandidateOccurrence
+	}
+	return candidate, true
+}
+
+func clipUTF8(value string, limit int) string {
+	value = strings.ToValidUTF8(value, "")
+	if len(value) <= limit {
+		return value
+	}
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
+	}
+	return value[:limit]
+}
+func safeOccurrenceAdd(left, right int) int {
+	if left >= maxCandidateOccurrence-right {
+		return maxCandidateOccurrence
+	}
+	return left + right
 }
 
 func normalizePublicURL(raw string) (string, bool) {
