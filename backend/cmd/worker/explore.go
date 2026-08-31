@@ -20,7 +20,11 @@ const (
 	exploreMaxBatchLimit      = 500
 	exploreDefaultConcurrency = 5
 	exploreDefaultLease       = 20 * time.Minute
-	exploreSnapshotStaleAfter = 45 * time.Minute
+	// A source fetch can consume two independent 20s network phases. The last
+	// queue position must remain leased while earlier concurrency waves finish.
+	exploreTaskWorstCaseDuration = 40 * time.Second
+	exploreLeaseSafetyMargin     = 5 * time.Minute
+	exploreSnapshotStaleAfter    = 45 * time.Minute
 )
 
 type exploreClock interface{ Now() time.Time }
@@ -42,9 +46,20 @@ type exploreTaskHandler interface {
 }
 
 type exploreSnapshotRunner interface {
-	// GenerateAll returns true when at least one user's failed generation may
-	// be retried in the same slot. Successful users remain database-idempotent.
-	GenerateAll(context.Context, time.Time, time.Time) bool
+	GenerateAll(context.Context, time.Time, time.Time) exploreSnapshotGenerationResult
+}
+
+type exploreSnapshotGenerationResult struct {
+	Done            int
+	FailedPersisted int
+	Pending         int
+	FailWriteErrors int
+	TransientErrors int
+	NoWork          int
+}
+
+func (result exploreSnapshotGenerationResult) NeedsRetry() bool {
+	return result.Pending > 0 || result.FailWriteErrors > 0 || result.TransientErrors > 0
 }
 
 type exploreCycleDeps struct {
@@ -83,6 +98,9 @@ func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
 	if deps.leaseDuration <= 0 {
 		deps.leaseDuration = exploreDefaultLease
 	}
+	if required := requiredExploreLeaseDuration(deps.batchLimit, deps.fetchConcurrency); deps.leaseDuration < required {
+		deps.leaseDuration = required
+	}
 	if deps.owner == "" {
 		deps.owner = newExploreWorkerOwner()
 	}
@@ -94,6 +112,17 @@ func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
 		providerWindows: make(map[time.Time]struct{}),
 		snapshotSlots:   make(map[time.Time]struct{}),
 	}
+}
+
+func requiredExploreLeaseDuration(batchLimit, concurrency int) time.Duration {
+	if batchLimit <= 0 || batchLimit > exploreMaxBatchLimit {
+		batchLimit = exploreMaxBatchLimit
+	}
+	if concurrency <= 0 {
+		concurrency = exploreDefaultConcurrency
+	}
+	waves := (batchLimit + concurrency - 1) / concurrency
+	return time.Duration(waves)*exploreTaskWorstCaseDuration + exploreLeaseSafetyMargin
 }
 
 func newExploreWorkerOwner() string {
@@ -114,7 +143,7 @@ func (cycle *exploreCycle) Run(ctx context.Context) {
 	// the last validated cache and deliberately never waits for queue drain.
 	if schedule.HasCurrent && cycle.deps.snapshots != nil && cycle.markSnapshotSlotStarted(schedule.SlotAt) {
 		go func() {
-			if cycle.deps.snapshots.GenerateAll(ctx, schedule.SlotAt, now) {
+			if cycle.deps.snapshots.GenerateAll(ctx, schedule.SlotAt, now).NeedsRetry() {
 				cycle.clearSnapshotSlot(schedule.SlotAt)
 			}
 		}()
@@ -264,36 +293,39 @@ type exploreSnapshotCoordinator struct {
 	logger   *log.Logger
 }
 
-func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotAt, now time.Time) bool {
+func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotAt, now time.Time) exploreSnapshotGenerationResult {
 	started := time.Now()
+	result := exploreSnapshotGenerationResult{}
 	userIDs, err := runner.users.ListUserIDs(ctx)
 	if err != nil {
 		runner.logger.Printf("explore snapshot slot=%s list_users_error=true", slotAt.Format(time.RFC3339))
-		return true
+		result.TransientErrors++
+		return result
 	}
 	candidates, candidateErr := runner.profiles.LoadCandidates(ctx, now)
-	done, failed, skipped := 0, 0, 0
 	for _, userID := range userIDs {
 		claim, owned, err := runner.store.Claim(userID, slotAt, now, exploreSnapshotStaleAfter)
 		if err != nil {
-			failed++
+			result.TransientErrors++
 			runner.logger.Printf("explore snapshot user_id=%d slot=%s claim_error=true", userID, slotAt.Format(time.RFC3339))
 			continue
 		}
 		if !owned || claim == nil {
-			skipped++
+			if claim == nil || claim.Batch.Status == model.ExploreBatchPending {
+				result.Pending++
+			} else {
+				result.NoWork++
+			}
 			continue
 		}
 		if candidateErr != nil {
-			failed++
-			_ = runner.store.Fail(claim.Batch.ID, claim.GenerationToken, safeExploreError("candidate input unavailable"))
+			runner.recordSnapshotFailure(&result, claim, safeExploreError("candidate input unavailable"))
 			runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s input_error=true", claim.Batch.ID, userID, slotAt.Format(time.RFC3339))
 			continue
 		}
 		profileInput, err := runner.profiles.LoadProfile(ctx, userID, now)
 		if err != nil {
-			failed++
-			_ = runner.store.Fail(claim.Batch.ID, claim.GenerationToken, safeExploreError("profile input unavailable"))
+			runner.recordSnapshotFailure(&result, claim, safeExploreError("profile input unavailable"))
 			runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s profile_error=true", claim.Batch.ID, userID, slotAt.Format(time.RFC3339))
 			continue
 		}
@@ -304,16 +336,23 @@ func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotA
 			values[index] = repository.ExploreSnapshotSourceInput{SourceID: value.SourceID, Score: value.Score, Topic: value.Topic, Reason: value.Reason}
 		}
 		if _, err := runner.store.Publish(claim.Batch.ID, claim.GenerationToken, values); err != nil {
-			failed++
-			_ = runner.store.Fail(claim.Batch.ID, claim.GenerationToken, safeExploreError("snapshot publish failed"))
+			runner.recordSnapshotFailure(&result, claim, safeExploreError("snapshot publish failed"))
 			runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s publish_error=true candidates=%d discarded=%d", claim.Batch.ID, userID, slotAt.Format(time.RFC3339), len(values), discarded)
 			continue
 		}
-		done++
+		result.Done++
 		runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s candidates=%d discarded=%d", claim.Batch.ID, userID, slotAt.Format(time.RFC3339), len(values), discarded)
 	}
-	runner.logger.Printf("explore snapshot slot=%s users=%d done=%d failed=%d skipped=%d candidates=%d duration_ms=%d", slotAt.Format(time.RFC3339), len(userIDs), done, failed, skipped, len(candidates), time.Since(started).Milliseconds())
-	return failed > 0
+	runner.logger.Printf("explore snapshot slot=%s users=%d done=%d failed_persisted=%d pending=%d fail_write_errors=%d transient_errors=%d no_work=%d candidates=%d duration_ms=%d", slotAt.Format(time.RFC3339), len(userIDs), result.Done, result.FailedPersisted, result.Pending, result.FailWriteErrors, result.TransientErrors, result.NoWork, len(candidates), time.Since(started).Milliseconds())
+	return result
+}
+
+func (runner *exploreSnapshotCoordinator) recordSnapshotFailure(result *exploreSnapshotGenerationResult, claim *repository.ExploreSnapshotClaim, cause error) {
+	if err := runner.store.Fail(claim.Batch.ID, claim.GenerationToken, cause); err != nil {
+		result.FailWriteErrors++
+		return
+	}
+	result.FailedPersisted++
 }
 
 type safeExploreError string

@@ -174,41 +174,77 @@ func TestExploreQueueLeaseFencingAndRecovery(t *testing.T) {
 	if visible, err := repo.ListLeased(run.ID, "old"); err != nil || len(visible) != 0 {
 		t.Fatalf("expired visible=%d err=%v", len(visible), err)
 	}
-	if err := repo.Complete(leased[0].ID, "old"); err == nil {
+	if err := repo.Complete(leased[0].ID, run.ID, "old"); err == nil {
 		t.Fatal("expired old owner completed task")
 	}
 	recovered, err := repo.RecoverExpired(run.ID, "new", time.Hour)
 	if err != nil || len(recovered) != 4 {
 		t.Fatalf("recover=%d err=%v", len(recovered), err)
 	}
-	if err := repo.Complete(recovered[0].ID, "old"); err == nil {
+	if err := repo.Complete(recovered[0].ID, run.ID, "old"); err == nil {
 		t.Fatal("old owner completed recovered task")
 	}
-	if err := repo.Retry(recovered[1].ID, "old", errors.New("stale")); err == nil {
+	if err := repo.Retry(recovered[1].ID, run.ID, "old", errors.New("stale")); err == nil {
 		t.Fatal("old owner retried recovered task")
 	}
-	if err := repo.Invalidate(recovered[2].ID, "old", errors.New("stale")); err == nil {
+	if err := repo.Invalidate(recovered[2].ID, run.ID, "old", errors.New("stale")); err == nil {
 		t.Fatal("old owner invalidated recovered task")
 	}
 	var claimed int
 	if err := db.QueryRow(`SELECT claimed_count FROM explore_fetch_runs WHERE id=$1`, run.ID).Scan(&claimed); err != nil || claimed != 4 {
 		t.Fatalf("recovery changed run quota claimed=%d err=%v", claimed, err)
 	}
-	if err := repo.Complete(recovered[0].ID, "new"); err != nil {
+	if err := repo.Complete(recovered[0].ID, run.ID, "new"); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Retry(recovered[1].ID, "new", errors.New("temporary")); err != nil {
+	if err := repo.Retry(recovered[1].ID, run.ID, "new", errors.New("temporary")); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Invalidate(recovered[2].ID, "new", errors.New(strings.Repeat("中🙂", 400))); err != nil {
+	if err := repo.Invalidate(recovered[2].ID, run.ID, "new", errors.New(strings.Repeat("中🙂", 400))); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Complete(recovered[3].ID, "new"); err != nil {
+	if err := repo.Complete(recovered[3].ID, run.ID, "new"); err != nil {
 		t.Fatal(err)
 	}
 	var persistedError string
 	if err := db.QueryRow(`SELECT last_error FROM explore_fetch_queue WHERE id=$1`, recovered[2].ID).Scan(&persistedError); err != nil || len(persistedError) > 1000 || !utf8.ValidString(persistedError) {
 		t.Fatalf("error len=%d valid=%t err=%v", len(persistedError), utf8.ValidString(persistedError), err)
+	}
+}
+
+func TestExploreQueueLaterRunReclaimsExpiredTasksWithinItsOwnQuota(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	enqueueExploreTasks(t, db, repo, 3, repository.ExplorePriorityRefresh)
+	oldRun, oldTasks, err := repo.ClaimRun(time.Now(), "same-worker", time.Minute, 3)
+	if err != nil || len(oldTasks) != 3 {
+		t.Fatalf("old claim tasks=%d err=%v", len(oldTasks), err)
+	}
+	if _, err := db.Exec(`UPDATE explore_fetch_queue SET lease_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE run_id=$1`, oldRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	newRun, recovered, err := repo.ClaimRun(time.Now().Add(time.Minute), "same-worker", time.Hour, 2)
+	if err != nil || len(recovered) != 2 || newRun.ClaimedCount != 2 {
+		t.Fatalf("new claim run=%+v tasks=%d err=%v", newRun, len(recovered), err)
+	}
+	for _, task := range recovered {
+		if task.RunID == nil || *task.RunID != newRun.ID {
+			t.Fatalf("recovered task run=%v, want %d", task.RunID, newRun.ID)
+		}
+	}
+	if err := repo.Complete(recovered[0].ID, oldRun.ID, "same-worker"); !errors.Is(err, repository.ErrExploreLeaseNotHeld) {
+		t.Fatalf("old run completed reassigned task: %v", err)
+	}
+	if err := repo.Complete(recovered[0].ID, newRun.ID, "same-worker"); err != nil {
+		t.Fatalf("new run could not complete recovered task: %v", err)
+	}
+	var oldClaimed int
+	if err := db.QueryRow(`SELECT claimed_count FROM explore_fetch_runs WHERE id=$1`, oldRun.ID).Scan(&oldClaimed); err != nil {
+		t.Fatal(err)
+	}
+	if oldClaimed != 3 || oldClaimed > 500 || newRun.ClaimedCount > 500 {
+		t.Fatalf("claimed counts old=%d new=%d", oldClaimed, newRun.ClaimedCount)
 	}
 }
 
@@ -226,7 +262,7 @@ func TestExploreQueueRetryUsesDatabaseClockAndBackoff(t *testing.T) {
 		if err != nil || len(tasks) != 1 {
 			t.Fatalf("claim tasks=%d err=%v", len(tasks), err)
 		}
-		if err := repo.Retry(tasks[0].ID, "worker", errors.New("temporary")); err != nil {
+		if err := repo.Retry(tasks[0].ID, *tasks[0].RunID, "worker", errors.New("temporary")); err != nil {
 			t.Fatal(err)
 		}
 		var seconds int
@@ -247,7 +283,7 @@ func TestExploreQueueRetryUsesDatabaseClockAndBackoff(t *testing.T) {
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("cap claim tasks=%d err=%v", len(tasks), err)
 	}
-	if err := repo.Retry(tasks[0].ID, "worker", errors.New("capped")); err != nil {
+	if err := repo.Retry(tasks[0].ID, *tasks[0].RunID, "worker", errors.New("capped")); err != nil {
 		t.Fatal(err)
 	}
 	var seconds int

@@ -107,8 +107,10 @@ func (r *ExploreQueueRepository) ClaimRun(windowAt time.Time, owner string, leas
 	rows, err := tx.Query(`
 		WITH candidate AS (
 			SELECT id FROM explore_fetch_queue
-			WHERE status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP
-			ORDER BY priority::BIGINT + FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600)::BIGINT DESC,
+			WHERE (status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP)
+			   OR (status = 'leased' AND lease_expires_at <= CURRENT_TIMESTAMP)
+			ORDER BY CASE WHEN status = 'leased' THEN 0 ELSE 1 END,
+			         priority::BIGINT + FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600)::BIGINT DESC,
 			         priority DESC, created_at ASC, id ASC
 			FOR UPDATE SKIP LOCKED
 			LIMIT $1
@@ -180,32 +182,32 @@ func (r *ExploreQueueRepository) ListLeased(runID int, owner string) ([]ExploreQ
 	return tasks, rows.Err()
 }
 
-func (r *ExploreQueueRepository) Complete(taskID int, owner string) error {
+func (r *ExploreQueueRepository) Complete(taskID, runID int, owner string) error {
 	result, err := r.db.Exec(`
 		UPDATE explore_fetch_queue SET status = 'done', completed_at = CURRENT_TIMESTAMP,
 		lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1 AND status = 'leased' AND lease_owner = $2 AND lease_expires_at > CURRENT_TIMESTAMP
-	`, taskID, owner)
+		WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_owner = $3 AND lease_expires_at > CURRENT_TIMESTAMP
+	`, taskID, runID, owner)
 	return expectExploreLeaseTransition(result, err, taskID)
 }
 
-func (r *ExploreQueueRepository) Retry(taskID int, owner string, cause error) error {
+func (r *ExploreQueueRepository) Retry(taskID, runID int, owner string, cause error) error {
 	result, err := r.db.Exec(`
 		UPDATE explore_fetch_queue
 		SET status = 'pending', attempts = attempts + 1,
 		    not_before = CURRENT_TIMESTAMP + (LEAST(3600, 60 * power(2, attempts)) * INTERVAL '1 second'),
-		    run_id = NULL, lease_owner = NULL, lease_expires_at = NULL, last_error = $3, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1 AND status = 'leased' AND lease_owner = $2 AND lease_expires_at > CURRENT_TIMESTAMP
-	`, taskID, owner, clipExploreError(cause))
+		    run_id = NULL, lease_owner = NULL, lease_expires_at = NULL, last_error = $4, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_owner = $3 AND lease_expires_at > CURRENT_TIMESTAMP
+	`, taskID, runID, owner, clipExploreError(cause))
 	return expectExploreLeaseTransition(result, err, taskID)
 }
 
-func (r *ExploreQueueRepository) Invalidate(taskID int, owner string, cause error) error {
+func (r *ExploreQueueRepository) Invalidate(taskID, runID int, owner string, cause error) error {
 	result, err := r.db.Exec(`
-		UPDATE explore_fetch_queue SET status = 'invalid', completed_at = CURRENT_TIMESTAMP, last_error = $3,
+		UPDATE explore_fetch_queue SET status = 'invalid', completed_at = CURRENT_TIMESTAMP, last_error = $4,
 		lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1 AND status = 'leased' AND lease_owner = $2 AND lease_expires_at > CURRENT_TIMESTAMP
-	`, taskID, owner, clipExploreError(cause))
+		WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_owner = $3 AND lease_expires_at > CURRENT_TIMESTAMP
+	`, taskID, runID, owner, clipExploreError(cause))
 	return expectExploreLeaseTransition(result, err, taskID)
 }
 
