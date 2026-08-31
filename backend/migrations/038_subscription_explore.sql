@@ -1,15 +1,10 @@
--- Subscription Explore: globally refreshed source/article cache plus
--- user-isolated batches, feedback, and article events. Safe for both initdb
--- and an existing database where the migration runner records no history.
+-- Subscription Explore: a shared source/article cache and per-user snapshots.
+-- This migration is safe to re-run after a partially completed initdb.
 
--- A user may subscribe to a URL already subscribed by another user. NULL
--- owner_id represents one shared feed and is included in this key via 0.
 ALTER TABLE feeds DROP CONSTRAINT IF EXISTS feeds_url_key;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_feeds_owner_url
     ON feeds ((COALESCE(owner_id, 0)), url);
 
--- The curated registry acquires operational metadata without changing its
--- existing catalog semantics. Existing rows remain pending until verified.
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS site_url VARCHAR(2048);
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS normalized_url VARCHAR(2048);
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS validation_status VARCHAR(16) NOT NULL DEFAULT 'pending';
@@ -24,30 +19,81 @@ ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS first_discovered_at TIMES
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS last_observed_at TIMESTAMP;
 
 UPDATE recommended_feeds
-   SET normalized_url = lower(trim(url))
+   SET normalized_url = lower(btrim(url))
  WHERE normalized_url IS NULL;
 UPDATE recommended_feeds
    SET validation_status = 'pending'
  WHERE validation_status IS NULL;
 
+-- Older catalogs can contain case/whitespace URL duplicates. recommended_feeds
+-- has no user-owned state; retain the deterministic lowest id and merge useful
+-- catalog metadata before removing only its duplicate catalog rows.
+WITH ranked AS (
+    SELECT id, normalized_url, min(id) OVER (PARTITION BY normalized_url) AS canonical_id
+      FROM recommended_feeds
+     WHERE normalized_url IS NOT NULL
+),
+duplicates AS (
+    SELECT r.id, r.canonical_id
+      FROM ranked r
+     WHERE r.id <> r.canonical_id
+)
+UPDATE recommended_feeds canonical
+   SET site_url = COALESCE(canonical.site_url, duplicate.site_url),
+       description = COALESCE(canonical.description, duplicate.description),
+       first_discovered_at = NULLIF(
+           LEAST(
+               COALESCE(canonical.first_discovered_at, 'infinity'::timestamp),
+               COALESCE(duplicate.first_discovered_at, 'infinity'::timestamp)
+           ),
+           'infinity'::timestamp
+       ),
+       last_observed_at = NULLIF(
+           GREATEST(
+               COALESCE(canonical.last_observed_at, '-infinity'::timestamp),
+               COALESCE(duplicate.last_observed_at, '-infinity'::timestamp)
+           ),
+           '-infinity'::timestamp
+       )
+  FROM duplicates d
+  JOIN recommended_feeds duplicate ON duplicate.id = d.id
+ WHERE canonical.id = d.canonical_id;
+
+DELETE FROM recommended_feeds duplicate
+ USING (
+    SELECT id
+      FROM (
+          SELECT id, row_number() OVER (PARTITION BY normalized_url ORDER BY id) AS ordinal
+            FROM recommended_feeds
+           WHERE normalized_url IS NOT NULL
+      ) ranked
+     WHERE ordinal > 1
+ ) duplicate_ids
+ WHERE duplicate.id = duplicate_ids.id;
+
 ALTER TABLE recommended_feeds DROP CONSTRAINT IF EXISTS recommended_feeds_validation_status_check;
 ALTER TABLE recommended_feeds ADD CONSTRAINT recommended_feeds_validation_status_check
     CHECK (validation_status IN ('pending', 'valid', 'invalid'));
-CREATE INDEX IF NOT EXISTS idx_recommended_feeds_normalized_url
+ALTER TABLE recommended_feeds DROP CONSTRAINT IF EXISTS recommended_feeds_health_score_check;
+ALTER TABLE recommended_feeds ADD CONSTRAINT recommended_feeds_health_score_check
+    CHECK (health_score IS NULL OR health_score BETWEEN 0 AND 1);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recommended_feeds_normalized_url
     ON recommended_feeds (normalized_url);
 
--- Global registry/cache tables. They contain no user profile state.
 CREATE TABLE IF NOT EXISTS explore_registry_providers (
     id SERIAL PRIMARY KEY,
     provider_key VARCHAR(100) NOT NULL UNIQUE,
+    provider_kind VARCHAR(32) NOT NULL,
     endpoint VARCHAR(2048) NOT NULL,
-    kind VARCHAR(32) NOT NULL,
-    topic VARCHAR(100) NOT NULL,
-    default_interval_minutes INTEGER NOT NULL DEFAULT 360 CHECK (default_interval_minutes > 0),
+    topic VARCHAR(100),
+    sync_interval_minutes INTEGER NOT NULL DEFAULT 360 CHECK (sync_interval_minutes > 0),
     enabled BOOLEAN NOT NULL DEFAULT true,
-    last_sync_started_at TIMESTAMP,
-    last_synced_at TIMESTAMP,
-    last_sync_error TEXT,
+    etag VARCHAR(500),
+    last_modified VARCHAR(500),
+    last_sync_at TIMESTAMP,
+    last_success_at TIMESTAMP,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+    last_error TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -55,87 +101,93 @@ CREATE TABLE IF NOT EXISTS explore_registry_providers (
 CREATE TABLE IF NOT EXISTS explore_source_observations (
     id SERIAL PRIMARY KEY,
     provider_id INTEGER NOT NULL REFERENCES explore_registry_providers(id) ON DELETE CASCADE,
-    source_url VARCHAR(2048) NOT NULL,
-    normalized_url VARCHAR(2048) NOT NULL,
-    title VARCHAR(500) NOT NULL DEFAULT '',
-    description TEXT,
-    topic VARCHAR(100),
-    feed_type VARCHAR(32) NOT NULL DEFAULT 'rss',
-    observed_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (provider_id, normalized_url)
+    source_id INTEGER NOT NULL REFERENCES recommended_feeds(id) ON DELETE CASCADE,
+    external_key VARCHAR(500) NOT NULL,
+    provider_tags TEXT[] NOT NULL DEFAULT '{}',
+    first_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    occurrence_count INTEGER NOT NULL DEFAULT 1 CHECK (occurrence_count > 0),
+    UNIQUE (provider_id, external_key, source_id)
 );
-CREATE INDEX IF NOT EXISTS idx_explore_source_observations_provider_normalized_url
-    ON explore_source_observations (provider_id, normalized_url);
+CREATE INDEX IF NOT EXISTS idx_explore_source_observations_source
+    ON explore_source_observations (source_id, last_seen_at DESC);
 
 CREATE TABLE IF NOT EXISTS explore_fetch_runs (
     id SERIAL PRIMARY KEY,
-    provider_id INTEGER NOT NULL REFERENCES explore_registry_providers(id) ON DELETE CASCADE,
-    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
+    window_at TIMESTAMP NOT NULL UNIQUE,
+    status VARCHAR(16) NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done', 'failed')),
     claimed_count INTEGER NOT NULL DEFAULT 0 CHECK (claimed_count >= 0 AND claimed_count <= 500),
     started_at TIMESTAMP,
-    finished_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    worker_id VARCHAR(200),
     error_message TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_explore_fetch_runs_provider_created_at
-    ON explore_fetch_runs (provider_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS explore_fetch_queue (
     id SERIAL PRIMARY KEY,
-    run_id INTEGER NOT NULL REFERENCES explore_fetch_runs(id) ON DELETE CASCADE,
-    source_observation_id INTEGER REFERENCES explore_source_observations(id) ON DELETE CASCADE,
-    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'claimed', 'done', 'failed')),
-    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
-    claimed_at TIMESTAMP,
-    completed_at TIMESTAMP,
+    source_id INTEGER NOT NULL REFERENCES recommended_feeds(id) ON DELETE CASCADE,
+    task_type VARCHAR(32) NOT NULL CHECK (task_type IN ('validate_source', 'refresh_articles')),
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'leased', 'done', 'invalid')),
+    priority INTEGER NOT NULL DEFAULT 0,
+    not_before TIMESTAMP NOT NULL DEFAULT NOW(),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    run_id INTEGER REFERENCES explore_fetch_runs(id) ON DELETE SET NULL,
+    lease_owner VARCHAR(200),
+    lease_expires_at TIMESTAMP,
     last_error TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_explore_fetch_queue_active_source_task
+    ON explore_fetch_queue (source_id, task_type)
+    WHERE status IN ('pending', 'leased');
 CREATE INDEX IF NOT EXISTS idx_explore_fetch_queue_claimable
-    ON explore_fetch_queue (status, created_at)
-    WHERE status IN ('pending', 'claimed');
+    ON explore_fetch_queue (not_before, priority DESC, id)
+    WHERE status IN ('pending', 'leased');
 
 CREATE TABLE IF NOT EXISTS explore_articles (
     id SERIAL PRIMARY KEY,
-    source_observation_id INTEGER NOT NULL REFERENCES explore_source_observations(id) ON DELETE CASCADE,
-    title VARCHAR(500) NOT NULL,
+    source_id INTEGER NOT NULL REFERENCES recommended_feeds(id) ON DELETE CASCADE,
     url VARCHAR(2048) NOT NULL,
     normalized_url VARCHAR(2048) NOT NULL,
+    title VARCHAR(500) NOT NULL,
     content TEXT,
-    summary_brief TEXT,
+    excerpt TEXT,
     published_at TIMESTAMP,
     fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (source_observation_id, normalized_url)
+    UNIQUE (source_id, normalized_url)
 );
 CREATE INDEX IF NOT EXISTS idx_explore_articles_source_published_at
-    ON explore_articles (source_observation_id, published_at DESC);
+    ON explore_articles (source_id, published_at DESC);
 
--- User scoped state. The RLS policies below are deliberately the same
--- fail-closed policy shape as migration 033's other private tables.
 CREATE TABLE IF NOT EXISTS explore_batches (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slot_at TIMESTAMP NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'failed')),
+    source_count INTEGER NOT NULL DEFAULT 0 CHECK (source_count >= 0),
+    error_message TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMP,
-    generated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    completed_at TIMESTAMP,
+    UNIQUE (user_id, slot_at)
 );
 CREATE INDEX IF NOT EXISTS idx_explore_batches_user_created_at
     ON explore_batches (user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS explore_batch_sources (
     id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     batch_id INTEGER NOT NULL REFERENCES explore_batches(id) ON DELETE CASCADE,
-    source_observation_id INTEGER NOT NULL REFERENCES explore_source_observations(id) ON DELETE CASCADE,
+    source_id INTEGER NOT NULL REFERENCES recommended_feeds(id) ON DELETE CASCADE,
     rank INTEGER NOT NULL CHECK (rank > 0),
     score DOUBLE PRECISION NOT NULL DEFAULT 0,
+    topic VARCHAR(100),
     reason TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (batch_id, source_observation_id),
-    UNIQUE (batch_id, rank)
+    UNIQUE (batch_id, source_id)
 );
 CREATE INDEX IF NOT EXISTS idx_explore_batch_sources_batch_rank
     ON explore_batch_sources (batch_id, rank);
@@ -143,21 +195,27 @@ CREATE INDEX IF NOT EXISTS idx_explore_batch_sources_batch_rank
 CREATE TABLE IF NOT EXISTS explore_feedback (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    source_observation_id INTEGER NOT NULL REFERENCES explore_source_observations(id) ON DELETE CASCADE,
-    feedback_type VARCHAR(32) NOT NULL CHECK (feedback_type IN ('hide_source', 'less_like_this')),
-    revoked_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    source_id INTEGER REFERENCES recommended_feeds(id) ON DELETE CASCADE,
+    topic VARCHAR(100),
+    feedback_type VARCHAR(32) NOT NULL CHECK (feedback_type IN ('hide_source', 'dampen_topic', 'boost_topic')),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CHECK (
+        (feedback_type = 'hide_source' AND source_id IS NOT NULL AND topic IS NULL)
+        OR (feedback_type IN ('dampen_topic', 'boost_topic') AND source_id IS NULL AND topic IS NOT NULL)
+    )
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_explore_feedback_user_source_active
-    ON explore_feedback (user_id, source_observation_id, feedback_type)
-    WHERE revoked_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_explore_feedback_user_source_type
+    ON explore_feedback (user_id, source_id, feedback_type)
+    WHERE source_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_explore_feedback_user_topic_type
+    ON explore_feedback (user_id, topic, feedback_type)
+    WHERE topic IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS explore_article_events (
     id BIGSERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     explore_article_id INTEGER NOT NULL REFERENCES explore_articles(id) ON DELETE CASCADE,
-    batch_id INTEGER REFERENCES explore_batches(id) ON DELETE SET NULL,
-    event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('exposure', 'click', 'read')),
+    event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('exposure', 'click', 'completed_read')),
     occurred_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_explore_article_events_user_article
@@ -174,16 +232,8 @@ ALTER TABLE explore_batch_sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE explore_batch_sources FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS explore_batch_sources_user_isolation ON explore_batch_sources;
 CREATE POLICY explore_batch_sources_user_isolation ON explore_batch_sources
-    USING (app_rls_bypass() OR EXISTS (
-        SELECT 1 FROM explore_batches b
-         WHERE b.id = explore_batch_sources.batch_id
-           AND b.user_id = app_current_user_id()
-    ))
-    WITH CHECK (app_rls_bypass() OR EXISTS (
-        SELECT 1 FROM explore_batches b
-         WHERE b.id = explore_batch_sources.batch_id
-           AND b.user_id = app_current_user_id()
-    ));
+    USING (app_rls_bypass() OR user_id = app_current_user_id())
+    WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id());
 
 ALTER TABLE explore_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE explore_feedback FORCE ROW LEVEL SECURITY;
@@ -199,19 +249,17 @@ CREATE POLICY explore_article_events_user_isolation ON explore_article_events
     USING (app_rls_bypass() OR user_id = app_current_user_id())
     WITH CHECK (app_rls_bypass() OR user_id = app_current_user_id());
 
--- Keep operator-controlled enabled state and runtime synchronisation metadata
--- on conflict; release revisions may only refresh stable registry fields.
-INSERT INTO explore_registry_providers (provider_key, endpoint, kind, topic, default_interval_minutes)
+INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, topic, sync_interval_minutes)
 VALUES
-    ('plenary-programming-opml', 'https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Programming.opml', 'opml', 'programming', 360),
-    ('plenary-tech-opml', 'https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Tech.opml', 'opml', 'technology', 360),
-    ('plenary-webdev-opml', 'https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Web%20Development.opml', 'opml', 'web-development', 360),
-    ('chinese-independent', 'https://raw.githubusercontent.com/timqian/chinese-independent-blogs/master/feed.opml', 'opml', 'chinese-independent', 360),
-    ('ooh-recently-added', 'https://ooh.directory/feeds/recently-added.xml', 'rss', 'recently-added', 360),
-    ('reddit-programming', '/reddit/subreddit/programming', 'rsshub', 'programming', 360),
-    ('awesome-selfhosted', 'https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md', 'markdown', 'self-hosted', 360)
+    ('plenary-programming-opml', 'opml', 'https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Programming.opml', 'programming', 360),
+    ('plenary-tech-opml', 'opml', 'https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Tech.opml', 'technology', 360),
+    ('plenary-webdev-opml', 'opml', 'https://raw.githubusercontent.com/spians/awesome-RSS-feeds/master/recommended/with_category/Web%20Development.opml', 'web-development', 360),
+    ('chinese-independent', 'opml', 'https://raw.githubusercontent.com/timqian/chinese-independent-blogs/master/feed.opml', 'chinese-independent', 360),
+    ('ooh-recently-added', 'rss', 'https://ooh.directory/feeds/recently-added.xml', 'recently-added', 360),
+    ('reddit-programming', 'rsshub', '/reddit/subreddit/programming', 'programming', 360),
+    ('awesome-selfhosted', 'markdown', 'https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md', 'self-hosted', 360)
 ON CONFLICT (provider_key) DO UPDATE
-    SET endpoint = EXCLUDED.endpoint,
-        kind = EXCLUDED.kind,
+    SET provider_kind = EXCLUDED.provider_kind,
+        endpoint = EXCLUDED.endpoint,
         topic = EXCLUDED.topic,
-        default_interval_minutes = EXCLUDED.default_interval_minutes;
+        sync_interval_minutes = EXCLUDED.sync_interval_minutes;

@@ -7,124 +7,139 @@ const (
 	ExploreValidationValid   = "valid"
 	ExploreValidationInvalid = "invalid"
 
-	ExploreFetchRunPending   = "pending"
-	ExploreFetchRunRunning   = "running"
-	ExploreFetchRunSucceeded = "succeeded"
-	ExploreFetchRunFailed    = "failed"
+	ExploreFetchRunRunning = "running"
+	ExploreFetchRunDone    = "done"
+	ExploreFetchRunFailed  = "failed"
 
-	ExploreFetchTaskPending = "pending"
-	ExploreFetchTaskClaimed = "claimed"
-	ExploreFetchTaskDone    = "done"
-	ExploreFetchTaskFailed  = "failed"
+	ExploreFetchTaskValidateSource  = "validate_source"
+	ExploreFetchTaskRefreshArticles = "refresh_articles"
+	ExploreFetchTaskPending         = "pending"
+	ExploreFetchTaskLeased          = "leased"
+	ExploreFetchTaskDone            = "done"
+	ExploreFetchTaskInvalid         = "invalid"
 
-	ExploreFeedbackHideSource   = "hide_source"
-	ExploreFeedbackLessLikeThis = "less_like_this"
+	ExploreBatchPending = "pending"
+	ExploreBatchDone    = "done"
+	ExploreBatchFailed  = "failed"
 
-	ExploreArticleEventExposure = "exposure"
-	ExploreArticleEventClick    = "click"
-	ExploreArticleEventRead     = "read"
+	ExploreFeedbackHideSource  = "hide_source"
+	ExploreFeedbackDampenTopic = "dampen_topic"
+	ExploreFeedbackBoostTopic  = "boost_topic"
+
+	ExploreArticleEventExposure      = "exposure"
+	ExploreArticleEventClick         = "click"
+	ExploreArticleEventCompletedRead = "completed_read"
 )
 
 // ExploreRegistryProvider is a stable, globally shared discovery provider.
 type ExploreRegistryProvider struct {
-	ID                     int        `json:"id" db:"id"`
-	ProviderKey            string     `json:"provider_key" db:"provider_key"`
-	Endpoint               string     `json:"endpoint" db:"endpoint"`
-	Kind                   string     `json:"kind" db:"kind"`
-	Topic                  string     `json:"topic" db:"topic"`
-	DefaultIntervalMinutes int        `json:"default_interval_minutes" db:"default_interval_minutes"`
-	Enabled                bool       `json:"enabled" db:"enabled"`
-	LastSyncStartedAt      *time.Time `json:"last_sync_started_at,omitempty" db:"last_sync_started_at"`
-	LastSyncedAt           *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
-	LastSyncError          string     `json:"last_sync_error,omitempty" db:"last_sync_error"`
-	CreatedAt              time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at" db:"updated_at"`
-}
-
-// ExploreSourceObservation is one provider's latest observation of a source.
-type ExploreSourceObservation struct {
-	ID            int       `json:"id" db:"id"`
-	ProviderID    int       `json:"provider_id" db:"provider_id"`
-	SourceURL     string    `json:"source_url" db:"source_url"`
-	NormalizedURL string    `json:"normalized_url" db:"normalized_url"`
-	Title         string    `json:"title" db:"title"`
-	Description   string    `json:"description,omitempty" db:"description"`
-	Topic         string    `json:"topic,omitempty" db:"topic"`
-	FeedType      string    `json:"feed_type" db:"feed_type"`
-	ObservedAt    time.Time `json:"observed_at" db:"observed_at"`
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
-}
-
-type ExploreFetchRun struct {
-	ID           int        `json:"id" db:"id"`
-	ProviderID   int        `json:"provider_id" db:"provider_id"`
-	Status       string     `json:"status" db:"status"`
-	ClaimedCount int        `json:"claimed_count" db:"claimed_count"`
-	StartedAt    *time.Time `json:"started_at,omitempty" db:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty" db:"finished_at"`
-	ErrorMessage string     `json:"error_message,omitempty" db:"error_message"`
-	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
-}
-
-type ExploreFetchTask struct {
 	ID                  int        `json:"id" db:"id"`
-	RunID               int        `json:"run_id" db:"run_id"`
-	SourceObservationID *int       `json:"source_observation_id,omitempty" db:"source_observation_id"`
-	Status              string     `json:"status" db:"status"`
-	AttemptCount        int        `json:"attempt_count" db:"attempt_count"`
-	ClaimedAt           *time.Time `json:"claimed_at,omitempty" db:"claimed_at"`
-	CompletedAt         *time.Time `json:"completed_at,omitempty" db:"completed_at"`
-	LastError           string     `json:"last_error,omitempty" db:"last_error"`
-	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
-}
-
-type ExploreArticle struct {
-	ID                  int        `json:"id" db:"id"`
-	SourceObservationID int        `json:"source_observation_id" db:"source_observation_id"`
-	Title               string     `json:"title" db:"title"`
-	URL                 string     `json:"url" db:"url"`
-	NormalizedURL       string     `json:"normalized_url" db:"normalized_url"`
-	Content             string     `json:"content,omitempty" db:"content"`
-	SummaryBrief        string     `json:"summary_brief,omitempty" db:"summary_brief"`
-	PublishedAt         *time.Time `json:"published_at,omitempty" db:"published_at"`
-	FetchedAt           time.Time  `json:"fetched_at" db:"fetched_at"`
+	ProviderKey         string     `json:"provider_key" db:"provider_key"`
+	ProviderKind        string     `json:"provider_kind" db:"provider_kind"`
+	Endpoint            string     `json:"endpoint" db:"endpoint"`
+	Topic               *string    `json:"topic,omitempty" db:"topic"`
+	SyncIntervalMinutes int        `json:"sync_interval_minutes" db:"sync_interval_minutes"`
+	Enabled             bool       `json:"enabled" db:"enabled"`
+	ETag                *string    `json:"etag,omitempty" db:"etag"`
+	LastModified        *string    `json:"last_modified,omitempty" db:"last_modified"`
+	LastSyncAt          *time.Time `json:"last_sync_at,omitempty" db:"last_sync_at"`
+	LastSuccessAt       *time.Time `json:"last_success_at,omitempty" db:"last_success_at"`
+	ConsecutiveFailures int        `json:"consecutive_failures" db:"consecutive_failures"`
+	LastError           *string    `json:"last_error,omitempty" db:"last_error"`
 	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at" db:"updated_at"`
 }
 
+// ExploreSourceObservation is one provider's latest observation of a source.
+type ExploreSourceObservation struct {
+	ID              int       `json:"id" db:"id"`
+	ProviderID      int       `json:"provider_id" db:"provider_id"`
+	SourceID        int       `json:"source_id" db:"source_id"`
+	ExternalKey     string    `json:"external_key" db:"external_key"`
+	ProviderTags    []string  `json:"provider_tags" db:"provider_tags"`
+	FirstSeenAt     time.Time `json:"first_seen_at" db:"first_seen_at"`
+	LastSeenAt      time.Time `json:"last_seen_at" db:"last_seen_at"`
+	OccurrenceCount int       `json:"occurrence_count" db:"occurrence_count"`
+}
+
+type ExploreFetchRun struct {
+	ID           int        `json:"id" db:"id"`
+	WindowAt     time.Time  `json:"window_at" db:"window_at"`
+	Status       string     `json:"status" db:"status"`
+	ClaimedCount int        `json:"claimed_count" db:"claimed_count"`
+	StartedAt    *time.Time `json:"started_at,omitempty" db:"started_at"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty" db:"completed_at"`
+	WorkerID     *string    `json:"worker_id,omitempty" db:"worker_id"`
+	ErrorMessage *string    `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+}
+
+type ExploreFetchTask struct {
+	ID             int        `json:"id" db:"id"`
+	SourceID       int        `json:"source_id" db:"source_id"`
+	TaskType       string     `json:"task_type" db:"task_type"`
+	Status         string     `json:"status" db:"status"`
+	Priority       int        `json:"priority" db:"priority"`
+	NotBefore      time.Time  `json:"not_before" db:"not_before"`
+	Attempts       int        `json:"attempts" db:"attempts"`
+	RunID          *int       `json:"run_id,omitempty" db:"run_id"`
+	LeaseOwner     *string    `json:"lease_owner,omitempty" db:"lease_owner"`
+	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty" db:"lease_expires_at"`
+	LastError      *string    `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at" db:"updated_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty" db:"completed_at"`
+}
+
+type ExploreArticle struct {
+	ID            int        `json:"id" db:"id"`
+	SourceID      int        `json:"source_id" db:"source_id"`
+	URL           string     `json:"url" db:"url"`
+	NormalizedURL string     `json:"normalized_url" db:"normalized_url"`
+	Title         string     `json:"title" db:"title"`
+	Content       *string    `json:"content,omitempty" db:"content"`
+	Excerpt       *string    `json:"excerpt,omitempty" db:"excerpt"`
+	PublishedAt   *time.Time `json:"published_at,omitempty" db:"published_at"`
+	FetchedAt     time.Time  `json:"fetched_at" db:"fetched_at"`
+	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
+}
+
 type ExploreBatch struct {
-	ID          int        `json:"id" db:"id"`
-	UserID      int        `json:"user_id" db:"user_id"`
-	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty" db:"expires_at"`
-	GeneratedAt time.Time  `json:"generated_at" db:"generated_at"`
+	ID           int        `json:"id" db:"id"`
+	UserID       int        `json:"user_id" db:"user_id"`
+	SlotAt       time.Time  `json:"slot_at" db:"slot_at"`
+	Status       string     `json:"status" db:"status"`
+	SourceCount  int        `json:"source_count" db:"source_count"`
+	ErrorMessage *string    `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 }
 
 type ExploreBatchSource struct {
-	ID                  int       `json:"id" db:"id"`
-	BatchID             int       `json:"batch_id" db:"batch_id"`
-	SourceObservationID int       `json:"source_observation_id" db:"source_observation_id"`
-	Rank                int       `json:"rank" db:"rank"`
-	Score               float64   `json:"score" db:"score"`
-	Reason              string    `json:"reason,omitempty" db:"reason"`
-	CreatedAt           time.Time `json:"created_at" db:"created_at"`
+	ID       int     `json:"id" db:"id"`
+	UserID   int     `json:"user_id" db:"user_id"`
+	BatchID  int     `json:"batch_id" db:"batch_id"`
+	SourceID int     `json:"source_id" db:"source_id"`
+	Rank     int     `json:"rank" db:"rank"`
+	Score    float64 `json:"score" db:"score"`
+	Topic    *string `json:"topic,omitempty" db:"topic"`
+	Reason   *string `json:"reason,omitempty" db:"reason"`
 }
 
 type ExploreFeedback struct {
-	ID                  int        `json:"id" db:"id"`
-	UserID              int        `json:"user_id" db:"user_id"`
-	SourceObservationID int        `json:"source_observation_id" db:"source_observation_id"`
-	FeedbackType        string     `json:"feedback_type" db:"feedback_type"`
-	RevokedAt           *time.Time `json:"revoked_at,omitempty" db:"revoked_at"`
-	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+	ID           int       `json:"id" db:"id"`
+	UserID       int       `json:"user_id" db:"user_id"`
+	SourceID     *int      `json:"source_id,omitempty" db:"source_id"`
+	Topic        *string   `json:"topic,omitempty" db:"topic"`
+	FeedbackType string    `json:"feedback_type" db:"feedback_type"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
 type ExploreArticleEvent struct {
 	ID               int64     `json:"id" db:"id"`
 	UserID           int       `json:"user_id" db:"user_id"`
 	ExploreArticleID int       `json:"explore_article_id" db:"explore_article_id"`
-	BatchID          *int      `json:"batch_id,omitempty" db:"batch_id"`
 	EventType        string    `json:"event_type" db:"event_type"`
 	OccurredAt       time.Time `json:"occurred_at" db:"occurred_at"`
 }
