@@ -525,6 +525,32 @@ func (r *ExploreRepository) DeleteFeedback(userID, feedbackID int) error {
 	return nil
 }
 
+// ClearNegativeFeedback removes only the two feedback kinds that suppress
+// Explore candidates. Positive interests are profile input and deliberately
+// survive this recovery action.
+func (r *ExploreRepository) ClearNegativeFeedback(userID int) (int, error) {
+	tx, commit, rollback, err := txOrBegin(r.db)
+	if err != nil {
+		return 0, err
+	}
+	defer rollback()
+	result, err := tx.Exec(`
+		DELETE FROM explore_feedback
+		WHERE user_id=$1 AND feedback_type IN ('hide_source','dampen_topic')
+	`, userID)
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := commit(); err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
 func IsExploreInterest(value string) bool {
 	_, ok := exploreInterestSet[strings.TrimSpace(value)]
 	return ok

@@ -27,6 +27,7 @@ type fakeExploreStore struct {
 	lastTopics    []string
 	lastEvent     string
 	deleteID      int
+	clearDeleted  int
 	eventCreated  bool
 	err           error
 }
@@ -70,6 +71,10 @@ func (f *fakeExploreStore) CreateFeedback(userID int, input repository.ExploreFe
 func (f *fakeExploreStore) DeleteFeedback(userID, feedbackID int) error {
 	f.lastUserID, f.deleteID = userID, feedbackID
 	return f.err
+}
+func (f *fakeExploreStore) ClearNegativeFeedback(userID int) (int, error) {
+	f.lastUserID = userID
+	return f.clearDeleted, f.err
 }
 func (f *fakeExploreStore) ReplaceInterests(userID int, topics []string) ([]model.ExploreFeedback, error) {
 	f.lastUserID, f.lastTopics = userID, topics
@@ -187,6 +192,15 @@ func TestExploreHandlerFeedbackInterestsUndoAndEvents(t *testing.T) {
 	}
 }
 
+func TestExploreHandlerClearsOnlyNegativeFeedbackForAuthenticatedUser(t *testing.T) {
+	store := &fakeExploreStore{clearDeleted: 3}
+	router := exploreTestRouter(newExploreHandlerWithStore(store, time.Now))
+	w := performExploreRequest(router, http.MethodDelete, "/api/explore/feedback", nil)
+	if w.Code != http.StatusOK || store.lastUserID != 42 || w.Body.String() != "{\"deleted_count\":3}" {
+		t.Fatalf("clear status=%d user=%d body=%s", w.Code, store.lastUserID, w.Body.String())
+	}
+}
+
 func TestExploreHandlerRejectsInvalidFeedbackInterestAndEventEnums(t *testing.T) {
 	store := &fakeExploreStore{}
 	router := exploreTestRouter(newExploreHandlerWithStore(store, time.Now))
@@ -292,6 +306,7 @@ func exploreTestRouter(handler *ExploreHandler) *gin.Engine {
 	router.GET("/api/explore/sources", handler.GetSources)
 	router.GET("/api/explore/articles/:id", handler.GetArticle)
 	router.POST("/api/explore/feedback", handler.CreateFeedback)
+	router.DELETE("/api/explore/feedback", handler.ClearNegativeFeedback)
 	router.DELETE("/api/explore/feedback/:id", handler.DeleteFeedback)
 	router.PUT("/api/explore/interests", handler.ReplaceInterests)
 	router.POST("/api/explore/articles/:id/events", handler.RecordArticleEvent)

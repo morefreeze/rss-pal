@@ -19,6 +19,7 @@ type exploreStore interface {
 	GetVisibleArticle(userID, articleID int) (*repository.ExploreArticleDetail, error)
 	CreateFeedback(userID int, input repository.ExploreFeedbackInput) (*model.ExploreFeedback, error)
 	DeleteFeedback(userID, feedbackID int) error
+	ClearNegativeFeedback(userID int) (int, error)
 	ReplaceInterests(userID int, topics []string) ([]model.ExploreFeedback, error)
 	RecordArticleEvent(userID, articleID int, eventType string, occurredAt time.Time) (bool, error)
 }
@@ -227,6 +228,15 @@ func (h *ExploreHandler) DeleteFeedback(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *ExploreHandler) ClearNegativeFeedback(c *gin.Context) {
+	deleted, err := h.storeFor(c).ClearNegativeFeedback(getUserID(c))
+	if err != nil {
+		writeExploreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted_count": deleted})
 }
 
 func (h *ExploreHandler) ReplaceInterests(c *gin.Context) {

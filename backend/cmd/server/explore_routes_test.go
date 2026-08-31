@@ -17,6 +17,7 @@ func TestRegisterExploreRoutes(t *testing.T) {
 		"GET /api/explore/articles/:id":             false,
 		"POST /api/explore/feedback":                false,
 		"DELETE /api/explore/feedback/:id":          false,
+		"DELETE /api/explore/feedback":              false,
 		"PUT /api/explore/interests":                false,
 		"POST /api/explore/articles/:id/events":     false,
 		"POST /api/explore/sources/:id/subscribe":   false,
