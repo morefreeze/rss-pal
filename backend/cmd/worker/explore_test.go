@@ -427,6 +427,13 @@ func TestExploreURLDomain(t *testing.T) {
 	}
 }
 
+func TestNormalizeExploreFeedURLMatchesCatalogCanonicalization(t *testing.T) {
+	got := normalizeExploreFeedURL("HTTPS://Example.COM/feed?utm_source=reader#section")
+	if got != "https://example.com/feed" {
+		t.Fatalf("normalized feed URL = %q", got)
+	}
+}
+
 func TestNewProductionExploreCycleUsesValidatedConfig(t *testing.T) {
 	cycle := newProductionExploreCycle(nil, &config.Config{
 		Explore: config.ExploreConfig{FetchBatchLimit: 321, FetchConcurrency: 7},
