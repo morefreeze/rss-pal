@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ExploreArticlePage from '../src/pages/ExploreArticlePage'
@@ -17,6 +17,29 @@ const api = vi.hoisted(() => ({
   shareArticle: vi.fn(),
   generateSummaryStream: vi.fn(),
 }))
+
+let nextAnimationFrameID = 1
+let animationFrames = new Map<number, FrameRequestCallback>()
+
+function flushAnimationFrame() {
+  act(() => {
+    const pending = [...animationFrames.values()]
+    animationFrames.clear()
+    for (const callback of pending) callback(performance.now())
+  })
+}
+
+function settleArticleLayout() {
+  flushAnimationFrame()
+  flushAnimationFrame()
+}
+
+class TestResizeObserver implements ResizeObserver {
+  observe = vi.fn()
+  unobserve = vi.fn()
+  disconnect = vi.fn()
+  constructor(_callback: ResizeObserverCallback) {}
+}
 
 vi.mock('../src/api/client', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/api/client')>()
@@ -90,7 +113,20 @@ function deferred<T>() {
 describe('ExploreArticlePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    nextAnimationFrameID = 1
+    animationFrames = new Map()
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      const id = nextAnimationFrameID++
+      animationFrames.set(id, callback)
+      return id
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => {
+      animationFrames.delete(id)
+    }))
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 500 })
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 2000 })
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {
       Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
     })
@@ -124,22 +160,128 @@ describe('ExploreArticlePage', () => {
     expect(api.recordExploreArticleEvent).not.toHaveBeenCalledWith(23, 'click')
   })
 
-  it('records one click for a direct entry and one completed-read event at the threshold', async () => {
+  it('records one click for a direct entry and only completes a long article at the 90% threshold', async () => {
     renderPage()
     await screen.findByRole('heading', { name: 'A safer candidate reader' })
     await waitFor(() => expect(api.recordExploreArticleEvent).toHaveBeenCalledWith(23, 'click'))
+    settleArticleLayout()
 
-    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 2000 })
-    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 500 })
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1300 })
+    fireEvent.scroll(window)
+    flushAnimationFrame()
+    expect(api.recordExploreArticleEvent).not.toHaveBeenCalledWith(23, 'completed_read')
+
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 1400 })
     fireEvent.scroll(window)
     fireEvent.scroll(window)
+    flushAnimationFrame()
 
     await waitFor(() => {
       expect(api.recordExploreArticleEvent.mock.calls.filter(call => call[1] === 'completed_read')).toEqual([
         [23, 'completed_read'],
       ])
     })
+  })
+
+  it('records completed-read after a short article is fully visible and layout has settled', async () => {
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 480 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 500 })
+    renderPage({
+      pathname: '/explore/articles/23',
+      state: { from: '/explore', articlePreview: preview },
+    })
+
+    await screen.findByRole('heading', { name: 'A safer candidate reader' })
+    expect(api.recordExploreArticleEvent).not.toHaveBeenCalledWith(23, 'completed_read')
+    flushAnimationFrame()
+    expect(api.recordExploreArticleEvent).not.toHaveBeenCalledWith(23, 'completed_read')
+    flushAnimationFrame()
+
+    await waitFor(() => expect(api.recordExploreArticleEvent).toHaveBeenCalledWith(23, 'completed_read'))
+  })
+
+  it('retries a failed completed-read on the next reading interaction', async () => {
+    api.recordExploreArticleEvent
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce({ recorded: true })
+    renderPage({
+      pathname: '/explore/articles/23',
+      state: { from: '/explore', articlePreview: preview },
+    })
+    await screen.findByRole('heading', { name: 'A safer candidate reader' })
+    settleArticleLayout()
+
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1400 })
+    fireEvent.scroll(window)
+    flushAnimationFrame()
+    await waitFor(() => expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(1))
+
+    fireEvent.scroll(window)
+    flushAnimationFrame()
+    await waitFor(() => expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(2))
+    expect(api.recordExploreArticleEvent.mock.calls).toEqual([
+      [23, 'completed_read'],
+      [23, 'completed_read'],
+    ])
+  })
+
+  it('coalesces concurrent completion checks and deduplicates only after success', async () => {
+    const request = deferred<{ recorded: boolean }>()
+    api.recordExploreArticleEvent.mockReturnValue(request.promise)
+    renderPage({
+      pathname: '/explore/articles/23',
+      state: { from: '/explore', articlePreview: preview },
+    })
+    await screen.findByRole('heading', { name: 'A safer candidate reader' })
+    settleArticleLayout()
+
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1400 })
+    fireEvent.scroll(window)
+    fireEvent.scroll(window)
+    flushAnimationFrame()
+    expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(1)
+
+    fireEvent.resize(window)
+    flushAnimationFrame()
+    expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(1)
+    request.resolve({ recorded: true })
+    await act(async () => { await request.promise })
+
+    fireEvent.scroll(window)
+    flushAnimationFrame()
+    expect(api.recordExploreArticleEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('tracks completion independently when switching candidate articles', async () => {
+    api.getExploreArticle.mockImplementation(async (articleID: number) => ({
+      ...detail,
+      id: articleID,
+      title: articleID === 23 ? detail.title : 'Second candidate',
+    }))
+    renderPage({
+      pathname: '/explore/articles/23',
+      state: { from: '/explore', articlePreview: preview },
+    })
+    await screen.findByRole('heading', { name: 'A safer candidate reader' })
+    settleArticleLayout()
+
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1400 })
+    fireEvent.scroll(window)
+    flushAnimationFrame()
+    await waitFor(() => expect(api.recordExploreArticleEvent).toHaveBeenCalledWith(23, 'completed_read'))
+
+    fireEvent.click(screen.getByTestId('switch-detail'))
+    await screen.findByRole('heading', { name: 'Second candidate' })
+    settleArticleLayout()
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1400 })
+    fireEvent.scroll(window)
+    flushAnimationFrame()
+
+    await waitFor(() => expect(api.recordExploreArticleEvent).toHaveBeenCalledWith(24, 'completed_read'))
+    expect(api.recordExploreArticleEvent.mock.calls.filter(call => call[1] === 'completed_read')).toEqual([
+      [23, 'completed_read'],
+      [24, 'completed_read'],
+    ])
   })
 
   it('resets inherited list scroll before measuring candidate completion', async () => {

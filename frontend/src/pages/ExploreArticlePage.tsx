@@ -59,7 +59,8 @@ export default function ExploreArticlePage() {
   const subscribeGenerationRef = useRef(0)
   const subscribingRef = useRef(false)
   const clickedArticleIDsRef = useRef(new Set<number>())
-  const completedArticleIDsRef = useRef(new Set<number>())
+  const completedReadInflightIDsRef = useRef(new Set<number>())
+  const completedReadSucceededIDsRef = useRef(new Set<number>())
 
   const previewTitle = resolveDetailPreviewTitle(articleID, locationState)
   useDocumentTitle(
@@ -125,19 +126,72 @@ export default function ExploreArticlePage() {
   useEffect(() => {
     if (!article) return
     const articleIDAtMount = article.id
-    const onScroll = () => {
-      if (completedArticleIDsRef.current.has(articleIDAtMount)) return
+    let disposed = false
+    let animationFrameID: number | null = null
+
+    const recordCompletion = async () => {
+      const inflight = completedReadInflightIDsRef.current
+      const succeeded = completedReadSucceededIDsRef.current
+      if (inflight.has(articleIDAtMount) || succeeded.has(articleIDAtMount)) return
+      inflight.add(articleIDAtMount)
+      try {
+        await recordExploreArticleEvent(articleIDAtMount, 'completed_read')
+        succeeded.add(articleIDAtMount)
+      } catch {
+        // A later scroll, resize or visibility interaction may retry.
+      } finally {
+        inflight.delete(articleIDAtMount)
+      }
+    }
+
+    const measureCompletion = () => {
+      const scrollHeight = document.documentElement.scrollHeight
+      const viewportHeight = window.innerHeight
+      const isFullyVisible = scrollHeight > 0 && viewportHeight > 0 && scrollHeight <= viewportHeight
       const progress = computeViewportProgress(
         window.scrollY,
-        document.documentElement.scrollHeight,
-        window.innerHeight,
+        scrollHeight,
+        viewportHeight,
       )
-      if (progress < 0.9) return
-      completedArticleIDsRef.current.add(articleIDAtMount)
-      void recordExploreArticleEvent(articleIDAtMount, 'completed_read').catch(() => {})
+      if (!isFullyVisible && progress < 0.9) return
+      void recordCompletion()
     }
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
+
+    const scheduleMeasurement = (afterLayoutSettles = false) => {
+      if (disposed || animationFrameID !== null) return
+      animationFrameID = window.requestAnimationFrame(() => {
+        animationFrameID = null
+        if (disposed) return
+        if (afterLayoutSettles) {
+          animationFrameID = window.requestAnimationFrame(() => {
+            animationFrameID = null
+            if (!disposed) measureCompletion()
+          })
+          return
+        }
+        measureCompletion()
+      })
+    }
+
+    const onViewportInteraction = () => scheduleMeasurement()
+    const onVisibilityChange = () => {
+      if (!document.hidden) scheduleMeasurement()
+    }
+    const resizeObserver = new ResizeObserver(onViewportInteraction)
+    resizeObserver.observe(document.documentElement)
+    window.addEventListener('scroll', onViewportInteraction, { passive: true })
+    window.addEventListener('resize', onViewportInteraction)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    scheduleMeasurement(true)
+
+    return () => {
+      disposed = true
+      if (animationFrameID !== null) window.cancelAnimationFrame(animationFrameID)
+      resizeObserver.disconnect()
+      window.removeEventListener('scroll', onViewportInteraction)
+      window.removeEventListener('resize', onViewportInteraction)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [article])
 
   const handleSubscribe = async () => {
