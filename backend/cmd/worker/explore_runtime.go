@@ -96,15 +96,11 @@ func newSQLExploreQueue(db *sql.DB) *sqlExploreQueue {
 }
 
 func (queue *sqlExploreQueue) ClaimRun(window time.Time, owner string, lease time.Duration, limit int) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error) {
-	run, tasks, err := queue.repo.ClaimRun(window, owner, lease, limit)
-	if err != nil || run == nil || len(tasks) > 0 || run.Status != model.ExploreFetchRunRunning || run.ClaimedCount == 0 {
-		return run, tasks, err
-	}
-	recovered, recoverErr := queue.repo.RecoverExpired(run.ID, owner, lease)
-	if recoverErr != nil {
-		return run, nil, recoverErr
-	}
-	return run, recovered, nil
+	return queue.repo.ClaimRun(window, owner, lease, limit)
+}
+
+func (queue *sqlExploreQueue) RecoverExpired(owner string, lease time.Duration) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error) {
+	return queue.repo.RecoverExpired(owner, lease)
 }
 
 func (queue *sqlExploreQueue) FinishRun(runID int, cause error) error {

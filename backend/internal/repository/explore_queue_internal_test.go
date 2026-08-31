@@ -31,19 +31,28 @@ func TestClipExploreErrorPreservesUTF8WithinByteLimit(t *testing.T) {
 	}
 }
 
-func TestExploreQueueSQLFencesRunAndReclaimsExpiredRowsIntoClaimLimit(t *testing.T) {
+func TestExploreQueueSQLKeepsFreshClaimsSeparateFromOriginalRunRecovery(t *testing.T) {
 	source, err := os.ReadFile("explore_queue.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(source)
 	for _, required := range []string{
-		"OR (status = 'leased' AND lease_expires_at <= CURRENT_TIMESTAMP)",
+		"status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP",
+		"ORDER BY run.window_at ASC, run.id ASC",
+		"SET lease_owner = $2, lease_expires_at",
 		"SET status = 'leased', run_id = $2, lease_owner = $3",
 		"WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_owner = $3",
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("queue SQL missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"OR (status = 'leased' AND lease_expires_at <= CURRENT_TIMESTAMP)",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("fresh claim SQL still rewrites expired original-run work: %q", forbidden)
 		}
 	}
 }

@@ -57,8 +57,8 @@ func TestExploreQueueClaimRunRejectsNonPositiveLeaseDuration(t *testing.T) {
 		if run, tasks, err := repo.ClaimRun(time.Now(), "worker", duration, 1); err == nil || run != nil || tasks != nil {
 			t.Fatalf("duration %s got run=%+v tasks=%+v err=%v", duration, run, tasks, err)
 		}
-		if tasks, err := repo.RecoverExpired(1, "worker", duration); err == nil || tasks != nil {
-			t.Fatalf("recover duration %s got tasks=%+v err=%v", duration, tasks, err)
+		if run, tasks, err := repo.RecoverExpired("worker", duration); err == nil || run != nil || tasks != nil {
+			t.Fatalf("recover duration %s got run=%+v tasks=%+v err=%v", duration, run, tasks, err)
 		}
 	}
 	var runs int
@@ -177,9 +177,9 @@ func TestExploreQueueLeaseFencingAndRecovery(t *testing.T) {
 	if err := repo.Complete(leased[0].ID, run.ID, "old"); err == nil {
 		t.Fatal("expired old owner completed task")
 	}
-	recovered, err := repo.RecoverExpired(run.ID, "new", time.Hour)
-	if err != nil || len(recovered) != 4 {
-		t.Fatalf("recover=%d err=%v", len(recovered), err)
+	recoveredRun, recovered, err := repo.RecoverExpired("new", time.Hour)
+	if err != nil || recoveredRun == nil || recoveredRun.ID != run.ID || len(recovered) != 4 {
+		t.Fatalf("recover run=%+v tasks=%d err=%v", recoveredRun, len(recovered), err)
 	}
 	if err := repo.Complete(recovered[0].ID, run.ID, "old"); err == nil {
 		t.Fatal("old owner completed recovered task")
@@ -212,7 +212,7 @@ func TestExploreQueueLeaseFencingAndRecovery(t *testing.T) {
 	}
 }
 
-func TestExploreQueueLaterRunReclaimsExpiredTasksWithinItsOwnQuota(t *testing.T) {
+func TestExploreQueueRecoversOldestExpiredTasksWithoutCreatingOrChargingNewRun(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	repo := repository.NewExploreQueueRepository(db)
@@ -224,27 +224,101 @@ func TestExploreQueueLaterRunReclaimsExpiredTasksWithinItsOwnQuota(t *testing.T)
 	if _, err := db.Exec(`UPDATE explore_fetch_queue SET lease_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE run_id=$1`, oldRun.ID); err != nil {
 		t.Fatal(err)
 	}
-	newRun, recovered, err := repo.ClaimRun(time.Now().Add(time.Minute), "same-worker", time.Hour, 2)
-	if err != nil || len(recovered) != 2 || newRun.ClaimedCount != 2 {
-		t.Fatalf("new claim run=%+v tasks=%d err=%v", newRun, len(recovered), err)
+	recoveredRun, recovered, err := repo.RecoverExpired("new-worker", time.Hour)
+	if err != nil || recoveredRun == nil || recoveredRun.ID != oldRun.ID || len(recovered) != 3 {
+		t.Fatalf("recovered run=%+v tasks=%d err=%v", recoveredRun, len(recovered), err)
 	}
 	for _, task := range recovered {
-		if task.RunID == nil || *task.RunID != newRun.ID {
-			t.Fatalf("recovered task run=%v, want %d", task.RunID, newRun.ID)
+		if task.RunID == nil || *task.RunID != oldRun.ID {
+			t.Fatalf("recovered task run=%v, want original %d", task.RunID, oldRun.ID)
 		}
 	}
 	if err := repo.Complete(recovered[0].ID, oldRun.ID, "same-worker"); !errors.Is(err, repository.ErrExploreLeaseNotHeld) {
-		t.Fatalf("old run completed reassigned task: %v", err)
+		t.Fatalf("old owner completed reassigned task: %v", err)
 	}
-	if err := repo.Complete(recovered[0].ID, newRun.ID, "same-worker"); err != nil {
-		t.Fatalf("new run could not complete recovered task: %v", err)
+	if err := repo.Complete(recovered[0].ID, oldRun.ID, "new-worker"); err != nil {
+		t.Fatalf("new owner could not complete original-run task: %v", err)
 	}
-	var oldClaimed int
+	var oldClaimed, runCount int
 	if err := db.QueryRow(`SELECT claimed_count FROM explore_fetch_runs WHERE id=$1`, oldRun.ID).Scan(&oldClaimed); err != nil {
 		t.Fatal(err)
 	}
-	if oldClaimed != 3 || oldClaimed > 500 || newRun.ClaimedCount > 500 {
-		t.Fatalf("claimed counts old=%d new=%d", oldClaimed, newRun.ClaimedCount)
+	if err := db.QueryRow(`SELECT count(*) FROM explore_fetch_runs`).Scan(&runCount); err != nil {
+		t.Fatal(err)
+	}
+	if oldClaimed != 3 || oldClaimed > 500 || recoveredRun.ClaimedCount != oldClaimed || runCount != 1 {
+		t.Fatalf("claimed old=%d recovered=%d run_count=%d", oldClaimed, recoveredRun.ClaimedCount, runCount)
+	}
+
+	newRun, fresh, err := repo.ClaimRun(time.Now().Add(time.Minute), "new-worker", time.Hour, 2)
+	if err != nil || len(fresh) != 0 || newRun.ClaimedCount != 0 {
+		t.Fatalf("fresh run captured original-run leases run=%+v tasks=%d err=%v", newRun, len(fresh), err)
+	}
+}
+
+func TestExploreQueueConcurrentRecoveryHasOneOwnerAndPreservesOriginalQuota(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	db.SetMaxOpenConns(8)
+	repo := repository.NewExploreQueueRepository(db)
+	enqueueExploreTasks(t, db, repo, 5, repository.ExplorePriorityRefresh)
+	original, tasks, err := repo.ClaimRun(time.Now(), "crashed", time.Minute, 5)
+	if err != nil || len(tasks) != 5 {
+		t.Fatalf("claim tasks=%d err=%v", len(tasks), err)
+	}
+	if _, err := db.Exec(`UPDATE explore_fetch_queue SET lease_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE run_id=$1`, original.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	type recovery struct {
+		run   *repository.ExploreFetchRun
+		tasks []repository.ExploreQueueTask
+		err   error
+	}
+	start := make(chan struct{})
+	results := make(chan recovery, 2)
+	for _, owner := range []string{"recovery-a", "recovery-b"} {
+		go func(owner string) {
+			<-start
+			run, tasks, err := repo.RecoverExpired(owner, time.Hour)
+			results <- recovery{run: run, tasks: tasks, err: err}
+		}(owner)
+	}
+	close(start)
+	winners := 0
+	for range 2 {
+		result := <-results
+		if result.err != nil {
+			if !errors.Is(result.err, repository.ErrExploreDispatcherBusy) {
+				t.Fatalf("unexpected concurrent recovery error: %v", result.err)
+			}
+			continue
+		}
+		if result.run == nil {
+			continue
+		}
+		winners++
+		if result.run.ID != original.ID || result.run.ClaimedCount != 5 || len(result.tasks) != 5 {
+			t.Fatalf("winner run=%+v tasks=%d", result.run, len(result.tasks))
+		}
+		for _, task := range result.tasks {
+			if task.RunID == nil || *task.RunID != original.ID {
+				t.Fatalf("task moved runs: %+v", task)
+			}
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("recovery winners=%d want=1", winners)
+	}
+	var claimed, runs int
+	if err := db.QueryRow(`SELECT claimed_count FROM explore_fetch_runs WHERE id=$1`, original.ID).Scan(&claimed); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM explore_fetch_runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if claimed != 5 || runs != 1 {
+		t.Fatalf("claimed=%d runs=%d", claimed, runs)
 	}
 }
 

@@ -81,20 +81,46 @@ func (registry *fakeExploreRegistry) count() int {
 }
 
 type fakeExploreQueue struct {
-	mu          sync.Mutex
-	claimCalls  int
-	windows     []time.Time
-	limits      []int
-	leases      []time.Duration
-	owners      []string
-	tasks       []repository.ExploreQueueTask
-	finishedRun []int
+	mu               sync.Mutex
+	recoverCalls     int
+	claimCalls       int
+	windows          []time.Time
+	limits           []int
+	leases           []time.Duration
+	owners           []string
+	tasks            []repository.ExploreQueueTask
+	recoveryRun      *repository.ExploreFetchRun
+	recoveryTasks    []repository.ExploreQueueTask
+	recoveryReturned bool
+	dispatchOrder    []string
+	finishedRun      []int
+}
+
+func (queue *fakeExploreQueue) RecoverExpired(owner string, lease time.Duration) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error) {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	queue.recoverCalls++
+	queue.dispatchOrder = append(queue.dispatchOrder, "recover")
+	if queue.recoveryRun == nil || queue.recoveryReturned {
+		return nil, nil, nil
+	}
+	queue.recoveryReturned = true
+	run := *queue.recoveryRun
+	tasks := append([]repository.ExploreQueueTask(nil), queue.recoveryTasks...)
+	for index := range tasks {
+		tasks[index].RunID = &run.ID
+		leaseOwner := owner
+		tasks[index].LeaseOwner = &leaseOwner
+	}
+	queue.leases = append(queue.leases, lease)
+	return &run, tasks, nil
 }
 
 func (queue *fakeExploreQueue) ClaimRun(window time.Time, owner string, lease time.Duration, limit int) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error) {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
 	queue.claimCalls++
+	queue.dispatchOrder = append(queue.dispatchOrder, "claim")
 	queue.windows = append(queue.windows, window)
 	queue.limits = append(queue.limits, limit)
 	queue.leases = append(queue.leases, lease)
@@ -262,6 +288,39 @@ func TestExploreCycleRunsProviderSyncThirtyMinutesBeforeSlotAndClaimsOncePerWind
 	}
 	if limits[0] != 500 {
 		t.Fatalf("claim limit = %d, want 500", limits[0])
+	}
+}
+
+func TestExploreCycleRecoversOriginalRunBeforeClaimingFreshWindow(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 30, 0, 0, exploreTestShanghai)
+	queue := &fakeExploreQueue{
+		recoveryRun:   &repository.ExploreFetchRun{ID: 41, Status: model.ExploreFetchRunFailed, ClaimedCount: 1},
+		recoveryTasks: makeExploreTasks(1),
+		tasks:         makeExploreTasks(1),
+	}
+	handler := &fakeExploreTaskHandler{}
+	cycle := newExploreCycleForTest(now, &fakeExploreRegistry{}, queue, handler, &fakeExploreSnapshotRunner{}, log.New(&bytes.Buffer{}, "", 0))
+
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return handler.done.Load() == 2 && queue.finishCount() == 2 })
+
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	if queue.claimCalls != 1 || queue.recoverCalls < 2 {
+		t.Fatalf("recover calls=%d claim calls=%d", queue.recoverCalls, queue.claimCalls)
+	}
+	claimIndex := -1
+	for index, operation := range queue.dispatchOrder {
+		if operation == "claim" {
+			claimIndex = index
+			break
+		}
+	}
+	if claimIndex < 1 {
+		t.Fatalf("dispatch order=%v, want recovery before fresh claim", queue.dispatchOrder)
+	}
+	if len(queue.finishedRun) != 2 || queue.finishedRun[0] != 41 || queue.finishedRun[1] != 71 {
+		t.Fatalf("finished runs=%v, want original 41 then fresh 71", queue.finishedRun)
 	}
 }
 
