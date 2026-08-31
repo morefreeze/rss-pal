@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	explorelogic "github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 )
@@ -14,6 +15,10 @@ type FeedRepository struct {
 }
 
 func NewFeedRepository(db *sql.DB) *FeedRepository {
+	return &FeedRepository{db: db}
+}
+
+func (r *FeedRepository) WithQuerier(db Querier) *FeedRepository {
 	return &FeedRepository{db: db}
 }
 
@@ -173,6 +178,13 @@ func (r *FeedRepository) Create(feed *model.Feed) error {
 	}
 	query := `INSERT INTO feeds (url, title, fetch_interval_minutes, owner_id, feed_type, expand_links) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`
 	return r.db.QueryRow(query, feed.URL, feed.Title, feed.FetchIntervalMin, feed.OwnerID, feedType, feed.ExpandLinks).Scan(&feed.ID, &feed.CreatedAt)
+}
+
+// GetOrCreateOwnerScoped reuses a visible shared feed before creating the
+// caller's owner+URL row. Its uniqueness path is independent from the clip
+// and provider-source identity indexes below.
+func (r *FeedRepository) GetOrCreateOwnerScoped(ownerID int, url, title, feedType string) (*model.Feed, bool, error) {
+	return explorelogic.GetOrCreateOwnerScopedFeed(r.db, ownerID, url, title, feedType)
 }
 
 func (r *FeedRepository) Update(feed *model.Feed) error {
