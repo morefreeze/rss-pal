@@ -85,17 +85,19 @@ type fakeExploreQueue struct {
 	claimCalls  int
 	windows     []time.Time
 	limits      []int
+	leases      []time.Duration
 	owners      []string
 	tasks       []repository.ExploreQueueTask
 	finishedRun []int
 }
 
-func (queue *fakeExploreQueue) ClaimRun(window time.Time, owner string, _ time.Duration, limit int) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error) {
+func (queue *fakeExploreQueue) ClaimRun(window time.Time, owner string, lease time.Duration, limit int) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error) {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
 	queue.claimCalls++
 	queue.windows = append(queue.windows, window)
 	queue.limits = append(queue.limits, limit)
+	queue.leases = append(queue.leases, lease)
 	queue.owners = append(queue.owners, owner)
 	runID := 71
 	tasks := append([]repository.ExploreQueueTask(nil), queue.tasks...)
@@ -116,6 +118,12 @@ func (queue *fakeExploreQueue) snapshot() (int, []time.Time, []int) {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
 	return queue.claimCalls, append([]time.Time(nil), queue.windows...), append([]int(nil), queue.limits...)
+}
+
+func (queue *fakeExploreQueue) leaseSnapshot() []time.Duration {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	return append([]time.Duration(nil), queue.leases...)
 }
 
 func (queue *fakeExploreQueue) finishCount() int {
@@ -163,7 +171,7 @@ type fakeExploreSnapshotRunner struct {
 	retry   bool
 }
 
-func (runner *fakeExploreSnapshotRunner) GenerateAll(_ context.Context, slotAt, _ time.Time) bool {
+func (runner *fakeExploreSnapshotRunner) GenerateAll(_ context.Context, slotAt, _ time.Time) exploreSnapshotGenerationResult {
 	runner.mu.Lock()
 	runner.slots = append(runner.slots, slotAt)
 	retry := runner.retry
@@ -174,7 +182,10 @@ func (runner *fakeExploreSnapshotRunner) GenerateAll(_ context.Context, slotAt, 
 	if runner.release != nil {
 		<-runner.release
 	}
-	return retry
+	if retry {
+		return exploreSnapshotGenerationResult{Pending: 1}
+	}
+	return exploreSnapshotGenerationResult{Done: 1}
 }
 
 func (runner *fakeExploreSnapshotRunner) setRetry(retry bool) {
@@ -310,6 +321,32 @@ func TestExploreCycleClampsQueueLimitAndDefaultsConcurrencyToFive(t *testing.T) 
 	}
 }
 
+func TestExploreCycleLeaseCoversWorstCaseQueuePosition(t *testing.T) {
+	now := time.Date(2026, 9, 1, 7, 30, 0, 0, exploreTestShanghai)
+	queue := &fakeExploreQueue{}
+	cycle := newExploreCycle(exploreCycleDeps{
+		clock: &fakeExploreClock{now: now}, registry: &fakeExploreRegistry{}, queue: queue,
+		taskHandler: &fakeExploreTaskHandler{}, snapshots: &fakeExploreSnapshotRunner{},
+		batchLimit: 500, fetchConcurrency: 5, leaseDuration: 20 * time.Minute,
+		owner: "worker-test", logger: log.New(&bytes.Buffer{}, "", 0),
+	})
+
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return len(queue.leaseSnapshot()) == 1 })
+	lease := queue.leaseSnapshot()[0]
+	want := 100*exploreTaskWorstCaseDuration + exploreLeaseSafetyMargin
+	if lease != want || lease <= 67*time.Minute {
+		t.Fatalf("lease = %v, want %v and > 67m", lease, want)
+	}
+}
+
+func TestExploreCyclePreservesLongerConfiguredLease(t *testing.T) {
+	cycle := newExploreCycle(exploreCycleDeps{batchLimit: 10, fetchConcurrency: 5, leaseDuration: 30 * time.Minute})
+	if cycle.deps.leaseDuration != 30*time.Minute {
+		t.Fatalf("lease = %v, want configured 30m", cycle.deps.leaseDuration)
+	}
+}
+
 func TestExploreCycleSnapshotDoesNotWaitForQueueDrainAndNightHasNoSnapshot(t *testing.T) {
 	now := time.Date(2026, 9, 1, 8, 0, 0, 0, exploreTestShanghai)
 	queue := &fakeExploreQueue{tasks: makeExploreTasks(1)}
@@ -382,6 +419,52 @@ func TestExploreSnapshotCoordinatorKeepsLastDoneAfterFailedGeneration(t *testing
 	}
 	if store.lastDone != 41 {
 		t.Fatalf("last done snapshot changed to %d, want 41", store.lastDone)
+	}
+}
+
+func TestExploreSnapshotCoordinatorReportsFreshUnownedPendingForRetry(t *testing.T) {
+	store := &fakeSnapshotStore{
+		claim:      &repository.ExploreSnapshotClaim{Batch: model.ExploreBatch{ID: 52, UserID: 7, Status: model.ExploreBatchPending}},
+		claimOwned: false,
+	}
+	runner := &exploreSnapshotCoordinator{
+		users: &fakeExploreUsers{ids: []int{7}}, profiles: &fakeExploreRankInputs{},
+		store: store, logger: log.New(&bytes.Buffer{}, "", 0),
+	}
+	result := runner.GenerateAll(context.Background(), time.Date(2026, 9, 1, 8, 0, 0, 0, exploreTestShanghai), time.Now())
+	if result.Pending != 1 || !result.NeedsRetry() {
+		t.Fatalf("result = %+v, want one retryable pending user", result)
+	}
+}
+
+func TestExploreSnapshotCoordinatorTreatsPersistedFailureAsTerminal(t *testing.T) {
+	store := &fakeSnapshotStore{
+		claim:      &repository.ExploreSnapshotClaim{Batch: model.ExploreBatch{ID: 52, UserID: 7, Status: model.ExploreBatchPending}},
+		claimOwned: true,
+	}
+	runner := &exploreSnapshotCoordinator{
+		users: &fakeExploreUsers{ids: []int{7}}, profiles: &fakeExploreRankInputs{profileErr: errors.New("profile unavailable")},
+		store: store, logger: log.New(&bytes.Buffer{}, "", 0),
+	}
+	result := runner.GenerateAll(context.Background(), time.Date(2026, 9, 1, 8, 0, 0, 0, exploreTestShanghai), time.Now())
+	if result.FailedPersisted != 1 || result.NeedsRetry() {
+		t.Fatalf("result = %+v, want one persisted terminal failure", result)
+	}
+}
+
+func TestExploreSnapshotCoordinatorRetriesWhenFailureCannotBePersisted(t *testing.T) {
+	store := &fakeSnapshotStore{
+		claim:      &repository.ExploreSnapshotClaim{Batch: model.ExploreBatch{ID: 52, UserID: 7, Status: model.ExploreBatchPending}},
+		claimOwned: true,
+		failErr:    errors.New("database unavailable"),
+	}
+	runner := &exploreSnapshotCoordinator{
+		users: &fakeExploreUsers{ids: []int{7}}, profiles: &fakeExploreRankInputs{profileErr: errors.New("profile unavailable")},
+		store: store, logger: log.New(&bytes.Buffer{}, "", 0),
+	}
+	result := runner.GenerateAll(context.Background(), time.Date(2026, 9, 1, 8, 0, 0, 0, exploreTestShanghai), time.Now())
+	if result.FailWriteErrors != 1 || !result.NeedsRetry() {
+		t.Fatalf("result = %+v, want one retryable fail-write error", result)
 	}
 }
 
@@ -461,20 +544,28 @@ func (inputs *fakeExploreRankInputs) LoadCandidates(context.Context, time.Time) 
 }
 
 type fakeSnapshotStore struct {
-	claim    *repository.ExploreSnapshotClaim
-	lastDone int
-	failed   int
+	claim      *repository.ExploreSnapshotClaim
+	claimOwned bool
+	claimErr   error
+	failErr    error
+	lastDone   int
+	failed     int
 }
 
 func (store *fakeSnapshotStore) Claim(int, time.Time, time.Time, time.Duration) (*repository.ExploreSnapshotClaim, bool, error) {
-	return store.claim, true, nil
+	owned := store.claimOwned
+	// Preserve the original fake's default: a configured claim is owned.
+	if store.claim != nil && !store.claimOwned && store.claim.Batch.Status == "" {
+		owned = true
+	}
+	return store.claim, owned, store.claimErr
 }
 func (store *fakeSnapshotStore) Publish(int, repository.ExploreSnapshotGenerationToken, []repository.ExploreSnapshotSourceInput) (*model.ExploreBatch, error) {
 	return nil, nil
 }
 func (store *fakeSnapshotStore) Fail(batchID int, _ repository.ExploreSnapshotGenerationToken, _ error) error {
 	store.failed = batchID
-	return nil
+	return store.failErr
 }
 
 func makeExploreTasks(count int) []repository.ExploreQueueTask {

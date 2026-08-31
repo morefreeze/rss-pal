@@ -40,6 +40,9 @@ func (p *ExploreTaskProcessor) Process(ctx context.Context, task ExploreQueueTas
 	if p == nil || p.db == nil {
 		return errors.New("explore task processor requires a database")
 	}
+	if task.RunID == nil || *task.RunID <= 0 {
+		return fmt.Errorf("%w: task %d has no run", ErrExploreLeaseNotHeld, task.ID)
+	}
 	checkedAt := p.now()
 	catalog := NewExploreCatalogRepository(p.db)
 	source, err := catalog.GetSourceWithObservations(task.SourceID)
@@ -66,7 +69,7 @@ func (p *ExploreTaskProcessor) finishMissingSource(ctx context.Context, task Exp
 		return err
 	}
 	defer tx.Rollback()
-	if err := NewExploreQueueRepository(p.db).WithQuerier(tx).Invalidate(task.ID, owner, cause); err != nil {
+	if err := NewExploreQueueRepository(p.db).WithQuerier(tx).Invalidate(task.ID, *task.RunID, owner, cause); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -83,7 +86,7 @@ func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task Expl
 	source, err := catalog.GetSource(task.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			if err := queue.Invalidate(task.ID, owner, err); err != nil {
+			if err := queue.Invalidate(task.ID, *task.RunID, owner, err); err != nil {
 				return err
 			}
 			return tx.Commit()
@@ -95,13 +98,13 @@ func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task Expl
 		if _, err := queue.Enqueue(task.SourceID, ExploreTaskRefreshArticles, ExplorePriorityRefresh); err != nil {
 			return err
 		}
-		if err := queue.Complete(task.ID, owner); err != nil {
+		if err := queue.Complete(task.ID, *task.RunID, owner); err != nil {
 			return err
 		}
 		return tx.Commit()
 	}
 	if decision == exploreTaskInvalidateWithoutFetch {
-		if err := queue.Invalidate(task.ID, owner, fmt.Errorf("explore %s task is not eligible for source status %s", task.TaskType, source.ValidationStatus)); err != nil {
+		if err := queue.Invalidate(task.ID, *task.RunID, owner, fmt.Errorf("explore %s task is not eligible for source status %s", task.TaskType, source.ValidationStatus)); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -125,7 +128,7 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 	current, err := catalog.GetSourceWithObservations(task.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			if err := queue.Invalidate(task.ID, owner, err); err != nil {
+			if err := queue.Invalidate(task.ID, *task.RunID, owner, err); err != nil {
 				return err
 			}
 			return tx.Commit()
@@ -137,13 +140,13 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		if _, err := queue.Enqueue(task.SourceID, ExploreTaskRefreshArticles, ExplorePriorityRefresh); err != nil {
 			return err
 		}
-		if err := queue.Complete(task.ID, owner); err != nil {
+		if err := queue.Complete(task.ID, *task.RunID, owner); err != nil {
 			return err
 		}
 		return tx.Commit()
 	}
 	if decision == exploreTaskInvalidateWithoutFetch {
-		if err := queue.Invalidate(task.ID, owner, fmt.Errorf("explore %s task is not eligible for source status %s", task.TaskType, current.Source.ValidationStatus)); err != nil {
+		if err := queue.Invalidate(task.ID, *task.RunID, owner, fmt.Errorf("explore %s task is not eligible for source status %s", task.TaskType, current.Source.ValidationStatus)); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -161,14 +164,14 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 			if err := catalog.RecordFetchFailure(task.SourceID, checkedAt, fetchErr); err != nil {
 				return err
 			}
-			if err := queue.Retry(task.ID, owner, fetchErr); err != nil {
+			if err := queue.Retry(task.ID, *task.RunID, owner, fetchErr); err != nil {
 				return err
 			}
 		} else {
 			if err := catalog.MarkValidationInvalid(task.SourceID, checkedAt, fetchErr); err != nil {
 				return err
 			}
-			if err := queue.Invalidate(task.ID, owner, fetchErr); err != nil {
+			if err := queue.Invalidate(task.ID, *task.RunID, owner, fetchErr); err != nil {
 				return err
 			}
 		}
@@ -182,7 +185,7 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		if err := catalog.RecordFetchNotModified(task.SourceID, checkedAt); err != nil {
 			return err
 		}
-		if err := queue.Complete(task.ID, owner); err != nil {
+		if err := queue.Complete(task.ID, *task.RunID, owner); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -219,7 +222,7 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 			return err
 		}
 	}
-	if err := queue.Complete(task.ID, owner); err != nil {
+	if err := queue.Complete(task.ID, *task.RunID, owner); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -229,7 +232,7 @@ func persistExploreTerminalResult(tx *sql.Tx, catalog *ExploreCatalogRepository,
 	if err := catalog.MarkValidationInvalid(task.SourceID, checkedAt, cause); err != nil {
 		return err
 	}
-	if err := queue.Invalidate(task.ID, owner, cause); err != nil {
+	if err := queue.Invalidate(task.ID, *task.RunID, owner, cause); err != nil {
 		return err
 	}
 	return tx.Commit()

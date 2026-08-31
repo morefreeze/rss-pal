@@ -31,6 +31,23 @@ func TestClipExploreErrorPreservesUTF8WithinByteLimit(t *testing.T) {
 	}
 }
 
+func TestExploreQueueSQLFencesRunAndReclaimsExpiredRowsIntoClaimLimit(t *testing.T) {
+	source, err := os.ReadFile("explore_queue.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"OR (status = 'leased' AND lease_expires_at <= CURRENT_TIMESTAMP)",
+		"SET status = 'leased', run_id = $2, lease_owner = $3",
+		"WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_owner = $3",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("queue SQL missing %q", required)
+		}
+	}
+}
+
 func TestExploreQueueWithQuerierPreservesRawDatabase(t *testing.T) {
 	raw := &sql.DB{}
 	repo := NewExploreQueueRepository(raw)
