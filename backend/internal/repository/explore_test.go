@@ -3,12 +3,29 @@ package repository
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
+
+func TestBuildExplorePageQueryLimitsEachSourceToRecentFiveBeforeRequestedOrdering(t *testing.T) {
+	query := strings.Join(strings.Fields(buildExplorePageQuery(ExploreListParams{
+		Sort: SortCaptured,
+		Dir:  SortAsc,
+	})), " ")
+
+	innerRecentFive := "ORDER BY COALESCE(explore_articles.published_at, explore_articles.fetched_at) DESC, explore_articles.fetched_at DESC, explore_articles.id DESC LIMIT 5"
+	if !strings.Contains(query, innerRecentFive) {
+		t.Fatalf("inner candidate order = %q, want fixed recent-five order %q", query, innerRecentFive)
+	}
+	outerRequestedOrder := ArticleOrderClause(ArticleAliasExplore, SortCaptured, SortAsc) + ", explore_articles.id ASC"
+	if !strings.HasSuffix(query, outerRequestedOrder) {
+		t.Fatalf("outer order = %q, want suffix %q", query, outerRequestedOrder)
+	}
+}
 
 func TestExploreStableSourceDiversityPreservesSourceOrder(t *testing.T) {
 	in := []ExploreArticleListItem{
@@ -126,6 +143,38 @@ func TestExploreRepositoryPageFeedbackVisibilityAndPagination(t *testing.T) {
 	insertExploreDoneBatch(t, db, otherUserID, now.Add(time.Hour), []exploreTestBatchSource{{sourceID: privateSource, rank: 1, topic: "security"}})
 	if _, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackHideSource, SourceID: &privateSource}); !errors.Is(err, ErrExploreNotFound) {
 		t.Fatalf("unauthorized source feedback=%v want not found", err)
+	}
+}
+
+func TestExploreRepositoryAscendingPageStillUsesEachSourcesRecentFive(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	userID, _ := insertExploreUsers(t, db)
+	sourceID := insertExploreSource(t, db, "https://recent-five.example/feed", "recent-five")
+	now := time.Now().UTC().Truncate(time.Second)
+	insertExploreDoneBatch(t, db, userID, now, []exploreTestBatchSource{{sourceID: sourceID, rank: 1, topic: "programming"}})
+
+	articleIDs := make([]int, 7)
+	for i := range articleIDs {
+		articleIDs[i] = insertExploreArticle(t, db, sourceID, now.Add(-time.Duration(i)*time.Hour), "recent-five")
+	}
+
+	page, err := NewExploreRepository(db).GetPage(userID, ExploreListParams{
+		Limit: 20,
+		Sort:  SortCaptured,
+		Dir:   SortAsc,
+	})
+	if err != nil {
+		t.Fatalf("GetPage: %v", err)
+	}
+	want := []int{articleIDs[4], articleIDs[3], articleIDs[2], articleIDs[1], articleIDs[0]}
+	if len(page.Articles) != len(want) {
+		t.Fatalf("article count=%d want=%d: %+v", len(page.Articles), len(want), page.Articles)
+	}
+	for i := range want {
+		if page.Articles[i].ID != want[i] {
+			t.Fatalf("article[%d].id=%d want=%d; page=%+v", i, page.Articles[i].ID, want[i], page.Articles)
+		}
 	}
 }
 
