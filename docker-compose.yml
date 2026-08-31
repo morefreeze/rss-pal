@@ -37,7 +37,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/038_subscription_explore.sql"]
+    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql"]
 
   api:
     restart: unless-stopped

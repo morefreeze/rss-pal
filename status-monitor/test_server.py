@@ -99,7 +99,7 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("restart: unless-stopped", status_service)
         self.assertIn("build:", status_service)
 
-    def test_compose_applies_heartbeat_migration_before_api_and_worker_start(self):
+    def test_compose_applies_heartbeat_then_explore_migration_before_api_and_worker_start(self):
         compose = (REPO_ROOT / "docker-compose.yml").read_text()
 
         def service_body(name):
@@ -120,9 +120,14 @@ class DeploymentConfigTests(unittest.TestCase):
             'PGPASSWORD: ${DB_ADMIN_PASSWORD:-${DB_PASSWORD:?DB_PASSWORD required in .env}}',
             '- ./backend/migrations:/migrations:ro',
             'condition: service_healthy',
-            '"psql", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/037_service_heartbeats.sql"',
         ):
             self.assertIn(setting, migration_service)
+
+        heartbeat = "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql"
+        explore = "psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql"
+        self.assertIn(heartbeat, migration_service)
+        self.assertIn(explore, migration_service)
+        self.assertLess(migration_service.index(heartbeat), migration_service.index(explore))
 
         for app_service_name in ("api", "worker"):
             app_service = service_body(app_service_name)
