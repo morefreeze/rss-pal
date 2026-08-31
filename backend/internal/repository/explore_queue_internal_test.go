@@ -50,7 +50,7 @@ func TestExploreQueueClaimRunAdvisoryLockBusyDoesNotMutate(t *testing.T) {
 	}
 
 	repo := NewExploreQueueRepository(db)
-	run, tasks, err := repo.ClaimRun(time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC), "blocked", time.Now().Add(time.Hour), 500)
+	run, tasks, err := repo.ClaimRun(time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC), "blocked", time.Hour, 500)
 	if !errors.Is(err, ErrExploreDispatcherBusy) || run != nil || tasks != nil {
 		t.Fatalf("ClaimRun while lock held run=%+v tasks=%+v err=%v", run, tasks, err)
 	}
@@ -84,7 +84,7 @@ func TestExploreQueueClaimRunAdvisoryQueryErrorRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, tasks, err := NewExploreQueueRepository(shadowDB).ClaimRun(time.Now(), "forced-error", time.Now().Add(time.Hour), 1)
+	run, tasks, err := NewExploreQueueRepository(shadowDB).ClaimRun(time.Now(), "forced-error", time.Hour, 1)
 	if err == nil || errors.Is(err, ErrExploreDispatcherBusy) || run != nil || tasks != nil {
 		t.Fatalf("forced advisory query run=%+v tasks=%+v err=%v", run, tasks, err)
 	}
