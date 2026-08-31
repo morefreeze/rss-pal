@@ -22,6 +22,8 @@ func TestMigration033_EnablesRLS(t *testing.T) {
 		"daily_digests", "hidden_articles", "user_ai_configs",
 		// shared-owned
 		"feeds", "articles", "summary_templates",
+		// explore user-scoped
+		"explore_batches", "explore_batch_sources", "explore_feedback", "explore_article_events",
 	}
 	sort.Strings(expected)
 

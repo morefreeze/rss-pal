@@ -2,6 +2,133 @@ package model
 
 import "time"
 
+const (
+	ExploreValidationPending = "pending"
+	ExploreValidationValid   = "valid"
+	ExploreValidationInvalid = "invalid"
+
+	ExploreFetchRunPending   = "pending"
+	ExploreFetchRunRunning   = "running"
+	ExploreFetchRunSucceeded = "succeeded"
+	ExploreFetchRunFailed    = "failed"
+
+	ExploreFetchTaskPending = "pending"
+	ExploreFetchTaskClaimed = "claimed"
+	ExploreFetchTaskDone    = "done"
+	ExploreFetchTaskFailed  = "failed"
+
+	ExploreFeedbackHideSource   = "hide_source"
+	ExploreFeedbackLessLikeThis = "less_like_this"
+
+	ExploreArticleEventExposure = "exposure"
+	ExploreArticleEventClick    = "click"
+	ExploreArticleEventRead     = "read"
+)
+
+// ExploreRegistryProvider is a stable, globally shared discovery provider.
+type ExploreRegistryProvider struct {
+	ID                     int        `json:"id" db:"id"`
+	ProviderKey            string     `json:"provider_key" db:"provider_key"`
+	Endpoint               string     `json:"endpoint" db:"endpoint"`
+	Kind                   string     `json:"kind" db:"kind"`
+	Topic                  string     `json:"topic" db:"topic"`
+	DefaultIntervalMinutes int        `json:"default_interval_minutes" db:"default_interval_minutes"`
+	Enabled                bool       `json:"enabled" db:"enabled"`
+	LastSyncStartedAt      *time.Time `json:"last_sync_started_at,omitempty" db:"last_sync_started_at"`
+	LastSyncedAt           *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
+	LastSyncError          string     `json:"last_sync_error,omitempty" db:"last_sync_error"`
+	CreatedAt              time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// ExploreSourceObservation is one provider's latest observation of a source.
+type ExploreSourceObservation struct {
+	ID            int       `json:"id" db:"id"`
+	ProviderID    int       `json:"provider_id" db:"provider_id"`
+	SourceURL     string    `json:"source_url" db:"source_url"`
+	NormalizedURL string    `json:"normalized_url" db:"normalized_url"`
+	Title         string    `json:"title" db:"title"`
+	Description   string    `json:"description,omitempty" db:"description"`
+	Topic         string    `json:"topic,omitempty" db:"topic"`
+	FeedType      string    `json:"feed_type" db:"feed_type"`
+	ObservedAt    time.Time `json:"observed_at" db:"observed_at"`
+	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type ExploreFetchRun struct {
+	ID           int        `json:"id" db:"id"`
+	ProviderID   int        `json:"provider_id" db:"provider_id"`
+	Status       string     `json:"status" db:"status"`
+	ClaimedCount int        `json:"claimed_count" db:"claimed_count"`
+	StartedAt    *time.Time `json:"started_at,omitempty" db:"started_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty" db:"finished_at"`
+	ErrorMessage string     `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+}
+
+type ExploreFetchTask struct {
+	ID                  int        `json:"id" db:"id"`
+	RunID               int        `json:"run_id" db:"run_id"`
+	SourceObservationID *int       `json:"source_observation_id,omitempty" db:"source_observation_id"`
+	Status              string     `json:"status" db:"status"`
+	AttemptCount        int        `json:"attempt_count" db:"attempt_count"`
+	ClaimedAt           *time.Time `json:"claimed_at,omitempty" db:"claimed_at"`
+	CompletedAt         *time.Time `json:"completed_at,omitempty" db:"completed_at"`
+	LastError           string     `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+}
+
+type ExploreArticle struct {
+	ID                  int        `json:"id" db:"id"`
+	SourceObservationID int        `json:"source_observation_id" db:"source_observation_id"`
+	Title               string     `json:"title" db:"title"`
+	URL                 string     `json:"url" db:"url"`
+	NormalizedURL       string     `json:"normalized_url" db:"normalized_url"`
+	Content             string     `json:"content,omitempty" db:"content"`
+	SummaryBrief        string     `json:"summary_brief,omitempty" db:"summary_brief"`
+	PublishedAt         *time.Time `json:"published_at,omitempty" db:"published_at"`
+	FetchedAt           time.Time  `json:"fetched_at" db:"fetched_at"`
+	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+type ExploreBatch struct {
+	ID          int        `json:"id" db:"id"`
+	UserID      int        `json:"user_id" db:"user_id"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty" db:"expires_at"`
+	GeneratedAt time.Time  `json:"generated_at" db:"generated_at"`
+}
+
+type ExploreBatchSource struct {
+	ID                  int       `json:"id" db:"id"`
+	BatchID             int       `json:"batch_id" db:"batch_id"`
+	SourceObservationID int       `json:"source_observation_id" db:"source_observation_id"`
+	Rank                int       `json:"rank" db:"rank"`
+	Score               float64   `json:"score" db:"score"`
+	Reason              string    `json:"reason,omitempty" db:"reason"`
+	CreatedAt           time.Time `json:"created_at" db:"created_at"`
+}
+
+type ExploreFeedback struct {
+	ID                  int        `json:"id" db:"id"`
+	UserID              int        `json:"user_id" db:"user_id"`
+	SourceObservationID int        `json:"source_observation_id" db:"source_observation_id"`
+	FeedbackType        string     `json:"feedback_type" db:"feedback_type"`
+	RevokedAt           *time.Time `json:"revoked_at,omitempty" db:"revoked_at"`
+	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+}
+
+type ExploreArticleEvent struct {
+	ID               int64     `json:"id" db:"id"`
+	UserID           int       `json:"user_id" db:"user_id"`
+	ExploreArticleID int       `json:"explore_article_id" db:"explore_article_id"`
+	BatchID          *int      `json:"batch_id,omitempty" db:"batch_id"`
+	EventType        string    `json:"event_type" db:"event_type"`
+	OccurredAt       time.Time `json:"occurred_at" db:"occurred_at"`
+}
+
 type Feed struct {
 	ID               int        `json:"id" db:"id"`
 	URL              string     `json:"url" db:"url"`
