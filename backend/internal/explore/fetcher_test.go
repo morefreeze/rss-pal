@@ -351,6 +351,20 @@ func TestSourceConfidenceBoundaries(t *testing.T) {
 	}
 }
 
+func TestSourceFetcherInsufficientConfidenceIsTerminalAndDetectable(t *testing.T) {
+	fetcher := sourceFetcherForTest(time.Now(), func(request *http.Request) (*http.Response, error) {
+		t.Fatal("insufficient confidence must fail before HTTP")
+		return nil, nil
+	})
+	_, err := fetcher.Fetch(context.Background(), SourceFetchRequest{URL: "https://example.com/feed"})
+	if !errors.Is(err, ErrInsufficientSourceConfidence) {
+		t.Fatalf("err=%v does not wrap ErrInsufficientSourceConfidence", err)
+	}
+	if got := ClassifySourceFetchError(err); got != SourceFetchTerminal {
+		t.Fatalf("classification=%q", got)
+	}
+}
+
 func TestSourceFetchProviderEvidenceCannotBypassFreshness(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	success := now

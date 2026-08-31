@@ -26,6 +26,10 @@ const (
 	maxExploreTitleBytes   = 500
 )
 
+// ErrInsufficientSourceConfidence lets the queue processor distinguish a
+// terminal content problem from registry evidence that may still be racing.
+var ErrInsufficientSourceConfidence = errors.New("source has insufficient public observation evidence")
+
 // ObservationEvidence contains only public registry evidence. It deliberately
 // has no user or private-article provenance fields.
 type ObservationEvidence struct {
@@ -145,7 +149,7 @@ func (f *SourceFetcher) Fetch(ctx context.Context, request SourceFetchRequest) (
 		now = f.now()
 	}
 	if !HasSourceConfidence(now, request.Evidence, request.DirectProfile) {
-		return SourceFetchResult{}, sourceError(SourceFetchTerminal, "source has insufficient public observation evidence")
+		return SourceFetchResult{}, sourceError(SourceFetchTerminal, "%w", ErrInsufficientSourceConfidence)
 	}
 	return f.fetch(ctx, request.URL, request.ETag, request.LastModified, now, true)
 }
