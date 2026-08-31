@@ -3,6 +3,7 @@ import {
   createExploreFeedback,
   deleteExploreFeedback,
   getExplore,
+  getUser,
   recordExploreArticleEvent,
   type ExploreArticleListItem,
   type ExploreOrder,
@@ -11,20 +12,30 @@ import {
 } from '../api/client'
 
 const DEFAULT_PAGE_SIZE = 20
-const EXPOSURE_SESSION_KEY = 'exploreReportedExposures'
+const EXPOSURE_SESSION_KEY_PREFIX = 'exploreReportedExposures'
+const MAX_AUTOMATIC_EMPTY_PAGE_LOADS = 5
 
-function reportedExposures(): Set<number> {
+function exposureSessionKey(): string {
   try {
-    const values = JSON.parse(sessionStorage.getItem(EXPOSURE_SESSION_KEY) || '[]')
+    const userID = getUser()?.id
+    return `${EXPOSURE_SESSION_KEY_PREFIX}:${Number.isInteger(userID) ? userID : 'unknown'}`
+  } catch {
+    return `${EXPOSURE_SESSION_KEY_PREFIX}:unknown`
+  }
+}
+
+function reportedExposures(key: string): Set<number> {
+  try {
+    const values = JSON.parse(sessionStorage.getItem(key) || '[]')
     return new Set(Array.isArray(values) ? values.filter(Number.isInteger) : [])
   } catch {
     return new Set()
   }
 }
 
-function persistReportedExposures(values: Set<number>) {
+function persistReportedExposures(key: string, values: Set<number>) {
   try {
-    sessionStorage.setItem(EXPOSURE_SESSION_KEY, JSON.stringify(Array.from(values)))
+    sessionStorage.setItem(key, JSON.stringify(Array.from(values)))
   } catch {
     // Session storage can be unavailable or full; in-memory de-noising remains.
   }
@@ -42,7 +53,13 @@ function mergeByID(
   incoming: ExploreArticleListItem[],
 ): ExploreArticleListItem[] {
   const seen = new Set(current.map(article => article.id))
-  return [...current, ...incoming.filter(article => !seen.has(article.id))]
+  const merged = [...current]
+  for (const article of incoming) {
+    if (seen.has(article.id)) continue
+    seen.add(article.id)
+    merged.push(article)
+  }
+  return merged
 }
 
 export function useExploreFeed({
@@ -66,9 +83,14 @@ export function useExploreFeed({
   const [dampenedTopics, setDampenedTopics] = useState<Set<string>>(() => new Set())
   const [knownTopics, setKnownTopics] = useState<string[]>([])
   const requestGenerationRef = useRef(0)
-  const exposedRef = useRef(reportedExposures())
+  const requestInFlightGenerationRef = useRef<number | null>(null)
+  const automaticEmptyLoadsRef = useRef(0)
+  const exposureKeyRef = useRef(exposureSessionKey())
+  const exposedRef = useRef(reportedExposures(exposureKeyRef.current))
+  const exposureInFlightRef = useRef(new Map<number, Promise<void>>())
 
   const requestPage = useCallback(async (nextOffset: number, reset: boolean, requestGeneration: number) => {
+    requestInFlightGenerationRef.current = requestGeneration
     if (reset) {
       setLoading(true)
       setLoadingMore(false)
@@ -88,7 +110,7 @@ export function useExploreFeed({
       })
       if (requestGeneration !== requestGenerationRef.current) return
       setSnapshot(page.snapshot)
-      setBaseArticles(current => reset ? page.articles : mergeByID(current, page.articles))
+      setBaseArticles(current => reset ? mergeByID([], page.articles) : mergeByID(current, page.articles))
       setKnownTopics(current => {
         const next = new Set(current)
         page.articles.forEach(article => { if (article.topic) next.add(article.topic) })
@@ -101,21 +123,24 @@ export function useExploreFeed({
       setError('探索内容加载失败，请稍后重试')
       setHasMore(false)
     } finally {
-      if (requestGeneration !== requestGenerationRef.current) return
-      if (reset) setLoading(false)
-      else setLoadingMore(false)
+      if (requestGeneration === requestGenerationRef.current) {
+        requestInFlightGenerationRef.current = null
+        if (reset) setLoading(false)
+        else setLoadingMore(false)
+      }
     }
   }, [order, pageSize, sort, topic])
 
   useEffect(() => {
     const nextGeneration = ++requestGenerationRef.current
+    automaticEmptyLoadsRef.current = 0
     setGeneration(nextGeneration)
     setOffset(0)
     void requestPage(0, true, nextGeneration)
   }, [requestPage])
 
   const loadMore = useCallback(async () => {
-    if (!hasMore || loading || loadingMore) return
+    if (!hasMore || loading || loadingMore || requestInFlightGenerationRef.current === requestGenerationRef.current) return
     await requestPage(offset + pageSize, false, requestGenerationRef.current)
   }, [hasMore, loading, loadingMore, offset, pageSize, requestPage])
 
@@ -123,15 +148,31 @@ export function useExploreFeed({
     !hiddenSources.has(article.source_id) && !dampenedTopics.has(article.topic),
   ), [baseArticles, dampenedTopics, hiddenSources])
 
-  const recordExposure = useCallback(async (articleID: number) => {
-    if (exposedRef.current.has(articleID)) return
-    exposedRef.current.add(articleID)
-    persistReportedExposures(exposedRef.current)
-    try {
-      await recordExploreArticleEvent(articleID, 'exposure')
-    } catch {
-      // Exposure is a low-weight signal and must never interrupt reading.
-    }
+  useEffect(() => {
+    if (articles.length > 0 || !hasMore || loading || loadingMore || error) return
+    if (requestInFlightGenerationRef.current === requestGenerationRef.current) return
+    if (automaticEmptyLoadsRef.current >= MAX_AUTOMATIC_EMPTY_PAGE_LOADS) return
+    automaticEmptyLoadsRef.current += 1
+    void loadMore()
+  }, [articles.length, error, hasMore, loadMore, loading, loadingMore, offset])
+
+  const recordExposure = useCallback((articleID: number): Promise<void> => {
+    if (exposedRef.current.has(articleID)) return Promise.resolve()
+    const pending = exposureInFlightRef.current.get(articleID)
+    if (pending) return pending
+    const request = recordExploreArticleEvent(articleID, 'exposure')
+      .then(() => {
+        exposedRef.current.add(articleID)
+        persistReportedExposures(exposureKeyRef.current, exposedRef.current)
+      })
+      .catch(() => {
+        // Exposure is a low-weight signal and must never interrupt reading.
+      })
+      .finally(() => {
+        exposureInFlightRef.current.delete(articleID)
+      })
+    exposureInFlightRef.current.set(articleID, request)
+    return request
   }, [])
 
   const recordClick = useCallback((articleID: number) => {
