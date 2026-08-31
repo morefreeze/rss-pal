@@ -55,9 +55,6 @@ func (r *ExploreRegistryRepository) LoadDueProviders(now time.Time) ([]explore.R
 }
 
 func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate explore.Candidate, observedAt time.Time) (int, error) {
-	if err := explore.ValidateCandidate(candidate); err != nil {
-		return 0, fmt.Errorf("invalid explore candidate: %w", err)
-	}
 	if providerID <= 0 || candidate.ExternalKey == "" || candidate.FeedURL == "" {
 		return 0, errors.New("provider, external key, and feed URL are required")
 	}
@@ -66,11 +63,16 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 	}
 	title := candidate.Title
 	if title == "" {
-		title = candidate.FeedURL
+		title = explore.ClipCandidateTitle(candidate.FeedURL)
 	}
+	candidate.Title = title
 	category := candidate.Topic
 	if category == "" {
 		category = "general"
+	}
+	candidate.Topic = category
+	if err := explore.ValidateCandidate(candidate); err != nil {
+		return 0, fmt.Errorf("invalid explore candidate: %w", err)
 	}
 	q, commit, rollback, err := txOrBegin(r.db)
 	if err != nil {

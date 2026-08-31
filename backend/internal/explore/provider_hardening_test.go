@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -95,7 +96,7 @@ func TestProviderClientRejectsNetworkPathBeforeFetch(t *testing.T) {
 
 func TestNormalizeCandidatesBoundsPublicFieldsAndProviderSize(t *testing.T) {
 	longKey := string(make([]byte, 501))
-	input := []Candidate{{ExternalKey: longKey, FeedURL: "https://example.com/feed", SiteURL: "https://example.com/" + string(make([]byte, 2050)), Title: string([]rune{'界'}) + string(make([]byte, 600)), Topic: string([]rune{'界'}) + string(make([]byte, 120)), Tags: []string{string([]rune{'界'}) + string(make([]byte, 120))}, OccurrenceCount: 0}}
+	input := []Candidate{{ExternalKey: longKey, FeedURL: "https://example.com/feed", SiteURL: "https://example.com/" + string(make([]byte, 2050)), Title: string([]rune{'界'}) + string(make([]byte, 600)), Topic: string([]rune{'界'}) + strings.Repeat("x", 120), Tags: []string{string([]rune{'界'}) + strings.Repeat("x", 120)}, OccurrenceCount: 0}}
 	for i := 0; i < 3000; i++ {
 		input = append(input, Candidate{ExternalKey: fmt.Sprintf("%d", i), FeedURL: fmt.Sprintf("https://many.example/%04d", i), Title: "many"})
 	}

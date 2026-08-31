@@ -168,13 +168,16 @@ func (c ProviderClient) resolveEndpoint(endpoint string) (string, error) {
 // NormalizeCandidates rejects unsafe URLs and coalesces candidates by their
 // canonical feed URL. The lexically smallest stable key wins public metadata.
 func NormalizeCandidates(input []Candidate) []Candidate {
-	byURL := make(map[string]Candidate, len(input))
+	byURL := make(map[string]Candidate, maxProviderCandidates)
 	for _, raw := range input {
 		raw, ok := normalizeCandidate(raw)
 		if !ok {
 			continue
 		}
 		feedURL := raw.FeedURL
+		if _, exists := byURL[feedURL]; !exists && len(byURL) >= maxProviderCandidates {
+			continue
+		}
 		if previous, exists := byURL[feedURL]; exists {
 			previous.OccurrenceCount = safeOccurrenceAdd(previous.OccurrenceCount, raw.OccurrenceCount)
 			previous.Tags = uniqueStrings(append(previous.Tags, raw.Tags...))
@@ -196,7 +199,7 @@ func NormalizeCandidates(input []Candidate) []Candidate {
 		raw.Tags = uniqueStrings(raw.Tags)
 		byURL[feedURL] = raw
 	}
-	out := make([]Candidate, 0, len(byURL))
+	out := make([]Candidate, 0, maxProviderCandidates)
 	for _, c := range byURL {
 		out = append(out, c)
 	}
@@ -215,6 +218,9 @@ func NormalizeCandidates(input []Candidate) []Candidate {
 // ValidateCandidate is the repository's defensive boundary for values that
 // should already have been normalized by provider adapters.
 func ValidateCandidate(candidate Candidate) error {
+	if strings.ContainsRune(candidate.ExternalKey, 0) || strings.ContainsRune(candidate.FeedURL, 0) || strings.ContainsRune(candidate.SiteURL, 0) || strings.ContainsRune(candidate.Title, 0) || strings.ContainsRune(candidate.Topic, 0) {
+		return errors.New("candidate contains NUL")
+	}
 	if candidate.ExternalKey == "" || !utf8.ValidString(candidate.ExternalKey) || len(candidate.ExternalKey) > maxCandidateKeyBytes {
 		return errors.New("invalid candidate external key")
 	}
@@ -225,6 +231,9 @@ func ValidateCandidate(candidate Candidate) error {
 		return errors.New("invalid candidate public metadata")
 	}
 	for _, tag := range candidate.Tags {
+		if strings.ContainsRune(tag, 0) {
+			return errors.New("candidate tag contains NUL")
+		}
 		if !utf8.ValidString(tag) || len(tag) > maxCandidateTopicBytes {
 			return errors.New("invalid candidate tag")
 		}
@@ -232,10 +241,24 @@ func ValidateCandidate(candidate Candidate) error {
 	if candidate.OccurrenceCount < 1 || candidate.OccurrenceCount > maxCandidateOccurrence {
 		return errors.New("invalid candidate occurrence count")
 	}
+	if normalized, ok := normalizePublicURL(candidate.FeedURL); !ok || normalized != candidate.FeedURL {
+		return errors.New("candidate feed URL is not canonical public URL")
+	}
+	if candidate.SiteURL != "" {
+		if normalized, ok := normalizePublicURL(candidate.SiteURL); !ok || normalized != candidate.SiteURL {
+			return errors.New("candidate site URL is not canonical public URL")
+		}
+	}
 	return nil
 }
 
 func normalizeCandidate(candidate Candidate) (Candidate, bool) {
+	if strings.ContainsRune(candidate.FeedURL, 0) {
+		return Candidate{}, false
+	}
+	if strings.ContainsRune(candidate.SiteURL, 0) {
+		candidate.SiteURL = ""
+	}
 	if !utf8.ValidString(candidate.FeedURL) || len(candidate.FeedURL) > maxCandidateFeedURLBytes {
 		return Candidate{}, false
 	}
@@ -251,8 +274,8 @@ func normalizeCandidate(candidate Candidate) (Candidate, bool) {
 	} else {
 		candidate.SiteURL = ""
 	}
-	candidate.Title = clipUTF8(candidate.Title, maxCandidateTitleBytes)
-	candidate.Topic = clipUTF8(candidate.Topic, maxCandidateTopicBytes)
+	candidate.Title = clipUTF8(strings.ReplaceAll(candidate.Title, "\x00", ""), maxCandidateTitleBytes)
+	candidate.Topic = clipUTF8(strings.ReplaceAll(candidate.Topic, "\x00", ""), maxCandidateTopicBytes)
 	if !utf8.ValidString(candidate.ExternalKey) || len(candidate.ExternalKey) > maxCandidateKeyBytes || candidate.ExternalKey == "" {
 		sum := sha256.Sum256([]byte(candidate.ExternalKey + "\x00" + feedURL))
 		candidate.ExternalKey = "sha256:" + hex.EncodeToString(sum[:])
@@ -260,6 +283,9 @@ func normalizeCandidate(candidate Candidate) (Candidate, bool) {
 	tags := make([]string, 0, maxCandidateTagCount)
 	seen := map[string]struct{}{}
 	for _, tag := range candidate.Tags {
+		if strings.ContainsRune(tag, 0) {
+			continue
+		}
 		tag = clipUTF8(tag, maxCandidateTopicBytes)
 		if tag != "" {
 			if _, ok := seen[tag]; !ok {
@@ -290,6 +316,9 @@ func clipUTF8(value string, limit int) string {
 		limit--
 	}
 	return value[:limit]
+}
+func ClipCandidateTitle(value string) string {
+	return clipUTF8(strings.ReplaceAll(value, "\x00", ""), maxCandidateTitleBytes)
 }
 func safeOccurrenceAdd(left, right int) int {
 	if left >= maxCandidateOccurrence-right {
