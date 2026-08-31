@@ -18,6 +18,8 @@ import BriefingRedirect from './components/BriefingRedirect'
 import FeedHealthPage from './pages/FeedHealthPage'
 import ClipPage from './pages/ClipPage'
 import ExtensionConfigPage from './pages/ExtensionConfigPage'
+import ExplorePage from './pages/ExplorePage'
+import ExploreArticlePage from './pages/ExploreArticlePage'
 import Layout from './components/Layout'
 import RoutePageTitle from './components/RoutePageTitle'
 
@@ -64,6 +66,8 @@ export function AppRoutes({
         <Route path="weekly" element={<WeeklyPage />} />
         <Route path="articles" element={<ArticleListPage />} />
         <Route path="articles/:id" element={<ArticlePage />} />
+        <Route path="explore" element={<ExplorePage />} />
+        <Route path="explore/articles/:id" element={<ExploreArticlePage />} />
         <Route path="clip" element={<ClipPage />} />
         {/* Back-compat: bookmarks of the old /saved view land on /articles
             with the 已保存 checkbox pre-ticked. ArticleListPage handles the

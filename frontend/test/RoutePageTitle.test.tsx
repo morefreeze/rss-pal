@@ -35,4 +35,32 @@ describe('RoutePageTitle', () => {
 
     expect(document.title).toBe('回退列表里能认出来的文章 - RSS Pal')
   })
+
+  it('names the explore list route', () => {
+    render(
+      <MemoryRouter initialEntries={['/explore']}>
+        <RoutePageTitle />
+      </MemoryRouter>,
+    )
+
+    expect(document.title).toBe('探索 - RSS Pal')
+  })
+
+  it('uses route state preview titles for explore article details', () => {
+    render(
+      <MemoryRouter initialEntries={[{
+        pathname: '/explore/articles/19',
+        state: {
+          articlePreview: {
+            id: 19,
+            title: '候选源里的一篇文章',
+          },
+        },
+      }]}>
+        <RoutePageTitle />
+      </MemoryRouter>,
+    )
+
+    expect(document.title).toBe('候选源里的一篇文章 - RSS Pal')
+  })
 })

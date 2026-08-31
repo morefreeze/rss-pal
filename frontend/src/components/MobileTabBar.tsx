@@ -8,7 +8,7 @@ const TABS: Tab[] = [
   { to: '/articles',            icon: '📰', label: '文章', showUnread: true, matchClip: false },
   { to: '/articles?view=clip',  icon: '⭐', label: '网摘',                   matchClip: true  },
   { to: '/feeds',               icon: '📡', label: '订阅' },
-  { to: '/briefing',            icon: '📅', label: '简报' },
+  { to: '/explore',             icon: '🔭', label: '探索' },
 ]
 
 interface Props {
@@ -29,7 +29,7 @@ export default function MobileTabBar({ unreadCount, onLogout }: Props) {
     if (t.matchClip) {
       return isClipView
     }
-    // Other tabs (/feeds): plain pathname prefix match.
+    // Other tabs (/feeds, /explore): plain pathname prefix match.
     return location.pathname === t.to || location.pathname.startsWith(t.to + '/')
   }
 

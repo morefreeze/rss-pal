@@ -52,6 +52,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/articles',           icon: '📰', label: '文章' },
   { to: '/articles?view=clip', icon: '⭐', label: '网摘', matchClip: true },
   { to: '/feeds',              icon: '📡', label: '订阅' },
+  { to: '/explore',            icon: '🔭', label: '探索' },
   { to: '/briefing',           icon: '📅', label: '简报' },
   { to: '/interests',          icon: '💡', label: '兴趣' },
   { to: '/stats',              icon: '📊', label: '统计' },
