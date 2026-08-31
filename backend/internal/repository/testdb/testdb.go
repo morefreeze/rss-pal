@@ -28,6 +28,18 @@ func New(t *testing.T) (*sql.DB, func()) {
 // callers can open additional connections (e.g. as a different role) that
 // point at the same migrated schema.
 func NewWithSchema(t *testing.T) (*sql.DB, string, func()) {
+	return newWithSchema(t, "")
+}
+
+// NewThroughMigration creates a fresh schema after applying migrations through
+// throughFile (inclusive). It is for upgrade-path tests that need to stage
+// legacy data before executing the next real migration.
+func NewThroughMigration(t *testing.T, throughFile string) (*sql.DB, func()) {
+	db, _, cleanup := newWithSchema(t, throughFile)
+	return db, cleanup
+}
+
+func newWithSchema(t *testing.T, throughFile string) (*sql.DB, string, func()) {
 	t.Helper()
 	dsn := os.Getenv("TEST_DB_URL")
 	if dsn == "" {
@@ -86,7 +98,7 @@ func NewWithSchema(t *testing.T) (*sql.DB, string, func()) {
 	if err != nil {
 		t.Fatalf("open schema db: %v", err)
 	}
-	if err := runMigrations(db); err != nil {
+	if err := runMigrationsThrough(db, throughFile); err != nil {
 		t.Fatalf("migrations: %v", err)
 	}
 
@@ -99,6 +111,10 @@ func NewWithSchema(t *testing.T) (*sql.DB, string, func()) {
 }
 
 func runMigrations(db *sql.DB) error {
+	return runMigrationsThrough(db, "")
+}
+
+func runMigrationsThrough(db *sql.DB, throughFile string) error {
 	dir := migrationsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -112,20 +128,29 @@ func runMigrations(db *sql.DB) error {
 	}
 	sort.Strings(files)
 	for _, name := range files {
-		b, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			return fmt.Errorf("%s: %w", name, err)
+		if throughFile != "" && name > throughFile {
+			break
 		}
-		// Split into individual statements so statements like
-		// CREATE INDEX CONCURRENTLY (which cannot run inside an implicit
-		// transaction block) can be executed on their own.
-		for _, stmt := range splitSQL(string(b)) {
-			if strings.TrimSpace(stmt) == "" {
-				continue
-			}
-			if _, err := db.Exec(stmt); err != nil {
-				return fmt.Errorf("%s: %w", name, err)
-			}
+		if err := ExecuteMigrationFile(db, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ExecuteMigrationFile applies one real migration file using the same
+// statement splitting path as normal test schema setup.
+func ExecuteMigrationFile(db *sql.DB, name string) error {
+	b, err := os.ReadFile(filepath.Join(migrationsDir(), name))
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	for _, stmt := range splitSQL(string(b)) {
+		if strings.TrimSpace(stmt) == "" {
+			continue
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
 	return nil
@@ -133,7 +158,7 @@ func runMigrations(db *sql.DB) error {
 
 // splitSQL splits a SQL script into individual statements on top-level
 // semicolons. It understands `--` line comments, `/* */` block comments,
-// single-quoted string literals (with `''` escapes), and `$tag$` dollar-quoted
+// single-quoted string literals (with `”` escapes), and `$tag$` dollar-quoted
 // strings. This is sufficient for the project's migration files; it is NOT a
 // general-purpose SQL parser.
 func splitSQL(s string) []string {

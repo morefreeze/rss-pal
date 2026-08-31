@@ -53,7 +53,7 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO feeds (url, title, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-			ON CONFLICT (url) DO UPDATE SET
+			ON CONFLICT ((COALESCE(owner_id, 0)), url) DO UPDATE SET
 				title = EXCLUDED.title,
 				fetch_interval_minutes = EXCLUDED.fetch_interval_minutes,
 				is_active = EXCLUDED.is_active,
