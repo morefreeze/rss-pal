@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -64,16 +66,56 @@ func TestExploreQueueClaimRunAdvisoryLockBusyDoesNotMutate(t *testing.T) {
 	}
 }
 
-func TestExploreQueueClaimRunClosedDatabaseReturnsErrorNotBusy(t *testing.T) {
-	db, err := sql.Open("postgres", "postgres://postgres:postgres@127.0.0.1:1/rsspal_test?sslmode=disable")
+func TestExploreQueueClaimRunAdvisoryQueryErrorRollsBack(t *testing.T) {
+	checkDB, schema, cleanup := testdb.NewWithSchema(t)
+	defer cleanup()
+	if _, err := checkDB.Exec(`
+		CREATE FUNCTION pg_try_advisory_xact_lock(bigint) RETURNS boolean
+		LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced advisory error'; END $$
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	shadowDB := openExploreShadowDB(t, schema)
+	defer shadowDB.Close()
+	shadowDB.SetMaxOpenConns(1)
+	shadowDB.SetMaxIdleConns(1)
+	if err := shadowDB.Ping(); err != nil {
+		t.Fatal(err)
+	}
+
+	run, tasks, err := NewExploreQueueRepository(shadowDB).ClaimRun(time.Now(), "forced-error", time.Now().Add(time.Hour), 1)
+	if err == nil || errors.Is(err, ErrExploreDispatcherBusy) || run != nil || tasks != nil {
+		t.Fatalf("forced advisory query run=%+v tasks=%+v err=%v", run, tasks, err)
+	}
+	var runs, leases int
+	if err := checkDB.QueryRow(`SELECT count(*) FROM explore_fetch_runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkDB.QueryRow(`SELECT count(*) FROM explore_fetch_queue WHERE status = 'leased'`).Scan(&leases); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 0 || leases != 0 {
+		t.Fatalf("advisory query error mutated state runs=%d leases=%d", runs, leases)
+	}
+}
+
+func openExploreShadowDB(t *testing.T, schema string) *sql.DB {
+	t.Helper()
+	dsn := os.Getenv("TEST_DB_URL")
+	if dsn == "" {
+		dsn = "postgres://postgres:postgres@127.0.0.1:5432/rsspal_test?sslmode=disable"
+	}
+	u, err := url.Parse(dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Close(); err != nil {
+	q := u.Query()
+	q.Set("search_path", schema+",pg_catalog")
+	u.RawQuery = q.Encode()
+	db, err := sql.Open("postgres", u.String())
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = NewExploreQueueRepository(db).ClaimRun(time.Now(), "closed", time.Now().Add(time.Hour), 1)
-	if err == nil || errors.Is(err, ErrExploreDispatcherBusy) {
-		t.Fatalf("closed DB error=%v, want non-busy query error", err)
-	}
+	return db
 }
