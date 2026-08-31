@@ -24,6 +24,23 @@ type fakeExploreClock struct{ now time.Time }
 
 func (clock *fakeExploreClock) Now() time.Time { return clock.now }
 
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (buffer *lockedBuffer) Write(value []byte) (int, error) {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.b.Write(value)
+}
+
+func (buffer *lockedBuffer) String() string {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.b.String()
+}
+
 type fakeExploreRegistry struct {
 	mu      sync.Mutex
 	windows []time.Time
@@ -82,6 +99,12 @@ func (queue *fakeExploreQueue) snapshot() (int, []time.Time, []int) {
 	return queue.claimCalls, append([]time.Time(nil), queue.windows...), append([]int(nil), queue.limits...)
 }
 
+func (queue *fakeExploreQueue) finishCount() int {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	return len(queue.finishedRun)
+}
+
 type fakeExploreTaskHandler struct {
 	started chan int
 	release chan struct{}
@@ -118,11 +141,13 @@ type fakeExploreSnapshotRunner struct {
 	slots   []time.Time
 	started chan time.Time
 	release chan struct{}
+	retry   bool
 }
 
-func (runner *fakeExploreSnapshotRunner) GenerateAll(_ context.Context, slotAt, _ time.Time) {
+func (runner *fakeExploreSnapshotRunner) GenerateAll(_ context.Context, slotAt, _ time.Time) bool {
 	runner.mu.Lock()
 	runner.slots = append(runner.slots, slotAt)
+	retry := runner.retry
 	runner.mu.Unlock()
 	if runner.started != nil {
 		runner.started <- slotAt
@@ -130,6 +155,41 @@ func (runner *fakeExploreSnapshotRunner) GenerateAll(_ context.Context, slotAt, 
 	if runner.release != nil {
 		<-runner.release
 	}
+	return retry
+}
+
+func (runner *fakeExploreSnapshotRunner) setRetry(retry bool) {
+	runner.mu.Lock()
+	runner.retry = retry
+	runner.mu.Unlock()
+}
+
+func TestExploreCycleRetriesFailedSnapshotButKeepsSuccessfulSlotGuard(t *testing.T) {
+	now := time.Date(2026, 9, 1, 11, 0, 0, 0, exploreTestShanghai)
+	snapshots := &fakeExploreSnapshotRunner{retry: true}
+	cycle := newExploreCycleForTest(now, &fakeExploreRegistry{}, &fakeExploreQueue{}, &fakeExploreTaskHandler{}, snapshots, log.New(&bytes.Buffer{}, "", 0))
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return snapshots.count() == 1 })
+	waitExplore(t, func() bool { return !exploreSnapshotSlotMarked(cycle, now) })
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return snapshots.count() == 2 })
+	waitExplore(t, func() bool { return !exploreSnapshotSlotMarked(cycle, now) })
+
+	snapshots.setRetry(false)
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return snapshots.count() == 3 })
+	cycle.Run(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if got := snapshots.count(); got != 3 {
+		t.Fatalf("successful slot generated %d times, want 3 total calls", got)
+	}
+}
+
+func exploreSnapshotSlotMarked(cycle *exploreCycle, slot time.Time) bool {
+	cycle.mu.Lock()
+	defer cycle.mu.Unlock()
+	_, exists := cycle.snapshotSlots[slot]
+	return exists
 }
 
 func (runner *fakeExploreSnapshotRunner) count() int {
@@ -246,7 +306,7 @@ func TestExploreCycleSnapshotDoesNotWaitForQueueDrainAndNightHasNoSnapshot(t *te
 
 func TestExploreCycleLogsOnlyIdentifiersAndContinuesAfterFailures(t *testing.T) {
 	now := time.Date(2026, 9, 1, 13, 30, 0, 0, exploreTestShanghai)
-	var output bytes.Buffer
+	var output lockedBuffer
 	registry := &fakeExploreRegistry{results: []explorelogic.ProviderSyncResult{
 		{ProviderID: 9, ProviderKey: "safe-provider", Err: errors.New("provider body PRIVATE-BODY")},
 		{ProviderID: 10, ProviderKey: "next-provider", Candidates: 2},
@@ -256,7 +316,7 @@ func TestExploreCycleLogsOnlyIdentifiersAndContinuesAfterFailures(t *testing.T) 
 	cycle := newExploreCycleForTest(now, registry, queue, handler, &fakeExploreSnapshotRunner{}, log.New(&output, "", 0))
 
 	cycle.Run(context.Background())
-	waitExplore(t, func() bool { return handler.done.Load() == 3 })
+	waitExplore(t, func() bool { return handler.done.Load() == 3 && queue.finishCount() == 1 })
 	logs := output.String()
 	for _, secret := range []string{"PRIVATE-BODY", "SECRET-PROFILE"} {
 		if strings.Contains(logs, secret) {

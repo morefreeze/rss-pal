@@ -42,7 +42,9 @@ type exploreTaskHandler interface {
 }
 
 type exploreSnapshotRunner interface {
-	GenerateAll(context.Context, time.Time, time.Time)
+	// GenerateAll returns true when at least one user's failed generation may
+	// be retried in the same slot. Successful users remain database-idempotent.
+	GenerateAll(context.Context, time.Time, time.Time) bool
 }
 
 type exploreCycleDeps struct {
@@ -111,7 +113,11 @@ func (cycle *exploreCycle) Run(ctx context.Context) {
 	// Launch the current slot before provider work. Snapshot ranking consumes
 	// the last validated cache and deliberately never waits for queue drain.
 	if schedule.HasCurrent && cycle.deps.snapshots != nil && cycle.markSnapshotSlotStarted(schedule.SlotAt) {
-		go cycle.deps.snapshots.GenerateAll(ctx, schedule.SlotAt, now)
+		go func() {
+			if cycle.deps.snapshots.GenerateAll(ctx, schedule.SlotAt, now) {
+				cycle.clearSnapshotSlot(schedule.SlotAt)
+			}
+		}()
 	}
 	if window, due := dueExploreProviderWindow(schedule, now); due && cycle.markProviderWindowStarted(window) {
 		go cycle.runProviderWindow(ctx, window, now)
@@ -141,6 +147,12 @@ func (cycle *exploreCycle) markSnapshotSlotStarted(slot time.Time) bool {
 	}
 	cycle.snapshotSlots[slot] = struct{}{}
 	return true
+}
+
+func (cycle *exploreCycle) clearSnapshotSlot(slot time.Time) {
+	cycle.mu.Lock()
+	delete(cycle.snapshotSlots, slot)
+	cycle.mu.Unlock()
 }
 
 func (cycle *exploreCycle) runProviderWindow(ctx context.Context, window, now time.Time) {
@@ -252,12 +264,12 @@ type exploreSnapshotCoordinator struct {
 	logger   *log.Logger
 }
 
-func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotAt, now time.Time) {
+func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotAt, now time.Time) bool {
 	started := time.Now()
 	userIDs, err := runner.users.ListUserIDs(ctx)
 	if err != nil {
 		runner.logger.Printf("explore snapshot slot=%s list_users_error=true", slotAt.Format(time.RFC3339))
-		return
+		return true
 	}
 	candidates, candidateErr := runner.profiles.LoadCandidates(ctx, now)
 	done, failed, skipped := 0, 0, 0
@@ -301,6 +313,7 @@ func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotA
 		runner.logger.Printf("explore snapshot batch_id=%d user_id=%d slot=%s candidates=%d discarded=%d", claim.Batch.ID, userID, slotAt.Format(time.RFC3339), len(values), discarded)
 	}
 	runner.logger.Printf("explore snapshot slot=%s users=%d done=%d failed=%d skipped=%d candidates=%d duration_ms=%d", slotAt.Format(time.RFC3339), len(userIDs), done, failed, skipped, len(candidates), time.Since(started).Milliseconds())
+	return failed > 0
 }
 
 type safeExploreError string
