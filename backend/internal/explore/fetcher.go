@@ -25,6 +25,12 @@ const (
 	maxExploreArticles     = 50
 	maxExploreTitleBytes   = 500
 	maxArticleClockSkew    = 24 * time.Hour
+
+	// SourceFetchRequestTimeout bounds each independent FetchBounded call.
+	// SourceFetchMaxRequests includes the initial URL plus every supported
+	// rel=alternate candidate, and is shared with the queue lease budget.
+	SourceFetchRequestTimeout = 20 * time.Second
+	SourceFetchMaxRequests    = 1 + maxDiscoveryCandidates
 )
 
 // ErrInsufficientSourceConfidence lets the queue processor distinguish a
@@ -149,7 +155,7 @@ type SourceFetcher struct {
 }
 
 func NewSourceFetcher() *SourceFetcher {
-	return &SourceFetcher{client: httpx.NewClient(20 * time.Second), now: time.Now, maxBodyBytes: defaultSourceBodyBytes}
+	return &SourceFetcher{client: httpx.NewClient(SourceFetchRequestTimeout), now: time.Now, maxBodyBytes: defaultSourceBodyBytes}
 }
 
 func (f *SourceFetcher) Fetch(ctx context.Context, request SourceFetchRequest) (SourceFetchResult, error) {
@@ -177,7 +183,7 @@ func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified st
 		client = f.client
 	}
 	if client == nil {
-		client = httpx.NewClient(20 * time.Second)
+		client = httpx.NewClient(SourceFetchRequestTimeout)
 	}
 	limit := defaultSourceBodyBytes
 	if f != nil && f.maxBodyBytes > 0 {

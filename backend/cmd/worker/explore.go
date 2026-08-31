@@ -20,9 +20,9 @@ const (
 	exploreMaxBatchLimit      = 500
 	exploreDefaultConcurrency = 5
 	exploreDefaultLease       = 20 * time.Minute
-	// A source fetch can consume two independent 20s network phases. The last
-	// queue position must remain leased while earlier concurrency waves finish.
-	exploreTaskWorstCaseDuration = 40 * time.Second
+	// The last queue position must remain leased while earlier concurrency
+	// waves perform the initial source request and every discovery candidate.
+	exploreTaskWorstCaseDuration = time.Duration(explorelogic.SourceFetchMaxRequests) * explorelogic.SourceFetchRequestTimeout
 	exploreLeaseSafetyMargin     = 5 * time.Minute
 	exploreSnapshotStaleAfter    = 45 * time.Minute
 )

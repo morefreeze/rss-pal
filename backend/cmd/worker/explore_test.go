@@ -334,9 +334,13 @@ func TestExploreCycleLeaseCoversWorstCaseQueuePosition(t *testing.T) {
 	cycle.Run(context.Background())
 	waitExplore(t, func() bool { return len(queue.leaseSnapshot()) == 1 })
 	lease := queue.leaseSnapshot()[0]
-	want := 100*exploreTaskWorstCaseDuration + exploreLeaseSafetyMargin
-	if lease != want || lease <= 67*time.Minute {
-		t.Fatalf("lease = %v, want %v and > 67m", lease, want)
+	wantTask := 5 * 20 * time.Second // initial HTML plus at most four alternates
+	if exploreTaskWorstCaseDuration != wantTask {
+		t.Fatalf("task worst case = %v, want %v", exploreTaskWorstCaseDuration, wantTask)
+	}
+	want := 100*wantTask + exploreLeaseSafetyMargin
+	if lease != want || lease != 171*time.Minute+40*time.Second {
+		t.Fatalf("lease = %v, want %v", lease, want)
 	}
 }
 
