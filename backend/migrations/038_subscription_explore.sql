@@ -172,11 +172,15 @@ CREATE TABLE IF NOT EXISTS explore_batches (
     status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'failed')),
     source_count INTEGER NOT NULL DEFAULT 0 CHECK (source_count >= 0),
     error_message TEXT,
+    generation_token VARCHAR(64),
+    started_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMP,
     CONSTRAINT explore_batches_id_user_id_key UNIQUE (id, user_id),
     UNIQUE (user_id, slot_at)
 );
+ALTER TABLE explore_batches ADD COLUMN IF NOT EXISTS generation_token VARCHAR(64);
+ALTER TABLE explore_batches ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_explore_batches_user_created_at
     ON explore_batches (user_id, created_at DESC);
 
@@ -188,13 +192,26 @@ CREATE TABLE IF NOT EXISTS explore_batch_sources (
     rank INTEGER NOT NULL CHECK (rank > 0),
     score DOUBLE PRECISION NOT NULL DEFAULT 0,
     topic VARCHAR(100),
-    reason TEXT,
+    reason VARCHAR(500),
     UNIQUE (batch_id, source_id),
+    UNIQUE (batch_id, rank),
     CONSTRAINT explore_batch_sources_batch_id_user_id_fkey
         FOREIGN KEY (batch_id, user_id)
         REFERENCES explore_batches(id, user_id)
         ON DELETE CASCADE
 );
+ALTER TABLE explore_batch_sources ALTER COLUMN reason TYPE VARCHAR(500) USING LEFT(reason, 500);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'explore_batch_sources'::regclass
+          AND conname = 'explore_batch_sources_batch_id_rank_key'
+    ) THEN
+        ALTER TABLE explore_batch_sources
+            ADD CONSTRAINT explore_batch_sources_batch_id_rank_key UNIQUE (batch_id, rank);
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_explore_batch_sources_batch_rank
     ON explore_batch_sources (batch_id, rank);
 
