@@ -10,10 +10,14 @@ import (
 const (
 	MaxProfileSubscriptionSignals = 128
 	MaxProfileBehaviorSignals     = 64
+	maxProfileFormalBehaviors     = 100
 
 	ExploreEventExposure      = "exposure"
 	ExploreEventClick         = "click"
 	ExploreEventCompletedRead = "completed_read"
+	FormalArticleRead         = "read"
+	FormalArticleSave         = "save"
+	FormalArticleLike         = "like"
 
 	FeedbackHideSource  = "hide_source"
 	FeedbackDampenTopic = "dampen_topic"
@@ -39,11 +43,12 @@ type WeightedSignal struct {
 // ProfileInput contains personalized metadata but no user identity, article
 // body, or private URL. Repository code owns access control and projection.
 type ProfileInput struct {
-	Now            time.Time
-	Subscriptions  []SubscriptionSignalInput
-	RecentArticles []RecentArticleSignalInput
-	ExploreEvents  []ExploreEventSignalInput
-	Feedback       []ExplicitFeedbackInput
+	Now                    time.Time
+	Subscriptions          []SubscriptionSignalInput
+	RecentArticles         []RecentArticleSignalInput
+	FormalArticleBehaviors []FormalArticleBehaviorInput
+	ExploreEvents          []ExploreEventSignalInput
+	Feedback               []ExplicitFeedbackInput
 }
 
 type SubscriptionSignalInput struct {
@@ -59,6 +64,15 @@ type RecentArticleSignalInput struct {
 	Category    string
 	Tags        []string
 	PublishedAt time.Time
+}
+
+type FormalArticleBehaviorInput struct {
+	Title      string
+	Category   string
+	Topic      string
+	Tags       []string
+	SignalType string
+	OccurredAt time.Time
 }
 
 type ExploreEventSignalInput struct {
@@ -128,13 +142,37 @@ func BuildExploreProfile(input ProfileInput) ExploreProfile {
 	}
 	for _, article := range recentArticles {
 		for _, token := range normalizeSignalTokens(article.Title, 8) {
-			behavior.addCapped(SignalToken, token, 0.08, 0.5)
+			subscriptions.addMax(SignalToken, token, 0.6)
 		}
 		if category := normalizeSignalPhrase(article.Category); category != "" {
-			behavior.addCapped(SignalCategory, category, 0.15, 0.75)
+			subscriptions.addMax(SignalCategory, category, 1.2)
 		}
 		for _, tag := range normalizeSignalList(article.Tags, 20) {
-			behavior.addCapped(SignalTag, tag, 0.12, 0.6)
+			subscriptions.addMax(SignalTag, tag, 1.5)
+		}
+	}
+
+	formalBehaviors := boundedFormalArticleBehaviors(input.FormalArticleBehaviors, input.Now)
+	for _, interaction := range formalBehaviors {
+		weight := map[string]float64{
+			FormalArticleRead: 0.02,
+			FormalArticleSave: 0.05,
+			FormalArticleLike: 0.08,
+		}[interaction.SignalType]
+		if weight == 0 {
+			continue
+		}
+		for _, token := range normalizeSignalTokens(interaction.Title, 8) {
+			behavior.addCapped(SignalToken, token, weight*0.5, 0.25)
+		}
+		if category := normalizeSignalPhrase(interaction.Category); category != "" {
+			behavior.addCapped(SignalCategory, category, weight*0.8, 0.4)
+		}
+		if topic := normalizeSignalPhrase(interaction.Topic); topic != "" {
+			behavior.addCapped(SignalTopic, topic, weight, 0.5)
+		}
+		for _, tag := range normalizeSignalList(interaction.Tags, 20) {
+			behavior.addCapped(SignalTag, tag, weight*0.8, 0.4)
 		}
 	}
 
@@ -192,6 +230,51 @@ func BuildExploreProfile(input ProfileInput) ExploreProfile {
 		BoostTopics:         sortedStringSet(boostTopics),
 		DampenTopics:        sortedStringSet(dampenTopics),
 	}
+}
+
+func boundedFormalArticleBehaviors(values []FormalArticleBehaviorInput, now time.Time) []FormalArticleBehaviorInput {
+	result := make([]FormalArticleBehaviorInput, 0, maxProfileFormalBehaviors)
+	for _, value := range values {
+		if !withinProfileWindow(value.OccurredAt, now, 30*24*time.Hour) || !knownFormalArticleBehavior(value.SignalType) {
+			continue
+		}
+		if len(result) < maxProfileFormalBehaviors {
+			result = append(result, value)
+			continue
+		}
+		worst := 0
+		for index := 1; index < len(result); index++ {
+			if formalArticleBehaviorLess(result[worst], result[index]) {
+				worst = index
+			}
+		}
+		if formalArticleBehaviorLess(value, result[worst]) {
+			result[worst] = value
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return formalArticleBehaviorLess(result[i], result[j]) })
+	return result
+}
+
+func formalArticleBehaviorLess(left, right FormalArticleBehaviorInput) bool {
+	if !left.OccurredAt.Equal(right.OccurredAt) {
+		return left.OccurredAt.After(right.OccurredAt)
+	}
+	return formalArticleBehaviorKey(left) < formalArticleBehaviorKey(right)
+}
+
+func knownFormalArticleBehavior(value string) bool {
+	return value == FormalArticleRead || value == FormalArticleSave || value == FormalArticleLike
+}
+
+func formalArticleBehaviorKey(value FormalArticleBehaviorInput) string {
+	return strings.Join([]string{
+		value.SignalType,
+		normalizeSignalPhrase(value.Title),
+		normalizeSignalPhrase(value.Category),
+		normalizeSignalPhrase(value.Topic),
+		strings.Join(normalizeSignalList(value.Tags, 20), ","),
+	}, "\x00")
 }
 
 func filterRecentArticles(values []RecentArticleSignalInput, now time.Time) []RecentArticleSignalInput {

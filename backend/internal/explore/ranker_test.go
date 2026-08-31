@@ -33,6 +33,23 @@ func TestExploreRankSubscriptionOutweighsBehaviorAndFeedbackOutweighsBehavior(t 
 	}
 }
 
+func TestExploreRankRecentFormalArticleMetadataOutweighsRepeatedExploreBehavior(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	input := ProfileInput{
+		Now:            now,
+		RecentArticles: []RecentArticleSignalInput{{Title: "Systems weekly", Tags: []string{"backend"}, PublishedAt: now.Add(-time.Hour)}},
+	}
+	for index := 0; index < 100; index++ {
+		input.ExploreEvents = append(input.ExploreEvents, ExploreEventSignalInput{Topic: "photography", EventType: ExploreEventCompletedRead, OccurredAt: now.Add(-time.Duration(index) * time.Minute)})
+	}
+	profile := BuildExploreProfile(input)
+	backend := rankFixture(1, "backend", []string{"backend"}, "provider-a", now)
+	photography := rankFixture(2, "photography", nil, "provider-b", now)
+	if got := rankedSourceIDs(RankExploreCandidates(profile, []RankCandidate{photography, backend}, now)); !reflect.DeepEqual(got, []int{1, 2}) {
+		t.Fatalf("recent formal metadata did not outweigh explore behavior: %v", got)
+	}
+}
+
 func TestExploreRankHardFiltersAndExistingSubscriptions(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	profile := BuildExploreProfile(ProfileInput{
