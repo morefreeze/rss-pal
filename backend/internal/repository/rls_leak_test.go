@@ -51,7 +51,7 @@ func newRLSFixture(t *testing.T) (*rlsFixture, func()) {
 		t.Fatalf("seed articleShared: %v", err)
 	}
 	var providerID, sourceID int
-	if err := privDB.QueryRow(`INSERT INTO recommended_feeds (url, title, category, language) VALUES ('https://example.test/feed', 'fixture', 'test', 'en') RETURNING id`).Scan(&sourceID); err != nil {
+	if err := privDB.QueryRow(`INSERT INTO recommended_feeds (url, title, category, language, normalized_url) VALUES ('https://Example.test/feed', 'fixture', 'test', 'en', 'https://example.test/feed') RETURNING id`).Scan(&sourceID); err != nil {
 		t.Fatalf("seed recommended source: %v", err)
 	}
 	if err := privDB.QueryRow(`INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, sync_interval_minutes) VALUES ('rls-fixture', 'opml', 'https://example.test/fixture', 360) RETURNING id`).Scan(&providerID); err != nil {

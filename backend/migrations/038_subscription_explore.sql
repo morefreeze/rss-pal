@@ -19,57 +19,37 @@ ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS first_discovered_at TIMES
 ALTER TABLE recommended_feeds ADD COLUMN IF NOT EXISTS last_observed_at TIMESTAMP;
 
 UPDATE recommended_feeds
-   SET normalized_url = lower(btrim(url))
+   SET normalized_url = CASE
+       WHEN btrim(url) ~* '^https?://' THEN
+           lower(substring(btrim(url) FROM '^(https?://[^/?#]*)'))
+           || substring(btrim(url) FROM '^https?://[^/?#]*(.*)$')
+       ELSE btrim(url)
+   END
  WHERE normalized_url IS NULL;
 UPDATE recommended_feeds
    SET validation_status = 'pending'
  WHERE validation_status IS NULL;
 
--- Older catalogs can contain case/whitespace URL duplicates. recommended_feeds
--- has no user-owned state; retain the deterministic lowest id and merge useful
--- catalog metadata before removing only its duplicate catalog rows.
-WITH ranked AS (
-    SELECT id, normalized_url, min(id) OVER (PARTITION BY normalized_url) AS canonical_id
+-- Never merge or remove historical catalog rows automatically. Any collision
+-- needs an operator decision because future Explore rows may reference it.
+DO $$
+DECLARE
+    duplicate_url TEXT;
+    duplicate_ids TEXT;
+BEGIN
+    SELECT normalized_url, string_agg(id::text, ',' ORDER BY id)
+      INTO duplicate_url, duplicate_ids
       FROM recommended_feeds
-     WHERE normalized_url IS NOT NULL
-),
-duplicates AS (
-    SELECT r.id, r.canonical_id
-      FROM ranked r
-     WHERE r.id <> r.canonical_id
-)
-UPDATE recommended_feeds canonical
-   SET site_url = COALESCE(canonical.site_url, duplicate.site_url),
-       description = COALESCE(canonical.description, duplicate.description),
-       first_discovered_at = NULLIF(
-           LEAST(
-               COALESCE(canonical.first_discovered_at, 'infinity'::timestamp),
-               COALESCE(duplicate.first_discovered_at, 'infinity'::timestamp)
-           ),
-           'infinity'::timestamp
-       ),
-       last_observed_at = NULLIF(
-           GREATEST(
-               COALESCE(canonical.last_observed_at, '-infinity'::timestamp),
-               COALESCE(duplicate.last_observed_at, '-infinity'::timestamp)
-           ),
-           '-infinity'::timestamp
-       )
-  FROM duplicates d
-  JOIN recommended_feeds duplicate ON duplicate.id = d.id
- WHERE canonical.id = d.canonical_id;
-
-DELETE FROM recommended_feeds duplicate
- USING (
-    SELECT id
-      FROM (
-          SELECT id, row_number() OVER (PARTITION BY normalized_url ORDER BY id) AS ordinal
-            FROM recommended_feeds
-           WHERE normalized_url IS NOT NULL
-      ) ranked
-     WHERE ordinal > 1
- ) duplicate_ids
- WHERE duplicate.id = duplicate_ids.id;
+     GROUP BY normalized_url
+    HAVING COUNT(*) > 1
+     ORDER BY normalized_url
+     LIMIT 1;
+    IF duplicate_url IS NOT NULL THEN
+        RAISE EXCEPTION 'recommended_feeds normalized_url collision: %', duplicate_url
+            USING DETAIL = format('normalized_url=%s ids=%s; resolve this catalog collision before migration', duplicate_url, duplicate_ids);
+    END IF;
+END
+$$;
 
 ALTER TABLE recommended_feeds DROP CONSTRAINT IF EXISTS recommended_feeds_validation_status_check;
 ALTER TABLE recommended_feeds ADD CONSTRAINT recommended_feeds_validation_status_check
@@ -77,6 +57,7 @@ ALTER TABLE recommended_feeds ADD CONSTRAINT recommended_feeds_validation_status
 ALTER TABLE recommended_feeds DROP CONSTRAINT IF EXISTS recommended_feeds_health_score_check;
 ALTER TABLE recommended_feeds ADD CONSTRAINT recommended_feeds_health_score_check
     CHECK (health_score IS NULL OR health_score BETWEEN 0 AND 1);
+ALTER TABLE recommended_feeds ALTER COLUMN normalized_url SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_recommended_feeds_normalized_url
     ON recommended_feeds (normalized_url);
 

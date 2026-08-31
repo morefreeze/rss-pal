@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -124,6 +125,9 @@ func TestMigration038_ExploreChecksAndUniqueIndexes(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO recommended_feeds (url, title, category, language, normalized_url) VALUES ('https://source-alias.test/feed', 'duplicate', 'test', 'en', 'https://source.test/feed')`); err == nil {
 		t.Fatal("recommended_feeds accepted duplicate normalized_url")
+	}
+	if _, err := db.Exec(`INSERT INTO recommended_feeds (url, title, category, language) VALUES ('https://missing-normalized.test/feed', 'missing', 'test', 'en')`); err == nil {
+		t.Fatal("recommended_feeds accepted NULL normalized_url")
 	}
 	if err := db.QueryRow(`INSERT INTO users (username, password_hash) VALUES ('explore-checks', 'x') RETURNING id`).Scan(&userID); err != nil {
 		t.Fatal(err)
@@ -247,6 +251,78 @@ func TestMigration038_ProviderSeedConflictPreservesRuntimeState(t *testing.T) {
 	}
 	if enabled || etag != "keep-etag" || lastModified != "keep-last-modified" || lastSync.IsZero() || lastSuccess.IsZero() || failures != 7 || lastError != "keep-error" {
 		t.Fatalf("real migration overwrote runtime state: enabled=%t etag=%q last_modified=%q last_sync=%v last_success=%v failures=%d last_error=%q", enabled, etag, lastModified, lastSync, lastSuccess, failures, lastError)
+	}
+}
+
+func TestMigration038_UpgradePathPreservesPathCaseAndRuntimeState(t *testing.T) {
+	db, cleanup := testdb.NewThroughMigration(t, "037_service_heartbeats.sql")
+	defer cleanup()
+
+	for _, url := range []string{
+		"https://Example.com/Feed?Token=ABC",
+		"https://example.com/feed?Token=ABC",
+	} {
+		if _, err := db.Exec(`INSERT INTO recommended_feeds (url, title, category, language) VALUES ($1, $1, 'test', 'en')`, url); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := testdb.ExecuteMigrationFile(db, "038_subscription_explore.sql"); err != nil {
+		t.Fatalf("apply real 038: %v", err)
+	}
+	rows, err := db.Query(`SELECT normalized_url FROM recommended_feeds ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var normalized string
+		if err := rows.Scan(&normalized); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, normalized)
+	}
+	want := []string{"https://example.com/Feed?Token=ABC", "https://example.com/feed?Token=ABC"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalized URLs: got %v, want %v", got, want)
+	}
+
+	seed := exploreProviderSeeds[0]
+	if _, err := db.Exec(`UPDATE explore_registry_providers SET enabled = false, etag = 'upgrade-etag', last_modified = 'upgrade-modified', last_sync_at = NOW(), last_success_at = NOW(), consecutive_failures = 5, last_error = 'upgrade-error' WHERE provider_key = $1`, seed.key); err != nil {
+		t.Fatal(err)
+	}
+	if err := testdb.ExecuteMigrationFile(db, "038_subscription_explore.sql"); err != nil {
+		t.Fatalf("reapply real 038: %v", err)
+	}
+	var enabled bool
+	var etag, modified, lastError string
+	var failures int
+	if err := db.QueryRow(`SELECT enabled, etag, last_modified, consecutive_failures, last_error FROM explore_registry_providers WHERE provider_key = $1`, seed.key).Scan(&enabled, &etag, &modified, &failures, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if enabled || etag != "upgrade-etag" || modified != "upgrade-modified" || failures != 5 || lastError != "upgrade-error" {
+		t.Fatalf("reapplied migration overwrote provider runtime: enabled=%t etag=%q modified=%q failures=%d error=%q", enabled, etag, modified, failures, lastError)
+	}
+}
+
+func TestMigration038_UpgradeFailsClosedOnNormalizedDuplicate(t *testing.T) {
+	db, cleanup := testdb.NewThroughMigration(t, "037_service_heartbeats.sql")
+	defer cleanup()
+
+	for _, url := range []string{"https://Example.com/Feed", "https://example.com/Feed"} {
+		if _, err := db.Exec(`INSERT INTO recommended_feeds (url, title, category, language) VALUES ($1, $1, 'test', 'en')`, url); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := testdb.ExecuteMigrationFile(db, "038_subscription_explore.sql"); err == nil {
+		t.Fatal("038 accepted equivalent normalized_url duplicates")
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM recommended_feeds WHERE url IN ('https://Example.com/Feed', 'https://example.com/Feed')`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("duplicate detection lost legacy rows: got %d, want 2", count)
 	}
 }
 

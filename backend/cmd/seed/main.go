@@ -109,7 +109,7 @@ func main() {
 			_, errF := db.Exec(`
 				INSERT INTO feeds (url, title, fetch_interval_minutes, owner_id, feed_type, is_active)
 				VALUES ($1, $2, 60, NULL, $3, true)
-				ON CONFLICT (url) DO NOTHING
+				ON CONFLICT ((COALESCE(owner_id, 0)), url) DO NOTHING
 			`, s.URL, s.Title, s.FeedType)
 			if errF != nil {
 				log.Printf("feeds insert failed for %s: %v", s.URL, errF)
