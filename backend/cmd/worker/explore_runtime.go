@@ -79,7 +79,7 @@ type sqlExploreQueue struct {
 }
 
 type exploreDueSourceCatalog interface {
-	ListDueSources(time.Time, time.Time, int) ([]model.ExploreSource, error)
+	ListDueSources(time.Time, time.Time, time.Time, int) ([]model.ExploreSource, error)
 }
 
 type exploreQueueEnqueuer interface {
@@ -104,7 +104,7 @@ func (scheduler *scheduledExploreRegistry) SyncDue(ctx context.Context, now time
 		related := scheduler.related.Sync(ctx, now)
 		syncErr = errors.Join(syncErr, related.Err)
 	}
-	due, dueErr := scheduler.catalog.ListDueSources(now.Add(-30*time.Minute), now.Add(-3*time.Hour), exploreMaxBatchLimit)
+	due, dueErr := scheduler.catalog.ListDueSources(now.Add(-30*time.Minute), now.Add(-3*time.Hour), now.Add(-24*time.Hour), exploreMaxBatchLimit)
 	var enqueueErr error
 	for _, source := range due {
 		taskType, priority := repository.ExploreTaskValidateSource, repository.ExplorePriorityStructuredProvider

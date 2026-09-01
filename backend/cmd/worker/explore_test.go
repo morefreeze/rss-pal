@@ -49,9 +49,17 @@ type fakeExploreRegistry struct {
 	err     error
 }
 
-type fakeExploreDueCatalog struct{ sources []model.ExploreSource }
+type fakeExploreDueCatalog struct {
+	sources         []model.ExploreSource
+	validationDueAt time.Time
+	refreshDueAt    time.Time
+	brokenDueAt     time.Time
+}
 
-func (catalog *fakeExploreDueCatalog) ListDueSources(time.Time, time.Time, int) ([]model.ExploreSource, error) {
+func (catalog *fakeExploreDueCatalog) ListDueSources(validationDueAt, refreshDueAt, brokenDueAt time.Time, _ int) ([]model.ExploreSource, error) {
+	catalog.validationDueAt = validationDueAt
+	catalog.refreshDueAt = refreshDueAt
+	catalog.brokenDueAt = brokenDueAt
 	return catalog.sources, nil
 }
 
@@ -395,6 +403,9 @@ func TestScheduledExploreRegistryEnqueuesDueValidationAndRefreshDespiteProviderF
 	if queue.tasks[0].SourceID != 4 || queue.tasks[0].TaskType != repository.ExploreTaskValidateSource ||
 		queue.tasks[1].SourceID != 8 || queue.tasks[1].TaskType != repository.ExploreTaskRefreshArticles {
 		t.Fatalf("scheduled task mapping = %+v", queue.tasks)
+	}
+	if !catalog.validationDueAt.Equal(now.Add(-30*time.Minute)) || !catalog.refreshDueAt.Equal(now.Add(-3*time.Hour)) || !catalog.brokenDueAt.Equal(now.Add(-24*time.Hour)) {
+		t.Fatalf("due cutoffs validation=%v refresh=%v broken=%v", catalog.validationDueAt, catalog.refreshDueAt, catalog.brokenDueAt)
 	}
 }
 
