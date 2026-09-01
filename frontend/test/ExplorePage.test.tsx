@@ -100,6 +100,8 @@ describe('ExplorePage', () => {
     ))
     renderPage()
     expect(await screen.findByText('Article 1')).toBeTruthy()
+    const thumbnail = screen.getByRole('img', { name: 'Article 1 缩略图' })
+    expect(thumbnail.getAttribute('src')).toBe('/api/proxy/image?url=https%3A%2F%2Fimages.test%2F1.jpg')
     expect(api.getExplore).toHaveBeenNthCalledWith(1, {
       limit: 20, offset: 0, sort: 'published', order: 'desc',
     })
