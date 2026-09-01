@@ -146,16 +146,41 @@ const (
 			WHERE observation.source_id = source.id AND provider.enabled
 		) AND ((
 			source.validation_status = 'pending'
+			AND source.is_broken=false
 			AND (source.last_checked_at IS NULL OR source.last_checked_at <= $1)
 		) OR (
 			source.validation_status = 'valid'
+			AND source.is_broken=false
 			AND (COALESCE(source.last_checked_at,source.last_fetched_at) IS NULL
 			     OR COALESCE(source.last_checked_at,source.last_fetched_at) <= $2)
+		) OR (
+			source.validation_status IN ('valid','invalid')
+			AND source.is_broken=true
+			AND (
+				COALESCE(source.last_checked_at,source.last_fetched_at) IS NULL
+				OR COALESCE(source.last_checked_at,source.last_fetched_at) <= $3
+				OR EXISTS (
+					SELECT 1 FROM explore_source_observations observation
+					JOIN explore_registry_providers provider ON provider.id=observation.provider_id
+					WHERE observation.source_id=source.id AND provider.enabled
+					  AND observation.last_seen_at > COALESCE(source.last_checked_at,source.last_fetched_at)
+				)
+			)
 		))
-		ORDER BY CASE WHEN source.validation_status = 'pending' THEN 0 ELSE 1 END,
+		ORDER BY CASE
+			WHEN source.validation_status = 'pending' THEN 0
+			WHEN source.is_broken AND EXISTS (
+				SELECT 1 FROM explore_source_observations observation
+				JOIN explore_registry_providers provider ON provider.id=observation.provider_id
+				WHERE observation.source_id=source.id AND provider.enabled
+				  AND observation.last_seen_at > COALESCE(source.last_checked_at,source.last_fetched_at)
+			) THEN 1
+			WHEN source.is_broken=false THEN 2
+			ELSE 3
+		END,
 		         CASE WHEN source.validation_status = 'pending' THEN source.last_checked_at ELSE COALESCE(source.last_checked_at,source.last_fetched_at) END ASC NULLS FIRST,
 		         source.id ASC
-		LIMIT $3`
+		LIMIT $4`
 )
 
 // ExploreCatalogObservation joins public evidence to its provider metadata.
@@ -246,16 +271,18 @@ func (r *ExploreCatalogRepository) GetSourceWithObservations(sourceID int) (*Exp
 	return result, rows.Err()
 }
 
-// ListDueSources returns observed canonical rows only. Pending sources use
-// their validation clock; valid sources use the latest check/fetch clock.
-func (r *ExploreCatalogRepository) ListDueSources(validationDueBefore, refreshDueBefore time.Time, limit int) ([]model.ExploreSource, error) {
+// ListDueSources returns observed canonical rows only. Broken valid/invalid
+// sources leave the normal refresh cadence and re-enter only on fresh enabled
+// provider evidence, explicit MarkValidationPending, or the bounded health
+// cadence supplied by brokenDueBefore.
+func (r *ExploreCatalogRepository) ListDueSources(validationDueBefore, refreshDueBefore, brokenDueBefore time.Time, limit int) ([]model.ExploreSource, error) {
 	if limit <= 0 {
 		return []model.ExploreSource{}, nil
 	}
 	if limit > maxExploreDueSources {
 		limit = maxExploreDueSources
 	}
-	rows, err := r.db.Query(exploreDueSourcesSQL, validationDueBefore, refreshDueBefore, limit)
+	rows, err := r.db.Query(exploreDueSourcesSQL, validationDueBefore, refreshDueBefore, brokenDueBefore, limit)
 	if err != nil {
 		return nil, err
 	}

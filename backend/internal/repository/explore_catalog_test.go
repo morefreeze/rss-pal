@@ -90,11 +90,60 @@ func TestExploreCatalogDueSQLRequiresEnabledObservation(t *testing.T) {
 		"explore_registry_providers provider",
 		"observation.source_id = source.id",
 		"provider.enabled",
+		"source.is_broken=false",
+		"source.is_broken=true",
+		"observation.last_seen_at > COALESCE(source.last_checked_at,source.last_fetched_at)",
+		"COALESCE(source.last_checked_at,source.last_fetched_at) <= $3",
+		"WHEN source.is_broken=false THEN 2",
+		"ELSE 3",
+		"LIMIT $4",
 	} {
 		if !strings.Contains(exploreDueSourcesSQL, fragment) {
 			t.Errorf("due-source SQL missing %q", fragment)
 		}
 	}
+}
+
+func TestExploreCatalogBrokenHealthChecksCannotDisplaceNormalRefreshFromLimit(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	providerID := insertCatalogProvider(t, db, "broken-budget-enabled", true)
+	if _, err := db.Exec(`
+		INSERT INTO recommended_feeds
+		(url,title,category,language,normalized_url,validation_status,last_checked_at,last_fetched_at,health_score,is_broken)
+		SELECT 'https://broken-budget-' || value || '.example/feed',
+		       'broken budget','test','en','https://broken-budget-' || value || '.example/feed',
+		       'valid',$1,$1,0,true
+		FROM generate_series(1,500) value`, now.Add(-25*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var normalID int
+	if err := db.QueryRow(`
+		INSERT INTO recommended_feeds
+		(url,title,category,language,normalized_url,validation_status,last_checked_at,last_fetched_at,health_score,is_broken)
+		VALUES ('https://normal-budget.example/feed','normal budget','test','en','https://normal-budget.example/feed','valid',$1,$1,1,false)
+		RETURNING id`, now.Add(-4*time.Hour)).Scan(&normalID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO explore_source_observations(provider_id,source_id,external_key,first_seen_at,last_seen_at)
+		SELECT $1,id,'budget-' || id,$2,$2 FROM recommended_feeds`, providerID, now.Add(-30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	due, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-30*time.Minute), now.Add(-3*time.Hour), now.Add(-24*time.Hour), 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 500 {
+		t.Fatalf("due count=%d want=500", len(due))
+	}
+	for _, source := range due {
+		if source.ID == normalID {
+			return
+		}
+	}
+	t.Fatalf("normal refresh %d was displaced by 500 broken health checks", normalID)
 }
 
 func TestExploreCatalogConditionalRequestSQLSeparates200And304(t *testing.T) {
@@ -715,19 +764,19 @@ func TestExploreCatalogListsOnlyDueCanonicalSources(t *testing.T) {
 	insertCatalogObservation(t, db, enabledProviderID, validID, "valid-enabled", old)
 	insertCatalogObservation(t, db, disabledProviderID, disabledOnlyID, "disabled-only", old)
 
-	due, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), 10)
+	due, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), now.Add(-24*time.Hour), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(due) != 2 || due[0].ID != pendingID || due[1].ID != validID {
 		t.Fatalf("due=%+v invalidIDs=%d,%d noObservationID=%d disabledOnlyID=%d", due, invalidID, oldInvalidID, noObservationID, disabledOnlyID)
 	}
-	limited, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), 1)
+	limited, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), now.Add(-24*time.Hour), 1)
 	if err != nil || len(limited) != 1 || limited[0].ID != pendingID {
 		t.Fatalf("limited=%+v err=%v", limited, err)
 	}
 	insertCatalogObservation(t, db, enabledProviderID, disabledOnlyID, "new-enabled", fresh)
-	due, err = NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), 10)
+	due, err = NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), now.Add(-24*time.Hour), 10)
 	if err != nil || len(due) != 3 || due[1].ID != disabledOnlyID {
 		t.Fatalf("new enabled observation did not restore source: due=%+v err=%v", due, err)
 	}
@@ -781,16 +830,27 @@ func TestExploreCatalogTransitionsHealthWithoutDeletingLastGoodCache(t *testing.
 	if status != model.ExploreValidationValid || score != 0 || !isBroken || articleCount != 1 {
 		t.Fatalf("after failures status=%q score=%v broken=%t cached=%d", status, score, isBroken, articleCount)
 	}
-	notDue, err := repo.ListDueSources(now.Add(24*time.Hour), now.Add(3*time.Hour+59*time.Minute), 10)
+	notDue, err := repo.ListDueSources(now.Add(24*time.Hour), now.Add(3*time.Hour+59*time.Minute), now.Add(-20*time.Hour), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(notDue) != 0 {
 		t.Fatalf("failed source immediately due again: %+v", notDue)
 	}
-	due, err := repo.ListDueSources(now.Add(24*time.Hour), now.Add(4*time.Hour+time.Second), 10)
+	notDue, err = repo.ListDueSources(now.Add(24*time.Hour), now.Add(4*time.Hour+time.Second), now.Add(-19*time.Hour), 10)
+	if err != nil || len(notDue) != 0 {
+		t.Fatalf("broken source entered normal refresh cadence: due=%+v err=%v", notDue, err)
+	}
+	due, err := repo.ListDueSources(now.Add(48*time.Hour), now.Add(48*time.Hour), now.Add(4*time.Hour+time.Second), 10)
 	if err != nil || len(due) != 1 || due[0].ID != sourceID {
-		t.Fatalf("source not due after health interval: due=%+v err=%v", due, err)
+		t.Fatalf("source not due after daily health interval: due=%+v err=%v", due, err)
+	}
+
+	rediscoveredAt := now.Add(4*time.Hour + 2*time.Second)
+	insertCatalogObservation(t, db, providerID, sourceID, "health-source-rediscovered", rediscoveredAt)
+	due, err = repo.ListDueSources(now.Add(24*time.Hour), now.Add(5*time.Hour), now.Add(-19*time.Hour), 10)
+	if err != nil || len(due) != 1 || due[0].ID != sourceID {
+		t.Fatalf("fresh observation did not restore early revalidation: due=%+v err=%v", due, err)
 	}
 
 	recoveredAt := now.Add(5 * time.Hour)
