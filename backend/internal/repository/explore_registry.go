@@ -22,6 +22,29 @@ const exploreRegistryCandidateUpsertSQL = `
 		last_observed_at = EXCLUDED.last_observed_at
 	RETURNING id`
 
+const ExploreRelatedSeedsSQL = `
+	WITH raw_seeds AS (
+		SELECT COALESCE(feed.owner_id,0) AS owner_key,
+		       COALESCE(source.site_url,feed.url) AS url,
+		       COALESCE(feed.last_fetched_at,feed.created_at) AS seed_at
+		FROM feeds feed
+		LEFT JOIN recommended_feeds source
+		  ON source.normalized_url=lower(btrim(feed.url)) AND source.merged_into_source_id IS NULL
+		WHERE feed.status='active' AND feed.is_active
+		UNION ALL
+		SELECT COALESCE(feed.owner_id,0),article.url,
+		       COALESCE(article.published_at,article.fetched_at)
+		FROM articles article JOIN feeds feed ON feed.id=article.feed_id
+		WHERE feed.status='active' AND feed.is_active
+		  AND COALESCE(article.published_at,article.fetched_at) >= $1 - INTERVAL '30 days'
+	), ranked AS (
+		SELECT owner_key,url,seed_at,
+		       ROW_NUMBER() OVER (PARTITION BY owner_key ORDER BY seed_at DESC,url) AS owner_rank
+		FROM raw_seeds WHERE url IS NOT NULL AND btrim(url) <> ''
+	)
+	SELECT url FROM ranked WHERE owner_rank <= 10
+	GROUP BY url ORDER BY MIN(owner_rank),url LIMIT $2`
+
 // ExploreRegistryRepository persists public provider state and observations.
 type ExploreRegistryRepository struct{ db Querier }
 
@@ -97,22 +120,7 @@ func (r *ExploreRegistryRepository) LoadRelatedSeeds(ctx context.Context, since 
 	if limit > explore.MaxRelatedSeeds {
 		limit = explore.MaxRelatedSeeds
 	}
-	rows, err := r.db.QueryContext(ctx, `
-		WITH public_seeds AS (
-			SELECT COALESCE(source.site_url, feed.url) AS url
-			FROM feeds feed
-			LEFT JOIN recommended_feeds source
-			  ON source.normalized_url=lower(btrim(feed.url)) AND source.merged_into_source_id IS NULL
-			WHERE feed.status='active' AND feed.is_active
-			UNION
-			SELECT article.url
-			FROM articles article JOIN feeds feed ON feed.id=article.feed_id
-			WHERE feed.status='active' AND feed.is_active
-			  AND COALESCE(article.published_at,article.fetched_at) >= $1 - INTERVAL '30 days'
-		)
-		SELECT DISTINCT url FROM public_seeds
-		WHERE url IS NOT NULL AND btrim(url) <> ''
-		ORDER BY url LIMIT $2`, since, limit)
+	rows, err := r.db.QueryContext(ctx, ExploreRelatedSeedsSQL, since, limit)
 	if err != nil {
 		return nil, err
 	}

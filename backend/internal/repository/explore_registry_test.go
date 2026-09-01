@@ -1,6 +1,7 @@
 package repository_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +9,19 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
+
+func TestRelatedSeedSQLFairlyBoundsEachVisibleOwnerBeforeGlobalLimit(t *testing.T) {
+	normalized := strings.Join(strings.Fields(repository.ExploreRelatedSeedsSQL), " ")
+	for _, fragment := range []string{
+		"ROW_NUMBER() OVER (PARTITION BY owner_key ORDER BY seed_at DESC,url)",
+		"WHERE owner_rank <= 10",
+		"ORDER BY MIN(owner_rank),url LIMIT $2",
+	} {
+		if !strings.Contains(normalized, fragment) {
+			t.Fatalf("related seed SQL missing %q: %s", fragment, normalized)
+		}
+	}
+}
 
 func TestExploreRegistryUpsertPreservesValidSourceAndObservation(t *testing.T) {
 	db, cleanup := testdb.New(t)
