@@ -182,16 +182,7 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 	}
 
 	if result.NotModified {
-		if task.TaskType != ExploreTaskRefreshArticles {
-			return persistExploreTerminalResult(tx, catalog, queue, task, owner, checkedAt, errors.New("validation source unexpectedly returned not modified"))
-		}
-		if err := catalog.RecordFetchNotModified(task.SourceID, checkedAt); err != nil {
-			return err
-		}
-		if err := queue.Complete(task.ID, *task.RunID, owner); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return persistExploreTerminalResult(tx, catalog, queue, task, owner, checkedAt, errors.New("validation source unexpectedly returned not modified"))
 	}
 	if err := validateExploreTaskResult(task.TaskType, result); err != nil {
 		if task.TaskType == ExploreTaskRefreshArticles && errors.Is(err, explore.ErrInactiveSource) {
