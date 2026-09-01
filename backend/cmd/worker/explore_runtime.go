@@ -24,11 +24,11 @@ const exploreCandidateInputLimit = 2000
 const exploreRecentArticleProfileSQL = `
 	SELECT article.title, COALESCE(article.category,''), COALESCE(article.topic,''),
 	       COALESCE(article.tags,'{}'), LEFT(COALESCE(article.content,''),4000),
-	       LEFT(COALESCE(article.summary_brief,''),1000), article.published_at
+	       LEFT(COALESCE(article.summary_brief,''),1000), COALESCE(article.published_at,article.fetched_at)
 	FROM articles article JOIN feeds feed ON feed.id=article.feed_id
 	WHERE (feed.owner_id IS NULL OR feed.owner_id=$1)
-	  AND article.published_at >= $2
-	ORDER BY article.published_at DESC, article.id DESC LIMIT 200`
+	  AND COALESCE(article.published_at,article.fetched_at) >= $2
+	ORDER BY COALESCE(article.published_at,article.fetched_at) DESC, article.id DESC LIMIT 200`
 
 const exploreCandidateSQL = `
 	SELECT source.id,source.title,source.category,COALESCE(source.site_url,source.url),
