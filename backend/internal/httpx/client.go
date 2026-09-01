@@ -105,7 +105,7 @@ func validateURL(ctx context.Context, raw string, resolver resolver) (*url.URL, 
 		}
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		if isBlockedIP(ip) {
+		if isBlockedIP(ip) || isSyntheticDNSIP(ip) {
 			return nil, errors.New("blocked address")
 		}
 		return u, nil
@@ -223,7 +223,18 @@ func FetchBounded(ctx context.Context, client *http.Client, rawURL string, heade
 // NewClient returns a client that re-validates redirect targets against the
 // SSRF guard. timeout caps the full request-to-response duration.
 func NewClient(timeout time.Duration) *http.Client {
-	return newClientWithProxy(timeout, net.DefaultResolver, &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}, http.ProxyFromEnvironment)
+	proxy := http.ProxyFromEnvironment
+	return newClientWithProxyFallback(
+		timeout,
+		net.DefaultResolver,
+		newProxyDoHResolver(proxy),
+		&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
+		proxy,
+	)
+}
+
+func newClientWithProxyFallback(timeout time.Duration, system, trusted resolver, dialer dialer, proxy func(*http.Request) (*url.URL, error)) *http.Client {
+	return newClientWithProxy(timeout, proxyFallbackResolver{system: system, trusted: trusted}, dialer, proxy)
 }
 
 func newClient(timeout time.Duration, resolver resolver, dialer dialer) *http.Client {
@@ -496,7 +507,7 @@ func pinRequest(req *http.Request, resolver resolver) (*http.Request, string, er
 	}
 	var ip net.IP
 	if literal := net.ParseIP(host); literal != nil {
-		if isBlockedIP(literal) {
+		if isBlockedIP(literal) || isSyntheticDNSIP(literal) {
 			return nil, "", errors.New("blocked address")
 		}
 		ip = literal
@@ -540,7 +551,7 @@ func safeDialContext(resolver resolver, dialer dialer) func(context.Context, str
 			return nil, err
 		}
 		if ip := net.ParseIP(host); ip != nil {
-			if isBlockedIP(ip) {
+			if isBlockedIP(ip) || isSyntheticDNSIP(ip) {
 				return nil, errors.New("blocked address")
 			}
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
