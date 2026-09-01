@@ -23,7 +23,7 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 		"explore_source_observations": {"id", "provider_id", "source_id", "external_key", "provider_tags", "first_seen_at", "last_seen_at", "occurrence_count"},
 		"explore_fetch_runs":          {"id", "window_at", "status", "claimed_count", "started_at", "completed_at", "worker_id", "error_message", "created_at"},
 		"explore_fetch_queue":         {"id", "source_id", "task_type", "status", "priority", "not_before", "attempts", "run_id", "lease_owner", "lease_token", "lease_expires_at", "last_error", "created_at", "updated_at", "completed_at"},
-		"explore_articles":            {"id", "source_id", "url", "normalized_url", "title", "content", "excerpt", "published_at", "fetched_at", "created_at", "updated_at"},
+		"explore_articles":            {"id", "source_id", "url", "normalized_url", "title", "content", "excerpt", "thumbnail_url", "published_at", "fetched_at", "created_at", "updated_at"},
 		"explore_batches":             {"id", "user_id", "slot_at", "status", "source_count", "error_message", "generation_token", "started_at", "created_at", "completed_at"},
 		"explore_batch_sources":       {"id", "user_id", "batch_id", "source_id", "rank", "score", "topic", "reason"},
 		"explore_feedback":            {"id", "user_id", "source_id", "topic", "feedback_type", "created_at"},
@@ -467,6 +467,7 @@ var exploreProviderSeeds = []providerSeed{
 	{"ooh-recently-added", "directory", "https://ooh.directory/feeds/recently-added.xml", "recently-added", 360},
 	{"reddit-programming", "reddit_stream", "/reddit/subreddit/programming", "programming", 360},
 	{"awesome-selfhosted", "github_awesome", "https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md", "self-hosted", 360},
+	{"related-sites", "related_site", "internal://visible-formal-subscriptions", "related", 360},
 }
 
 func assertExactColumns(t *testing.T, db interface {

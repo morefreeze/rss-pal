@@ -120,13 +120,14 @@ const (
 
 	exploreArticleUpsertSQL = `
 		INSERT INTO explore_articles
-		(source_id,url,normalized_url,title,content,excerpt,published_at,fetched_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		(source_id,url,normalized_url,title,content,excerpt,thumbnail_url,published_at,fetched_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT (source_id,normalized_url) DO UPDATE SET
 			url=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN EXCLUDED.url ELSE explore_articles.url END,
 			title=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN EXCLUDED.title ELSE explore_articles.title END,
 			content=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.content,explore_articles.content) ELSE explore_articles.content END,
 			excerpt=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.excerpt,explore_articles.excerpt) ELSE explore_articles.excerpt END,
+			thumbnail_url=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.thumbnail_url,explore_articles.thumbnail_url) ELSE explore_articles.thumbnail_url END,
 			published_at=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.published_at,explore_articles.published_at) ELSE explore_articles.published_at END,
 			fetched_at=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN EXCLUDED.fetched_at ELSE explore_articles.fetched_at END,
 			updated_at=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN CURRENT_TIMESTAMP ELSE explore_articles.updated_at END
@@ -457,7 +458,7 @@ func (r *ExploreCatalogRepository) UpsertArticle(article model.ExploreArticle) (
 	}
 	var articleID int
 	err := r.db.QueryRow(exploreArticleUpsertSQL, article.SourceID, article.URL, article.NormalizedURL,
-		article.Title, article.Content, article.Excerpt, article.PublishedAt,
+		article.Title, article.Content, article.Excerpt, article.ThumbnailURL, article.PublishedAt,
 		article.FetchedAt).Scan(&articleID)
 	return articleID, err
 }

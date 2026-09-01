@@ -19,12 +19,13 @@ import (
 )
 
 const (
-	defaultSourceBodyBytes = int64(4 << 20)
-	maxSourceBodyBytes     = int64(4 << 20)
-	maxDiscoveryCandidates = 4
-	maxExploreArticles     = 50
-	maxExploreTitleBytes   = 500
-	maxArticleClockSkew    = 24 * time.Hour
+	defaultSourceBodyBytes      = int64(4 << 20)
+	maxSourceBodyBytes          = int64(4 << 20)
+	maxDiscoveryCandidates      = 4
+	maxExploreArticles          = 50
+	maxExploreTitleBytes        = 500
+	maxExploreThumbnailURLBytes = 2048
+	maxArticleClockSkew         = 24 * time.Hour
 
 	// SourceFetchRequestTimeout bounds each independent FetchBounded call.
 	// SourceFetchMaxRequests includes the initial URL plus every supported
@@ -502,7 +503,68 @@ func exploreArticleFromItem(item *gofeed.Item, base *url.URL, fetchedAt time.Tim
 			article.Content = &excerpt
 		}
 	}
+	article.ThumbnailURL = exploreItemThumbnail(item, resolved)
 	return article, true
+}
+
+func exploreItemThumbnail(item *gofeed.Item, articleURL *url.URL) *string {
+	if item == nil || articleURL == nil {
+		return nil
+	}
+	candidates := make([]string, 0, 4)
+	if media := item.Extensions["media"]; media != nil {
+		for _, name := range []string{"thumbnail", "content"} {
+			for _, extension := range media[name] {
+				if name != "content" || strings.HasPrefix(strings.ToLower(extension.Attrs["type"]), "image/") || extension.Attrs["medium"] == "image" {
+					candidates = append(candidates, extension.Attrs["url"])
+				}
+			}
+		}
+	}
+	if item.Image != nil {
+		candidates = append(candidates, item.Image.URL)
+	}
+	for _, enclosure := range item.Enclosures {
+		if enclosure != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(enclosure.Type)), "image/") {
+			candidates = append(candidates, enclosure.URL)
+		}
+	}
+	for _, body := range []string{item.Content, item.Description} {
+		if image := firstExploreHTMLImage(body); image != "" {
+			candidates = append(candidates, image)
+		}
+	}
+	for _, raw := range candidates {
+		reference, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || reference.User != nil {
+			continue
+		}
+		resolved := articleURL.ResolveReference(reference)
+		if len(resolved.String()) > maxExploreThumbnailURLBytes {
+			continue
+		}
+		if normalized, ok := normalizePublicURL(resolved.String()); ok && len(normalized) <= maxExploreThumbnailURLBytes {
+			return &normalized
+		}
+	}
+	return nil
+}
+
+func firstExploreHTMLImage(body string) string {
+	tokenizer := html.NewTokenizer(strings.NewReader(body))
+	for {
+		switch tokenizer.Next() {
+		case html.ErrorToken:
+			return ""
+		case html.StartTagToken, html.SelfClosingTagToken:
+			token := tokenizer.Token()
+			if strings.EqualFold(token.Data, "img") {
+				if src, ok := htmlAttribute(token, "src"); ok {
+					return strings.TrimSpace(src)
+				}
+			}
+		}
+	}
 }
 
 func articleBefore(left, right model.ExploreArticle) bool {

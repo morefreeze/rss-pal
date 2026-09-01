@@ -78,6 +78,7 @@ type ExploreSnapshotStatus struct {
 	SlotAt        time.Time  `json:"slot_at"`
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 	Generating    bool       `json:"generating"`
+	Cold          bool       `json:"cold"`
 	UsingFallback bool       `json:"using_fallback"`
 	RefreshFailed bool       `json:"refresh_failed"`
 	NextRefreshAt *time.Time `json:"next_refresh_at,omitempty"`
@@ -90,6 +91,7 @@ type ExploreArticleListItem struct {
 	Title        string     `json:"title"`
 	URL          string     `json:"url"`
 	Excerpt      string     `json:"excerpt"`
+	ThumbnailURL *string    `json:"thumbnail_url,omitempty"`
 	PublishedAt  *time.Time `json:"published_at"`
 	FetchedAt    time.Time  `json:"fetched_at"`
 	Topic        string     `json:"topic"`
@@ -131,6 +133,7 @@ type ExploreArticleDetail struct {
 	URL          string     `json:"url"`
 	Content      *string    `json:"content"`
 	Excerpt      *string    `json:"excerpt,omitempty"`
+	ThumbnailURL *string    `json:"thumbnail_url,omitempty"`
 	PublishedAt  *time.Time `json:"published_at"`
 	FetchedAt    time.Time  `json:"fetched_at"`
 	IsSubscribed bool       `json:"is_subscribed"`
@@ -177,7 +180,7 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 		var item ExploreArticleListItem
 		if err := rows.Scan(
 			&item.ID, &item.SourceID, &item.SourceTitle, &item.Title, &item.URL,
-			&item.Excerpt, &item.PublishedAt, &item.FetchedAt, &item.Topic,
+			&item.Excerpt, &item.ThumbnailURL, &item.PublishedAt, &item.FetchedAt, &item.Topic,
 			&item.Reason, &item.IsSubscribed,
 		); err != nil {
 			rows.Close()
@@ -223,7 +226,7 @@ func buildExplorePageQuery(params ExploreListParams) string {
 	return `
 		SELECT explore_articles.id, explore_articles.source_id, source.title,
 		       explore_articles.title, explore_articles.url,
-		       COALESCE(explore_articles.excerpt, ''), explore_articles.published_at,
+		       COALESCE(explore_articles.excerpt, ''), explore_articles.thumbnail_url, explore_articles.published_at,
 		       explore_articles.fetched_at, COALESCE(batch_source.topic, ''),
 		       COALESCE(batch_source.reason, ''),
 		       EXISTS (
@@ -300,10 +303,15 @@ func readExploreSnapshotStatus(db Querier, userID int) (ExploreSnapshotStatus, e
 	} else if err != nil {
 		return status, err
 	}
-	status.Generating = latestStatus == model.ExploreBatchPending && (status.ID == 0 || latestSlot.After(status.SlotAt))
+	return finalizeExploreSnapshotStatus(status, latestStatus, latestSlot), nil
+}
+
+func finalizeExploreSnapshotStatus(status ExploreSnapshotStatus, latestStatus string, latestSlot time.Time) ExploreSnapshotStatus {
+	status.Cold = status.ID != 0 && status.SlotAt.Equal(ExploreColdStartSlotAt)
+	status.Generating = status.Cold || (latestStatus == model.ExploreBatchPending && (status.ID == 0 || latestSlot.After(status.SlotAt)))
 	status.RefreshFailed = latestStatus == model.ExploreBatchFailed
-	status.UsingFallback = status.RefreshFailed && status.ID != 0 && latestSlot.After(status.SlotAt)
-	return status, nil
+	status.UsingFallback = status.Cold || (status.RefreshFailed && status.ID != 0 && latestSlot.After(status.SlotAt))
+	return status
 }
 
 func stableDiversifyExploreArticles(in []ExploreArticleListItem) []ExploreArticleListItem {
@@ -383,7 +391,7 @@ func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreAr
 	var detail ExploreArticleDetail
 	err := r.db.QueryRow(`
 		SELECT article.id, article.source_id, source.title, source.url, source.site_url,
-		       article.title, article.url, article.content, article.excerpt,
+		       article.title, article.url, article.content, article.excerpt, article.thumbnail_url,
 		       article.published_at, article.fetched_at,
 		       EXISTS (
 		           SELECT 1 FROM feeds subscribed_feed
@@ -407,7 +415,7 @@ func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreAr
 		)
 	`, userID, articleID).Scan(
 		&detail.ID, &detail.SourceID, &detail.SourceTitle, &detail.SourceURL,
-		&detail.SiteURL, &detail.Title, &detail.URL, &detail.Content, &detail.Excerpt,
+		&detail.SiteURL, &detail.Title, &detail.URL, &detail.Content, &detail.Excerpt, &detail.ThumbnailURL,
 		&detail.PublishedAt, &detail.FetchedAt, &detail.IsSubscribed,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

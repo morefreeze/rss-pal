@@ -81,6 +81,51 @@ func TestSourceFetchDirectRSSAndAtom(t *testing.T) {
 	}
 }
 
+func TestExploreArticleThumbnailUsesSafeFeedMediaThenContentImage(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	body := `<?xml version="1.0"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title>Feed</title>` +
+		`<item><title>Media</title><link>https://9.9.9.9/media</link><pubDate>` + now.Format(time.RFC1123Z) + `</pubDate><media:thumbnail url="https://cdn.example/media.jpg"/><description><![CDATA[<img src="https://cdn.example/fallback.jpg">]]></description></item>` +
+		`<item><title>Content</title><link>https://9.9.9.9/content</link><pubDate>` + now.Add(-time.Hour).Format(time.RFC1123Z) + `</pubDate><description><![CDATA[<p>x</p><img src="https://cdn.example/content.webp">]]></description></item>` +
+		`</channel></rss>`
+	articles, recognized, err := parseExploreFeed([]byte(body), "https://8.8.8.8/feed", now, 2)
+	if err != nil || !recognized || len(articles) != 2 {
+		t.Fatalf("parseExploreFeed=(%+v,%v,%v)", articles, recognized, err)
+	}
+	if articles[0].ThumbnailURL == nil || *articles[0].ThumbnailURL != "https://cdn.example/media.jpg" {
+		t.Fatalf("media thumbnail=%v", stringValue(articles[0].ThumbnailURL))
+	}
+	if articles[1].ThumbnailURL == nil || *articles[1].ThumbnailURL != "https://cdn.example/content.webp" {
+		t.Fatalf("content thumbnail=%v", articles[1].ThumbnailURL)
+	}
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return "<nil>"
+	}
+	return *value
+}
+
+func TestExploreArticleThumbnailRejectsUnsafeAndOversizedURLs(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	for _, raw := range []string{
+		"data:image/png;base64,aaaa",
+		"javascript:alert(1)",
+		"http://127.0.0.1/private.png",
+		"https://cdn.example/" + strings.Repeat("x", 2048),
+	} {
+		item := rssItem("Unsafe", "https://9.9.9.9/unsafe", now)
+		item = strings.Replace(item, "<![CDATA[body]]>", "<![CDATA[<img src=\""+raw+"\">]]>", 1)
+		articles, recognized, err := parseExploreFeed([]byte(validRSS(item+rssItem("Second", "https://9.9.9.9/second", now.Add(-time.Hour)))), "https://8.8.8.8/feed", now, 2)
+		if err != nil || !recognized || len(articles) != 2 {
+			t.Fatalf("raw=%q parse=(%d,%v,%v)", raw, len(articles), recognized, err)
+		}
+		if articles[0].ThumbnailURL != nil {
+			t.Fatalf("unsafe thumbnail %q accepted as %q", raw, *articles[0].ThumbnailURL)
+		}
+	}
+}
+
 func TestSourceFetchHTMLDiscoveryUsesFinalURLAndAtMostFourCandidates(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	var paths []string

@@ -158,12 +158,14 @@ CREATE TABLE IF NOT EXISTS explore_articles (
     title VARCHAR(500) NOT NULL,
     content TEXT,
     excerpt TEXT,
+    thumbnail_url VARCHAR(2048),
     published_at TIMESTAMP,
     fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (source_id, normalized_url)
 );
+ALTER TABLE explore_articles ADD COLUMN IF NOT EXISTS thumbnail_url VARCHAR(2048);
 CREATE INDEX IF NOT EXISTS idx_explore_articles_source_published_at
     ON explore_articles (source_id, published_at DESC);
 
@@ -286,7 +288,8 @@ VALUES
     ('chinese-independent', 'opml', 'https://raw.githubusercontent.com/timqian/chinese-independent-blogs/master/feed.opml', 'chinese-independent', 360),
     ('ooh-recently-added', 'directory', 'https://ooh.directory/feeds/recently-added.xml', 'recently-added', 360),
     ('reddit-programming', 'reddit_stream', '/reddit/subreddit/programming', 'programming', 360),
-    ('awesome-selfhosted', 'github_awesome', 'https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md', 'self-hosted', 360)
+    ('awesome-selfhosted', 'github_awesome', 'https://raw.githubusercontent.com/awesome-selfhosted/awesome-selfhosted/master/README.md', 'self-hosted', 360),
+    ('related-sites', 'related_site', 'internal://visible-formal-subscriptions', 'related', 360)
 ON CONFLICT (provider_key) DO UPDATE
     SET provider_kind = EXCLUDED.provider_kind,
         endpoint = EXCLUDED.endpoint,
