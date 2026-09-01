@@ -11,6 +11,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
 	"github.com/bytedance/rss-pal/internal/rss"
+	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/lib/pq"
 )
 
@@ -153,15 +154,72 @@ type promotableSource struct {
 	FeedType string
 }
 
+func visibleSubscribeNormalizedURLs(db Querier, userID int) ([]string, error) {
+	rows, err := db.Query(`SELECT url FROM feeds WHERE owner_id IS NULL OR owner_id=$1 ORDER BY id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]struct{}{}
+	result := []string{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		normalized := util.NormalizeURL(strings.TrimSpace(raw))
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result, rows.Err()
+}
+
 func loadPromotableSources(db Querier, userID int, sourceIDs []int, now time.Time) ([]promotableSource, error) {
+	formalURLs, err := visibleSubscribeNormalizedURLs(db, userID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := db.Query(`
+		WITH cold_ranked AS (
+			SELECT source.id,COALESCE(source.health_score,0) AS health_score,observation.last_seen_at
+			FROM recommended_feeds source
+			JOIN LATERAL (
+				SELECT item.last_seen_at,COALESCE(provider.topic,'') AS topic
+				FROM explore_source_observations item
+				JOIN explore_registry_providers provider ON provider.id=item.provider_id
+				WHERE item.source_id=source.id AND provider.enabled
+				  AND item.last_seen_at >= $3::timestamp - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')
+				ORDER BY item.last_seen_at DESC,item.id DESC LIMIT 1
+			) observation ON true
+			WHERE source.validation_status='valid' AND source.is_broken=false
+			  AND source.merged_into_source_id IS NULL
+			  AND EXISTS (SELECT 1 FROM explore_articles article WHERE article.source_id=source.id)
+			  AND NOT EXISTS (
+				SELECT 1 FROM explore_feedback hidden
+				WHERE hidden.user_id=$1 AND hidden.source_id=source.id AND hidden.feedback_type='hide_source'
+			  )
+			  AND NOT EXISTS (
+				SELECT 1 FROM explore_feedback dampened
+				WHERE dampened.user_id=$1 AND dampened.feedback_type='dampen_topic'
+				  AND dampened.topic=COALESCE(NULLIF(source.category,''),NULLIF(observation.topic,''),'')
+			  )
+			  AND NOT source.normalized_url=ANY($4)
+			ORDER BY COALESCE(source.health_score,0) DESC,observation.last_seen_at DESC,source.id
+			LIMIT 12
+		), cold_sources AS (SELECT id FROM cold_ranked)
 		SELECT source.id, source.url, source.title, COALESCE(NULLIF(source.feed_type,''),'rss')
 		FROM recommended_feeds source
 		WHERE source.id=ANY($2)
 		  AND source.validation_status='valid'
 		  AND source.is_broken=false
 		  AND source.merged_into_source_id IS NULL
-		  AND EXISTS (
+		  AND (EXISTS (
 		      SELECT 1
 		      FROM explore_batch_sources batch_source
 		      JOIN explore_batches batch
@@ -169,10 +227,10 @@ func loadPromotableSources(db Querier, userID int, sourceIDs []int, now time.Tim
 		      WHERE batch_source.user_id=$1
 		        AND batch_source.source_id=source.id
 		        AND batch.status='done'
-		        AND batch.completed_at >= $3
-		  )
+		        AND batch.completed_at >= $3::timestamp - INTERVAL '30 days'
+		  ) OR source.id IN (SELECT id FROM cold_sources) OR source.normalized_url=ANY($4))
 		ORDER BY source.id
-		FOR SHARE OF source`, userID, pq.Array(sourceIDs), now.Add(-SubscribeSnapshotAge))
+		FOR SHARE OF source`, userID, pq.Array(sourceIDs), now, pq.Array(formalURLs))
 	if err != nil {
 		return nil, err
 	}
@@ -287,11 +345,25 @@ func GetOrCreateOwnerScopedFeed(db Querier, ownerID int, url, title, feedType st
 	if feedType == "" {
 		feedType = "rss"
 	}
+	normalizedURL := util.NormalizeURL(url)
+	if _, err := db.Exec(`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, fmt.Sprintf("explore-subscribe:%d:%s", ownerID, normalizedURL)); err != nil {
+		return nil, false, err
+	}
 	if shared, err := scanOwnerScopedFeed(db.QueryRow(`
 		SELECT id,url,title,owner_id,feed_type,fetch_interval_minutes,is_active,status,created_at
 		FROM feeds WHERE owner_id IS NULL AND url=$1
 		ORDER BY id LIMIT 1 FOR SHARE`, url)); err == nil {
 		return shared, false, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, err
+	}
+	if shared, err := findNormalizedOwnerScopedFeed(db, 0, normalizedURL); err == nil {
+		return shared, false, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, err
+	}
+	if owned, err := findNormalizedOwnerScopedFeed(db, ownerID, normalizedURL); err == nil {
+		return owned, false, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, err
 	}
@@ -317,6 +389,37 @@ func GetOrCreateOwnerScopedFeed(db Querier, ownerID int, url, title, feedType st
 		return nil, false, err
 	}
 	return feed, false, nil
+}
+
+func findNormalizedOwnerScopedFeed(db Querier, ownerID int, normalizedURL string) (*model.Feed, error) {
+	rows, err := db.Query(`
+		SELECT id,url,title,owner_id,feed_type,fetch_interval_minutes,is_active,status,created_at
+		FROM feeds WHERE (($1=0 AND owner_id IS NULL) OR owner_id=$1) ORDER BY id FOR SHARE`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var feed model.Feed
+		var title, feedType, status sql.NullString
+		var owner sql.NullInt64
+		if err := rows.Scan(&feed.ID, &feed.URL, &title, &owner, &feedType, &feed.FetchIntervalMin, &feed.IsActive, &status, &feed.CreatedAt); err != nil {
+			return nil, err
+		}
+		if util.NormalizeURL(strings.TrimSpace(feed.URL)) != normalizedURL {
+			continue
+		}
+		feed.Title, feed.FeedType, feed.Status = title.String, feedType.String, status.String
+		if owner.Valid {
+			value := int(owner.Int64)
+			feed.OwnerID = &value
+		}
+		return &feed, nil
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nil, sql.ErrNoRows
 }
 
 func scanOwnerScopedFeed(row *sql.Row) (*model.Feed, error) {

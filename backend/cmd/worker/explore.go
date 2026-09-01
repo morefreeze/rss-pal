@@ -23,9 +23,10 @@ const (
 	exploreDefaultLease       = 20 * time.Minute
 	// The last queue position must remain leased while earlier concurrency
 	// waves perform the initial source request and every discovery candidate.
-	exploreTaskWorstCaseDuration = time.Duration(explorelogic.SourceFetchMaxRequests) * explorelogic.SourceFetchRequestTimeout
-	exploreLeaseSafetyMargin     = 5 * time.Minute
-	exploreSnapshotStaleAfter    = 45 * time.Minute
+	exploreTaskWorstCaseDuration  = time.Duration(explorelogic.SourceFetchMaxRequests) * explorelogic.SourceFetchRequestTimeout
+	exploreLeaseSafetyMargin      = 5 * time.Minute
+	exploreSnapshotStaleAfter     = 45 * time.Minute
+	exploreColdSnapshotStaleAfter = time.Minute
 )
 
 type exploreClock interface{ Now() time.Time }
@@ -49,6 +50,7 @@ type exploreTaskHandler interface {
 
 type exploreSnapshotRunner interface {
 	GenerateAll(context.Context, time.Time, time.Time) exploreSnapshotGenerationResult
+	GenerateColdMissing(context.Context, time.Time) exploreSnapshotGenerationResult
 }
 
 type exploreSnapshotCleaner interface {
@@ -91,6 +93,7 @@ type exploreCycle struct {
 	providerWindows map[time.Time]struct{}
 	snapshotSlots   map[time.Time]struct{}
 	cleanupDays     map[string]struct{}
+	coldRunning     bool
 }
 
 func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
@@ -151,6 +154,12 @@ func (cycle *exploreCycle) Run(ctx context.Context) {
 		return
 	}
 	now := cycle.deps.clock.Now()
+	if cycle.deps.snapshots != nil && cycle.markColdStarted() {
+		go func() {
+			defer cycle.clearColdStarted()
+			cycle.deps.snapshots.GenerateColdMissing(ctx, now)
+		}()
+	}
 	cleanupDay := now.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02")
 	if cycle.deps.cleanup != nil && cycle.markCleanupDayStarted(cleanupDay) {
 		go func() {
@@ -222,6 +231,22 @@ func (cycle *exploreCycle) markSnapshotSlotStarted(slot time.Time) bool {
 func (cycle *exploreCycle) clearSnapshotSlot(slot time.Time) {
 	cycle.mu.Lock()
 	delete(cycle.snapshotSlots, slot)
+	cycle.mu.Unlock()
+}
+
+func (cycle *exploreCycle) markColdStarted() bool {
+	cycle.mu.Lock()
+	defer cycle.mu.Unlock()
+	if cycle.coldRunning {
+		return false
+	}
+	cycle.coldRunning = true
+	return true
+}
+
+func (cycle *exploreCycle) clearColdStarted() {
+	cycle.mu.Lock()
+	cycle.coldRunning = false
 	cycle.mu.Unlock()
 }
 
@@ -333,6 +358,7 @@ func startExploreWorker(ctx context.Context, cycle *exploreCycle) {
 
 type exploreUserLister interface {
 	ListUserIDs(context.Context) ([]int, error)
+	ListColdUserIDs(context.Context) ([]int, error)
 }
 
 type exploreRankInputLoader interface {
@@ -351,20 +377,40 @@ type exploreSnapshotCoordinator struct {
 	profiles exploreRankInputLoader
 	store    exploreSnapshotStore
 	logger   *log.Logger
+	claimNow func() time.Time
 }
 
 func (runner *exploreSnapshotCoordinator) GenerateAll(ctx context.Context, slotAt, now time.Time) exploreSnapshotGenerationResult {
-	started := time.Now()
-	result := exploreSnapshotGenerationResult{}
 	userIDs, err := runner.users.ListUserIDs(ctx)
 	if err != nil {
 		runner.logger.Printf("explore snapshot slot=%s list_users_error=true", slotAt.Format(time.RFC3339))
-		result.TransientErrors++
-		return result
+		return exploreSnapshotGenerationResult{TransientErrors: 1}
 	}
+	return runner.generateUsers(ctx, userIDs, slotAt, now, exploreSnapshotStaleAfter)
+}
+
+func (runner *exploreSnapshotCoordinator) GenerateColdMissing(ctx context.Context, now time.Time) exploreSnapshotGenerationResult {
+	userIDs, err := runner.users.ListColdUserIDs(ctx)
+	if err != nil {
+		runner.logger.Printf("explore cold_snapshot list_users_error=true")
+		return exploreSnapshotGenerationResult{TransientErrors: 1}
+	}
+	if len(userIDs) == 0 {
+		return exploreSnapshotGenerationResult{NoWork: 1}
+	}
+	return runner.generateUsers(ctx, userIDs, repository.ExploreColdStartSlotAt, now, exploreColdSnapshotStaleAfter)
+}
+
+func (runner *exploreSnapshotCoordinator) generateUsers(ctx context.Context, userIDs []int, slotAt, now time.Time, staleAfter time.Duration) exploreSnapshotGenerationResult {
+	started := time.Now()
+	result := exploreSnapshotGenerationResult{}
 	candidates, candidateErr := runner.profiles.LoadCandidates(ctx, now)
 	for _, userID := range userIDs {
-		claim, owned, err := runner.store.Claim(userID, slotAt, now, exploreSnapshotStaleAfter)
+		claimAt := time.Now()
+		if runner.claimNow != nil {
+			claimAt = runner.claimNow()
+		}
+		claim, owned, err := runner.store.Claim(userID, slotAt, claimAt, staleAfter)
 		if err != nil {
 			result.TransientErrors++
 			runner.logger.Printf("explore snapshot user_id=%d slot=%s claim_error=true", userID, slotAt.Format(time.RFC3339))

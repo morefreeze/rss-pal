@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,14 +29,9 @@ type exploreSubscriber interface {
 	Subscribe(userID int, sourceIDs []int) ([]explorelogic.SubscribeResult, error)
 }
 
-type exploreColdStarter interface {
-	Ensure(userID int, now time.Time) error
-}
-
 type ExploreHandler struct {
 	storeFor      func(*gin.Context) exploreStore
 	subscriberFor func(*gin.Context) exploreSubscriber
-	coldStartFor  func(*gin.Context) exploreColdStarter
 	now           func() time.Time
 }
 
@@ -51,14 +45,6 @@ func NewExploreHandler(repo *repository.ExploreRepository) *ExploreHandler {
 func NewExploreHandlerWithSubscriber(repo *repository.ExploreRepository, subscriber *explorelogic.SubscribeService) *ExploreHandler {
 	handler := NewExploreHandler(repo)
 	handler.subscriberFor = func(c *gin.Context) exploreSubscriber { return subscriber.WithCtx(c) }
-	return handler
-}
-
-func NewExploreHandlerWithSubscriberAndColdStart(repo *repository.ExploreRepository, subscriber *explorelogic.SubscribeService, snapshots *repository.ExploreSnapshotRepository, ranks *SQLExploreColdRankLoader, logger *log.Logger) *ExploreHandler {
-	handler := NewExploreHandlerWithSubscriber(repo, subscriber)
-	handler.coldStartFor = func(c *gin.Context) exploreColdStarter {
-		return NewExploreColdStartService(snapshots.WithCtx(c), ranks.WithCtx(c), logger)
-	}
 	return handler
 }
 
@@ -80,7 +66,6 @@ func (h *ExploreHandler) GetExplore(c *gin.Context) {
 		return
 	}
 	userID := getUserID(c)
-	h.ensureColdStart(c, userID)
 	page, err := h.storeFor(c).GetPage(userID, params)
 	if err != nil {
 		writeExploreError(c, err)
@@ -168,7 +153,6 @@ func parseExploreListParams(c *gin.Context) (repository.ExploreListParams, bool)
 
 func (h *ExploreHandler) GetSources(c *gin.Context) {
 	userID := getUserID(c)
-	h.ensureColdStart(c, userID)
 	items, err := h.storeFor(c).GetSources(userID)
 	if err != nil {
 		writeExploreError(c, err)
@@ -179,14 +163,6 @@ func (h *ExploreHandler) GetSources(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "private, no-cache")
 	c.JSON(http.StatusOK, items)
-}
-
-func (h *ExploreHandler) ensureColdStart(c *gin.Context, userID int) {
-	if h != nil && h.coldStartFor != nil {
-		// A racing/empty cold generation must not make the page unavailable.
-		// Its persisted pending state is exposed as `generating` by GetPage.
-		_ = h.coldStartFor(c).Ensure(userID, h.now())
-	}
 }
 
 func (h *ExploreHandler) GetArticle(c *gin.Context) {

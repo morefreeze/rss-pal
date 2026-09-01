@@ -177,6 +177,21 @@ type sqlExploreRankInputs struct{ db *sql.DB }
 
 func (inputs *sqlExploreRankInputs) ListUserIDs(ctx context.Context) ([]int, error) {
 	rows, err := inputs.db.QueryContext(ctx, `SELECT id FROM users ORDER BY id`)
+	return scanExploreUserIDs(rows, err)
+}
+
+func (inputs *sqlExploreRankInputs) ListColdUserIDs(ctx context.Context) ([]int, error) {
+	rows, err := inputs.db.QueryContext(ctx, `
+		SELECT users.id FROM users
+		WHERE NOT EXISTS (
+			SELECT 1 FROM explore_batches batch
+			WHERE batch.user_id=users.id AND batch.status='done'
+		)
+		ORDER BY users.id`)
+	return scanExploreUserIDs(rows, err)
+}
+
+func scanExploreUserIDs(rows *sql.Rows, err error) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
