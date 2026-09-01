@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -581,13 +582,76 @@ func TestExploreRankInputSQLRequiresFreshEnabledObservation(t *testing.T) {
 
 func TestExploreProfileSQLLoadsBoundedFormalMetadata(t *testing.T) {
 	normalized := strings.Join(strings.Fields(exploreRecentArticleProfileSQL), " ")
-	for _, fragment := range []string{"article.category", "article.topic", "article.tags", "LEFT(COALESCE(article.content,''),4000)", "LEFT(COALESCE(article.summary_brief,''),1000)"} {
+	for _, fragment := range []string{
+		"article.category", "article.topic", "article.tags", "LEFT(COALESCE(article.content,''),4000)", "LEFT(COALESCE(article.summary_brief,''),1000)",
+		"JOIN users profile_user ON profile_user.id=$1",
+		"feed.owner_id=$1 AND COALESCE(article.published_at,article.fetched_at) >= $2",
+		"feed.owner_id IS NULL AND article.published_at IS NOT NULL",
+		"article.published_at >= GREATEST($2,profile_user.shared_visible_from)",
+	} {
 		if !strings.Contains(normalized, fragment) {
 			t.Fatalf("profile SQL missing %q: %s", fragment, normalized)
 		}
 	}
 	if strings.Count(normalized, "COALESCE(article.published_at,article.fetched_at)") < 2 {
 		t.Fatalf("profile SQL does not include recently fetched undated articles: %s", normalized)
+	}
+}
+
+func TestSQLExploreRankInputsSharedArticlesRespectEachUserVisibilityFloor(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	var userA, userB int
+	if err := db.QueryRow(`INSERT INTO users(username,password_hash,shared_visible_from) VALUES ('profile-floor-a','x',$1) RETURNING id`, now.Add(-5*24*time.Hour)).Scan(&userA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO users(username,password_hash,shared_visible_from) VALUES ('profile-floor-b','x',$1) RETURNING id`, now.Add(-25*24*time.Hour)).Scan(&userB); err != nil {
+		t.Fatal(err)
+	}
+	var sharedFeed, ownedAFeed, ownedBFeed int
+	if err := db.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES ('https://profile-shared.example/feed','shared',NULL) RETURNING id`).Scan(&sharedFeed); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES ('https://profile-a.example/feed','owned-a',$1) RETURNING id`, userA).Scan(&ownedAFeed); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES ('https://profile-b.example/feed','owned-b',$1) RETURNING id`, userB).Scan(&ownedBFeed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO articles(feed_id,title,url,published_at,fetched_at) VALUES
+			($1,'shared-old','https://profile-shared.example/old',$4,$6),
+			($1,'shared-recent','https://profile-shared.example/recent',$5,$6),
+			($1,'shared-undated','https://profile-shared.example/undated',NULL,$6),
+			($2,'owned-a-undated','https://profile-a.example/undated',NULL,$6),
+			($3,'owned-b-recent','https://profile-b.example/recent',$5,$6)`,
+		sharedFeed, ownedAFeed, ownedBFeed, now.Add(-20*24*time.Hour), now.Add(-2*24*time.Hour), now.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	inputs := &sqlExploreRankInputs{db: db}
+	profileA, err := inputs.LoadProfile(context.Background(), userA, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileB, err := inputs.LoadProfile(context.Background(), userB, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRecentProfileTitles(t, profileA, []string{"owned-a-undated", "shared-recent"})
+	assertRecentProfileTitles(t, profileB, []string{"owned-b-recent", "shared-old", "shared-recent"})
+}
+
+func assertRecentProfileTitles(t *testing.T, profile explorelogic.ProfileInput, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(profile.RecentArticles))
+	for _, article := range profile.RecentArticles {
+		got = append(got, article.Title)
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("recent article titles=%v want=%v", got, want)
 	}
 }
 

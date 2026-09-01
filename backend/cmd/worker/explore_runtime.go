@@ -25,9 +25,12 @@ const exploreRecentArticleProfileSQL = `
 	SELECT article.title, COALESCE(article.category,''), COALESCE(article.topic,''),
 	       COALESCE(article.tags,'{}'), LEFT(COALESCE(article.content,''),4000),
 	       LEFT(COALESCE(article.summary_brief,''),1000), COALESCE(article.published_at,article.fetched_at)
-	FROM articles article JOIN feeds feed ON feed.id=article.feed_id
-	WHERE (feed.owner_id IS NULL OR feed.owner_id=$1)
-	  AND COALESCE(article.published_at,article.fetched_at) >= $2
+	FROM articles article
+	JOIN feeds feed ON feed.id=article.feed_id
+	JOIN users profile_user ON profile_user.id=$1
+	WHERE (feed.owner_id=$1 AND COALESCE(article.published_at,article.fetched_at) >= $2)
+	   OR (feed.owner_id IS NULL AND article.published_at IS NOT NULL
+	       AND article.published_at >= GREATEST($2,profile_user.shared_visible_from))
 	ORDER BY COALESCE(article.published_at,article.fetched_at) DESC, article.id DESC LIMIT 200`
 
 const exploreCandidateSQL = `
