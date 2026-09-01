@@ -630,10 +630,11 @@ func TestExploreColdSnapshotClaimsUseFreshTimePerUser(t *testing.T) {
 }
 
 func TestExploreRankInputSQLRequiresFreshEnabledObservation(t *testing.T) {
-	normalized := strings.Join(strings.Fields(exploreCandidateSQL), " ")
+	normalized := strings.Join(strings.Fields(exploreCandidateSQL+" "+exploreObservationSQL), " ")
 	for _, fragment := range []string{
 		"provider.enabled",
-		"observation.last_seen_at >= $1 - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')",
+		"observation.last_seen_at >= $1::timestamp - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')",
+		"observation.last_seen_at >= $2::timestamp - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')",
 	} {
 		if !strings.Contains(normalized, fragment) {
 			t.Fatalf("candidate SQL missing %q: %s", fragment, normalized)
