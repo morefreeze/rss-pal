@@ -34,12 +34,15 @@ wait_for_outbound_proxy() {
   local proxy="${DEPLOY_PROXY:-http://172.18.0.1:3128}"
   local attempt
 
-  for attempt in 1 2 3 4 5; do
+  # The SSH tunnel can need several seconds after systemd reports it active
+  # before the remote proxy accepts traffic. Keep the wait bounded, but long
+  # enough to cover that startup window on the Tencent host.
+  for attempt in {1..15}; do
     if curl -fsS --connect-timeout 2 --max-time 5 -x "$proxy" https://api.github.com/rate_limit >/dev/null 2>&1; then
       log "Outbound proxy is ready: $proxy"
       return 0
     fi
-    if [ "$attempt" -lt 5 ]; then
+    if [ "$attempt" -lt 15 ]; then
       sleep 1
     fi
   done

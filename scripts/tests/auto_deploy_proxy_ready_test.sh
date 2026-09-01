@@ -54,12 +54,12 @@ if wait_for_outbound_proxy; then
   echo "FAIL: permanently unavailable proxy was accepted" >&2
   exit 1
 fi
-[ "$curl_attempts" -eq 5 ] || {
-  echo "FAIL: expected 5 readiness attempts, got $curl_attempts" >&2
+[ "$curl_attempts" -eq 15 ] || {
+  echo "FAIL: expected 15 readiness attempts, got $curl_attempts" >&2
   exit 1
 }
-[ "$sleep_calls" -eq 4 ] || {
-  echo "FAIL: expected 4 sleeps before timeout, got $sleep_calls" >&2
+[ "$sleep_calls" -eq 14 ] || {
+  echo "FAIL: expected 14 sleeps before timeout, got $sleep_calls" >&2
   exit 1
 }
 [[ "$logs" == *"Outbound proxy did not become ready: $DEPLOY_PROXY"* ]] || {
