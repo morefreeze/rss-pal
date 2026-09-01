@@ -147,6 +147,107 @@ func TestExploreQueueEnqueueIsIdempotentAndClampsPriority(t *testing.T) {
 	if second.ID != first.ID || second.Priority != 10000 || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.After(first.UpdatedAt) {
 		t.Fatalf("enqueue conflict first=%+v second=%+v", first, second)
 	}
+	lowered, err := repo.Enqueue(sourceID, repository.ExploreTaskRefreshArticles, repository.ExplorePriorityBrokenHealthCheck)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lowered.ID != first.ID || lowered.Priority != repository.ExplorePriorityBrokenHealthCheck {
+		t.Fatalf("broken health check did not lower existing backlog: %+v", lowered)
+	}
+}
+
+func TestExploreQueueCombinedSourceAndRelatedHardCap(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	enqueueExploreTasks(t, db, repo, 500, repository.ExplorePriorityRefresh)
+	var providerID int
+	if err := db.QueryRow(`SELECT id FROM explore_registry_providers WHERE provider_key='related-sites'`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_related_tasks(provider_id,canonical_seed_url,priority) VALUES ($1,'https://related-cap.example/article',$2)`, providerID, repository.ExplorePriorityRelatedSeed); err != nil {
+		t.Fatal(err)
+	}
+	run, tasks, err := repo.ClaimRun(time.Now(), "combined", time.Hour, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 500 || run.ClaimedCount != 500 {
+		t.Fatalf("combined claim=%d run=%+v", len(tasks), run)
+	}
+	var sourceLeased, relatedLeased, pending int
+	if err := db.QueryRow(`SELECT (SELECT count(*) FROM explore_fetch_queue WHERE run_id=$1),(SELECT count(*) FROM explore_related_tasks WHERE run_id=$1),(SELECT count(*) FROM explore_fetch_queue WHERE status='pending')+(SELECT count(*) FROM explore_related_tasks WHERE status='pending')`, run.ID).Scan(&sourceLeased, &relatedLeased, &pending); err != nil {
+		t.Fatal(err)
+	}
+	if sourceLeased+relatedLeased != 500 || pending != 1 || relatedLeased != 1 {
+		t.Fatalf("source=%d related=%d pending=%d", sourceLeased, relatedLeased, pending)
+	}
+}
+
+func TestExploreQueueHealthyRefreshPrecedesBrokenHealthCheckAtBoundary(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	enqueueExploreTasks(t, db, repo, 500, repository.ExplorePriorityRefresh)
+	brokenID := insertExploreSource(t, db, 9999)
+	if _, err := repo.Enqueue(brokenID, repository.ExploreTaskRefreshArticles, repository.ExplorePriorityBrokenHealthCheck); err != nil {
+		t.Fatal(err)
+	}
+	run, tasks, err := repo.ClaimRun(time.Now(), "priority", time.Hour, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 500 || run.ClaimedCount != 500 {
+		t.Fatalf("claim=%d run=%+v", len(tasks), run)
+	}
+	for _, task := range tasks {
+		if task.SourceID == brokenID {
+			t.Fatal("broken health check displaced a healthy refresh")
+		}
+	}
+	var pending bool
+	if err := db.QueryRow(`SELECT status='pending' FROM explore_fetch_queue WHERE source_id=$1`, brokenID).Scan(&pending); err != nil || !pending {
+		t.Fatalf("broken pending=%t err=%v", pending, err)
+	}
+}
+
+func TestExploreQueueRelatedRecoveryRotatesTokenWithinOriginalRun(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	var providerID int
+	if err := db.QueryRow(`SELECT id FROM explore_registry_providers WHERE provider_key='related-sites'`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_related_tasks(provider_id,canonical_seed_url,priority) VALUES ($1,'https://recover-related.example/post',$2)`, providerID, repository.ExplorePriorityRelatedSeed); err != nil {
+		t.Fatal(err)
+	}
+	run, tasks, err := repo.ClaimRun(time.Now(), "same-process", time.Minute, 500)
+	if err != nil || len(tasks) != 1 || tasks[0].QueueKind != repository.ExploreQueueKindRelated {
+		t.Fatalf("claim run=%+v tasks=%+v err=%v", run, tasks, err)
+	}
+	oldToken := *tasks[0].LeaseToken
+	if _, err := db.Exec(`UPDATE explore_related_tasks SET lease_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE id=$1`, tasks[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	recoveredRun, recovered, err := repo.RecoverExpired("same-process", time.Hour)
+	if err != nil || recoveredRun.ID != run.ID || len(recovered) != 1 {
+		t.Fatalf("recover run=%+v tasks=%+v err=%v", recoveredRun, recovered, err)
+	}
+	newToken := *recovered[0].LeaseToken
+	if newToken == oldToken {
+		t.Fatal("related recovery reused token")
+	}
+	if err := repo.CompleteRelated(recovered[0].ID, run.ID, oldToken); !errors.Is(err, repository.ErrLeaseLost) {
+		t.Fatalf("old token completed related task: %v", err)
+	}
+	if err := repo.CompleteRelated(recovered[0].ID, run.ID, newToken); err != nil {
+		t.Fatal(err)
+	}
+	var claimed int
+	if err := db.QueryRow(`SELECT claimed_count FROM explore_fetch_runs WHERE id=$1`, run.ID).Scan(&claimed); err != nil || claimed != 1 {
+		t.Fatalf("claimed=%d err=%v", claimed, err)
+	}
 }
 
 func TestExploreQueueLeaseFencingAndRecovery(t *testing.T) {

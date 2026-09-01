@@ -391,17 +391,19 @@ func TestScheduledExploreRegistryEnqueuesDueValidationAndRefreshDespiteProviderF
 	catalog := &fakeExploreDueCatalog{sources: []model.ExploreSource{
 		{ID: 4, ValidationStatus: model.ExploreValidationPending},
 		{ID: 8, ValidationStatus: model.ExploreValidationValid},
+		{ID: 12, ValidationStatus: model.ExploreValidationValid, IsBroken: true},
 	}}
 	queue := &fakeExploreEnqueuer{}
 	scheduler := &scheduledExploreRegistry{registry: base, catalog: catalog, queue: queue}
 	if _, err := scheduler.SyncDue(context.Background(), now); err == nil {
 		t.Fatal("provider failure should remain observable")
 	}
-	if len(queue.tasks) != 2 {
+	if len(queue.tasks) != 3 {
 		t.Fatalf("scheduled tasks = %+v", queue.tasks)
 	}
 	if queue.tasks[0].SourceID != 4 || queue.tasks[0].TaskType != repository.ExploreTaskValidateSource ||
-		queue.tasks[1].SourceID != 8 || queue.tasks[1].TaskType != repository.ExploreTaskRefreshArticles {
+		queue.tasks[1].SourceID != 8 || queue.tasks[1].TaskType != repository.ExploreTaskRefreshArticles ||
+		queue.tasks[2].SourceID != 12 || queue.tasks[2].Priority != repository.ExplorePriorityBrokenHealthCheck {
 		t.Fatalf("scheduled task mapping = %+v", queue.tasks)
 	}
 	if !catalog.validationDueAt.Equal(now.Add(-30*time.Minute)) || !catalog.refreshDueAt.Equal(now.Add(-3*time.Hour)) || !catalog.brokenDueAt.Equal(now.Add(-24*time.Hour)) {

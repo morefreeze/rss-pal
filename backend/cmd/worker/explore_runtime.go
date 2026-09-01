@@ -48,10 +48,7 @@ func newProductionExploreCycle(db *sql.DB, cfg *config.Config) *exploreCycle {
 		registry: baseRegistry,
 		catalog:  repository.NewExploreCatalogRepository(db),
 		queue:    queue.repo,
-		related: explorelogic.RelatedSiteSync{
-			Store: repository.NewExploreRegistryRepository(db), Queue: repository.NewExploreRegistryQueue(queue.repo),
-			Client: explorelogic.NewProviderClient(cfg.RSSHub.BaseURL),
-		},
+		related:  repository.NewExploreRelatedTaskRepository(db),
 	}
 	inputs := &sqlExploreRankInputs{db: db}
 	snapshots := &exploreSnapshotCoordinator{
@@ -61,9 +58,12 @@ func newProductionExploreCycle(db *sql.DB, cfg *config.Config) *exploreCycle {
 		logger:   log.Default(),
 	}
 	return newExploreCycle(exploreCycleDeps{
-		registry:         registry,
-		queue:            queue,
-		taskHandler:      repository.NewExploreTaskProcessor(db, explorelogic.NewSourceFetcher(), time.Now),
+		registry: registry,
+		queue:    queue,
+		taskHandler: &exploreTaskRouter{
+			source:  repository.NewExploreTaskProcessor(db, explorelogic.NewSourceFetcher(), time.Now),
+			related: repository.NewExploreRelatedTaskProcessor(db, explorelogic.NewProviderClient(cfg.RSSHub.BaseURL)),
+		},
 		snapshots:        snapshots,
 		cleanup:          repository.NewExploreSnapshotRepository(db),
 		batchLimit:       cfg.Explore.FetchBatchLimit,
@@ -94,15 +94,15 @@ type scheduledExploreRegistry struct {
 	catalog  exploreDueSourceCatalog
 	queue    exploreQueueEnqueuer
 	related  interface {
-		Sync(context.Context, time.Time) explorelogic.RelatedSiteSyncResult
+		Produce(context.Context, time.Time, int) (repository.ExploreRelatedProduceResult, error)
 	}
 }
 
 func (scheduler *scheduledExploreRegistry) SyncDue(ctx context.Context, now time.Time) ([]explorelogic.ProviderSyncResult, error) {
 	results, syncErr := scheduler.registry.SyncDue(ctx, now)
 	if scheduler.related != nil {
-		related := scheduler.related.Sync(ctx, now)
-		syncErr = errors.Join(syncErr, related.Err)
+		_, relatedErr := scheduler.related.Produce(ctx, now, 250)
+		syncErr = errors.Join(syncErr, relatedErr)
 	}
 	due, dueErr := scheduler.catalog.ListDueSources(now.Add(-30*time.Minute), now.Add(-3*time.Hour), now.Add(-24*time.Hour), exploreMaxBatchLimit)
 	var enqueueErr error
@@ -111,11 +111,32 @@ func (scheduler *scheduledExploreRegistry) SyncDue(ctx context.Context, now time
 		if source.ValidationStatus == model.ExploreValidationValid {
 			taskType, priority = repository.ExploreTaskRefreshArticles, repository.ExplorePriorityRefresh
 		}
+		if source.IsBroken {
+			priority = repository.ExplorePriorityBrokenHealthCheck
+		}
 		if _, err := scheduler.queue.Enqueue(source.ID, taskType, priority); err != nil {
 			enqueueErr = errors.Join(enqueueErr, err)
 		}
 	}
 	return results, errors.Join(syncErr, dueErr, enqueueErr)
+}
+
+type exploreTaskRouter struct {
+	source  exploreTaskHandler
+	related exploreTaskHandler
+}
+
+func (router *exploreTaskRouter) Process(ctx context.Context, task repository.ExploreQueueTask) error {
+	if task.QueueKind == repository.ExploreQueueKindRelated || task.TaskType == repository.ExploreTaskDiscoverRelated {
+		if router.related == nil {
+			return errors.New("explore related task handler is required")
+		}
+		return router.related.Process(ctx, task)
+	}
+	if router.source == nil {
+		return errors.New("explore source task handler is required")
+	}
+	return router.source.Process(ctx, task)
 }
 
 func newSQLExploreQueue(db *sql.DB) *sqlExploreQueue {

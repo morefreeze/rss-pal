@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
@@ -167,6 +168,9 @@ func (collector *exploreRelatedSeedCollector) Select(now time.Time, limit int) [
 
 func canonicalExploreRelatedSeedURL(raw string) (string, bool) {
 	canonical := util.NormalizeURL(strings.TrimSpace(raw))
+	if canonical == "" || len(canonical) > 2048 || !utf8.ValidString(canonical) || strings.ContainsRune(canonical, '\x00') {
+		return "", false
+	}
 	parsed, err := url.Parse(canonical)
 	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
 		return "", false

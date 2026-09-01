@@ -83,6 +83,9 @@ type ExploreFetchRun struct {
 type ExploreFetchTask struct {
 	ID             int        `json:"id" db:"id"`
 	SourceID       int        `json:"source_id" db:"source_id"`
+	QueueKind      string     `json:"queue_kind,omitempty" db:"-"`
+	ProviderID     int        `json:"provider_id,omitempty" db:"provider_id"`
+	SeedURL        string     `json:"-" db:"canonical_seed_url"`
 	TaskType       string     `json:"task_type" db:"task_type"`
 	Status         string     `json:"status" db:"status"`
 	Priority       int        `json:"priority" db:"priority"`
