@@ -41,6 +41,13 @@ func TestExploreArticleListItemBoundsUnicodeExcerptAndOmitsContent(t *testing.T)
 	}
 }
 
+func TestColdSnapshotStatusIsMarkedColdGeneratingFallback(t *testing.T) {
+	status := finalizeExploreSnapshotStatus(ExploreSnapshotStatus{ID: 7, SlotAt: ExploreColdStartSlotAt}, model.ExploreBatchDone, ExploreColdStartSlotAt)
+	if !status.Cold || !status.Generating || !status.UsingFallback || status.RefreshFailed {
+		t.Fatalf("cold status=%+v", status)
+	}
+}
+
 func TestBuildExplorePageQueryLimitsEachSourceToRecentFiveBeforeRequestedOrdering(t *testing.T) {
 	query := strings.Join(strings.Fields(buildExplorePageQuery(ExploreListParams{
 		Sort: SortCaptured,

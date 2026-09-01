@@ -28,6 +28,10 @@ var (
 	ErrExploreSnapshotFence   = errors.New("explore snapshot generation is not owned by this token")
 )
 
+// ExploreColdStartSlotAt is a per-user sentinel slot. A real scheduled slot is
+// always later, so normal snapshots supersede this persisted authorization.
+var ExploreColdStartSlotAt = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+
 const exploreLatestDoneBatchSQL = `
 	SELECT id, user_id, slot_at, status, source_count, error_message,
 	       generation_token, started_at, created_at, completed_at
