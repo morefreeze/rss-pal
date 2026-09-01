@@ -22,7 +22,7 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 		"explore_registry_providers":  {"id", "provider_key", "provider_kind", "endpoint", "topic", "sync_interval_minutes", "enabled", "etag", "last_modified", "last_sync_at", "last_success_at", "consecutive_failures", "last_error", "created_at", "updated_at"},
 		"explore_source_observations": {"id", "provider_id", "source_id", "external_key", "provider_tags", "first_seen_at", "last_seen_at", "occurrence_count"},
 		"explore_fetch_runs":          {"id", "window_at", "status", "claimed_count", "started_at", "completed_at", "worker_id", "error_message", "created_at"},
-		"explore_fetch_queue":         {"id", "source_id", "task_type", "status", "priority", "not_before", "attempts", "run_id", "lease_owner", "lease_expires_at", "last_error", "created_at", "updated_at", "completed_at"},
+		"explore_fetch_queue":         {"id", "source_id", "task_type", "status", "priority", "not_before", "attempts", "run_id", "lease_owner", "lease_token", "lease_expires_at", "last_error", "created_at", "updated_at", "completed_at"},
 		"explore_articles":            {"id", "source_id", "url", "normalized_url", "title", "content", "excerpt", "published_at", "fetched_at", "created_at", "updated_at"},
 		"explore_batches":             {"id", "user_id", "slot_at", "status", "source_count", "error_message", "generation_token", "started_at", "created_at", "completed_at"},
 		"explore_batch_sources":       {"id", "user_id", "batch_id", "source_id", "rank", "score", "topic", "reason"},
@@ -124,6 +124,22 @@ func TestMigration038_CanonicalTombstonesUseExplicitSelfReference(t *testing.T) 
 	} {
 		if !strings.Contains(definition, fragment) {
 			t.Fatalf("canonical tombstone migration missing %q", fragment)
+		}
+	}
+}
+
+func TestMigration038_LeaseTokenUpgradeIsIdempotent(t *testing.T) {
+	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "038_subscription_explore.sql"))
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	definition := string(migration)
+	for _, fragment := range []string{
+		"lease_token VARCHAR(64)",
+		"ALTER TABLE explore_fetch_queue ADD COLUMN IF NOT EXISTS lease_token VARCHAR(64)",
+	} {
+		if !strings.Contains(definition, fragment) {
+			t.Fatalf("lease-token upgrade missing %q", fragment)
 		}
 	}
 }

@@ -154,7 +154,7 @@ func TestExploreTaskProcessorCorrectOwnerPersistsSuccessAndRefresh(t *testing.T)
 	task := leaseProcessorTask(t, db, sourceID, ExploreTaskValidateSource, ExplorePriorityStructuredProvider, "worker-a")
 	fetcher := &fakeExploreSourceFetcher{result: processorSuccessResult(checkedAt, "https://processor-success.example/feed")}
 
-	err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a")
+	err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,10 +184,10 @@ func TestExploreTaskProcessorCorrectOwnerPersistsSuccessAndRefresh(t *testing.T)
 
 func TestExploreTaskProcessorWrongOrExpiredLeaseRollsBackAllMutations(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		owner     string
-		expireNow bool
-	}{{"wrong-owner", "worker-b", false}, {"expired-owner", "worker-a", true}} {
+		name       string
+		wrongToken bool
+		expireNow  bool
+	}{{"wrong-token", true, false}, {"expired-token", false, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, cleanup := testdb.New(t)
 			defer cleanup()
@@ -197,13 +197,17 @@ func TestExploreTaskProcessorWrongOrExpiredLeaseRollsBackAllMutations(t *testing
 			sourceID := insertProcessorSource(t, db, originalURL, model.ExploreValidationPending)
 			insertProcessorEvidence(t, db, sourceID, checkedAt)
 			task := leaseProcessorTask(t, db, sourceID, ExploreTaskValidateSource, ExplorePriorityStructuredProvider, "worker-a")
+			if tc.wrongToken {
+				wrong := "wrong-token"
+				task.LeaseToken = &wrong
+			}
 			if tc.expireNow {
 				if _, err := db.Exec(`UPDATE explore_fetch_queue SET lease_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE id=$1`, task.ID); err != nil {
 					t.Fatal(err)
 				}
 			}
 			fetcher := &fakeExploreSourceFetcher{result: processorSuccessResult(checkedAt, targetURL)}
-			err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, tc.owner)
+			err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task)
 			if !errors.Is(err, ErrExploreLeaseNotHeld) {
 				t.Fatalf("err=%v", err)
 			}
@@ -268,7 +272,7 @@ func TestExploreTaskProcessorPersistsFailure304MergeAndSkipOutcomes(t *testing.T
 				task.Attempts = tc.attempts
 			}
 			fetcher := &fakeExploreSourceFetcher{result: tc.result, err: tc.fetchErr}
-			if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a"); err != nil {
+			if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task); err != nil {
 				t.Fatal(err)
 			}
 			assertProcessorTaskStatus(t, db, task.ID, tc.wantTask)
@@ -315,7 +319,7 @@ func TestExploreTaskProcessorPersistsFailure304MergeAndSkipOutcomes(t *testing.T
 		insertProcessorEvidence(t, db, loserID, checkedAt)
 		task := leaseProcessorTask(t, db, loserID, ExploreTaskValidateSource, ExplorePriorityStructuredProvider, "worker-a")
 		fetcher := &fakeExploreSourceFetcher{result: processorSuccessResult(checkedAt, "https://processor-target.example/feed")}
-		if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a"); err != nil {
+		if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task); err != nil {
 			t.Fatal(err)
 		}
 		var loserStatus, targetStatus string
@@ -356,7 +360,7 @@ func TestExploreTaskProcessorPersistsFailure304MergeAndSkipOutcomes(t *testing.T
 				panic(err)
 			}
 		}}
-		if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a"); err != nil {
+		if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task); err != nil {
 			t.Fatal(err)
 		}
 		assertProcessorTaskStatus(t, db, task.ID, model.ExploreFetchTaskPending)
@@ -370,7 +374,7 @@ func TestExploreTaskProcessorPersistsFailure304MergeAndSkipOutcomes(t *testing.T
 	})
 }
 
-func TestExploreTaskProcessorWrongOwnerRetryRollsBackHealth(t *testing.T) {
+func TestExploreTaskProcessorWrongTokenRetryRollsBackHealth(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	checkedAt := time.Date(2026, 8, 31, 5, 0, 0, 0, time.UTC)
@@ -378,7 +382,9 @@ func TestExploreTaskProcessorWrongOwnerRetryRollsBackHealth(t *testing.T) {
 	insertProcessorEvidence(t, db, sourceID, checkedAt)
 	task := leaseProcessorTask(t, db, sourceID, ExploreTaskRefreshArticles, ExplorePriorityRefresh, "worker-a")
 	fetcher := &fakeExploreSourceFetcher{err: errors.New("temporary")}
-	err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-b")
+	wrongToken := "wrong-token"
+	task.LeaseToken = &wrongToken
+	err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task)
 	if !errors.Is(err, ErrExploreLeaseNotHeld) {
 		t.Fatalf("err=%v", err)
 	}
@@ -403,7 +409,7 @@ func TestExploreTaskProcessorDoesNotOpenTransactionDuringNetwork(t *testing.T) {
 	fetcher := &fakeExploreSourceFetcher{started: make(chan struct{}), release: make(chan struct{}), result: processorSuccessResult(checkedAt, "https://processor-block.example/feed")}
 	done := make(chan error, 1)
 	go func() {
-		done <- NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a")
+		done <- NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task)
 	}()
 	<-fetcher.started
 	if stats := db.Stats(); stats.InUse != 0 {
@@ -425,13 +431,13 @@ func TestExploreTaskProcessorMissingSourceAndUnknownTaskUseFencedInvalidate(t *t
 	for _, tc := range []struct {
 		name         string
 		mutateTask   func(*ExploreQueueTask)
-		owner        string
+		wrongToken   bool
 		wantStatus   string
 		wantLeaseErr bool
 	}{
-		{"missing-source", func(task *ExploreQueueTask) { task.SourceID += 100000 }, "worker-a", model.ExploreFetchTaskInvalid, false},
-		{"missing-source-wrong-owner", func(task *ExploreQueueTask) { task.SourceID += 100000 }, "worker-b", model.ExploreFetchTaskLeased, true},
-		{"unknown-task", func(task *ExploreQueueTask) { task.TaskType = "future_task" }, "worker-a", model.ExploreFetchTaskInvalid, false},
+		{"missing-source", func(task *ExploreQueueTask) { task.SourceID += 100000 }, false, model.ExploreFetchTaskInvalid, false},
+		{"missing-source-wrong-token", func(task *ExploreQueueTask) { task.SourceID += 100000 }, true, model.ExploreFetchTaskLeased, true},
+		{"unknown-task", func(task *ExploreQueueTask) { task.TaskType = "future_task" }, false, model.ExploreFetchTaskInvalid, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, cleanup := testdb.New(t)
@@ -440,8 +446,12 @@ func TestExploreTaskProcessorMissingSourceAndUnknownTaskUseFencedInvalidate(t *t
 			sourceID := insertProcessorSource(t, db, "https://processor-"+tc.name+".example/feed", model.ExploreValidationPending)
 			task := leaseProcessorTask(t, db, sourceID, ExploreTaskValidateSource, ExplorePriorityStructuredProvider, "worker-a")
 			tc.mutateTask(&task)
+			if tc.wrongToken {
+				wrong := "wrong-token"
+				task.LeaseToken = &wrong
+			}
 			fetcher := &fakeExploreSourceFetcher{}
-			err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, tc.owner)
+			err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task)
 			if tc.wantLeaseErr != errors.Is(err, ErrExploreLeaseNotHeld) {
 				t.Fatalf("err=%v wantLeaseErr=%v", err, tc.wantLeaseErr)
 			}
@@ -466,7 +476,7 @@ func TestExploreTaskProcessorSourceDeletedDuringFetchUsesFencedTransition(t *tes
 			panic(err)
 		}
 	}}
-	err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a")
+	err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task)
 	if !errors.Is(err, ErrExploreLeaseNotHeld) {
 		t.Fatalf("deleted source should lose cascaded lease, err=%v", err)
 	}
@@ -491,7 +501,7 @@ func TestExploreTaskProcessorInactiveRefreshPreservesLastGoodCacheAndRetries(t *
 	task := leaseProcessorTask(t, db, sourceID, ExploreTaskRefreshArticles, ExplorePriorityRefresh, "worker-a")
 	fetcher := &fakeExploreSourceFetcher{err: fmt.Errorf("wrapped stale output: %w", explore.ErrInactiveSource)}
 
-	if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a"); err != nil {
+	if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
 	assertProcessorTaskStatus(t, db, task.ID, model.ExploreFetchTaskPending)

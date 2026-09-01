@@ -90,6 +90,7 @@ type ExploreFetchTask struct {
 	Attempts       int        `json:"attempts" db:"attempts"`
 	RunID          *int       `json:"run_id,omitempty" db:"run_id"`
 	LeaseOwner     *string    `json:"lease_owner,omitempty" db:"lease_owner"`
+	LeaseToken     *string    `json:"-" db:"lease_token"`
 	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty" db:"lease_expires_at"`
 	LastError      *string    `json:"last_error,omitempty" db:"last_error"`
 	CreatedAt      time.Time  `json:"created_at" db:"created_at"`

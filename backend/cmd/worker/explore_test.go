@@ -110,7 +110,9 @@ func (queue *fakeExploreQueue) RecoverExpired(owner string, lease time.Duration)
 	for index := range tasks {
 		tasks[index].RunID = &run.ID
 		leaseOwner := owner
+		leaseToken := "recovered-token"
 		tasks[index].LeaseOwner = &leaseOwner
+		tasks[index].LeaseToken = &leaseToken
 	}
 	queue.leases = append(queue.leases, lease)
 	return &run, tasks, nil
@@ -129,6 +131,10 @@ func (queue *fakeExploreQueue) ClaimRun(window time.Time, owner string, lease ti
 	tasks := append([]repository.ExploreQueueTask(nil), queue.tasks...)
 	for index := range tasks {
 		tasks[index].RunID = &runID
+		leaseOwner := owner
+		leaseToken := "fresh-token"
+		tasks[index].LeaseOwner = &leaseOwner
+		tasks[index].LeaseToken = &leaseToken
 	}
 	return &repository.ExploreFetchRun{ID: runID, WindowAt: window, Status: model.ExploreFetchRunRunning, ClaimedCount: len(tasks)}, tasks, nil
 }
@@ -167,7 +173,7 @@ type fakeExploreTaskHandler struct {
 	done    atomic.Int32
 }
 
-func (handler *fakeExploreTaskHandler) Process(_ context.Context, task repository.ExploreQueueTask, _ string) error {
+func (handler *fakeExploreTaskHandler) Process(_ context.Context, task repository.ExploreQueueTask) error {
 	active := handler.active.Add(1)
 	for {
 		peak := handler.peak.Load()

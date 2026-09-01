@@ -43,7 +43,7 @@ type exploreQueueDispatcher interface {
 }
 
 type exploreTaskHandler interface {
-	Process(context.Context, repository.ExploreQueueTask, string) error
+	Process(context.Context, repository.ExploreQueueTask) error
 }
 
 type exploreSnapshotRunner interface {
@@ -245,7 +245,7 @@ func (cycle *exploreCycle) processTaskRun(ctx context.Context, run *repository.E
 		go func() {
 			defer workers.Done()
 			for task := range jobs {
-				if err := cycle.deps.taskHandler.Process(ctx, task, cycle.deps.owner); err != nil {
+				if err := cycle.deps.taskHandler.Process(ctx, task); err != nil {
 					failures.Add(1)
 					cycle.deps.logger.Printf("explore task run_id=%d task_id=%d source_id=%d error=true", run.ID, task.ID, task.SourceID)
 				}
