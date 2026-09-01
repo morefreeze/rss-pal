@@ -551,7 +551,7 @@ func insertExploreUsers(t *testing.T, db *sql.DB) (int, int) {
 func insertExploreSource(t *testing.T, db *sql.DB, url, title string) int {
 	t.Helper()
 	var id int
-	err := db.QueryRow(`INSERT INTO recommended_feeds(url,title,normalized_url,validation_status,is_broken,health_score) VALUES ($1,$2,$1,'valid',false,0.9) RETURNING id`, url, title).Scan(&id)
+	err := db.QueryRow(`INSERT INTO recommended_feeds(url,title,category,language,normalized_url,validation_status,is_broken,health_score) VALUES ($1,$2,'test','en',$1,'valid',false,0.9) RETURNING id`, url, title).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}

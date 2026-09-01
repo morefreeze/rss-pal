@@ -1059,7 +1059,7 @@ func insertCatalogSource(t *testing.T, db *sql.DB, feedURL, status string, check
 	if err := db.QueryRow(`
 		INSERT INTO recommended_feeds
 		(url,title,category,language,normalized_url,validation_status,last_checked_at,last_fetched_at,health_score)
-		VALUES ($1,$1,'test','en',$1,$2,$3,$4,CASE WHEN $2='valid' THEN 1 ELSE NULL END)
+		VALUES ($1,$1,'test','en',$1,$2::varchar,$3,$4,CASE WHEN $2::text='valid' THEN 1 ELSE NULL END)
 		RETURNING id`, feedURL, status, checkedAt, fetchedAt).Scan(&id); err != nil {
 		t.Fatal(err)
 	}

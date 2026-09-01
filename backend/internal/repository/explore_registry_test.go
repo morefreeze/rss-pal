@@ -159,9 +159,40 @@ func TestExploreRegistryUpsertPreservesValidSourceAndObservation(t *testing.T) {
 	}
 }
 
+func TestExploreRegistryUpsertPersistsNilAndEmptyTagsAsEmptyArrays(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	var providerID int
+	if err := db.QueryRow(`INSERT INTO explore_registry_providers (provider_key,provider_kind,endpoint) VALUES ('empty-tags','opml','https://registry.example/empty-tags') RETURNING id`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewExploreRegistryRepository(db)
+	for index, tags := range [][]string{nil, {}} {
+		key := fmt.Sprintf("empty-tags-%d", index)
+		_, err := repo.UpsertCandidate(providerID, explore.Candidate{
+			ExternalKey: key, FeedURL: "https://empty-tags.example/" + key,
+			Title: key, Topic: "test", Tags: tags, OccurrenceCount: 1,
+		}, time.Now())
+		if err != nil {
+			t.Fatalf("tags=%#v: %v", tags, err)
+		}
+		var notNull bool
+		var count int
+		if err := db.QueryRow(`SELECT provider_tags IS NOT NULL,cardinality(provider_tags) FROM explore_source_observations WHERE provider_id=$1 AND external_key=$2`, providerID, key).Scan(&notNull, &count); err != nil {
+			t.Fatal(err)
+		}
+		if !notNull || count != 0 {
+			t.Fatalf("tags=%#v persisted not_null=%t cardinality=%d", tags, notNull, count)
+		}
+	}
+}
+
 func TestExploreRegistryDueBackoffAndSuccessState(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
+	if _, err := db.Exec(`UPDATE explore_registry_providers SET enabled=false`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`INSERT INTO explore_registry_providers (provider_key, provider_kind, endpoint, sync_interval_minutes) VALUES ('due-opml','opml','https://registry.example/opml',60)`); err != nil {
 		t.Fatal(err)
 	}
