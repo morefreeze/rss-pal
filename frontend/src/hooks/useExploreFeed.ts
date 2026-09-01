@@ -82,6 +82,7 @@ export function useExploreFeed({
   const [hiddenSources, setHiddenSources] = useState<Set<number>>(() => new Set())
   const [dampenedTopics, setDampenedTopics] = useState<Set<string>>(() => new Set())
   const [knownTopics, setKnownTopics] = useState<string[]>([])
+  const [interests, setInterests] = useState<string[] | null>(null)
   const requestGenerationRef = useRef(0)
   const requestInFlightGenerationRef = useRef<number | null>(null)
   const automaticEmptyLoadsRef = useRef(0)
@@ -112,6 +113,7 @@ export function useExploreFeed({
       })
       if (requestGeneration !== requestGenerationRef.current) return
       setSnapshot(page.snapshot)
+      setInterests(Array.isArray(page.interests) ? page.interests : [])
       setBaseArticles(current => reset ? mergeByID([], page.articles) : mergeByID(current, page.articles))
       setKnownTopics(current => {
         const next = new Set(current)
@@ -138,6 +140,12 @@ export function useExploreFeed({
     setAutomaticLoadLimitReached(false)
     setHiddenSources(new Set())
     setDampenedTopics(new Set())
+    setBaseArticles([])
+    setSnapshot(null)
+    setKnownTopics([])
+    setError(null)
+    setHasMore(false)
+    setLoadingMore(false)
     setGeneration(nextGeneration)
     setOffset(0)
     await requestPage(0, true, nextGeneration)
@@ -157,6 +165,40 @@ export function useExploreFeed({
     setAutomaticLoadLimitReached(false)
     await loadMore()
   }, [loadMore])
+
+  const invalidateQuery = useCallback(() => {
+    const nextGeneration = ++requestGenerationRef.current
+    requestInFlightGenerationRef.current = null
+    automaticEmptyLoadsRef.current = 0
+    setAutomaticLoadLimitReached(false)
+    setBaseArticles([])
+    setSnapshot(null)
+    setKnownTopics([])
+    setError(null)
+    setHasMore(false)
+    setLoading(true)
+    setLoadingMore(false)
+    setOffset(0)
+    setGeneration(nextGeneration)
+  }, [])
+
+  const changeSort = useCallback((value: ExploreSort) => {
+    if (value === sort) return
+    invalidateQuery()
+    setSort(value)
+  }, [invalidateQuery, sort])
+
+  const changeOrder = useCallback((value: ExploreOrder) => {
+    if (value === order) return
+    invalidateQuery()
+    setOrder(value)
+  }, [invalidateQuery, order])
+
+  const changeTopic = useCallback((value: string) => {
+    if (value === topic) return
+    invalidateQuery()
+    setTopicState(value)
+  }, [invalidateQuery, topic])
 
   const articles = useMemo(() => baseArticles.filter(article =>
     !hiddenSources.has(article.source_id) && !dampenedTopics.has(article.topic),
@@ -249,15 +291,16 @@ export function useExploreFeed({
     order,
     topic,
     topics: knownTopics,
+    interests,
     loading,
     loadingMore,
     hasMore,
     automaticLoadLimitReached,
     error,
     requestGeneration: generation,
-    setSort,
-    setOrder,
-    setTopic: (value: string) => setTopicState(value),
+    setSort: changeSort,
+    setOrder: changeOrder,
+    setTopic: changeTopic,
     loadMore,
     continueLoading,
     reload,

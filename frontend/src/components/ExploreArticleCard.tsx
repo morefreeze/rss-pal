@@ -101,18 +101,8 @@ export default function ExploreArticleCard({
   return (
     <article
       ref={assignRef}
-      role="article"
       aria-label={article.title}
-      tabIndex={0}
       className="card explore-article-card"
-      onClick={open}
-      onKeyDown={event => {
-        if (event.currentTarget !== event.target) return
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          open()
-        }
-      }}
     >
       <div className="explore-article-card__body">
         <div className="explore-article-card__content">
@@ -123,7 +113,11 @@ export default function ExploreArticleCard({
             </span>
             {article.is_subscribed && <span className="explore-subscribed-chip">已订阅</span>}
           </div>
-          <h3>{article.title}</h3>
+          <h3>
+            <button type="button" className="explore-article-card__title" onClick={open}>
+              {article.title}
+            </button>
+          </h3>
           {article.excerpt && <p className="explore-article-card__excerpt">{article.excerpt}</p>}
           <div className="explore-article-card__recommendation">
             <span>{article.topic || '综合'}</span>

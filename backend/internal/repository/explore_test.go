@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -327,6 +328,64 @@ func TestExploreRepositoryInterestsReplaceAndTopicFeedbackFilter(t *testing.T) {
 	}
 	if len(page.Articles) != 0 {
 		t.Fatalf("dampened topic was not immediately filtered: %+v", page.Articles)
+	}
+	encoded, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if got := payload["interests"]; !reflect.DeepEqual(got, []any{"programming", "security"}) {
+		t.Fatalf("persisted interests=%v want [programming security]", got)
+	}
+}
+
+func TestExploreRepositoryPageInterestsHonorRLSContext(t *testing.T) {
+	privDB, schema, cleanupSchema := testdb.NewWithSchema(t)
+	defer cleanupSchema()
+	appDB, cleanupApp := testdb.NewAsApp(t, schema)
+	defer cleanupApp()
+	userID := seedExploreSnapshotUser(t, privDB, "page-interests-rls-a")
+	otherUserID := seedExploreSnapshotUser(t, privDB, "page-interests-rls-b")
+	if _, err := privDB.Exec(`
+		INSERT INTO explore_feedback(user_id,topic,feedback_type) VALUES
+			($1,'programming','boost_topic'),($2,'security','boost_topic')
+	`, userID, otherUserID); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := appDB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`SELECT set_config('app.user_id',$1,true)`, userID); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewExploreRepository(appDB).WithCtx(fakeCtx{ctxkey.Tx: Querier(tx)})
+	page, err := repo.GetPage(userID, ExploreListParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) == "" || !bytes.Contains(encoded, []byte(`"interests":["programming"]`)) {
+		t.Fatalf("owner interests missing or leaked: %s", encoded)
+	}
+	otherPage, err := repo.GetPage(otherUserID, ExploreListParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherEncoded, err := json.Marshal(otherPage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(otherEncoded, []byte(`"interests":[]`)) || bytes.Contains(otherEncoded, []byte("security")) {
+		t.Fatalf("cross-user interests leaked: %s", otherEncoded)
 	}
 }
 

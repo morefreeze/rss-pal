@@ -100,9 +100,10 @@ type ExploreArticleListItem struct {
 }
 
 type ExplorePage struct {
-	Snapshot ExploreSnapshotStatus    `json:"snapshot"`
-	Articles []ExploreArticleListItem `json:"articles"`
-	HasMore  bool                     `json:"has_more"`
+	Snapshot  ExploreSnapshotStatus    `json:"snapshot"`
+	Articles  []ExploreArticleListItem `json:"articles"`
+	HasMore   bool                     `json:"has_more"`
+	Interests []string                 `json:"interests"`
 }
 
 type ExploreSourceItem struct {
@@ -157,7 +158,11 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 	if err != nil {
 		return nil, err
 	}
-	page := &ExplorePage{Snapshot: status, Articles: []ExploreArticleListItem{}}
+	interests, err := readExploreInterests(tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page := &ExplorePage{Snapshot: status, Articles: []ExploreArticleListItem{}, Interests: interests}
 	if status.ID == 0 {
 		if err := commit(); err != nil {
 			return nil, err
@@ -207,6 +212,29 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 		return nil, err
 	}
 	return page, nil
+}
+
+func readExploreInterests(db Querier, userID int) ([]string, error) {
+	rows, err := db.Query(`
+		SELECT topic FROM explore_feedback
+		WHERE user_id=$1 AND feedback_type='boost_topic'
+		ORDER BY id
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	topics := []string{}
+	for rows.Next() {
+		var topic string
+		if err := rows.Scan(&topic); err != nil {
+			return nil, err
+		}
+		if IsExploreInterest(topic) {
+			topics = append(topics, topic)
+		}
+	}
+	return topics, rows.Err()
 }
 
 func normalizeExploreArticleListItem(item ExploreArticleListItem) ExploreArticleListItem {

@@ -87,10 +87,13 @@ func (h *ExploreHandler) GetExplore(c *gin.Context) {
 		return
 	}
 	if page == nil {
-		page = &repository.ExplorePage{Articles: []repository.ExploreArticleListItem{}}
+		page = &repository.ExplorePage{Articles: []repository.ExploreArticleListItem{}, Interests: []string{}}
 	}
 	if page.Articles == nil {
 		page.Articles = []repository.ExploreArticleListItem{}
+	}
+	if page.Interests == nil {
+		page.Interests = []string{}
 	}
 	next := explorelogic.ExploreScheduleAt(h.now()).NextSlotAt
 	page.Snapshot.NextRefreshAt = &next

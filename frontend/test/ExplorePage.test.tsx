@@ -60,8 +60,9 @@ function response(overrides: Partial<ExploreListResponse> = {}): ExploreListResp
     },
     articles: [article(1), article(2, 2, '设计')],
     has_more: false,
+    interests: [],
     ...overrides,
-  }
+  } as ExploreListResponse
 }
 
 function DetailProbe() {
@@ -162,14 +163,15 @@ describe('ExplorePage', () => {
     api.getExplore.mockResolvedValue(response({
       snapshot: { ...response().snapshot, id: 0 },
       articles: [],
-    }))
+      interests: ['programming'],
+    } as Partial<ExploreListResponse>))
     api.replaceExploreInterests
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce({ interests: [] })
     renderPage()
 
     expect(await screen.findByRole('group', { name: '选择探索兴趣' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '编程' }))
+    expect(screen.getByRole('button', { name: '编程' }).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByRole('button', { name: '安全' }))
     fireEvent.click(screen.getByRole('button', { name: '保存兴趣' }))
     expect((await screen.findByRole('alert')).textContent).toContain('兴趣保存失败')
@@ -180,12 +182,58 @@ describe('ExplorePage', () => {
     expect((await screen.findByRole('status')).textContent).toContain('兴趣已保存')
   })
 
+  it('does not allow a failed interests load to replace persisted topics with an empty set', async () => {
+    api.getExplore
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response({
+        snapshot: { ...response().snapshot, id: 0 },
+        articles: [],
+        interests: ['programming'],
+      } as Partial<ExploreListResponse>))
+    renderPage()
+
+    expect((await screen.findByRole('alert')).textContent).toContain('探索内容加载失败')
+    expect(screen.queryByRole('group', { name: '选择探索兴趣' })).toBeNull()
+    expect(api.replaceExploreInterests).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试加载' }))
+    expect(await screen.findByRole('group', { name: '选择探索兴趣' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '编程' }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: '安全' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存兴趣' }))
+    await waitFor(() => expect(api.replaceExploreInterests).toHaveBeenCalledWith(['programming', 'security']))
+  })
+
+  it('does not overwrite unsaved interest edits when another article page loads', async () => {
+    api.getExplore
+      .mockResolvedValueOnce(response({
+        snapshot: { ...response().snapshot, id: 0 },
+        articles: [article(1)],
+        has_more: true,
+        interests: ['programming'],
+      } as Partial<ExploreListResponse>))
+      .mockResolvedValueOnce(response({
+        snapshot: { ...response().snapshot, id: 0 },
+        articles: [article(2)],
+        interests: ['programming'],
+      } as Partial<ExploreListResponse>))
+    renderPage()
+
+    expect(await screen.findByRole('group', { name: '选择探索兴趣' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '安全' }))
+    await act(async () => { await infinite.options.onLoadMore() })
+    expect(screen.getByRole('button', { name: '安全' }).getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: '保存兴趣' }))
+    await waitFor(() => expect(api.replaceExploreInterests).toHaveBeenCalledWith(['programming', 'security']))
+  })
+
   it('renders exploration metadata and opens a candidate without subscribing', async () => {
     renderPage('/explore?topic=%E5%B7%A5%E7%A8%8B&sort=published&order=desc')
     expect(await screen.findByAltText('Article 1 缩略图')).toBeTruthy()
     expect(screen.getByText('Source 1')).toBeTruthy()
     expect(screen.getByText('Reason 1')).toBeTruthy()
-    fireEvent.click(screen.getByRole('article', { name: 'Article 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Article 1' }))
     expect(await screen.findByTestId('detail-state')).toHaveProperty('textContent', '/explore?topic=%E5%B7%A5%E7%A8%8B&sort=published&order=desc|1')
     expect(api.recordExploreArticleEvent).toHaveBeenCalledWith(1, 'click')
     expect(api.subscribeExploreSource).not.toHaveBeenCalled()

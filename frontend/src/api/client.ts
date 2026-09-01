@@ -456,6 +456,7 @@ export interface ExploreListResponse {
   snapshot: ExploreSnapshotStatus
   articles: ExploreArticleListItem[]
   has_more: boolean
+  interests: string[]
 }
 
 export interface ExploreSource {

@@ -44,6 +44,7 @@ function response(articles: ExploreArticleListItem[], hasMore = false): ExploreL
     },
     articles,
     has_more: hasMore,
+    interests: [],
   }
 }
 
@@ -116,6 +117,34 @@ describe('useExploreFeed', () => {
     }))
 
     await act(async () => { oldRequest.resolve(response([article(10)])); await oldRequest.promise })
+    expect(result.current.articles.map(item => item.id)).toEqual([20])
+  })
+
+  it('clears the previous query immediately and retries a failed replacement with the same criteria', async () => {
+    const replacement = deferred<ExploreListResponse>()
+    api.getExplore
+      .mockResolvedValueOnce(response([article(10)], true))
+      .mockReturnValueOnce(replacement.promise)
+      .mockResolvedValueOnce(response([article(20)]))
+
+    const { result } = renderHook(() => useExploreFeed({ pageSize: 20 }))
+    await waitFor(() => expect(result.current.articles.map(item => item.id)).toEqual([10]))
+
+    act(() => result.current.setSort('captured'))
+    expect(result.current.articles).toEqual([])
+    expect(result.current.hasMore).toBe(false)
+
+    await act(async () => { replacement.reject(new Error('offline')); await replacement.promise.catch(() => {}) })
+    expect(result.current.error).toContain('探索内容加载失败')
+    expect(result.current.articles).toEqual([])
+
+    await act(async () => { await result.current.reload() })
+    expect(api.getExplore).toHaveBeenNthCalledWith(3, {
+      limit: 20,
+      offset: 0,
+      sort: 'captured',
+      order: 'desc',
+    })
     expect(result.current.articles.map(item => item.id)).toEqual([20])
   })
 
