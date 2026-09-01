@@ -1,11 +1,11 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,7 +13,6 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
-	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/lib/pq"
 )
 
@@ -23,7 +22,7 @@ var ErrExploreColdStartPending = errors.New("explore cold start has no validated
 
 type exploreColdRankLoader interface {
 	LoadColdCandidates(time.Time) ([]explorelogic.RankCandidate, error)
-	LoadColdSubscriptions(int) ([]explorelogic.SubscriptionSignalInput, error)
+	LoadColdProfileSignals(int, time.Time) (explorelogic.ProfileInput, error)
 	LoadColdFeedback(int) ([]explorelogic.ExplicitFeedbackInput, error)
 }
 
@@ -60,7 +59,7 @@ func (service *ExploreColdStartService) Ensure(userID int, now time.Time) error 
 	if err != nil {
 		return err
 	}
-	subscriptions, err := service.ranks.LoadColdSubscriptions(userID)
+	profileInput, err := service.ranks.LoadColdProfileSignals(userID, now)
 	if err != nil {
 		return err
 	}
@@ -68,7 +67,9 @@ func (service *ExploreColdStartService) Ensure(userID int, now time.Time) error 
 	if err != nil {
 		return err
 	}
-	profile := explorelogic.BuildExploreProfile(explorelogic.ProfileInput{Now: now, Subscriptions: subscriptions, Feedback: feedback})
+	profileInput.Now = now
+	profileInput.Feedback = feedback
+	profile := explorelogic.BuildExploreProfile(profileInput)
 	ranked := explorelogic.RankExploreCandidates(profile, candidates, now)
 	claim, owned, err := service.snapshots.Claim(userID, repository.ExploreColdStartSlotAt, now, coldStartStaleAfter)
 	if err != nil || !owned || claim == nil {
@@ -122,68 +123,10 @@ func (loader *SQLExploreColdRankLoader) LoadColdFeedback(userID int) ([]explorel
 	return result, rows.Err()
 }
 
-// LoadColdSubscriptions intentionally reads through the request-scoped RLS
-// transaction. This keeps the immediate cold snapshot on the same formal-feed
-// visibility boundary as the worker-generated profile.
-func (loader *SQLExploreColdRankLoader) LoadColdSubscriptions(userID int) ([]explorelogic.SubscriptionSignalInput, error) {
-	rows, err := loader.db.Query(`
-		SELECT COALESCE(feed.title,''),feed.url
-		FROM feeds feed
-		WHERE feed.owner_id IS NULL OR feed.owner_id=$1
-		ORDER BY feed.id`, userID)
-	if err != nil {
-		return nil, err
-	}
-	result := []explorelogic.SubscriptionSignalInput{}
-	byNormalizedURL := make(map[string][]int)
-	for rows.Next() {
-		var item explorelogic.SubscriptionSignalInput
-		var rawURL string
-		if err := rows.Scan(&item.Title, &rawURL); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		item.Domain = coldURLDomain(rawURL)
-		normalizedURL := util.NormalizeURL(strings.TrimSpace(rawURL))
-		if normalizedURL != "" {
-			byNormalizedURL[normalizedURL] = append(byNormalizedURL[normalizedURL], len(result))
-		}
-		result = append(result, item)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if len(byNormalizedURL) == 0 {
-		return result, nil
-	}
-	normalizedURLs := make([]string, 0, len(byNormalizedURL))
-	for normalizedURL := range byNormalizedURL {
-		normalizedURLs = append(normalizedURLs, normalizedURL)
-	}
-	sort.Strings(normalizedURLs)
-	rows, err = loader.db.Query(`
-		SELECT id,normalized_url FROM recommended_feeds
-		WHERE normalized_url=ANY($1)
-		ORDER BY id`, pq.Array(normalizedURLs))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var sourceID int
-		var normalizedURL string
-		if err := rows.Scan(&sourceID, &normalizedURL); err != nil {
-			return nil, err
-		}
-		for _, index := range byNormalizedURL[normalizedURL] {
-			result[index].SourceID = sourceID
-		}
-	}
-	return result, rows.Err()
+// LoadColdProfileSignals intentionally runs through the request-scoped RLS
+// transaction and shares the worker's formal profile projection.
+func (loader *SQLExploreColdRankLoader) LoadColdProfileSignals(userID int, now time.Time) (explorelogic.ProfileInput, error) {
+	return repository.NewExploreProfileSignalRepository(loader.db).Load(context.Background(), userID, now)
 }
 
 func (loader *SQLExploreColdRankLoader) LoadColdCandidates(now time.Time) ([]explorelogic.RankCandidate, error) {

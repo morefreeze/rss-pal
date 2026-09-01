@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,9 +53,10 @@ func TestExploreHandlerEnsuresColdSnapshotForPageAndDrawerWithoutBlockingOnError
 }
 
 type fakeColdRankLoader struct {
-	candidates    []explorelogic.RankCandidate
-	subscriptions []explorelogic.SubscriptionSignalInput
-	feedback      []explorelogic.ExplicitFeedbackInput
+	candidates     []explorelogic.RankCandidate
+	subscriptions  []explorelogic.SubscriptionSignalInput
+	recentArticles []explorelogic.RecentArticleSignalInput
+	feedback       []explorelogic.ExplicitFeedbackInput
 }
 
 func (loader *fakeColdRankLoader) LoadColdCandidates(time.Time) ([]explorelogic.RankCandidate, error) {
@@ -63,8 +65,8 @@ func (loader *fakeColdRankLoader) LoadColdCandidates(time.Time) ([]explorelogic.
 func (loader *fakeColdRankLoader) LoadColdFeedback(int) ([]explorelogic.ExplicitFeedbackInput, error) {
 	return loader.feedback, nil
 }
-func (loader *fakeColdRankLoader) LoadColdSubscriptions(int) ([]explorelogic.SubscriptionSignalInput, error) {
-	return loader.subscriptions, nil
+func (loader *fakeColdRankLoader) LoadColdProfileSignals(int, time.Time) (explorelogic.ProfileInput, error) {
+	return explorelogic.ProfileInput{Subscriptions: loader.subscriptions, RecentArticles: loader.recentArticles}, nil
 }
 
 type fakeColdSnapshotStore struct {
@@ -99,12 +101,14 @@ func TestExploreColdStartPublishesDeterministicUserScopedFallback(t *testing.T) 
 		Batch: model.ExploreBatch{ID: 77, UserID: 5, SlotAt: repository.ExploreColdStartSlotAt},
 	}}
 	loader := &fakeColdRankLoader{
-		subscriptions: []explorelogic.SubscriptionSignalInput{{SourceID: 3, Domain: "subscribed.example"}},
-		feedback:      []explorelogic.ExplicitFeedbackInput{{SourceID: 2, Type: explorelogic.FeedbackHideSource}},
+		subscriptions:  []explorelogic.SubscriptionSignalInput{{SourceID: 3, Domain: "subscribed.example"}},
+		recentArticles: []explorelogic.RecentArticleSignalInput{{Title: "Go runtime", Category: "tech", Topic: "tech", PublishedAt: now.Add(-time.Hour)}},
+		feedback:       []explorelogic.ExplicitFeedbackInput{{SourceID: 2, Type: explorelogic.FeedbackHideSource}},
 		candidates: []explorelogic.RankCandidate{
 			{SourceID: 2, Title: "hidden", ValidationStatus: model.ExploreValidationValid, HealthScore: 1, Articles: []explorelogic.RankArticle{{ID: 20, FetchedAt: now}}},
 			{SourceID: 3, Title: "subscribed source", Domain: "another.example", ValidationStatus: model.ExploreValidationValid, HealthScore: 1, Articles: []explorelogic.RankArticle{{ID: 30, FetchedAt: now}}},
 			{SourceID: 4, Title: "subscribed domain", Domain: "subscribed.example", ValidationStatus: model.ExploreValidationValid, HealthScore: 1, Articles: []explorelogic.RankArticle{{ID: 40, FetchedAt: now}}},
+			{SourceID: 5, Title: "unrelated", Topic: "cooking", Category: "cooking", Provider: "directory", ValidationStatus: model.ExploreValidationValid, HealthScore: .9, Articles: []explorelogic.RankArticle{{ID: 50, FetchedAt: now}}},
 			{SourceID: 1, Title: "visible", Topic: "tech", Provider: "directory", ValidationStatus: model.ExploreValidationValid, HealthScore: .9, Articles: []explorelogic.RankArticle{{ID: 10, FetchedAt: now}}},
 		},
 	}
@@ -112,7 +116,7 @@ func TestExploreColdStartPublishesDeterministicUserScopedFallback(t *testing.T) 
 	if err := service.Ensure(5, now); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	if len(store.values) != 1 || store.values[0].SourceID != 1 {
+	if len(store.values) != 2 || store.values[0].SourceID != 1 || !strings.Contains(store.values[0].Reason, "tech") {
 		t.Fatalf("published=%+v", store.values)
 	}
 }
@@ -148,11 +152,25 @@ func TestExploreColdSubscriptionsUseRequestRLSTransaction(t *testing.T) {
 	if err := privDB.QueryRow(`INSERT INTO users(username,password_hash) VALUES ('cold-rls-b','x') RETURNING id`).Scan(&otherUserID); err != nil {
 		t.Fatal(err)
 	}
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := privDB.Exec(`UPDATE users SET shared_visible_from=$2 WHERE id IN ($1,$3)`, userID, now.Add(-5*24*time.Hour), otherUserID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := privDB.Exec(`
 		INSERT INTO feeds(url,title,owner_id) VALUES
 			('https://shared.example/feed','shared',NULL),
 			('https://mine.example/feed','mine',$1),
 			('https://other.example/feed','other',$2)`, userID, otherUserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := privDB.Exec(`
+		INSERT INTO articles(feed_id,title,url,published_at,fetched_at,category,topic,tags) VALUES
+			((SELECT id FROM feeds WHERE url='https://shared.example/feed'),'shared recent','https://shared.example/recent',$1,$2,'tech','go',ARRAY['public']),
+			((SELECT id FROM feeds WHERE url='https://shared.example/feed'),'shared old','https://shared.example/old',$3,$2,'private-old','old',ARRAY['hidden-old']),
+			((SELECT id FROM feeds WHERE url='https://shared.example/feed'),'shared undated','https://shared.example/undated',NULL,$2,'private-undated','undated',ARRAY['hidden-undated']),
+			((SELECT id FROM feeds WHERE url='https://mine.example/feed'),'mine recent','https://mine.example/recent',NULL,$2,'owned','backend',ARRAY['mine']),
+			((SELECT id FROM feeds WHERE url='https://other.example/feed'),'other recent','https://other.example/recent',$1,$2,'other','other',ARRAY['hidden-other'])`,
+		now.Add(-24*time.Hour), now.Add(-time.Hour), now.Add(-10*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := privDB.Exec(`
@@ -172,10 +190,11 @@ func TestExploreColdSubscriptionsUseRequestRLSTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	loader := NewSQLExploreColdRankLoader(appDB).WithCtx(coldLoaderCtx{ctxkey.Tx: repository.Querier(tx)})
-	subscriptions, err := loader.LoadColdSubscriptions(userID)
+	profile, err := loader.LoadColdProfileSignals(userID, now)
 	if err != nil {
 		t.Fatal(err)
 	}
+	subscriptions := profile.Subscriptions
 	if len(subscriptions) != 2 {
 		t.Fatalf("subscriptions=%+v, want shared and owned only", subscriptions)
 	}
@@ -186,4 +205,28 @@ func TestExploreColdSubscriptionsUseRequestRLSTransaction(t *testing.T) {
 	if got["shared.example"] == 0 || got["mine.example"] == 0 || got["other.example"] != 0 {
 		t.Fatalf("subscriptions by domain=%v", got)
 	}
+	titles := map[string]bool{}
+	for _, article := range profile.RecentArticles {
+		titles[article.Title] = true
+	}
+	if !titles["shared recent"] || !titles["mine recent"] || titles["shared old"] || titles["shared undated"] || titles["other recent"] {
+		t.Fatalf("RLS-scoped recent articles=%v", titles)
+	}
+	for _, subscription := range subscriptions {
+		if subscription.Domain == "mine.example" && (subscription.Category != "owned" || !containsColdString(subscription.Tags, "mine")) {
+			t.Fatalf("owned subscription metadata=%+v", subscription)
+		}
+		if containsColdString(subscription.Tags, "hidden-old") || containsColdString(subscription.Tags, "hidden-undated") || containsColdString(subscription.Tags, "hidden-other") {
+			t.Fatalf("subscription metadata leaked invisible article: %+v", subscription)
+		}
+	}
+}
+
+func containsColdString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

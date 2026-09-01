@@ -580,24 +580,6 @@ func TestExploreRankInputSQLRequiresFreshEnabledObservation(t *testing.T) {
 	}
 }
 
-func TestExploreProfileSQLLoadsBoundedFormalMetadata(t *testing.T) {
-	normalized := strings.Join(strings.Fields(exploreRecentArticleProfileSQL), " ")
-	for _, fragment := range []string{
-		"article.category", "article.topic", "article.tags", "LEFT(COALESCE(article.content,''),4000)", "LEFT(COALESCE(article.summary_brief,''),1000)",
-		"JOIN users profile_user ON profile_user.id=$1",
-		"feed.owner_id=$1 AND COALESCE(article.published_at,article.fetched_at) >= $2",
-		"feed.owner_id IS NULL AND article.published_at IS NOT NULL",
-		"article.published_at >= GREATEST($2,profile_user.shared_visible_from)",
-	} {
-		if !strings.Contains(normalized, fragment) {
-			t.Fatalf("profile SQL missing %q: %s", fragment, normalized)
-		}
-	}
-	if strings.Count(normalized, "COALESCE(article.published_at,article.fetched_at)") < 2 {
-		t.Fatalf("profile SQL does not include recently fetched undated articles: %s", normalized)
-	}
-}
-
 func TestSQLExploreRankInputsSharedArticlesRespectEachUserVisibilityFloor(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
@@ -620,12 +602,12 @@ func TestSQLExploreRankInputsSharedArticlesRespectEachUserVisibilityFloor(t *tes
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO articles(feed_id,title,url,published_at,fetched_at) VALUES
-			($1,'shared-old','https://profile-shared.example/old',$4,$6),
-			($1,'shared-recent','https://profile-shared.example/recent',$5,$6),
-			($1,'shared-undated','https://profile-shared.example/undated',NULL,$6),
-			($2,'owned-a-undated','https://profile-a.example/undated',NULL,$6),
-			($3,'owned-b-recent','https://profile-b.example/recent',$5,$6)`,
+		INSERT INTO articles(feed_id,title,url,published_at,fetched_at,category,topic,tags) VALUES
+			($1,'shared-old','https://profile-shared.example/old',$4,$6,'legacy','legacy',ARRAY['hidden-old']),
+			($1,'shared-recent','https://profile-shared.example/recent',$5,$6,'shared','shared',ARRAY['public']),
+			($1,'shared-undated','https://profile-shared.example/undated',NULL,$6,'undated','undated',ARRAY['hidden-undated']),
+			($2,'owned-a-undated','https://profile-a.example/undated',NULL,$6,'programming','go',ARRAY['backend']),
+			($3,'owned-b-recent','https://profile-b.example/recent',$5,$6,'databases','postgres',ARRAY['storage'])`,
 		sharedFeed, ownedAFeed, ownedBFeed, now.Add(-20*24*time.Hour), now.Add(-2*24*time.Hour), now.Add(-24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -640,6 +622,9 @@ func TestSQLExploreRankInputsSharedArticlesRespectEachUserVisibilityFloor(t *tes
 	}
 	assertRecentProfileTitles(t, profileA, []string{"owned-a-undated", "shared-recent"})
 	assertRecentProfileTitles(t, profileB, []string{"owned-b-recent", "shared-old", "shared-recent"})
+	assertSubscriptionMetadata(t, profileA, "profile-a.example", "programming", "backend")
+	assertSubscriptionMetadata(t, profileA, "profile-shared.example", "shared", "public")
+	assertSubscriptionMetadata(t, profileB, "profile-b.example", "databases", "storage")
 }
 
 func assertRecentProfileTitles(t *testing.T, profile explorelogic.ProfileInput, want []string) {
@@ -653,6 +638,29 @@ func assertRecentProfileTitles(t *testing.T, profile explorelogic.ProfileInput, 
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("recent article titles=%v want=%v", got, want)
 	}
+}
+
+func assertSubscriptionMetadata(t *testing.T, profile explorelogic.ProfileInput, domain, category, tag string) {
+	t.Helper()
+	for _, subscription := range profile.Subscriptions {
+		if subscription.Domain != domain {
+			continue
+		}
+		if subscription.Category != category || !containsExploreString(subscription.Tags, tag) {
+			t.Fatalf("subscription %s metadata=%+v want category=%q tag=%q", domain, subscription, category, tag)
+		}
+		return
+	}
+	t.Fatalf("subscription %s missing from %+v", domain, profile.Subscriptions)
+}
+
+func containsExploreString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestExploreCycleRetriesPersistedSnapshotFailureThenClosesGuardAfterSuccess(t *testing.T) {
