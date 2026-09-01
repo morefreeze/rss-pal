@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -20,18 +19,6 @@ import (
 )
 
 const exploreCandidateInputLimit = 2000
-
-const exploreRecentArticleProfileSQL = `
-	SELECT article.title, COALESCE(article.category,''), COALESCE(article.topic,''),
-	       COALESCE(article.tags,'{}'), LEFT(COALESCE(article.content,''),4000),
-	       LEFT(COALESCE(article.summary_brief,''),1000), COALESCE(article.published_at,article.fetched_at)
-	FROM articles article
-	JOIN feeds feed ON feed.id=article.feed_id
-	JOIN users profile_user ON profile_user.id=$1
-	WHERE (feed.owner_id=$1 AND COALESCE(article.published_at,article.fetched_at) >= $2)
-	   OR (feed.owner_id IS NULL AND article.published_at IS NOT NULL
-	       AND article.published_at >= GREATEST($2,profile_user.shared_visible_from))
-	ORDER BY COALESCE(article.published_at,article.fetched_at) DESC, article.id DESC LIMIT 200`
 
 const exploreCandidateSQL = `
 	SELECT source.id,source.title,source.category,COALESCE(source.site_url,source.url),
@@ -185,78 +172,11 @@ func (inputs *sqlExploreRankInputs) ListUserIDs(ctx context.Context) ([]int, err
 }
 
 func (inputs *sqlExploreRankInputs) LoadProfile(ctx context.Context, userID int, now time.Time) (explorelogic.ProfileInput, error) {
-	profile := explorelogic.ProfileInput{Now: now}
+	profile, err := repository.NewExploreProfileSignalRepository(inputs.db).Load(ctx, userID, now)
+	if err != nil {
+		return profile, err
+	}
 	rows, err := inputs.db.QueryContext(ctx, `
-		SELECT COALESCE(feed.title,''), feed.url
-		FROM feeds feed
-		WHERE feed.owner_id IS NULL OR feed.owner_id=$1
-		ORDER BY feed.id`, userID)
-	if err != nil {
-		return profile, err
-	}
-	subscriptionIndexes := make(map[string][]int)
-	for rows.Next() {
-		var item explorelogic.SubscriptionSignalInput
-		var rawURL string
-		if err := rows.Scan(&item.Title, &rawURL); err != nil {
-			rows.Close()
-			return profile, err
-		}
-		item.Domain = exploreURLDomain(rawURL)
-		normalizedURL := normalizeExploreFeedURL(rawURL)
-		subscriptionIndexes[normalizedURL] = append(subscriptionIndexes[normalizedURL], len(profile.Subscriptions))
-		profile.Subscriptions = append(profile.Subscriptions, item)
-	}
-	if err := closeExploreRows(rows); err != nil {
-		return profile, err
-	}
-	if len(subscriptionIndexes) > 0 {
-		normalizedURLs := make([]string, 0, len(subscriptionIndexes))
-		for normalizedURL := range subscriptionIndexes {
-			normalizedURLs = append(normalizedURLs, normalizedURL)
-		}
-		sort.Strings(normalizedURLs)
-		rows, err = inputs.db.QueryContext(ctx, `
-			SELECT id,normalized_url FROM recommended_feeds
-			WHERE normalized_url=ANY($1)`, pq.Array(normalizedURLs))
-		if err != nil {
-			return profile, err
-		}
-		for rows.Next() {
-			var sourceID int
-			var normalizedURL string
-			if err := rows.Scan(&sourceID, &normalizedURL); err != nil {
-				rows.Close()
-				return profile, err
-			}
-			for _, index := range subscriptionIndexes[normalizedURL] {
-				profile.Subscriptions[index].SourceID = sourceID
-			}
-		}
-		if err := closeExploreRows(rows); err != nil {
-			return profile, err
-		}
-	}
-
-	rows, err = inputs.db.QueryContext(ctx, exploreRecentArticleProfileSQL, userID, now.Add(-30*24*time.Hour))
-	if err != nil {
-		return profile, err
-	}
-	for rows.Next() {
-		var item explorelogic.RecentArticleSignalInput
-		var content, snippet string
-		if err := rows.Scan(&item.Title, &item.Category, &item.Topic, pq.Array(&item.Tags), &content, &snippet, &item.PublishedAt); err != nil {
-			rows.Close()
-			return profile, err
-		}
-		item.TextTokens = explorelogic.ProfileTextTokens(content, snippet)
-		profile.RecentArticles = append(profile.RecentArticles, item)
-	}
-	if err := closeExploreRows(rows); err != nil {
-		return profile, err
-	}
-
-	rows, err = inputs.db.QueryContext(ctx, `
 		SELECT article.title, preference.signal_type, preference.created_at
 		FROM user_preferences preference JOIN articles article ON article.id=preference.article_id
 		WHERE preference.user_id=$1 AND preference.signal_type IN ('save','like')
