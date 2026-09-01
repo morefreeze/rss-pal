@@ -27,7 +27,12 @@ export default function ExploreArticleCard({
   onHideSource,
   onDampenTopic,
 }: Props) {
-  const cardRef = useRef<HTMLElement | null>(null)
+	const cardRef = useRef<HTMLElement | null>(null)
+	const thumbnailSrc = article.thumbnail_url
+		? article.thumbnail_url.startsWith('/api/articles/')
+			? article.thumbnail_url
+			: `/api/proxy/image?url=${encodeURIComponent(article.thumbnail_url)}`
+		: undefined
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -125,10 +130,10 @@ export default function ExploreArticleCard({
             <span>{article.reason}</span>
           </div>
         </div>
-        {article.thumbnail_url && (
+        {thumbnailSrc && (
           <img
             className="explore-article-card__thumbnail"
-            src={article.thumbnail_url}
+            src={thumbnailSrc}
             alt={`${article.title} 缩略图`}
             loading="lazy"
             referrerPolicy="no-referrer"
