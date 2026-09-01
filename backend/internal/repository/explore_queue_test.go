@@ -179,8 +179,29 @@ func TestExploreQueueCombinedSourceAndRelatedHardCap(t *testing.T) {
 	if err := db.QueryRow(`SELECT (SELECT count(*) FROM explore_fetch_queue WHERE run_id=$1),(SELECT count(*) FROM explore_related_tasks WHERE run_id=$1),(SELECT count(*) FROM explore_fetch_queue WHERE status='pending')+(SELECT count(*) FROM explore_related_tasks WHERE status='pending')`, run.ID).Scan(&sourceLeased, &relatedLeased, &pending); err != nil {
 		t.Fatal(err)
 	}
-	if sourceLeased+relatedLeased != 500 || pending != 1 || relatedLeased != 1 {
+	if sourceLeased != 500 || relatedLeased != 0 || pending != 1 {
 		t.Fatalf("source=%d related=%d pending=%d", sourceLeased, relatedLeased, pending)
+	}
+}
+
+func TestExploreQueueRelatedAgeBoostEventuallyBeatsFreshHealthyRefresh(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	enqueueExploreTasks(t, db, repo, 1, repository.ExplorePriorityRefresh)
+	var providerID int
+	if err := db.QueryRow(`SELECT id FROM explore_registry_providers WHERE provider_key='related-sites'`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_related_tasks(provider_id,canonical_seed_url,priority,created_at) VALUES ($1,'https://aged-related.example/article',$2,CURRENT_TIMESTAMP-INTERVAL '101 hours')`, providerID, repository.ExplorePriorityRelatedSeed); err != nil {
+		t.Fatal(err)
+	}
+	_, tasks, err := repo.ClaimRun(time.Now(), "aged-related", time.Hour, 1)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("tasks=%+v err=%v", tasks, err)
+	}
+	if tasks[0].QueueKind != repository.ExploreQueueKindRelated {
+		t.Fatalf("aged related task remained starved: %+v", tasks[0])
 	}
 }
 

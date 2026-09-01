@@ -14,8 +14,8 @@ func TestLoadExploreConfigValidation(t *testing.T) {
 		{name: "zero", batch: "0", concur: "0", wantBatch: 500, wantConcur: 5},
 		{name: "negative", batch: "-1", concur: "-2", wantBatch: 500, wantConcur: 5},
 		{name: "one", batch: "1", concur: "1", wantBatch: 1, wantConcur: 1},
-		{name: "499", batch: "499", concur: "7", wantBatch: 499, wantConcur: 7},
-		{name: "500", batch: "500", concur: "9", wantBatch: 500, wantConcur: 9},
+		{name: "499", batch: "499", concur: "7", wantBatch: 499, wantConcur: 5},
+		{name: "500", batch: "500", concur: "9", wantBatch: 500, wantConcur: 5},
 		{name: "501", batch: "501", concur: "3", wantBatch: 500, wantConcur: 3},
 	}
 	for _, tc := range cases {

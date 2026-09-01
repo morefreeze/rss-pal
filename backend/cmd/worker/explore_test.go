@@ -411,14 +411,14 @@ func TestScheduledExploreRegistryEnqueuesDueValidationAndRefreshDespiteProviderF
 	}
 }
 
-func TestExploreCycleClampsQueueLimitAndDefaultsConcurrencyToFive(t *testing.T) {
+func TestExploreCycleClampsQueueLimitAndConcurrencyToFive(t *testing.T) {
 	now := time.Date(2026, 9, 1, 7, 30, 0, 0, exploreTestShanghai)
 	queue := &fakeExploreQueue{tasks: makeExploreTasks(12)}
 	handler := &fakeExploreTaskHandler{started: make(chan int, 12), release: make(chan struct{})}
 	cycle := newExploreCycle(exploreCycleDeps{
 		clock: &fakeExploreClock{now: now}, registry: &fakeExploreRegistry{}, queue: queue,
 		taskHandler: handler, snapshots: &fakeExploreSnapshotRunner{}, batchLimit: 999,
-		owner: "worker-test", logger: log.New(&bytes.Buffer{}, "", 0),
+		fetchConcurrency: 9, owner: "worker-test", logger: log.New(&bytes.Buffer{}, "", 0),
 	})
 
 	cycle.Run(context.Background())
@@ -443,6 +443,20 @@ func TestExploreCycleClampsQueueLimitAndDefaultsConcurrencyToFive(t *testing.T) 
 	}
 	if peak := handler.peak.Load(); peak != 5 {
 		t.Fatalf("peak task goroutines = %d, want default concurrency 5", peak)
+	}
+}
+
+func TestExploreCyclePreservesExplicitLowerConcurrencyAndUsesClampedLeaseMath(t *testing.T) {
+	low := newExploreCycle(exploreCycleDeps{batchLimit: 500, fetchConcurrency: 2, leaseDuration: time.Minute})
+	if low.deps.fetchConcurrency != 2 {
+		t.Fatalf("lower concurrency=%d", low.deps.fetchConcurrency)
+	}
+	high := newExploreCycle(exploreCycleDeps{batchLimit: 500, fetchConcurrency: 9, leaseDuration: time.Minute})
+	if high.deps.fetchConcurrency != 5 {
+		t.Fatalf("high concurrency=%d", high.deps.fetchConcurrency)
+	}
+	if high.deps.leaseDuration != requiredExploreLeaseDuration(500, 5) || requiredExploreLeaseDuration(500, 9) != requiredExploreLeaseDuration(500, 5) {
+		t.Fatalf("lease high=%v direct9=%v direct5=%v", high.deps.leaseDuration, requiredExploreLeaseDuration(500, 9), requiredExploreLeaseDuration(500, 5))
 	}
 }
 
@@ -787,7 +801,7 @@ func TestNewProductionExploreCycleUsesValidatedConfig(t *testing.T) {
 		Explore: config.ExploreConfig{FetchBatchLimit: 321, FetchConcurrency: 7},
 		RSSHub:  config.RSSHubConfig{BaseURL: "http://rsshub:1200"},
 	})
-	if cycle.deps.batchLimit != 321 || cycle.deps.fetchConcurrency != 7 {
+	if cycle.deps.batchLimit != 321 || cycle.deps.fetchConcurrency != 5 {
 		t.Fatalf("production explore deps = limit %d concurrency %d", cycle.deps.batchLimit, cycle.deps.fetchConcurrency)
 	}
 	if cycle.deps.registry == nil || cycle.deps.queue == nil || cycle.deps.taskHandler == nil || cycle.deps.snapshots == nil {
