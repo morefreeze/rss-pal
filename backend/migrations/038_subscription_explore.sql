@@ -150,6 +150,42 @@ CREATE INDEX IF NOT EXISTS idx_explore_fetch_queue_claimable
     ON explore_fetch_queue (not_before, priority DESC, id)
     WHERE status IN ('pending', 'leased');
 
+-- Related-site discovery is network work and therefore shares the same
+-- logical-run quota as source fetches.  The producer only advances bounded
+-- database cursors and persists canonical seeds here; workers own HTTP.
+CREATE TABLE IF NOT EXISTS explore_related_tasks (
+    id SERIAL PRIMARY KEY,
+    provider_id INTEGER NOT NULL REFERENCES explore_registry_providers(id) ON DELETE CASCADE,
+    canonical_seed_url VARCHAR(2048) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'leased', 'done', 'invalid')),
+    priority INTEGER NOT NULL DEFAULT 250,
+    not_before TIMESTAMP NOT NULL DEFAULT NOW(),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    run_id INTEGER REFERENCES explore_fetch_runs(id) ON DELETE SET NULL,
+    lease_owner VARCHAR(200),
+    lease_token VARCHAR(64),
+    lease_expires_at TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMP
+);
+ALTER TABLE explore_related_tasks ADD COLUMN IF NOT EXISTS lease_token VARCHAR(64);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_explore_related_tasks_active_seed
+    ON explore_related_tasks (canonical_seed_url)
+    WHERE status IN ('pending', 'leased');
+CREATE INDEX IF NOT EXISTS idx_explore_related_tasks_claimable
+    ON explore_related_tasks (not_before, priority DESC, id)
+    WHERE status IN ('pending', 'leased');
+
+CREATE TABLE IF NOT EXISTS explore_related_scan_state (
+    id SMALLINT PRIMARY KEY CHECK (id = 1),
+    feed_cursor INTEGER NOT NULL DEFAULT 0 CHECK (feed_cursor >= 0),
+    article_cursor INTEGER NOT NULL DEFAULT 0 CHECK (article_cursor >= 0),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+INSERT INTO explore_related_scan_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS explore_articles (
     id SERIAL PRIMARY KEY,
     source_id INTEGER NOT NULL REFERENCES recommended_feeds(id) ON DELETE CASCADE,
