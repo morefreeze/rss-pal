@@ -41,7 +41,7 @@ const ExploreRelatedSeedsSQL = `
 		       COALESCE(article.published_at,article.fetched_at)
 		FROM articles article JOIN feeds feed ON feed.id=article.feed_id
 		WHERE feed.status='active' AND feed.is_active
-		  AND COALESCE(article.published_at,article.fetched_at) >= $1 - INTERVAL '30 days'
+		  AND COALESCE(article.published_at,article.fetched_at) >= $1::timestamp - INTERVAL '30 days'
 	)
 	SELECT owner_key,url,seed_at FROM raw_seeds
 	WHERE url IS NOT NULL AND btrim(url) <> ''

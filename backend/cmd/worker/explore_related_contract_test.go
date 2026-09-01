@@ -38,7 +38,7 @@ func TestExploreSchedulerQueueClaimBoundaryPrefers500HealthyThenBroken(t *testin
 	if _, err := db.Exec(`
 		WITH inserted AS (
 			INSERT INTO recommended_feeds(url,title,category,language,normalized_url,validation_status,is_broken,health_score,last_checked_at,last_fetched_at)
-			SELECT 'https://healthy-boundary-'||n||'.example/feed','healthy','test','en','https://healthy-boundary-'||n||'.example/feed','valid',false,1,$1-INTERVAL '4 hours',$1-INTERVAL '4 hours'
+			SELECT 'https://healthy-boundary-'||n||'.example/feed','healthy','test','en','https://healthy-boundary-'||n||'.example/feed','valid',false,1,$1::timestamp-INTERVAL '4 hours',$1::timestamp-INTERVAL '4 hours'
 			FROM generate_series(1,500) n RETURNING id,normalized_url
 		)
 		INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at)
@@ -46,7 +46,7 @@ func TestExploreSchedulerQueueClaimBoundaryPrefers500HealthyThenBroken(t *testin
 		t.Fatal(err)
 	}
 	var brokenID int
-	if err := db.QueryRow(`INSERT INTO recommended_feeds(url,title,category,language,normalized_url,validation_status,is_broken,health_score,last_checked_at,last_fetched_at) VALUES ('https://broken-boundary.example/feed','broken','test','en','https://broken-boundary.example/feed','valid',true,0,$1-INTERVAL '25 hours',$1-INTERVAL '25 hours') RETURNING id`, now).Scan(&brokenID); err != nil {
+	if err := db.QueryRow(`INSERT INTO recommended_feeds(url,title,category,language,normalized_url,validation_status,is_broken,health_score,last_checked_at,last_fetched_at) VALUES ('https://broken-boundary.example/feed','broken','test','en','https://broken-boundary.example/feed','valid',true,0,$1::timestamp-INTERVAL '25 hours',$1::timestamp-INTERVAL '25 hours') RETURNING id`, now).Scan(&brokenID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) VALUES ($1,$2,'broken-boundary',$3)`, providerID, brokenID, now.Add(-26*time.Hour)); err != nil {
