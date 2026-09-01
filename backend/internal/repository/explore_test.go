@@ -48,6 +48,13 @@ func TestColdSnapshotStatusIsMarkedColdGeneratingFallback(t *testing.T) {
 	}
 }
 
+func TestPendingColdSnapshotWithoutDoneIsMarkedColdGenerating(t *testing.T) {
+	status := finalizeExploreSnapshotStatus(ExploreSnapshotStatus{}, model.ExploreBatchPending, ExploreColdStartSlotAt)
+	if !status.Cold || !status.Generating || status.UsingFallback || status.RefreshFailed {
+		t.Fatalf("pending cold status=%+v", status)
+	}
+}
+
 func TestBuildExplorePageQueryLimitsEachSourceToRecentFiveBeforeRequestedOrdering(t *testing.T) {
 	query := strings.Join(strings.Fields(buildExplorePageQuery(ExploreListParams{
 		Sort: SortCaptured,

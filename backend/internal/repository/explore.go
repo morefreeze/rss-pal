@@ -307,10 +307,11 @@ func readExploreSnapshotStatus(db Querier, userID int) (ExploreSnapshotStatus, e
 }
 
 func finalizeExploreSnapshotStatus(status ExploreSnapshotStatus, latestStatus string, latestSlot time.Time) ExploreSnapshotStatus {
-	status.Cold = status.ID != 0 && status.SlotAt.Equal(ExploreColdStartSlotAt)
+	status.Cold = (status.ID != 0 && status.SlotAt.Equal(ExploreColdStartSlotAt)) ||
+		(latestStatus == model.ExploreBatchPending && latestSlot.Equal(ExploreColdStartSlotAt))
 	status.Generating = status.Cold || (latestStatus == model.ExploreBatchPending && (status.ID == 0 || latestSlot.After(status.SlotAt)))
 	status.RefreshFailed = latestStatus == model.ExploreBatchFailed
-	status.UsingFallback = status.Cold || (status.RefreshFailed && status.ID != 0 && latestSlot.After(status.SlotAt))
+	status.UsingFallback = (status.Cold && status.ID != 0) || (status.RefreshFailed && status.ID != 0 && latestSlot.After(status.SlotAt))
 	return status
 }
 
