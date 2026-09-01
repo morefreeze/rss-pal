@@ -94,13 +94,18 @@ func TestExploreCatalogDueSQLRequiresEnabledObservation(t *testing.T) {
 		"source.is_broken=true",
 		"observation.last_seen_at > COALESCE(source.last_checked_at,source.last_fetched_at)",
 		"COALESCE(source.last_checked_at,source.last_fetched_at) <= $3",
-		"WHEN source.is_broken=false THEN 2",
+		"WHEN source.is_broken=false THEN 1",
 		"ELSE 3",
 		"LIMIT $4",
 	} {
 		if !strings.Contains(exploreDueSourcesSQL, fragment) {
 			t.Errorf("due-source SQL missing %q", fragment)
 		}
+	}
+	normalIndex := strings.Index(exploreDueSourcesSQL, "WHEN source.is_broken=false THEN 1")
+	freshBrokenIndex := strings.Index(exploreDueSourcesSQL, "WHEN source.is_broken AND EXISTS")
+	if normalIndex < 0 || freshBrokenIndex < 0 || normalIndex > freshBrokenIndex {
+		t.Fatalf("normal refreshes must sort before every broken health check: %s", exploreDueSourcesSQL)
 	}
 }
 
@@ -128,7 +133,7 @@ func TestExploreCatalogBrokenHealthChecksCannotDisplaceNormalRefreshFromLimit(t 
 	}
 	if _, err := db.Exec(`
 		INSERT INTO explore_source_observations(provider_id,source_id,external_key,first_seen_at,last_seen_at)
-		SELECT $1,id,'budget-' || id,$2,$2 FROM recommended_feeds`, providerID, now.Add(-30*24*time.Hour)); err != nil {
+		SELECT $1,id,'budget-' || id,$2,$2 FROM recommended_feeds`, providerID, now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	due, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-30*time.Minute), now.Add(-3*time.Hour), now.Add(-24*time.Hour), 500)

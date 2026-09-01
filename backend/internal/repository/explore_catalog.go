@@ -169,13 +169,13 @@ const (
 		))
 		ORDER BY CASE
 			WHEN source.validation_status = 'pending' THEN 0
+			WHEN source.is_broken=false THEN 1
 			WHEN source.is_broken AND EXISTS (
 				SELECT 1 FROM explore_source_observations observation
 				JOIN explore_registry_providers provider ON provider.id=observation.provider_id
 				WHERE observation.source_id=source.id AND provider.enabled
 				  AND observation.last_seen_at > COALESCE(source.last_checked_at,source.last_fetched_at)
-			) THEN 1
-			WHEN source.is_broken=false THEN 2
+			) THEN 2
 			ELSE 3
 		END,
 		         CASE WHEN source.validation_status = 'pending' THEN source.last_checked_at ELSE COALESCE(source.last_checked_at,source.last_fetched_at) END ASC NULLS FIRST,
