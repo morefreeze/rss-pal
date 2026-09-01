@@ -207,6 +207,7 @@ func (handler *fakeExploreTaskHandler) Process(_ context.Context, task repositor
 type fakeExploreSnapshotRunner struct {
 	mu      sync.Mutex
 	slots   []time.Time
+	cold    int
 	started chan time.Time
 	release chan struct{}
 	retry   bool
@@ -248,6 +249,13 @@ func (runner *fakeExploreSnapshotRunner) GenerateAll(_ context.Context, slotAt, 
 	return exploreSnapshotGenerationResult{Done: 1}
 }
 
+func (runner *fakeExploreSnapshotRunner) GenerateColdMissing(context.Context, time.Time) exploreSnapshotGenerationResult {
+	runner.mu.Lock()
+	runner.cold++
+	runner.mu.Unlock()
+	return exploreSnapshotGenerationResult{}
+}
+
 func (runner *fakeExploreSnapshotRunner) setRetry(retry bool) {
 	runner.mu.Lock()
 	runner.retry = retry
@@ -286,6 +294,12 @@ func (runner *fakeExploreSnapshotRunner) count() int {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 	return len(runner.slots)
+}
+
+func (runner *fakeExploreSnapshotRunner) coldCount() int {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return runner.cold
 }
 
 func newExploreCycleForTest(now time.Time, registry *fakeExploreRegistry, queue *fakeExploreQueue, handler *fakeExploreTaskHandler, snapshots *fakeExploreSnapshotRunner, logger *log.Logger) *exploreCycle {
@@ -518,7 +532,7 @@ func TestExploreCycleSnapshotDoesNotWaitForQueueDrainAndNightHasNoSnapshot(t *te
 
 	night := newExploreCycleForTest(time.Date(2026, 9, 2, 3, 0, 0, 0, exploreTestShanghai), &fakeExploreRegistry{}, &fakeExploreQueue{}, &fakeExploreTaskHandler{}, &fakeExploreSnapshotRunner{}, log.New(&bytes.Buffer{}, "", 0))
 	night.Run(context.Background())
-	time.Sleep(20 * time.Millisecond)
+	waitExplore(t, func() bool { return night.deps.snapshots.(*fakeExploreSnapshotRunner).coldCount() == 1 })
 	if night.deps.snapshots.(*fakeExploreSnapshotRunner).count() != 0 {
 		t.Fatal("00:00-08:00 must not generate a snapshot")
 	}
@@ -595,6 +609,26 @@ func TestExploreSnapshotCoordinatorRetriesPersistedFailure(t *testing.T) {
 	}
 }
 
+func TestExploreColdSnapshotClaimsUseFreshTimePerUser(t *testing.T) {
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	claimTimes := []time.Time{base, base.Add(2 * time.Minute)}
+	index := 0
+	store := &recordingClaimTimesStore{}
+	runner := &exploreSnapshotCoordinator{
+		users: &fakeExploreUsers{coldIDs: []int{1, 2}}, profiles: &fakeExploreRankInputs{}, store: store,
+		logger: log.New(&bytes.Buffer{}, "", 0),
+		claimNow: func() time.Time {
+			value := claimTimes[index]
+			index++
+			return value
+		},
+	}
+	runner.GenerateColdMissing(context.Background(), base)
+	if len(store.times) != 2 || !store.times[0].Equal(claimTimes[0]) || !store.times[1].Equal(claimTimes[1]) {
+		t.Fatalf("claim times=%v want=%v", store.times, claimTimes)
+	}
+}
+
 func TestExploreRankInputSQLRequiresFreshEnabledObservation(t *testing.T) {
 	normalized := strings.Join(strings.Fields(exploreCandidateSQL), " ")
 	for _, fragment := range []string{
@@ -652,6 +686,28 @@ func TestSQLExploreRankInputsSharedArticlesRespectEachUserVisibilityFloor(t *tes
 	assertSubscriptionMetadata(t, profileA, "profile-a.example", "programming", "backend")
 	assertSubscriptionMetadata(t, profileA, "profile-shared.example", "shared", "public")
 	assertSubscriptionMetadata(t, profileB, "profile-b.example", "databases", "storage")
+}
+
+func TestSQLExploreRankInputsListsOnlyUsersMissingDoneSnapshots(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	var coldUserID, readyUserID int
+	if err := db.QueryRow(`INSERT INTO users(username,password_hash) VALUES ('cold-user','x') RETURNING id`).Scan(&coldUserID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO users(username,password_hash) VALUES ('ready-user','x') RETURNING id`).Scan(&readyUserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_batches(user_id,slot_at,status,completed_at) VALUES ($1,$2,'done',NOW())`, readyUserID, repository.ExploreColdStartSlotAt); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := (&sqlExploreRankInputs{db: db}).ListColdUserIDs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != coldUserID {
+		t.Fatalf("cold user ids=%v want [%d]", ids, coldUserID)
+	}
 }
 
 func assertRecentProfileTitles(t *testing.T, profile explorelogic.ProfileInput, want []string) {
@@ -809,9 +865,15 @@ func TestNewProductionExploreCycleUsesValidatedConfig(t *testing.T) {
 	}
 }
 
-type fakeExploreUsers struct{ ids []int }
+type fakeExploreUsers struct {
+	ids     []int
+	coldIDs []int
+}
 
 func (users *fakeExploreUsers) ListUserIDs(context.Context) ([]int, error) { return users.ids, nil }
+func (users *fakeExploreUsers) ListColdUserIDs(context.Context) ([]int, error) {
+	return users.coldIDs, nil
+}
 
 type fakeExploreRankInputs struct{ profileErr error }
 
@@ -893,6 +955,19 @@ type fakeSnapshotStore struct {
 	failErr    error
 	lastDone   int
 	failed     int
+}
+
+type recordingClaimTimesStore struct{ times []time.Time }
+
+func (store *recordingClaimTimesStore) Claim(_ int, _ time.Time, now time.Time, _ time.Duration) (*repository.ExploreSnapshotClaim, bool, error) {
+	store.times = append(store.times, now)
+	return nil, false, nil
+}
+func (*recordingClaimTimesStore) Publish(int, repository.ExploreSnapshotGenerationToken, []repository.ExploreSnapshotSourceInput) (*model.ExploreBatch, error) {
+	return nil, nil
+}
+func (*recordingClaimTimesStore) Fail(int, repository.ExploreSnapshotGenerationToken, error) error {
+	return nil
 }
 
 func (store *fakeSnapshotStore) Claim(int, time.Time, time.Time, time.Duration) (*repository.ExploreSnapshotClaim, bool, error) {

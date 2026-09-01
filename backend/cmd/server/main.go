@@ -89,10 +89,7 @@ func main() {
 	interestsHandler := api.NewInterestsHandler(prefRepo, articleRepo, templateRepo, userInterestsRepo, summarizer, cfg)
 	exploreRepo := repository.NewExploreRepository(db)
 	exploreSubscriber := explorelogic.NewSubscribeService(db)
-	exploreHandler := api.NewExploreHandlerWithSubscriberAndColdStart(
-		exploreRepo, exploreSubscriber, repository.NewExploreSnapshotRepository(db),
-		api.NewSQLExploreColdRankLoader(db), log.Default(),
-	)
+	exploreHandler := api.NewExploreHandlerWithSubscriber(exploreRepo, exploreSubscriber)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo)
 	dailyHandler := api.NewDailyHandler(articleRepo, dailyDigestRepo)
 	briefingHandler := api.NewBriefingHandler(userRepo)

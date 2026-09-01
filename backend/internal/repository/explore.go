@@ -8,6 +8,8 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
+	"github.com/bytedance/rss-pal/internal/util"
+	"github.com/lib/pq"
 )
 
 const (
@@ -162,19 +164,26 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 	if err != nil {
 		return nil, err
 	}
+	formalURLs, err := visibleFormalNormalizedURLs(tx, userID)
+	if err != nil {
+		return nil, err
+	}
 	page := &ExplorePage{Snapshot: status, Articles: []ExploreArticleListItem{}, Interests: interests}
+	var args []any
+	var query string
 	if status.ID == 0 {
-		if err := commit(); err != nil {
-			return nil, err
+		args = []any{userID, pq.Array(formalURLs)}
+		if params.Topic != "" {
+			args = append(args, params.Topic)
 		}
-		return page, nil
+		query = buildExploreColdPageQuery(params)
+	} else {
+		args = []any{userID, status.ID, pq.Array(formalURLs)}
+		if params.Topic != "" {
+			args = append(args, params.Topic)
+		}
+		query = buildExplorePageQuery(params)
 	}
-
-	args := []any{userID, status.ID}
-	if params.Topic != "" {
-		args = append(args, params.Topic)
-	}
-	query := buildExplorePageQuery(params)
 
 	rows, err := tx.Query(query, args...)
 	if err != nil {
@@ -237,6 +246,32 @@ func readExploreInterests(db Querier, userID int) ([]string, error) {
 	return topics, rows.Err()
 }
 
+func visibleFormalNormalizedURLs(db Querier, userID int) ([]string, error) {
+	rows, err := db.Query(`SELECT url FROM feeds WHERE owner_id IS NULL OR owner_id=$1 ORDER BY id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]struct{}{}
+	result := []string{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		normalized := util.NormalizeURL(strings.TrimSpace(raw))
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result, rows.Err()
+}
+
 func normalizeExploreArticleListItem(item ExploreArticleListItem) ExploreArticleListItem {
 	runes := []rune(item.Excerpt)
 	if len(runes) > MaxExploreListExcerptRunes {
@@ -248,7 +283,7 @@ func normalizeExploreArticleListItem(item ExploreArticleListItem) ExploreArticle
 func buildExplorePageQuery(params ExploreListParams) string {
 	topicClause := ""
 	if params.Topic != "" {
-		topicClause = " AND COALESCE(batch_source.topic, '') = $3"
+		topicClause = " AND COALESCE(batch_source.topic, '') = $4"
 	}
 	requestedOrder := ArticleOrderClause(ArticleAliasExplore, params.Sort, params.Dir)
 	return `
@@ -257,11 +292,7 @@ func buildExplorePageQuery(params ExploreListParams) string {
 		       COALESCE(explore_articles.excerpt, ''), explore_articles.thumbnail_url, explore_articles.published_at,
 		       explore_articles.fetched_at, COALESCE(batch_source.topic, ''),
 		       COALESCE(batch_source.reason, ''),
-		       EXISTS (
-		           SELECT 1 FROM feeds formal_feed
-		           WHERE formal_feed.url=source.url
-		             AND (formal_feed.owner_id IS NULL OR formal_feed.owner_id=$1)
-		       ) AS is_subscribed
+		       source.normalized_url=ANY($3) AS is_subscribed
 		FROM explore_batches batch
 		JOIN explore_batch_sources batch_source
 		  ON batch_source.batch_id=batch.id AND batch_source.user_id=$1
@@ -287,6 +318,66 @@ func buildExplorePageQuery(params ExploreListParams) string {
 		      WHERE dampened.user_id=$1 AND dampened.feedback_type='dampen_topic'
 		        AND dampened.topic=batch_source.topic
 		  )` + topicClause + `
+		` + requestedOrder + `, explore_articles.id ` + params.Dir.sql()
+}
+
+const exploreColdSourcesCTE = `
+	WITH cold_ranked AS (
+		SELECT source.id, source.title, source.url, source.site_url, source.health_score,
+		       COALESCE(NULLIF(source.category,''), NULLIF(observation.topic,''), '') AS topic,
+		       '来自持续更新的 ' || observation.provider_key || ' 目录' AS reason,
+		       observation.last_seen_at
+		FROM recommended_feeds source
+		JOIN LATERAL (
+			SELECT provider.provider_key, COALESCE(provider.topic,'') AS topic, item.last_seen_at
+			FROM explore_source_observations item
+			JOIN explore_registry_providers provider ON provider.id=item.provider_id
+			WHERE item.source_id=source.id AND provider.enabled
+			  AND item.last_seen_at >= CURRENT_TIMESTAMP - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')
+			ORDER BY item.last_seen_at DESC, item.id DESC
+			LIMIT 1
+		) observation ON true
+		WHERE source.validation_status='valid' AND source.is_broken=false
+		  AND source.merged_into_source_id IS NULL
+		  AND EXISTS (SELECT 1 FROM explore_articles article WHERE article.source_id=source.id)
+		  AND NOT EXISTS (
+			SELECT 1 FROM explore_feedback hidden
+			WHERE hidden.user_id=$1 AND hidden.source_id=source.id AND hidden.feedback_type='hide_source'
+		  )
+		  AND NOT EXISTS (
+			SELECT 1 FROM explore_feedback dampened
+			WHERE dampened.user_id=$1 AND dampened.feedback_type='dampen_topic'
+			  AND dampened.topic=COALESCE(NULLIF(source.category,''),NULLIF(observation.topic,''),'')
+		  )
+		  AND NOT source.normalized_url=ANY($2)
+		ORDER BY COALESCE(source.health_score,0) DESC, observation.last_seen_at DESC, source.id
+		LIMIT 12
+	), cold_sources AS (
+		SELECT cold_ranked.*,
+		       ROW_NUMBER() OVER (ORDER BY COALESCE(health_score,0) DESC,last_seen_at DESC,id)::integer AS rank
+		FROM cold_ranked
+	)`
+
+func buildExploreColdPageQuery(params ExploreListParams) string {
+	topicClause := ""
+	if params.Topic != "" {
+		topicClause = " WHERE cold.topic = $3"
+	}
+	requestedOrder := ArticleOrderClause(ArticleAliasExplore, params.Sort, params.Dir)
+	return exploreColdSourcesCTE + `
+		SELECT explore_articles.id, explore_articles.source_id, cold.title,
+		       explore_articles.title, explore_articles.url,
+		       COALESCE(explore_articles.excerpt, ''), explore_articles.thumbnail_url,
+		       explore_articles.published_at, explore_articles.fetched_at,
+		       cold.topic, cold.reason, false AS is_subscribed
+		FROM cold_sources cold
+		JOIN LATERAL (
+			SELECT explore_articles.* FROM explore_articles
+			WHERE explore_articles.source_id=cold.id
+			ORDER BY COALESCE(explore_articles.published_at, explore_articles.fetched_at) DESC,
+			         explore_articles.fetched_at DESC, explore_articles.id DESC
+			LIMIT 5
+		) explore_articles ON true` + topicClause + `
 		` + requestedOrder + `, explore_articles.id ` + params.Dir.sql()
 }
 
@@ -335,9 +426,10 @@ func readExploreSnapshotStatus(db Querier, userID int) (ExploreSnapshotStatus, e
 }
 
 func finalizeExploreSnapshotStatus(status ExploreSnapshotStatus, latestStatus string, latestSlot time.Time) ExploreSnapshotStatus {
-	status.Cold = (status.ID != 0 && status.SlotAt.Equal(ExploreColdStartSlotAt)) ||
+	status.Cold = status.ID == 0 || (status.ID != 0 && status.SlotAt.Equal(ExploreColdStartSlotAt)) ||
 		(latestStatus == model.ExploreBatchPending && latestSlot.Equal(ExploreColdStartSlotAt))
-	status.Generating = status.Cold || (latestStatus == model.ExploreBatchPending && (status.ID == 0 || latestSlot.After(status.SlotAt)))
+	status.Generating = (status.Cold && latestStatus != model.ExploreBatchFailed) ||
+		(latestStatus == model.ExploreBatchPending && (status.ID == 0 || latestSlot.After(status.SlotAt)))
 	status.RefreshFailed = latestStatus == model.ExploreBatchFailed
 	status.UsingFallback = (status.Cold && status.ID != 0) || (status.RefreshFailed && status.ID != 0 && latestSlot.After(status.SlotAt))
 	return status
@@ -374,7 +466,15 @@ func stableDiversifyExploreArticles(in []ExploreArticleListItem) []ExploreArticl
 }
 
 func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) {
-	rows, err := r.db.Query(`
+	status, err := readExploreSnapshotStatus(r.db, userID)
+	if err != nil {
+		return nil, err
+	}
+	formalURLs, err := visibleFormalNormalizedURLs(r.db, userID)
+	if err != nil {
+		return nil, err
+	}
+	query := `
 		WITH latest_done AS (
 			SELECT id FROM explore_batches WHERE user_id=$1 AND status='done'
 			ORDER BY slot_at DESC, id DESC LIMIT 1
@@ -388,14 +488,23 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 		       EXISTS (SELECT 1 FROM explore_feedback feedback
 		               WHERE feedback.user_id=$1 AND feedback.source_id=source.id
 		                 AND feedback.feedback_type='hide_source'),
-		       EXISTS (SELECT 1 FROM feeds formal_feed WHERE formal_feed.url=source.url
-		               AND (formal_feed.owner_id IS NULL OR formal_feed.owner_id=$1))
+		       source.normalized_url=ANY($2)
 		FROM latest_done batch
 		JOIN explore_batch_sources batch_source
 		  ON batch_source.batch_id=batch.id AND batch_source.user_id=$1
 		JOIN recommended_feeds source ON source.id=batch_source.source_id
 		ORDER BY batch_source.rank, source.id
-	`, userID)
+	`
+	if status.ID == 0 {
+		query = exploreColdSourcesCTE + `
+			SELECT cold.id,cold.title,cold.url,cold.site_url,cold.rank,cold.topic,cold.reason,
+			       cold.health_score,'valid',false,NULL::integer,
+			       (SELECT COUNT(*) FROM explore_articles article WHERE article.source_id=cold.id),
+			       false,false,false
+			FROM cold_sources cold
+			ORDER BY cold.rank,cold.id`
+	}
+	rows, err := r.db.Query(query, userID, pq.Array(formalURLs))
 	if err != nil {
 		return nil, err
 	}
@@ -417,32 +526,28 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 }
 
 func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreArticleDetail, error) {
+	formalURLs, err := visibleFormalNormalizedURLs(r.db, userID)
+	if err != nil {
+		return nil, err
+	}
 	var detail ExploreArticleDetail
-	err := r.db.QueryRow(`
+	err = r.db.QueryRow(exploreColdSourcesCTE+`
 		SELECT article.id, article.source_id, source.title, source.url, source.site_url,
 		       article.title, article.url, article.content, article.excerpt, article.thumbnail_url,
 		       article.published_at, article.fetched_at,
-		       EXISTS (
-		           SELECT 1 FROM feeds subscribed_feed
-		           WHERE subscribed_feed.url=source.url
-		             AND (subscribed_feed.owner_id IS NULL OR subscribed_feed.owner_id=$1)
-		       ) AS is_subscribed
+		       source.normalized_url=ANY($2) AS is_subscribed
 		FROM explore_articles article
 		JOIN recommended_feeds source ON source.id=article.source_id
-		WHERE article.id=$2 AND (
+		WHERE article.id=$3 AND (
 			EXISTS (
 				SELECT 1 FROM explore_batch_sources batch_source
 				JOIN explore_batches batch
 				  ON batch.id=batch_source.batch_id AND batch.user_id=batch_source.user_id
 				WHERE batch_source.user_id=$1 AND batch_source.source_id=article.source_id
 				  AND batch.status='done' AND batch.completed_at >= NOW() - INTERVAL '30 days'
-			) OR EXISTS (
-				SELECT 1 FROM feeds formal_feed
-				WHERE formal_feed.url=source.url
-				  AND (formal_feed.owner_id IS NULL OR formal_feed.owner_id=$1)
-			)
+			) OR source.normalized_url=ANY($2) OR source.id IN (SELECT id FROM cold_sources)
 		)
-	`, userID, articleID).Scan(
+	`, userID, pq.Array(formalURLs), articleID).Scan(
 		&detail.ID, &detail.SourceID, &detail.SourceTitle, &detail.SourceURL,
 		&detail.SiteURL, &detail.Title, &detail.URL, &detail.Content, &detail.Excerpt, &detail.ThumbnailURL,
 		&detail.PublishedAt, &detail.FetchedAt, &detail.IsSubscribed,
@@ -464,18 +569,25 @@ func (r *ExploreRepository) CreateFeedback(userID int, input ExploreFeedbackInpu
 	if err := validateExploreFeedback(input); err != nil {
 		return nil, err
 	}
+	formalURLs, err := visibleFormalNormalizedURLs(r.db, userID)
+	if err != nil {
+		return nil, err
+	}
 	if input.FeedbackType == model.ExploreFeedbackHideSource {
 		var visible bool
-		err := r.db.QueryRow(`
+		err := r.db.QueryRow(exploreColdSourcesCTE+`
 			SELECT EXISTS (
 				SELECT 1 FROM explore_batch_sources batch_source
 				JOIN explore_batches batch
 				  ON batch.id=batch_source.batch_id AND batch.user_id=batch_source.user_id
-				WHERE batch_source.user_id=$1 AND batch_source.source_id=$2
+				WHERE batch_source.user_id=$1 AND batch_source.source_id=$3
 				  AND batch.status='done'
 				  AND batch.id=(SELECT id FROM explore_batches WHERE user_id=$1 AND status='done' ORDER BY slot_at DESC,id DESC LIMIT 1)
+				UNION ALL SELECT 1 FROM cold_sources WHERE id=$3
+				UNION ALL SELECT 1 FROM explore_feedback existing
+				WHERE existing.user_id=$1 AND existing.source_id=$3 AND existing.feedback_type='hide_source'
 			)
-		`, userID, *input.SourceID).Scan(&visible)
+		`, userID, pq.Array(formalURLs), *input.SourceID).Scan(&visible)
 		if err != nil {
 			return nil, err
 		}
@@ -485,16 +597,19 @@ func (r *ExploreRepository) CreateFeedback(userID int, input ExploreFeedbackInpu
 	}
 	if input.FeedbackType == model.ExploreFeedbackDampenTopic {
 		var visible bool
-		err := r.db.QueryRow(`
+		err := r.db.QueryRow(exploreColdSourcesCTE+`
 			SELECT EXISTS (
 				SELECT 1 FROM explore_batch_sources batch_source
 				JOIN explore_batches batch
 				  ON batch.id=batch_source.batch_id AND batch.user_id=batch_source.user_id
-				WHERE batch_source.user_id=$1 AND batch_source.topic=$2
+				WHERE batch_source.user_id=$1 AND batch_source.topic=$3
 				  AND batch.status='done'
 				  AND batch.id=(SELECT id FROM explore_batches WHERE user_id=$1 AND status='done' ORDER BY slot_at DESC,id DESC LIMIT 1)
+				UNION ALL SELECT 1 FROM cold_sources WHERE topic=$3
+				UNION ALL SELECT 1 FROM explore_feedback existing
+				WHERE existing.user_id=$1 AND existing.topic=$3 AND existing.feedback_type='dampen_topic'
 			)
-		`, userID, *input.Topic).Scan(&visible)
+		`, userID, pq.Array(formalURLs), *input.Topic).Scan(&visible)
 		if err != nil {
 			return nil, err
 		}
@@ -503,7 +618,7 @@ func (r *ExploreRepository) CreateFeedback(userID int, input ExploreFeedbackInpu
 		}
 	}
 	feedback := &model.ExploreFeedback{}
-	var err error
+	err = nil
 	if input.SourceID != nil {
 		err = r.db.QueryRow(`
 			INSERT INTO explore_feedback(user_id,source_id,feedback_type)

@@ -104,6 +104,57 @@ func TestSubscribePromotesCandidateArticlesWithoutUserSideEffects(t *testing.T) 
 	_ = candidateArticleID
 }
 
+func TestSubscribeAcceptsImmediateColdFallbackBeforeWorkerSnapshot(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Now().UTC().Truncate(time.Second)
+	userID := seedSubscribeUser(t, db, "subscribe-cold-fallback")
+	var sourceID, providerID int
+	if err := db.QueryRow(`
+		INSERT INTO recommended_feeds(url,title,category,language,feed_type,normalized_url,validation_status,is_broken,health_score)
+		VALUES ('https://subscribe-cold.example/feed','Cold','technology','en','rss','https://subscribe-cold.example/feed','valid',false,0.9)
+		RETURNING id`).Scan(&sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO explore_registry_providers(provider_key,provider_kind,endpoint,sync_interval_minutes) VALUES ('subscribe-cold','directory','https://directory.example',360) RETURNING id`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) VALUES ($1,$2,'cold',$3)`, providerID, sourceID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_articles(source_id,url,normalized_url,title,fetched_at) VALUES ($1,'https://subscribe-cold.example/post','https://subscribe-cold.example/post','Cold post',$2)`, sourceID, now); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, sourceID)
+	if err != nil || !result.Created || result.SourceID != sourceID {
+		t.Fatalf("cold subscribe=(%+v,%v)", result, err)
+	}
+	again, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, sourceID)
+	if err != nil || again.Created || again.FeedID != result.FeedID {
+		t.Fatalf("cold subscribe retry=(%+v,%v) first=%+v", again, err, result)
+	}
+}
+
+func TestSubscribeReusesOwnerFeedByNormalizedURL(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Now().UTC().Truncate(time.Second)
+	userID := seedSubscribeUser(t, db, "subscribe-normalized-owner")
+	sourceID := seedSubscribeSource(t, db, userID, "https://normalized-owner.example/feed", "Normalized", "valid", now)
+	var existingFeedID int
+	if err := db.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES ('https://NORMALIZED-OWNER.example/feed?utm_source=reader#top','Existing',$1) RETURNING id`, userID).Scan(&existingFeedID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, sourceID)
+	if err != nil || result.Created || result.FeedID != existingFeedID {
+		t.Fatalf("normalized owner reuse=(%+v,%v) existing=%d", result, err, existingFeedID)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM feeds WHERE owner_id=$1`, userID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("normalized owner feed count=%d err=%v", count, err)
+	}
+}
+
 func TestSubscribeRequiresRecentDoneSnapshotAndValidSource(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()

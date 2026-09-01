@@ -56,6 +56,13 @@ func TestPendingColdSnapshotWithoutDoneIsMarkedColdGenerating(t *testing.T) {
 	}
 }
 
+func TestMissingSnapshotIsMarkedColdGeneratingWithoutRequestTimeWork(t *testing.T) {
+	status := finalizeExploreSnapshotStatus(ExploreSnapshotStatus{}, "", time.Time{})
+	if !status.Cold || !status.Generating || status.UsingFallback || status.RefreshFailed {
+		t.Fatalf("missing snapshot status=%+v", status)
+	}
+}
+
 func TestBuildExplorePageQueryLimitsEachSourceToRecentFiveBeforeRequestedOrdering(t *testing.T) {
 	query := strings.Join(strings.Fields(buildExplorePageQuery(ExploreListParams{
 		Sort: SortCaptured,
@@ -204,6 +211,79 @@ func TestExploreRepositoryPageFeedbackVisibilityAndPagination(t *testing.T) {
 	insertExploreDoneBatch(t, db, otherUserID, now.Add(time.Hour), []exploreTestBatchSource{{sourceID: privateSource, rank: 1, topic: "security"}})
 	if _, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackHideSource, SourceID: &privateSource}); !errors.Is(err, ErrExploreNotFound) {
 		t.Fatalf("unauthorized source feedback=%v want not found", err)
+	}
+}
+
+func TestExploreRepositoryColdFallbackIsImmediateReadableAndActionable(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	userID, _ := insertExploreUsers(t, db)
+	sourceID := insertExploreSource(t, db, "https://cold-fallback.example/feed", "cold fallback")
+	now := time.Now().UTC().Truncate(time.Second)
+	articleID := insertExploreArticle(t, db, sourceID, now, "cold-fallback")
+	var providerID int
+	if err := db.QueryRow(`INSERT INTO explore_registry_providers(provider_key,provider_kind,endpoint,topic,sync_interval_minutes) VALUES ('cold-directory','directory','https://directory.example','programming',360) RETURNING id`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) VALUES ($1,$2,'cold-fallback',$3)`, providerID, sourceID, now); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := NewExploreRepository(db)
+	page, err := repo.GetPage(userID, ExploreListParams{Limit: 20, Sort: SortCaptured, Dir: SortDesc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !page.Snapshot.Cold || !page.Snapshot.Generating || len(page.Articles) != 1 || page.Articles[0].ID != articleID || page.Articles[0].Reason == "" {
+		t.Fatalf("cold page=%+v", page)
+	}
+	sources, err := repo.GetSources(userID)
+	if err != nil || len(sources) != 1 || sources[0].ID != sourceID {
+		t.Fatalf("cold sources=(%+v,%v)", sources, err)
+	}
+	otherSourceID := insertExploreSource(t, db, "https://personalized.example/feed", "personalized")
+	insertExploreDoneBatch(t, db, userID, now.Add(time.Minute), []exploreTestBatchSource{{sourceID: otherSourceID, rank: 1, topic: "technology"}})
+	if _, err := repo.GetVisibleArticle(userID, articleID); err != nil {
+		t.Fatalf("cold detail after first done snapshot: %v", err)
+	}
+	created, err := repo.RecordArticleEvent(userID, articleID, model.ExploreArticleEventClick, now)
+	if err != nil || !created {
+		t.Fatalf("cold event=(%v,%v)", created, err)
+	}
+	feedback, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackHideSource, SourceID: &sourceID})
+	if err != nil {
+		t.Fatalf("cold feedback: %v", err)
+	}
+	again, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackHideSource, SourceID: &sourceID})
+	if err != nil || again.ID != feedback.ID {
+		t.Fatalf("cold feedback retry=(%+v,%v) first=%+v", again, err, feedback)
+	}
+	page, err = repo.GetPage(userID, ExploreListParams{Limit: 20})
+	if err != nil || len(page.Articles) != 0 {
+		t.Fatalf("hidden cold page=(%+v,%v)", page, err)
+	}
+}
+
+func TestExploreColdFallbackExcludesNormalizedFormalSubscription(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	userID, _ := insertExploreUsers(t, db)
+	sourceID := insertExploreSource(t, db, "https://normalized-cold.example/feed", "normalized cold")
+	now := time.Now().UTC().Truncate(time.Second)
+	insertExploreArticle(t, db, sourceID, now, "normalized-cold")
+	var providerID int
+	if err := db.QueryRow(`INSERT INTO explore_registry_providers(provider_key,provider_kind,endpoint,sync_interval_minutes) VALUES ('normalized-cold','directory','https://directory.example',360) RETURNING id`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) VALUES ($1,$2,'normalized-cold',$3)`, providerID, sourceID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO feeds(url,title,owner_id) VALUES ('https://NORMALIZED-COLD.example/feed?utm_source=reader#top','formal',$1)`, userID); err != nil {
+		t.Fatal(err)
+	}
+	page, err := NewExploreRepository(db).GetPage(userID, ExploreListParams{Limit: 20})
+	if err != nil || len(page.Articles) != 0 {
+		t.Fatalf("normalized subscribed cold page=(%+v,%v)", page, err)
 	}
 }
 
