@@ -41,18 +41,10 @@ const ExploreRelatedSeedsSQL = `
 		FROM articles article JOIN feeds feed ON feed.id=article.feed_id
 		WHERE feed.status='active' AND feed.is_active
 		  AND COALESCE(article.published_at,article.fetched_at) >= $1 - INTERVAL '30 days'
-	), canonical_seeds AS (
-		SELECT owner_key,lower(btrim(url)) AS canonical_url,
-		       MIN(btrim(url)) AS url,MAX(seed_at) AS seed_at
-		FROM raw_seeds WHERE url IS NOT NULL AND btrim(url) <> ''
-		GROUP BY owner_key,lower(btrim(url))
-	), ranked AS (
-		SELECT owner_key,canonical_url,url,seed_at,
-		       ROW_NUMBER() OVER (PARTITION BY owner_key ORDER BY seed_at DESC,canonical_url) AS owner_rank
-		FROM canonical_seeds
 	)
-	SELECT owner_key,url,seed_at FROM ranked WHERE owner_rank <= $2
-	ORDER BY owner_rank,owner_key,canonical_url`
+	SELECT owner_key,url,seed_at FROM raw_seeds
+	WHERE url IS NOT NULL AND btrim(url) <> ''
+	ORDER BY owner_key,seed_at DESC,url`
 
 const (
 	exploreRelatedSeedsPerOwner = 10
@@ -73,66 +65,96 @@ type ExploreRelatedSeed struct {
 // a deterministic rotating window offset, so N owners are all reached within
 // ceil(N/limit) continuously scheduled windows when each has one seed.
 func SelectExploreRelatedSeeds(raw []ExploreRelatedSeed, now time.Time, limit int) []string {
-	if limit <= 0 || len(raw) == 0 {
+	ordered := append([]ExploreRelatedSeed(nil), raw...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].OwnerKey != ordered[j].OwnerKey {
+			return ordered[i].OwnerKey < ordered[j].OwnerKey
+		}
+		if !ordered[i].SeedAt.Equal(ordered[j].SeedAt) {
+			return ordered[i].SeedAt.After(ordered[j].SeedAt)
+		}
+		return ordered[i].URL < ordered[j].URL
+	})
+	collector := newExploreRelatedSeedCollector()
+	for _, seed := range ordered {
+		collector.Add(seed)
+	}
+	return collector.Select(now, limit)
+}
+
+type exploreRelatedOwnerSeeds struct {
+	owner int
+	urls  []string
+}
+
+// exploreRelatedSeedCollector consumes rows ordered by owner/time. Once ten
+// canonical unique URLs have been retained for an owner it keeps scanning but
+// does not retain more rows, bounding memory without pre-canonicalization SQL
+// sampling that could starve an older unique URL.
+type exploreRelatedSeedCollector struct {
+	started      bool
+	currentOwner int
+	currentURLs  []string
+	currentSeen  map[string]struct{}
+	owners       []exploreRelatedOwnerSeeds
+}
+
+func newExploreRelatedSeedCollector() *exploreRelatedSeedCollector {
+	return &exploreRelatedSeedCollector{}
+}
+
+func (collector *exploreRelatedSeedCollector) Add(seed ExploreRelatedSeed) {
+	if !collector.started || seed.OwnerKey != collector.currentOwner {
+		collector.flush()
+		collector.started = true
+		collector.currentOwner = seed.OwnerKey
+		collector.currentURLs = nil
+		collector.currentSeen = make(map[string]struct{}, exploreRelatedSeedsPerOwner)
+	}
+	if len(collector.currentURLs) >= exploreRelatedSeedsPerOwner {
+		return
+	}
+	canonical, ok := canonicalExploreRelatedSeedURL(seed.URL)
+	if !ok {
+		return
+	}
+	if _, duplicate := collector.currentSeen[canonical]; duplicate {
+		return
+	}
+	collector.currentSeen[canonical] = struct{}{}
+	collector.currentURLs = append(collector.currentURLs, canonical)
+}
+
+func (collector *exploreRelatedSeedCollector) flush() {
+	if !collector.started || len(collector.currentURLs) == 0 {
+		return
+	}
+	collector.owners = append(collector.owners, exploreRelatedOwnerSeeds{
+		owner: collector.currentOwner,
+		urls:  append([]string(nil), collector.currentURLs...),
+	})
+}
+
+func (collector *exploreRelatedSeedCollector) Select(now time.Time, limit int) []string {
+	collector.flush()
+	collector.started = false
+	if limit <= 0 || len(collector.owners) == 0 {
 		return []string{}
 	}
 	if limit > explore.MaxRelatedSeeds {
 		limit = explore.MaxRelatedSeeds
 	}
-	byOwner := make(map[int]map[string]ExploreRelatedSeed)
-	for _, seed := range raw {
-		canonical, ok := canonicalExploreRelatedSeedURL(seed.URL)
-		if !ok {
-			continue
-		}
-		ownerSeeds := byOwner[seed.OwnerKey]
-		if ownerSeeds == nil {
-			ownerSeeds = make(map[string]ExploreRelatedSeed)
-			byOwner[seed.OwnerKey] = ownerSeeds
-		}
-		current, exists := ownerSeeds[canonical]
-		if !exists || seed.SeedAt.After(current.SeedAt) {
-			seed.URL = canonical
-			ownerSeeds[canonical] = seed
-		}
-	}
-	owners := make([]int, 0, len(byOwner))
-	ownerSeeds := make(map[int][]ExploreRelatedSeed, len(byOwner))
-	for owner, deduplicated := range byOwner {
-		values := make([]ExploreRelatedSeed, 0, len(deduplicated))
-		for _, seed := range deduplicated {
-			values = append(values, seed)
-		}
-		sort.Slice(values, func(i, j int) bool {
-			if !values[i].SeedAt.Equal(values[j].SeedAt) {
-				return values[i].SeedAt.After(values[j].SeedAt)
-			}
-			return values[i].URL < values[j].URL
-		})
-		if len(values) > exploreRelatedSeedsPerOwner {
-			values = values[:exploreRelatedSeedsPerOwner]
-		}
-		if len(values) > 0 {
-			owners = append(owners, owner)
-			ownerSeeds[owner] = values
-		}
-	}
-	if len(owners) == 0 {
-		return []string{}
-	}
-	sort.Ints(owners)
 	window := now.UTC().Unix() / int64(ExploreRelatedSeedWindow/time.Second)
-	start := int(((window % int64(len(owners))) * int64(limit)) % int64(len(owners)))
+	start := int(((window % int64(len(collector.owners))) * int64(limit)) % int64(len(collector.owners)))
 	selected := make([]string, 0, limit)
 	seen := make(map[string]struct{}, limit)
 	for ownerRank := 0; ownerRank < exploreRelatedSeedsPerOwner && len(selected) < limit; ownerRank++ {
-		for offset := 0; offset < len(owners) && len(selected) < limit; offset++ {
-			owner := owners[(start+offset)%len(owners)]
-			values := ownerSeeds[owner]
-			if ownerRank >= len(values) {
+		for offset := 0; offset < len(collector.owners) && len(selected) < limit; offset++ {
+			owner := collector.owners[(start+offset)%len(collector.owners)]
+			if ownerRank >= len(owner.urls) {
 				continue
 			}
-			seed := values[ownerRank].URL
+			seed := owner.urls[ownerRank]
 			if _, duplicate := seen[seed]; duplicate {
 				continue
 			}
@@ -231,23 +253,23 @@ func (r *ExploreRegistryRepository) LoadRelatedSeeds(ctx context.Context, since 
 	if limit > explore.MaxRelatedSeeds {
 		limit = explore.MaxRelatedSeeds
 	}
-	rows, err := r.db.QueryContext(ctx, ExploreRelatedSeedsSQL, since, exploreRelatedSeedsPerOwner)
+	rows, err := r.db.QueryContext(ctx, ExploreRelatedSeedsSQL, since)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	rawSeeds := []ExploreRelatedSeed{}
+	collector := newExploreRelatedSeedCollector()
 	for rows.Next() {
 		var seed ExploreRelatedSeed
 		if err := rows.Scan(&seed.OwnerKey, &seed.URL, &seed.SeedAt); err != nil {
 			return nil, err
 		}
-		rawSeeds = append(rawSeeds, seed)
+		collector.Add(seed)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return SelectExploreRelatedSeeds(rawSeeds, since, limit), nil
+	return collector.Select(since, limit), nil
 }
 
 func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate explore.Candidate, observedAt time.Time) (int, error) {

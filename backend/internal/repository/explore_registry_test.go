@@ -15,13 +15,16 @@ import (
 func TestRelatedSeedSQLFairlyBoundsEachVisibleOwnerBeforeGlobalLimit(t *testing.T) {
 	normalized := strings.Join(strings.Fields(repository.ExploreRelatedSeedsSQL), " ")
 	for _, fragment := range []string{
-		"GROUP BY owner_key,lower(btrim(url))",
-		"ROW_NUMBER() OVER (PARTITION BY owner_key ORDER BY seed_at DESC,canonical_url)",
-		"WHERE owner_rank <= $2",
-		"ORDER BY owner_rank,owner_key,canonical_url",
+		"SELECT owner_key,url,seed_at FROM raw_seeds",
+		"ORDER BY owner_key,seed_at DESC,url",
 	} {
 		if !strings.Contains(normalized, fragment) {
 			t.Fatalf("related seed SQL missing %q: %s", fragment, normalized)
+		}
+	}
+	for _, forbidden := range []string{"ROW_NUMBER()", "owner_rank", "LIMIT $2"} {
+		if strings.Contains(normalized, forbidden) {
+			t.Fatalf("related seed SQL caps before full canonicalization via %q: %s", forbidden, normalized)
 		}
 	}
 }
@@ -44,6 +47,23 @@ func TestSelectExploreRelatedSeedsCanonicalDedupDoesNotConsumeOwnerQuota(t *test
 	}
 	if counts["https://example.com/feed"] != 1 || counts["https://example.com/second"] != 1 || counts["https://other.example/feed"] != 1 {
 		t.Fatalf("canonical seeds=%v", got)
+	}
+}
+
+func TestSelectExploreRelatedSeedsCanonicalizesElevenTrackingVariantsBeforeOwnerQuota(t *testing.T) {
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	raw := make([]repository.ExploreRelatedSeed, 0, 12)
+	for index := 0; index < 11; index++ {
+		raw = append(raw, repository.ExploreRelatedSeed{
+			OwnerKey: 7,
+			URL:      fmt.Sprintf("https://example.com/feed?utm_source=variant-%02d#fragment", index),
+			SeedAt:   now.Add(-time.Duration(index) * time.Minute),
+		})
+	}
+	raw = append(raw, repository.ExploreRelatedSeed{OwnerKey: 7, URL: "https://example.com/unique", SeedAt: now.Add(-12 * time.Minute)})
+	got := repository.SelectExploreRelatedSeeds(raw, now, 10)
+	if len(got) != 2 || got[0] != "https://example.com/feed" || got[1] != "https://example.com/unique" {
+		t.Fatalf("seeds=%v, older unique URL was starved by tracking variants", got)
 	}
 }
 
