@@ -586,6 +586,9 @@ func TestExploreProfileSQLLoadsBoundedFormalMetadata(t *testing.T) {
 			t.Fatalf("profile SQL missing %q: %s", fragment, normalized)
 		}
 	}
+	if strings.Count(normalized, "COALESCE(article.published_at,article.fetched_at)") < 2 {
+		t.Fatalf("profile SQL does not include recently fetched undated articles: %s", normalized)
+	}
 }
 
 func TestExploreCycleRetriesPersistedSnapshotFailureThenClosesGuardAfterSuccess(t *testing.T) {
