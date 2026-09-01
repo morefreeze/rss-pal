@@ -145,7 +145,10 @@ func TestSourceFetchHTMLDiscoveryBoundsLargeAlternateSet(t *testing.T) {
 		return sourceResponse(req, http.StatusOK, "text/html", "not a feed"), nil
 	})
 	_, _ = fetcher.Fetch(context.Background(), validConfidenceRequest("https://8.8.8.8/start"))
-	if requests != 1+maxDiscoveryCandidates {
+	if SourceFetchMaxRequests != 1+maxDiscoveryCandidates {
+		t.Fatalf("exported request budget=%d, implementation budget=%d", SourceFetchMaxRequests, 1+maxDiscoveryCandidates)
+	}
+	if requests != SourceFetchMaxRequests {
 		t.Fatalf("requests=%d, want initial + %d bounded candidates", requests, maxDiscoveryCandidates)
 	}
 }
@@ -213,15 +216,18 @@ func TestSourceFetchValidationAndArticleNormalization(t *testing.T) {
 	}
 }
 
-func TestSourceRefreshSkipsNewSourceConfidenceAndActivityGates(t *testing.T) {
+func TestSourceRefreshSkipsConfidenceButRequiresNonEmptyRecentOutput(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
-		name string
-		body string
-		want int
+		name    string
+		body    string
+		want    int
+		wantErr bool
 	}{
-		{name: "one old article", body: validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-365*24*time.Hour))), want: 1},
-		{name: "all old articles", body: validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-365*24*time.Hour)) + rssItem("Two", "https://9.9.9.9/two", now.Add(-400*24*time.Hour))), want: 2},
+		{name: "one recent article", body: validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-90*24*time.Hour))), want: 1},
+		{name: "empty", body: validRSS(""), wantErr: true},
+		{name: "one old article", body: validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-90*24*time.Hour-time.Second))), wantErr: true},
+		{name: "all old articles", body: validRSS(rssItem("One", "https://9.9.9.9/one", now.Add(-365*24*time.Hour)) + rssItem("Two", "https://9.9.9.9/two", now.Add(-400*24*time.Hour))), wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
@@ -238,6 +244,12 @@ func TestSourceRefreshSkipsNewSourceConfidenceAndActivityGates(t *testing.T) {
 					ProviderLastSuccessAt: &staleSuccess, LastSeenAt: now.Add(-31 * 24 * time.Hour), OccurrenceCount: 1,
 				}},
 			})
+			if tc.wantErr {
+				if !errors.Is(err, ErrInactiveSource) || calls != 1 {
+					t.Fatalf("refresh result=%#v calls=%d err=%v", result, calls, err)
+				}
+				return
+			}
 			if err != nil || len(result.Articles) != tc.want || calls != 1 {
 				t.Fatalf("refresh result=%#v calls=%d err=%v", result, calls, err)
 			}
@@ -245,18 +257,18 @@ func TestSourceRefreshSkipsNewSourceConfidenceAndActivityGates(t *testing.T) {
 	}
 }
 
-func TestSourceRefreshNotModifiedDoesNotRequireCurrentEvidence(t *testing.T) {
+func TestSourceRefreshForcesFullBodyAndRejectsNotModified(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	fetcher := sourceFetcherForTest(now, func(req *http.Request) (*http.Response, error) {
-		if req.Header.Get("If-None-Match") != `"old"` {
-			t.Fatalf("missing refresh validator: %v", req.Header)
+		if req.Header.Get("If-None-Match") != "" || req.Header.Get("If-Modified-Since") != "" {
+			t.Fatalf("refresh sent validators and can prolong stale cache: %v", req.Header)
 		}
 		return sourceResponse(req, http.StatusNotModified, "", ""), nil
 	})
 	result, err := fetcher.Fetch(context.Background(), SourceFetchRequest{
 		URL: "https://8.8.8.8/feed", Mode: SourceFetchRefresh, ETag: `"old"`,
 	})
-	if err != nil || !result.NotModified {
+	if !errors.Is(err, ErrInactiveSource) || result.NotModified {
 		t.Fatalf("refresh 304 result=%#v err=%v", result, err)
 	}
 }

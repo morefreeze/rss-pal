@@ -79,7 +79,7 @@ func TestBuildExploreSourceFetchRequestMapsEvidenceAndTaskPolicy(t *testing.T) {
 	}
 
 	refresh := buildExploreSourceFetchRequest(source, ExploreQueueTask{TaskType: ExploreTaskRefreshArticles, Priority: ExplorePriorityRefresh})
-	if refresh.Mode != explore.SourceFetchRefresh || refresh.ETag != etag || refresh.LastModified != modified || refresh.DirectProfile {
+	if refresh.Mode != explore.SourceFetchRefresh || refresh.ETag != "" || refresh.LastModified != "" || refresh.DirectProfile {
 		t.Fatalf("refresh request=%+v", refresh)
 	}
 }
@@ -124,6 +124,9 @@ func TestExploreTaskOutcomeRetriesInsufficientConfidenceBeforeThirdFailure(t *te
 	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 3, err); got != exploreTaskRetry {
 		t.Fatalf("refresh confidence must not become terminal, decision=%q", got)
 	}
+	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 0, explore.ErrInactiveSource); got != exploreTaskRetry {
+		t.Fatalf("inactive refresh decision=%q want retry", got)
+	}
 }
 
 func TestExploreTaskResultValidationKeepsRefreshPolicySeparate(t *testing.T) {
@@ -136,6 +139,9 @@ func TestExploreTaskResultValidationKeepsRefreshPolicySeparate(t *testing.T) {
 	}
 	if err := validateExploreTaskResult(ExploreTaskRefreshArticles, explore.SourceFetchResult{}); err == nil {
 		t.Fatal("refresh accepted a missing feed URL")
+	}
+	if err := validateExploreTaskResult(ExploreTaskRefreshArticles, explore.SourceFetchResult{FeedURL: "https://source.example/feed"}); !errors.Is(err, explore.ErrInactiveSource) {
+		t.Fatalf("refresh accepted empty output or returned wrong error: %v", err)
 	}
 }
 
@@ -235,7 +241,8 @@ func TestExploreTaskProcessorPersistsFailure304MergeAndSkipOutcomes(t *testing.T
 		{"early-insufficient-validation", model.ExploreValidationPending, ExploreTaskValidateSource, 2, explore.SourceFetchResult{}, fmt.Errorf("wrapped: %w", explore.ErrInsufficientSourceConfidence), model.ExploreFetchTaskPending, model.ExploreValidationPending, 1},
 		{"third-insufficient-validation", model.ExploreValidationPending, ExploreTaskValidateSource, 3, explore.SourceFetchResult{}, fmt.Errorf("wrapped: %w", explore.ErrInsufficientSourceConfidence), model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
 		{"terminal-refresh", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{}, httpx.ErrResponseTooLarge, model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
-		{"refresh-not-modified", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{NotModified: true}, nil, model.ExploreFetchTaskDone, model.ExploreValidationValid, 1},
+		{"refresh-not-modified", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{NotModified: true}, nil, model.ExploreFetchTaskPending, model.ExploreValidationValid, 1},
+		{"inactive-refresh", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{}, explore.ErrInactiveSource, model.ExploreFetchTaskPending, model.ExploreValidationValid, 1},
 		{"validation-not-modified", model.ExploreValidationPending, ExploreTaskValidateSource, 0, explore.SourceFetchResult{NotModified: true}, nil, model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
 		{"defensive-short-200", model.ExploreValidationPending, ExploreTaskValidateSource, 0, explore.SourceFetchResult{FeedURL: "https://processor-case.example/feed", Articles: []model.ExploreArticle{{Title: "one"}}}, nil, model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
 		{"valid-validation-skips", model.ExploreValidationValid, ExploreTaskValidateSource, 0, explore.SourceFetchResult{}, nil, model.ExploreFetchTaskDone, model.ExploreValidationValid, 0},
@@ -284,7 +291,7 @@ func TestExploreTaskProcessorPersistsFailure304MergeAndSkipOutcomes(t *testing.T
 					t.Fatalf("unexpected validators request=%+v", request)
 				}
 			}
-			if tc.name == "retryable-refresh" && (!health.Valid || health.Float64 >= 1) {
+			if (tc.name == "retryable-refresh" || tc.name == "refresh-not-modified" || tc.name == "inactive-refresh") && (!health.Valid || health.Float64 >= 1) {
 				t.Fatalf("health=%v", health)
 			}
 			if tc.name == "valid-validation-skips" {
@@ -462,6 +469,43 @@ func TestExploreTaskProcessorSourceDeletedDuringFetchUsesFencedTransition(t *tes
 	err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a")
 	if !errors.Is(err, ErrExploreLeaseNotHeld) {
 		t.Fatalf("deleted source should lose cascaded lease, err=%v", err)
+	}
+}
+
+func TestExploreTaskProcessorInactiveRefreshPreservesLastGoodCacheAndRetries(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	checkedAt := time.Date(2026, 9, 1, 5, 0, 0, 0, time.UTC)
+	sourceID := insertProcessorSource(t, db, "https://processor-inactive.example/feed", model.ExploreValidationValid)
+	insertProcessorEvidence(t, db, sourceID, checkedAt)
+	lastGood := checkedAt.Add(-3 * time.Hour)
+	if _, err := db.Exec(`
+		INSERT INTO explore_articles (source_id,url,normalized_url,title,content,published_at,fetched_at)
+		VALUES ($1,'https://processor-inactive.example/last','https://processor-inactive.example/last','Last good','cached body',$2,$2)`,
+		sourceID, lastGood); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE recommended_feeds SET last_fetched_at=$2 WHERE id=$1`, sourceID, lastGood); err != nil {
+		t.Fatal(err)
+	}
+	task := leaseProcessorTask(t, db, sourceID, ExploreTaskRefreshArticles, ExplorePriorityRefresh, "worker-a")
+	fetcher := &fakeExploreSourceFetcher{err: fmt.Errorf("wrapped stale output: %w", explore.ErrInactiveSource)}
+
+	if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task, "worker-a"); err != nil {
+		t.Fatal(err)
+	}
+	assertProcessorTaskStatus(t, db, task.ID, model.ExploreFetchTaskPending)
+	var status, title, content string
+	var health float64
+	var fetchedAt time.Time
+	if err := db.QueryRow(`SELECT validation_status,health_score,last_fetched_at FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&status, &health, &fetchedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT title,content FROM explore_articles WHERE source_id=$1`, sourceID).Scan(&title, &content); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.ExploreValidationValid || health >= 1 || !fetchedAt.Equal(lastGood) || title != "Last good" || content != "cached body" {
+		t.Fatalf("status=%q health=%v fetched=%v cache=%q/%q", status, health, fetchedAt, title, content)
 	}
 }
 

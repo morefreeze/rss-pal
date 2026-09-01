@@ -151,6 +151,9 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		}
 		return tx.Commit()
 	}
+	if fetchErr == nil && result.NotModified && task.TaskType == ExploreTaskRefreshArticles {
+		fetchErr = fmt.Errorf("%w: refresh returned not modified", explore.ErrInactiveSource)
+	}
 
 	if fetchErr != nil {
 		failureDecision := decideExploreTaskFailure(task.TaskType, task.Attempts, fetchErr)
@@ -191,6 +194,15 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		return tx.Commit()
 	}
 	if err := validateExploreTaskResult(task.TaskType, result); err != nil {
+		if task.TaskType == ExploreTaskRefreshArticles && errors.Is(err, explore.ErrInactiveSource) {
+			if recordErr := catalog.RecordFetchFailure(task.SourceID, checkedAt, err); recordErr != nil {
+				return recordErr
+			}
+			if retryErr := queue.Retry(task.ID, *task.RunID, owner, err); retryErr != nil {
+				return retryErr
+			}
+			return tx.Commit()
+		}
 		return persistExploreTerminalResult(tx, catalog, queue, task, owner, checkedAt, err)
 	}
 
@@ -262,12 +274,6 @@ func buildExploreSourceFetchRequest(source ExploreCatalogSource, task ExploreQue
 	}
 	if task.TaskType == ExploreTaskRefreshArticles {
 		request.Mode = explore.SourceFetchRefresh
-		if source.Source.ETag != nil {
-			request.ETag = *source.Source.ETag
-		}
-		if source.Source.LastModified != nil {
-			request.LastModified = *source.Source.LastModified
-		}
 	}
 	for _, observation := range source.Observations {
 		request.Evidence = append(request.Evidence, explore.ObservationEvidence{
@@ -318,6 +324,9 @@ func validateExploreTaskResult(taskType string, result explore.SourceFetchResult
 	}
 	if taskType == ExploreTaskValidateSource && len(result.Articles) < 2 {
 		return errors.New("successful source validation requires at least two articles")
+	}
+	if taskType == ExploreTaskRefreshArticles && len(result.Articles) == 0 {
+		return fmt.Errorf("%w: successful source refresh requires at least one article", explore.ErrInactiveSource)
 	}
 	return nil
 }
