@@ -218,7 +218,17 @@ func TestSubscribeSharedFeedNeverMutatesGlobalArticlesAcrossUsers(t *testing.T) 
 	userID := seedSubscribeUser(t, db, "subscribe-shared-first")
 	otherUserID := seedSubscribeUser(t, db, "subscribe-shared-second")
 	sourceID := seedSubscribeSource(t, db, userID, "https://shared-floor.example/feed", "Shared", "valid", now)
-	otherSourceID := seedSubscribeSource(t, db, otherUserID, "https://shared-floor.example/feed", "Shared", "valid", now)
+	var otherBatchID int
+	if err := db.QueryRow(`
+		INSERT INTO explore_batches (user_id,slot_at,status,source_count,completed_at)
+		VALUES ($1,$2,'done',1,$2) RETURNING id`, otherUserID, now).Scan(&otherBatchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO explore_batch_sources (user_id,batch_id,source_id,rank,score)
+		VALUES ($1,$2,$3,1,1)`, otherUserID, otherBatchID, sourceID); err != nil {
+		t.Fatal(err)
+	}
 	var sharedFeedID int
 	if err := db.QueryRow(`
 		INSERT INTO feeds (url,title) VALUES ('https://shared-floor.example/feed','Shared') RETURNING id`,
@@ -237,7 +247,7 @@ func TestSubscribeSharedFeedNeverMutatesGlobalArticlesAcrossUsers(t *testing.T) 
 		sharedFeedID, now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	for _, subscription := range []struct{ userID, sourceID int }{{userID, sourceID}, {otherUserID, otherSourceID}} {
+	for _, subscription := range []struct{ userID, sourceID int }{{userID, sourceID}, {otherUserID, sourceID}} {
 		result, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(subscription.userID, subscription.sourceID)
 		if err != nil || result.Created || result.FeedID != sharedFeedID || result.CopiedArticles != 0 {
 			t.Fatalf("shared subscription=%+v err=%v", result, err)
