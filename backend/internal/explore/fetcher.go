@@ -35,7 +35,10 @@ const (
 
 // ErrInsufficientSourceConfidence lets the queue processor distinguish a
 // terminal content problem from registry evidence that may still be racing.
-var ErrInsufficientSourceConfidence = errors.New("source has insufficient public observation evidence")
+var (
+	ErrInsufficientSourceConfidence = errors.New("source has insufficient public observation evidence")
+	ErrInactiveSource               = errors.New("source has no recent article output")
+)
 
 // ObservationEvidence contains only public registry evidence. It deliberately
 // has no user or private-article provenance fields.
@@ -107,6 +110,9 @@ func ClassifySourceFetchError(err error) SourceFetchErrorKind {
 	if err == nil {
 		return ""
 	}
+	if errors.Is(err, ErrInactiveSource) {
+		return SourceFetchRetryable
+	}
 	var classified *sourceFetchError
 	if errors.As(err, &classified) {
 		return classified.kind
@@ -163,14 +169,26 @@ func (f *SourceFetcher) Fetch(ctx context.Context, request SourceFetchRequest) (
 	if f != nil && f.now != nil {
 		now = f.now()
 	}
-	requireValidation := request.Mode != SourceFetchRefresh
-	if requireValidation && !HasSourceConfidence(now, request.Evidence, request.DirectProfile) {
+	requireConfidence := request.Mode != SourceFetchRefresh
+	if requireConfidence && !HasSourceConfidence(now, request.Evidence, request.DirectProfile) {
 		return SourceFetchResult{}, sourceError(SourceFetchTerminal, "%w", ErrInsufficientSourceConfidence)
 	}
-	return f.fetch(ctx, request.URL, request.ETag, request.LastModified, now, true, requireValidation)
+	minimumArticles := 2
+	etag, lastModified := request.ETag, request.LastModified
+	if request.Mode == SourceFetchRefresh {
+		minimumArticles = 1
+		// Refresh is also the liveness check. Conditional 304 responses cannot
+		// prove that the source still emits recent articles.
+		etag, lastModified = "", ""
+	}
+	result, err := f.fetch(ctx, request.URL, etag, lastModified, now, true, minimumArticles)
+	if err == nil && request.Mode == SourceFetchRefresh && result.NotModified {
+		return SourceFetchResult{}, sourceError(SourceFetchTerminal, "%w: refresh returned no body", ErrInactiveSource)
+	}
+	return result, err
 }
 
-func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified string, now time.Time, allowDiscovery, requireValidation bool) (SourceFetchResult, error) {
+func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified string, now time.Time, allowDiscovery bool, minimumArticles int) (SourceFetchResult, error) {
 	headers := make(http.Header)
 	if etag != "" {
 		headers.Set("If-None-Match", etag)
@@ -237,7 +255,7 @@ func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified st
 		result.NotModified = true
 		return result, nil
 	}
-	articles, recognizedFeed, parseErr := parseExploreFeed(response.Body, result.FeedURL, now, requireValidation)
+	articles, recognizedFeed, parseErr := parseExploreFeed(response.Body, result.FeedURL, now, minimumArticles)
 	if recognizedFeed {
 		if parseErr != nil {
 			return SourceFetchResult{}, sourceError(SourceFetchTerminal, "parse source: %w", parseErr)
@@ -255,7 +273,7 @@ func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified st
 		}
 		var retryable error
 		for _, candidate := range candidates {
-			candidateResult, candidateErr := f.fetch(ctx, candidate, "", "", now, false, requireValidation)
+			candidateResult, candidateErr := f.fetch(ctx, candidate, "", "", now, false, minimumArticles)
 			if candidateErr == nil {
 				return candidateResult, nil
 			}
@@ -383,7 +401,7 @@ func insertLexicographicTop(values map[string]struct{}, value string, limit int)
 	delete(values, largest)
 }
 
-func parseExploreFeed(body []byte, feedURL string, fetchedAt time.Time, requireValidation bool) ([]model.ExploreArticle, bool, error) {
+func parseExploreFeed(body []byte, feedURL string, fetchedAt time.Time, minimumArticles int) ([]model.ExploreArticle, bool, error) {
 	parsed, err := gofeed.NewParser().ParseString(string(body))
 	if err != nil {
 		return nil, false, err
@@ -408,8 +426,11 @@ func parseExploreFeed(body []byte, feedURL string, fetchedAt time.Time, requireV
 		articles = append(articles, article)
 	}
 	sort.Slice(articles, func(i, j int) bool { return articleBefore(articles[i], articles[j]) })
-	if requireValidation {
-		if len(articles) < 2 {
+	if minimumArticles > 0 {
+		if len(articles) < minimumArticles {
+			if minimumArticles == 1 {
+				return nil, true, fmt.Errorf("%w: feed has no parseable articles", ErrInactiveSource)
+			}
 			return nil, true, errors.New("feed must contain at least two parseable articles")
 		}
 		cutoff := fetchedAt.Add(-90 * 24 * time.Hour)
@@ -422,6 +443,9 @@ func parseExploreFeed(body []byte, feedURL string, fetchedAt time.Time, requireV
 			}
 		}
 		if !recent {
+			if minimumArticles == 1 {
+				return nil, true, fmt.Errorf("%w: feed has no article published or updated in the last 90 days", ErrInactiveSource)
+			}
 			return nil, true, errors.New("feed has no article published or updated in the last 90 days")
 		}
 	}
