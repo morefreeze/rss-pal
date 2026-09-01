@@ -2,11 +2,128 @@ package explore
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"net/url"
+	"sort"
 	"strings"
+	"time"
 
+	"github.com/bytedance/rss-pal/internal/model"
 	"golang.org/x/net/html"
 )
+
+const (
+	MaxRelatedSeeds         = 200
+	RelatedPriorityDirect   = 400
+	RelatedPriorityIndirect = 100
+)
+
+type RelatedSiteSyncStore interface {
+	LoadRelatedSeeds(context.Context, time.Time, int) ([]string, error)
+	LoadRelatedProvider(time.Time) (*RegistryProvider, error)
+	UpsertCandidate(providerID int, candidate Candidate, observedAt time.Time) (int, error)
+	RecordSuccess(providerID int, syncedAt time.Time, etag, lastModified string) error
+	RecordFailure(providerID int, syncedAt time.Time, cause error) error
+}
+
+type RelatedSiteSync struct {
+	Store  RelatedSiteSyncStore
+	Queue  RegistryQueue
+	Client ProviderClient
+}
+
+type RelatedSiteSyncResult struct {
+	Seeds      int
+	Candidates int
+	Failures   int
+	Err        error
+}
+
+// Sync discovers from a bounded projection of owner-visible formal URLs. The
+// persisted observation carries only generic related-site provenance.
+func (syncer RelatedSiteSync) Sync(ctx context.Context, now time.Time) RelatedSiteSyncResult {
+	result := RelatedSiteSyncResult{}
+	if syncer.Store == nil || syncer.Queue == nil {
+		result.Err = errors.New("related site sync store and queue are required")
+		return result
+	}
+	provider, err := syncer.Store.LoadRelatedProvider(now)
+	if err != nil || provider == nil {
+		result.Err = err
+		return result
+	}
+	seeds, err := syncer.Store.LoadRelatedSeeds(ctx, now, MaxRelatedSeeds)
+	if err != nil {
+		result.Err = errors.Join(err, syncer.Store.RecordFailure(provider.ID, now, err))
+		return result
+	}
+	result.Seeds = len(seeds)
+	var syncErr error
+	successfulSeeds := 0
+	type aggregatedCandidate struct {
+		candidate Candidate
+		priority  int
+	}
+	aggregated := make(map[string]aggregatedCandidate)
+	for _, seed := range seeds {
+		fetched, fetchErr := syncer.Client.Fetch(ctx, seed, "", "")
+		if fetchErr != nil {
+			result.Failures++
+			syncErr = errors.Join(syncErr, fetchErr)
+			continue
+		}
+		candidates, discoverErr := (RelatedSiteDiscoverer{}).Discover(seed, fetched.Body)
+		if discoverErr != nil {
+			result.Failures++
+			syncErr = errors.Join(syncErr, discoverErr)
+			continue
+		}
+		successfulSeeds++
+		for _, candidate := range NormalizeCandidates(candidates) {
+			priority := RelatedPriorityIndirect
+			key := "indirect\x00" + candidate.ExternalKey
+			if candidate.SiteURL != "" && candidate.SiteURL != candidate.FeedURL {
+				priority = RelatedPriorityDirect
+				key = "direct\x00" + candidate.FeedURL
+			}
+			current, exists := aggregated[key]
+			if !exists || candidate.FeedURL < current.candidate.FeedURL {
+				candidate.OccurrenceCount += current.candidate.OccurrenceCount
+				current = aggregatedCandidate{candidate: candidate, priority: priority}
+			} else {
+				current.candidate.OccurrenceCount += candidate.OccurrenceCount
+			}
+			aggregated[key] = current
+		}
+	}
+	keys := make([]string, 0, len(aggregated))
+	for key := range aggregated {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		item := aggregated[key]
+		sourceID, upsertErr := syncer.Store.UpsertCandidate(provider.ID, item.candidate, now)
+		if upsertErr != nil {
+			result.Failures++
+			syncErr = errors.Join(syncErr, upsertErr)
+			continue
+		}
+		if queueErr := syncer.Queue.Enqueue(sourceID, model.ExploreFetchTaskValidateSource, item.priority); queueErr != nil {
+			result.Failures++
+			syncErr = errors.Join(syncErr, queueErr)
+			continue
+		}
+		result.Candidates++
+	}
+	if successfulSeeds > 0 || len(seeds) == 0 {
+		result.Err = errors.Join(syncErr, syncer.Store.RecordSuccess(provider.ID, now, "", ""))
+		return result
+	}
+	result.Err = errors.Join(syncErr, syncer.Store.RecordFailure(provider.ID, now, syncErr))
+	return result
+}
 
 // RelatedSiteDiscoverer finds public feeds and a small, bounded set of sites
 // linked from an already-fetched public page. It does not fetch or validate.

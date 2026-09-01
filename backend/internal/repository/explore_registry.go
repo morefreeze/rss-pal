@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -42,7 +43,7 @@ func (r *ExploreRegistryRepository) LoadDueProviders(now time.Time) ([]explore.R
 		SELECT id, provider_key, provider_kind, endpoint, topic, sync_interval_minutes,
 		       enabled, etag, last_modified, last_sync_at, last_success_at, consecutive_failures
 		FROM explore_registry_providers
-		WHERE enabled
+		WHERE enabled AND provider_kind <> 'related_site'
 		  AND (last_sync_at IS NULL OR last_sync_at + sync_interval_minutes * POWER(2, LEAST(consecutive_failures, 6)) * INTERVAL '1 minute' <= $1)
 		ORDER BY id ASC`, now)
 	if err != nil {
@@ -62,6 +63,69 @@ func (r *ExploreRegistryRepository) LoadDueProviders(now time.Time) ([]explore.R
 		providers = append(providers, provider)
 	}
 	return providers, rows.Err()
+}
+
+func (r *ExploreRegistryRepository) LoadRelatedProvider(now time.Time) (*explore.RegistryProvider, error) {
+	var provider explore.RegistryProvider
+	var interval int
+	var topic, etag, modified sql.NullString
+	err := r.db.QueryRow(`
+		SELECT id, provider_key, provider_kind, endpoint, topic, sync_interval_minutes,
+		       enabled, etag, last_modified, last_sync_at, last_success_at, consecutive_failures
+		FROM explore_registry_providers
+		WHERE provider_key='related-sites' AND provider_kind='related_site' AND enabled
+		  AND (last_sync_at IS NULL OR last_sync_at + sync_interval_minutes * POWER(2, LEAST(consecutive_failures, 6)) * INTERVAL '1 minute' <= $1)
+	`, now).Scan(&provider.ID, &provider.Key, &provider.Kind, &provider.Endpoint, &topic, &interval,
+		&provider.Enabled, &etag, &modified, &provider.LastSyncAt, &provider.LastSuccessAt, &provider.ConsecutiveFailures)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	provider.Topic, provider.ETag, provider.LastModified = topic.String, etag.String, modified.String
+	provider.SyncInterval = time.Duration(interval) * time.Minute
+	return &provider, nil
+}
+
+// LoadRelatedSeeds projects only public URLs from visible formal subscription
+// data. It never returns a user ID or article ID.
+func (r *ExploreRegistryRepository) LoadRelatedSeeds(ctx context.Context, since time.Time, limit int) ([]string, error) {
+	if limit <= 0 {
+		return []string{}, nil
+	}
+	if limit > explore.MaxRelatedSeeds {
+		limit = explore.MaxRelatedSeeds
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		WITH public_seeds AS (
+			SELECT COALESCE(source.site_url, feed.url) AS url
+			FROM feeds feed
+			LEFT JOIN recommended_feeds source
+			  ON source.normalized_url=lower(btrim(feed.url)) AND source.merged_into_source_id IS NULL
+			WHERE feed.status='active' AND feed.is_active
+			UNION
+			SELECT article.url
+			FROM articles article JOIN feeds feed ON feed.id=article.feed_id
+			WHERE feed.status='active' AND feed.is_active
+			  AND COALESCE(article.published_at,article.fetched_at) >= $1 - INTERVAL '30 days'
+		)
+		SELECT DISTINCT url FROM public_seeds
+		WHERE url IS NOT NULL AND btrim(url) <> ''
+		ORDER BY url LIMIT $2`, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seeds := make([]string, 0, limit)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		seeds = append(seeds, raw)
+	}
+	return seeds, rows.Err()
 }
 
 func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate explore.Candidate, observedAt time.Time) (int, error) {
@@ -137,6 +201,7 @@ func expectProviderUpdate(result sql.Result, err error, providerID int) error {
 }
 
 var _ explore.RegistryStore = (*ExploreRegistryRepository)(nil)
+var _ explore.RelatedSiteSyncStore = (*ExploreRegistryRepository)(nil)
 
 // ExploreRegistryQueue adapts the existing idempotent queue repository to the
 // narrow registry queue interface without changing Task1's public API.
