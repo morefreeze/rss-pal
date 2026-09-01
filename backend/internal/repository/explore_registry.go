@@ -5,10 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
+	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/lib/pq"
 )
 
@@ -37,13 +41,120 @@ const ExploreRelatedSeedsSQL = `
 		FROM articles article JOIN feeds feed ON feed.id=article.feed_id
 		WHERE feed.status='active' AND feed.is_active
 		  AND COALESCE(article.published_at,article.fetched_at) >= $1 - INTERVAL '30 days'
-	), ranked AS (
-		SELECT owner_key,url,seed_at,
-		       ROW_NUMBER() OVER (PARTITION BY owner_key ORDER BY seed_at DESC,url) AS owner_rank
+	), canonical_seeds AS (
+		SELECT owner_key,lower(btrim(url)) AS canonical_url,
+		       MIN(btrim(url)) AS url,MAX(seed_at) AS seed_at
 		FROM raw_seeds WHERE url IS NOT NULL AND btrim(url) <> ''
+		GROUP BY owner_key,lower(btrim(url))
+	), ranked AS (
+		SELECT owner_key,canonical_url,url,seed_at,
+		       ROW_NUMBER() OVER (PARTITION BY owner_key ORDER BY seed_at DESC,canonical_url) AS owner_rank
+		FROM canonical_seeds
 	)
-	SELECT url FROM ranked WHERE owner_rank <= 10
-	GROUP BY url ORDER BY MIN(owner_rank),url LIMIT $2`
+	SELECT owner_key,url,seed_at FROM ranked WHERE owner_rank <= $2
+	ORDER BY owner_rank,owner_key,canonical_url`
+
+const (
+	exploreRelatedSeedsPerOwner = 10
+	ExploreRelatedSeedWindow    = 6 * time.Hour
+)
+
+// ExploreRelatedSeed is a privacy-minimized scheduling input. OwnerKey is
+// used only to share the global discovery budget fairly and is never exposed
+// downstream or persisted in the public candidate pool.
+type ExploreRelatedSeed struct {
+	OwnerKey int
+	URL      string
+	SeedAt   time.Time
+}
+
+// SelectExploreRelatedSeeds canonicalizes and de-duplicates inside each owner
+// before applying the per-owner quota. It then visits owners round-robin from
+// a deterministic rotating window offset, so N owners are all reached within
+// ceil(N/limit) continuously scheduled windows when each has one seed.
+func SelectExploreRelatedSeeds(raw []ExploreRelatedSeed, now time.Time, limit int) []string {
+	if limit <= 0 || len(raw) == 0 {
+		return []string{}
+	}
+	if limit > explore.MaxRelatedSeeds {
+		limit = explore.MaxRelatedSeeds
+	}
+	byOwner := make(map[int]map[string]ExploreRelatedSeed)
+	for _, seed := range raw {
+		canonical, ok := canonicalExploreRelatedSeedURL(seed.URL)
+		if !ok {
+			continue
+		}
+		ownerSeeds := byOwner[seed.OwnerKey]
+		if ownerSeeds == nil {
+			ownerSeeds = make(map[string]ExploreRelatedSeed)
+			byOwner[seed.OwnerKey] = ownerSeeds
+		}
+		current, exists := ownerSeeds[canonical]
+		if !exists || seed.SeedAt.After(current.SeedAt) {
+			seed.URL = canonical
+			ownerSeeds[canonical] = seed
+		}
+	}
+	owners := make([]int, 0, len(byOwner))
+	ownerSeeds := make(map[int][]ExploreRelatedSeed, len(byOwner))
+	for owner, deduplicated := range byOwner {
+		values := make([]ExploreRelatedSeed, 0, len(deduplicated))
+		for _, seed := range deduplicated {
+			values = append(values, seed)
+		}
+		sort.Slice(values, func(i, j int) bool {
+			if !values[i].SeedAt.Equal(values[j].SeedAt) {
+				return values[i].SeedAt.After(values[j].SeedAt)
+			}
+			return values[i].URL < values[j].URL
+		})
+		if len(values) > exploreRelatedSeedsPerOwner {
+			values = values[:exploreRelatedSeedsPerOwner]
+		}
+		if len(values) > 0 {
+			owners = append(owners, owner)
+			ownerSeeds[owner] = values
+		}
+	}
+	if len(owners) == 0 {
+		return []string{}
+	}
+	sort.Ints(owners)
+	window := now.UTC().Unix() / int64(ExploreRelatedSeedWindow/time.Second)
+	start := int(((window % int64(len(owners))) * int64(limit)) % int64(len(owners)))
+	selected := make([]string, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	for ownerRank := 0; ownerRank < exploreRelatedSeedsPerOwner && len(selected) < limit; ownerRank++ {
+		for offset := 0; offset < len(owners) && len(selected) < limit; offset++ {
+			owner := owners[(start+offset)%len(owners)]
+			values := ownerSeeds[owner]
+			if ownerRank >= len(values) {
+				continue
+			}
+			seed := values[ownerRank].URL
+			if _, duplicate := seen[seed]; duplicate {
+				continue
+			}
+			seen[seed] = struct{}{}
+			selected = append(selected, seed)
+		}
+	}
+	return selected
+}
+
+func canonicalExploreRelatedSeedURL(raw string) (string, bool) {
+	canonical := util.NormalizeURL(strings.TrimSpace(raw))
+	parsed, err := url.Parse(canonical)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
+		return "", false
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", false
+	}
+	return parsed.String(), true
+}
 
 // ExploreRegistryRepository persists public provider state and observations.
 type ExploreRegistryRepository struct{ db Querier }
@@ -120,20 +231,23 @@ func (r *ExploreRegistryRepository) LoadRelatedSeeds(ctx context.Context, since 
 	if limit > explore.MaxRelatedSeeds {
 		limit = explore.MaxRelatedSeeds
 	}
-	rows, err := r.db.QueryContext(ctx, ExploreRelatedSeedsSQL, since, limit)
+	rows, err := r.db.QueryContext(ctx, ExploreRelatedSeedsSQL, since, exploreRelatedSeedsPerOwner)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	seeds := make([]string, 0, limit)
+	rawSeeds := []ExploreRelatedSeed{}
 	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
+		var seed ExploreRelatedSeed
+		if err := rows.Scan(&seed.OwnerKey, &seed.URL, &seed.SeedAt); err != nil {
 			return nil, err
 		}
-		seeds = append(seeds, raw)
+		rawSeeds = append(rawSeeds, seed)
 	}
-	return seeds, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return SelectExploreRelatedSeeds(rawSeeds, since, limit), nil
 }
 
 func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate explore.Candidate, observedAt time.Time) (int, error) {

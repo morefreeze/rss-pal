@@ -1,6 +1,8 @@
 package repository_test
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -13,13 +15,92 @@ import (
 func TestRelatedSeedSQLFairlyBoundsEachVisibleOwnerBeforeGlobalLimit(t *testing.T) {
 	normalized := strings.Join(strings.Fields(repository.ExploreRelatedSeedsSQL), " ")
 	for _, fragment := range []string{
-		"ROW_NUMBER() OVER (PARTITION BY owner_key ORDER BY seed_at DESC,url)",
-		"WHERE owner_rank <= 10",
-		"ORDER BY MIN(owner_rank),url LIMIT $2",
+		"GROUP BY owner_key,lower(btrim(url))",
+		"ROW_NUMBER() OVER (PARTITION BY owner_key ORDER BY seed_at DESC,canonical_url)",
+		"WHERE owner_rank <= $2",
+		"ORDER BY owner_rank,owner_key,canonical_url",
 	} {
 		if !strings.Contains(normalized, fragment) {
 			t.Fatalf("related seed SQL missing %q: %s", fragment, normalized)
 		}
+	}
+}
+
+func TestSelectExploreRelatedSeedsCanonicalDedupDoesNotConsumeOwnerQuota(t *testing.T) {
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	raw := []repository.ExploreRelatedSeed{
+		{OwnerKey: 7, URL: "HTTPS://Example.COM/feed?utm_source=a#top", SeedAt: now},
+		{OwnerKey: 7, URL: "https://example.com/feed", SeedAt: now.Add(-time.Minute)},
+		{OwnerKey: 7, URL: "https://example.com/second", SeedAt: now.Add(-2 * time.Minute)},
+		{OwnerKey: 9, URL: "https://other.example/feed", SeedAt: now},
+	}
+	got := repository.SelectExploreRelatedSeeds(raw, now, 3)
+	if len(got) != 3 {
+		t.Fatalf("seeds=%v, canonical duplicate consumed quota", got)
+	}
+	counts := map[string]int{}
+	for _, seed := range got {
+		counts[seed]++
+	}
+	if counts["https://example.com/feed"] != 1 || counts["https://example.com/second"] != 1 || counts["https://other.example/feed"] != 1 {
+		t.Fatalf("canonical seeds=%v", got)
+	}
+}
+
+func TestSelectExploreRelatedSeedsRotatesMoreThan250OwnersWithBoundedWait(t *testing.T) {
+	window := 6 * time.Hour
+	start := time.Unix(0, 0).UTC().Add(10_000 * window)
+	raw := make([]repository.ExploreRelatedSeed, 0, 251)
+	for owner := 1; owner <= 251; owner++ {
+		raw = append(raw, repository.ExploreRelatedSeed{OwnerKey: owner, URL: fmt.Sprintf("https://owner-%03d.example/feed", owner), SeedAt: start})
+	}
+	seen := map[string]struct{}{}
+	for cycle := 0; cycle < 2; cycle++ {
+		got := repository.SelectExploreRelatedSeeds(raw, start.Add(time.Duration(cycle)*window), 200)
+		if len(got) != 200 {
+			t.Fatalf("cycle %d seeds=%d want=200", cycle, len(got))
+		}
+		for _, seed := range got {
+			seen[seed] = struct{}{}
+		}
+	}
+	if len(seen) != 251 {
+		t.Fatalf("owners observed in two cycles=%d want=251", len(seen))
+	}
+}
+
+func TestExploreRegistryRelatedSeedsRotateAcrossMoreThan250Owners(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	if _, err := db.Exec(`
+		INSERT INTO users(username,password_hash)
+		SELECT 'related-owner-' || value,'x' FROM generate_series(1,251) value`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO feeds(url,title,owner_id,last_fetched_at)
+		SELECT 'https://related-owner-' || row_number() OVER (ORDER BY id) || '.example/feed',
+		       'owner seed',id,$1
+		FROM users WHERE username LIKE 'related-owner-%'`, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewExploreRegistryRepository(db)
+	start := time.Unix(0, 0).UTC().Add(10_000 * 6 * time.Hour)
+	seen := map[string]struct{}{}
+	for cycle := 0; cycle < 2; cycle++ {
+		seeds, err := repo.LoadRelatedSeeds(context.Background(), start.Add(time.Duration(cycle)*6*time.Hour), 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(seeds) != 200 {
+			t.Fatalf("cycle %d seeds=%d want=200", cycle, len(seeds))
+		}
+		for _, seed := range seeds {
+			seen[seed] = struct{}{}
+		}
+	}
+	if len(seen) != 251 {
+		t.Fatalf("database owners observed in two cycles=%d want=251", len(seen))
 	}
 }
 
