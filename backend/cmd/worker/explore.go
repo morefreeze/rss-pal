@@ -50,6 +50,10 @@ type exploreSnapshotRunner interface {
 	GenerateAll(context.Context, time.Time, time.Time) exploreSnapshotGenerationResult
 }
 
+type exploreSnapshotCleaner interface {
+	Cleanup(time.Time) (int64, int64, error)
+}
+
 type exploreSnapshotGenerationResult struct {
 	Done            int
 	FailedPersisted int
@@ -69,6 +73,7 @@ type exploreCycleDeps struct {
 	queue            exploreQueueDispatcher
 	taskHandler      exploreTaskHandler
 	snapshots        exploreSnapshotRunner
+	cleanup          exploreSnapshotCleaner
 	batchLimit       int
 	fetchConcurrency int
 	leaseDuration    time.Duration
@@ -84,6 +89,7 @@ type exploreCycle struct {
 	mu              sync.Mutex
 	providerWindows map[time.Time]struct{}
 	snapshotSlots   map[time.Time]struct{}
+	cleanupDays     map[string]struct{}
 }
 
 func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
@@ -112,6 +118,7 @@ func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
 		deps:            deps,
 		providerWindows: make(map[time.Time]struct{}),
 		snapshotSlots:   make(map[time.Time]struct{}),
+		cleanupDays:     make(map[string]struct{}),
 	}
 }
 
@@ -139,6 +146,18 @@ func (cycle *exploreCycle) Run(ctx context.Context) {
 		return
 	}
 	now := cycle.deps.clock.Now()
+	cleanupDay := now.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02")
+	if cycle.deps.cleanup != nil && cycle.markCleanupDayStarted(cleanupDay) {
+		go func() {
+			batches, events, err := cycle.deps.cleanup.Cleanup(now)
+			if err != nil {
+				cycle.clearCleanupDay(cleanupDay)
+				cycle.deps.logger.Printf("explore cleanup day=%s error=true", cleanupDay)
+				return
+			}
+			cycle.deps.logger.Printf("explore cleanup day=%s batches=%d events=%d", cleanupDay, batches, events)
+		}()
+	}
 	schedule := explorelogic.ExploreScheduleAt(now)
 	// Launch the current slot before provider work. Snapshot ranking consumes
 	// the last validated cache and deliberately never waits for queue drain.
@@ -152,6 +171,22 @@ func (cycle *exploreCycle) Run(ctx context.Context) {
 	if window, due := dueExploreProviderWindow(schedule, now); due && cycle.markProviderWindowStarted(window) {
 		go cycle.runProviderWindow(ctx, window, now)
 	}
+}
+
+func (cycle *exploreCycle) markCleanupDayStarted(day string) bool {
+	cycle.mu.Lock()
+	defer cycle.mu.Unlock()
+	if _, exists := cycle.cleanupDays[day]; exists {
+		return false
+	}
+	cycle.cleanupDays[day] = struct{}{}
+	return true
+}
+
+func (cycle *exploreCycle) clearCleanupDay(day string) {
+	cycle.mu.Lock()
+	delete(cycle.cleanupDays, day)
+	cycle.mu.Unlock()
 }
 
 func dueExploreProviderWindow(schedule explorelogic.ExploreSchedule, now time.Time) (time.Time, bool) {

@@ -203,6 +203,25 @@ type fakeExploreSnapshotRunner struct {
 	retry   bool
 }
 
+type fakeExploreCleanup struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+}
+
+func (cleanup *fakeExploreCleanup) Cleanup(time.Time) (int64, int64, error) {
+	cleanup.mu.Lock()
+	defer cleanup.mu.Unlock()
+	cleanup.calls++
+	return 2, 3, cleanup.err
+}
+
+func (cleanup *fakeExploreCleanup) count() int {
+	cleanup.mu.Lock()
+	defer cleanup.mu.Unlock()
+	return cleanup.calls
+}
+
 func (runner *fakeExploreSnapshotRunner) GenerateAll(_ context.Context, slotAt, _ time.Time) exploreSnapshotGenerationResult {
 	runner.mu.Lock()
 	runner.slots = append(runner.slots, slotAt)
@@ -294,6 +313,33 @@ func TestExploreCycleRunsProviderSyncThirtyMinutesBeforeSlotAndClaimsOncePerWind
 	}
 	if limits[0] != 500 {
 		t.Fatalf("claim limit = %d, want 500", limits[0])
+	}
+}
+
+func TestExploreCycleRunsCleanupOncePerShanghaiDayAndRetriesFailureWithoutBlocking(t *testing.T) {
+	now := time.Date(2026, 9, 1, 3, 0, 0, 0, exploreTestShanghai)
+	cleanup := &fakeExploreCleanup{err: errors.New("db unavailable")}
+	snapshots := &fakeExploreSnapshotRunner{}
+	var output lockedBuffer
+	cycle := newExploreCycle(exploreCycleDeps{
+		clock: &fakeExploreClock{now: now}, registry: &fakeExploreRegistry{}, queue: &fakeExploreQueue{},
+		taskHandler: &fakeExploreTaskHandler{}, snapshots: snapshots, cleanup: cleanup,
+		owner: "worker-test", logger: log.New(&output, "", 0),
+	})
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return cleanup.count() == 1 })
+	if snapshots.count() != 0 || !strings.Contains(output.String(), "cleanup") {
+		t.Fatalf("cleanup failure blocked/log missing: snapshots=%d logs=%s", snapshots.count(), output.String())
+	}
+	cleanup.mu.Lock()
+	cleanup.err = nil
+	cleanup.mu.Unlock()
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return cleanup.count() == 2 })
+	cycle.Run(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if cleanup.count() != 2 {
+		t.Fatalf("successful daily cleanup repeated: %d", cleanup.count())
 	}
 }
 
@@ -518,6 +564,27 @@ func TestExploreSnapshotCoordinatorRetriesPersistedFailure(t *testing.T) {
 	result := runner.GenerateAll(context.Background(), time.Date(2026, 9, 1, 8, 0, 0, 0, exploreTestShanghai), time.Now())
 	if result.FailedPersisted != 1 || !result.NeedsRetry() {
 		t.Fatalf("result = %+v, want one retryable persisted failure", result)
+	}
+}
+
+func TestExploreRankInputSQLRequiresFreshEnabledObservation(t *testing.T) {
+	normalized := strings.Join(strings.Fields(exploreCandidateSQL), " ")
+	for _, fragment := range []string{
+		"provider.enabled",
+		"observation.last_seen_at >= $1 - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')",
+	} {
+		if !strings.Contains(normalized, fragment) {
+			t.Fatalf("candidate SQL missing %q: %s", fragment, normalized)
+		}
+	}
+}
+
+func TestExploreProfileSQLLoadsBoundedFormalMetadata(t *testing.T) {
+	normalized := strings.Join(strings.Fields(exploreRecentArticleProfileSQL), " ")
+	for _, fragment := range []string{"article.category", "article.topic", "article.tags", "LEFT(COALESCE(article.content,''),4000)", "LEFT(COALESCE(article.summary_brief,''),1000)"} {
+		if !strings.Contains(normalized, fragment) {
+			t.Fatalf("profile SQL missing %q: %s", fragment, normalized)
+		}
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 const (
 	MaxProfileSubscriptionSignals = 128
 	MaxProfileBehaviorSignals     = 64
+	MaxProfileContentRunes        = 4000
+	MaxProfileSnippetRunes        = 1000
 	maxProfileFormalBehaviors     = 100
 
 	ExploreEventExposure      = "exposure"
@@ -62,7 +64,9 @@ type SubscriptionSignalInput struct {
 type RecentArticleSignalInput struct {
 	Title       string
 	Category    string
+	Topic       string
 	Tags        []string
+	TextTokens  []string
 	PublishedAt time.Time
 }
 
@@ -147,8 +151,18 @@ func BuildExploreProfile(input ProfileInput) ExploreProfile {
 		if category := normalizeSignalPhrase(article.Category); category != "" {
 			subscriptions.addMax(SignalCategory, category, 1.2)
 		}
+		if topic := normalizeSignalPhrase(article.Topic); topic != "" {
+			subscriptions.addMax(SignalTopic, topic, 1.2)
+			for _, token := range normalizeSignalTokens(topic, 8) {
+				subscriptions.addMax(SignalToken, token, 0.8)
+			}
+		}
 		for _, tag := range normalizeSignalList(article.Tags, 20) {
 			subscriptions.addMax(SignalTag, tag, 1.5)
+			subscriptions.addMax(SignalToken, tag, 0.8)
+		}
+		for _, token := range normalizeSignalList(article.TextTokens, 24) {
+			subscriptions.addMax(SignalToken, token, 0.5)
 		}
 	}
 
@@ -230,6 +244,36 @@ func BuildExploreProfile(input ProfileInput) ExploreProfile {
 		BoostTopics:         sortedStringSet(boostTopics),
 		DampenTopics:        sortedStringSet(dampenTopics),
 	}
+}
+
+// ClipProfileText keeps SQL/profile inputs bounded before tokenization. It is
+// rune-aware so truncation cannot manufacture invalid UTF-8.
+func ClipProfileText(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) > limit {
+		runes = runes[:limit]
+	}
+	return string(runes)
+}
+
+// ProfileTextTokens extracts a bounded projection and drops the raw formal
+// article body before it crosses into the ranking profile.
+func ProfileTextTokens(content, snippet string) []string {
+	combined := ClipProfileText(content, MaxProfileContentRunes) + " " + ClipProfileText(snippet, MaxProfileSnippetRunes)
+	return normalizeSignalTokens(combined, 24)
+}
+
+// FreshObservationWindow is the recommendation evidence window for one
+// provider: two expected sync periods, with enough slack for short intervals.
+func FreshObservationWindow(syncIntervalMinutes int) time.Duration {
+	window := time.Duration(syncIntervalMinutes) * 2 * time.Minute
+	if window < 6*time.Hour {
+		return 6 * time.Hour
+	}
+	return window
 }
 
 func boundedFormalArticleBehaviors(values []FormalArticleBehaviorInput, now time.Time) []FormalArticleBehaviorInput {

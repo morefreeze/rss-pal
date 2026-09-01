@@ -21,6 +21,31 @@ import (
 
 const exploreCandidateInputLimit = 2000
 
+const exploreRecentArticleProfileSQL = `
+	SELECT article.title, COALESCE(article.category,''), COALESCE(article.topic,''),
+	       COALESCE(article.tags,'{}'), LEFT(COALESCE(article.content,''),4000),
+	       LEFT(COALESCE(article.summary_brief,''),1000), article.published_at
+	FROM articles article JOIN feeds feed ON feed.id=article.feed_id
+	WHERE (feed.owner_id IS NULL OR feed.owner_id=$1)
+	  AND article.published_at >= $2
+	ORDER BY article.published_at DESC, article.id DESC LIMIT 200`
+
+const exploreCandidateSQL = `
+	SELECT source.id,source.title,source.category,COALESCE(source.site_url,source.url),
+	       source.validation_status,source.is_broken,source.merged_into_source_id,
+	       COALESCE(source.health_score,0)
+	FROM recommended_feeds source
+	WHERE source.validation_status='valid' AND source.is_broken=false
+	  AND source.merged_into_source_id IS NULL
+	  AND EXISTS (
+	      SELECT 1 FROM explore_source_observations observation
+	      JOIN explore_registry_providers provider ON provider.id=observation.provider_id
+	      WHERE observation.source_id=source.id AND provider.enabled
+	        AND observation.last_seen_at >= $1 - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')
+	  )
+	ORDER BY COALESCE(source.health_score,0) DESC, source.last_observed_at DESC NULLS LAST, source.id
+	LIMIT $2`
+
 func newProductionExploreCycle(db *sql.DB, cfg *config.Config) *exploreCycle {
 	queue := newSQLExploreQueue(db)
 	baseRegistry := &explorelogic.Registry{
@@ -33,6 +58,10 @@ func newProductionExploreCycle(db *sql.DB, cfg *config.Config) *exploreCycle {
 		registry: baseRegistry,
 		catalog:  repository.NewExploreCatalogRepository(db),
 		queue:    queue.repo,
+		related: explorelogic.RelatedSiteSync{
+			Store: repository.NewExploreRegistryRepository(db), Queue: repository.NewExploreRegistryQueue(queue.repo),
+			Client: explorelogic.NewProviderClient(cfg.RSSHub.BaseURL),
+		},
 	}
 	inputs := &sqlExploreRankInputs{db: db}
 	snapshots := &exploreSnapshotCoordinator{
@@ -46,6 +75,7 @@ func newProductionExploreCycle(db *sql.DB, cfg *config.Config) *exploreCycle {
 		queue:            queue,
 		taskHandler:      repository.NewExploreTaskProcessor(db, explorelogic.NewSourceFetcher(), time.Now),
 		snapshots:        snapshots,
+		cleanup:          repository.NewExploreSnapshotRepository(db),
 		batchLimit:       cfg.Explore.FetchBatchLimit,
 		fetchConcurrency: cfg.Explore.FetchConcurrency,
 		leaseDuration:    exploreDefaultLease,
@@ -73,10 +103,17 @@ type scheduledExploreRegistry struct {
 	registry exploreRegistrySyncer
 	catalog  exploreDueSourceCatalog
 	queue    exploreQueueEnqueuer
+	related  interface {
+		Sync(context.Context, time.Time) explorelogic.RelatedSiteSyncResult
+	}
 }
 
 func (scheduler *scheduledExploreRegistry) SyncDue(ctx context.Context, now time.Time) ([]explorelogic.ProviderSyncResult, error) {
 	results, syncErr := scheduler.registry.SyncDue(ctx, now)
+	if scheduler.related != nil {
+		related := scheduler.related.Sync(ctx, now)
+		syncErr = errors.Join(syncErr, related.Err)
+	}
 	due, dueErr := scheduler.catalog.ListDueSources(now.Add(-30*time.Minute), now.Add(-3*time.Hour), exploreMaxBatchLimit)
 	var enqueueErr error
 	for _, source := range due {
@@ -198,21 +235,18 @@ func (inputs *sqlExploreRankInputs) LoadProfile(ctx context.Context, userID int,
 		}
 	}
 
-	rows, err = inputs.db.QueryContext(ctx, `
-		SELECT article.title, article.published_at
-		FROM articles article JOIN feeds feed ON feed.id=article.feed_id
-		WHERE (feed.owner_id IS NULL OR feed.owner_id=$1)
-		  AND article.published_at >= $2
-		ORDER BY article.published_at DESC, article.id DESC LIMIT 200`, userID, now.Add(-30*24*time.Hour))
+	rows, err = inputs.db.QueryContext(ctx, exploreRecentArticleProfileSQL, userID, now.Add(-30*24*time.Hour))
 	if err != nil {
 		return profile, err
 	}
 	for rows.Next() {
 		var item explorelogic.RecentArticleSignalInput
-		if err := rows.Scan(&item.Title, &item.PublishedAt); err != nil {
+		var content, snippet string
+		if err := rows.Scan(&item.Title, &item.Category, &item.Topic, pq.Array(&item.Tags), &content, &snippet, &item.PublishedAt); err != nil {
 			rows.Close()
 			return profile, err
 		}
+		item.TextTokens = explorelogic.ProfileTextTokens(content, snippet)
 		profile.RecentArticles = append(profile.RecentArticles, item)
 	}
 	if err := closeExploreRows(rows); err != nil {
@@ -303,14 +337,8 @@ func (inputs *sqlExploreRankInputs) LoadProfile(ctx context.Context, userID int,
 	return profile, rows.Err()
 }
 
-func (inputs *sqlExploreRankInputs) LoadCandidates(ctx context.Context, _ time.Time) ([]explorelogic.RankCandidate, error) {
-	rows, err := inputs.db.QueryContext(ctx, `
-		SELECT id,title,category,COALESCE(site_url,url),validation_status,is_broken,
-		       merged_into_source_id,COALESCE(health_score,0)
-		FROM recommended_feeds
-		WHERE validation_status='valid' AND is_broken=false AND merged_into_source_id IS NULL
-		ORDER BY COALESCE(health_score,0) DESC, last_observed_at DESC NULLS LAST, id
-		LIMIT $1`, exploreCandidateInputLimit)
+func (inputs *sqlExploreRankInputs) LoadCandidates(ctx context.Context, now time.Time) ([]explorelogic.RankCandidate, error) {
+	rows, err := inputs.db.QueryContext(ctx, exploreCandidateSQL, now, exploreCandidateInputLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +370,8 @@ func (inputs *sqlExploreRankInputs) LoadCandidates(ctx context.Context, _ time.T
 		FROM explore_source_observations observation
 		JOIN explore_registry_providers provider ON provider.id=observation.provider_id
 		WHERE observation.source_id=ANY($1) AND provider.enabled
-		ORDER BY observation.source_id, observation.last_seen_at DESC, observation.id`, pq.Array(ids))
+		  AND observation.last_seen_at >= $2 - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')
+		ORDER BY observation.source_id, observation.last_seen_at DESC, observation.id`, pq.Array(ids), now)
 	if err != nil {
 		return nil, err
 	}

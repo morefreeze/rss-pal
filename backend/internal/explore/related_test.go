@@ -1,10 +1,17 @@
 package explore
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestRelatedSiteDiscovererPrefersDeclaredFeedAndBoundsExternalSites(t *testing.T) {
@@ -90,3 +97,73 @@ func TestRedditLinkStreamAdapterAggregatesExternalDomains(t *testing.T) {
 		t.Errorf("other candidate = %#v", got[1])
 	}
 }
+
+type fakeRelatedSyncStore struct {
+	seeds      []string
+	provider   RegistryProvider
+	candidates []Candidate
+	succeeded  bool
+	failed     bool
+}
+
+func (store *fakeRelatedSyncStore) LoadRelatedSeeds(context.Context, time.Time, int) ([]string, error) {
+	return append([]string(nil), store.seeds...), nil
+}
+func (store *fakeRelatedSyncStore) LoadRelatedProvider(time.Time) (*RegistryProvider, error) {
+	provider := store.provider
+	return &provider, nil
+}
+func (store *fakeRelatedSyncStore) UpsertCandidate(_ int, candidate Candidate, _ time.Time) (int, error) {
+	store.candidates = append(store.candidates, candidate)
+	return len(store.candidates), nil
+}
+func (store *fakeRelatedSyncStore) RecordSuccess(int, time.Time, string, string) error {
+	store.succeeded = true
+	return nil
+}
+func (store *fakeRelatedSyncStore) RecordFailure(int, time.Time, error) error {
+	store.failed = true
+	return nil
+}
+
+type fakeRelatedQueue struct {
+	mu         sync.Mutex
+	priorities []int
+}
+
+func (queue *fakeRelatedQueue) Enqueue(_ int, _ string, priority int) error {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	queue.priorities = append(queue.priorities, priority)
+	return nil
+}
+
+func TestRelatedSiteSyncUsesSafeSeedsQueuesCandidatesAndContinuesAfterFailure(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 30, 0, 0, time.UTC)
+	store := &fakeRelatedSyncStore{
+		provider: RegistryProvider{ID: 9, Key: "related-sites", Kind: "related_site", Enabled: true},
+		seeds:    []string{"https://8.8.8.8/ok", "https://8.8.8.8/fail"},
+	}
+	queue := &fakeRelatedQueue{}
+	client := ProviderClient{
+		validateURL: func(raw string) (*url.URL, error) { return url.Parse(raw) },
+		publicDoer: relatedRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.URL.Path == "/fail" {
+				return nil, errors.New("temporary")
+			}
+			body := `<link rel="alternate" type="application/rss+xml" href="/feed.xml"><a href="https://9.9.9.9/blog/post">blog</a>`
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		}),
+	}
+	result := (RelatedSiteSync{Store: store, Queue: queue, Client: client}).Sync(context.Background(), now)
+	if result.Seeds != 2 || result.Failures != 1 || result.Candidates != 2 || !store.succeeded {
+		t.Fatalf("result=%+v store=%+v", result, store)
+	}
+	if len(queue.priorities) != 2 || queue.priorities[0] != RelatedPriorityDirect || queue.priorities[1] != RelatedPriorityIndirect {
+		t.Fatalf("priorities=%v", queue.priorities)
+	}
+}
+
+type relatedRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn relatedRoundTripFunc) Do(request *http.Request) (*http.Response, error) { return fn(request) }
