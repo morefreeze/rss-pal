@@ -1,0 +1,116 @@
+package api
+
+import (
+	"database/sql"
+	"errors"
+	"io"
+	"log"
+	"net/http"
+	"testing"
+	"time"
+
+	explorelogic "github.com/bytedance/rss-pal/internal/explore"
+	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/gin-gonic/gin"
+)
+
+type fakeColdStarter struct {
+	calls  int
+	userID int
+	err    error
+}
+
+func (starter *fakeColdStarter) Ensure(userID int, _ time.Time) error {
+	starter.calls++
+	starter.userID = userID
+	return starter.err
+}
+
+func TestExploreHandlerEnsuresColdSnapshotForPageAndDrawerWithoutBlockingOnError(t *testing.T) {
+	store := &fakeExploreStore{page: &repository.ExplorePage{}, sources: []repository.ExploreSourceItem{}}
+	starter := &fakeColdStarter{err: errors.New("candidate refresh racing")}
+	handler := newExploreHandlerWithStore(store, time.Now)
+	handler.coldStartFor = func(*gin.Context) exploreColdStarter { return starter }
+	router := exploreTestRouter(handler)
+	for _, path := range []string{"/api/explore", "/api/explore/sources"} {
+		response := performExploreRequest(router, http.MethodGet, path, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+	if starter.calls != 2 || starter.userID != 42 {
+		t.Fatalf("cold starts=%d user=%d", starter.calls, starter.userID)
+	}
+}
+
+type fakeColdRankLoader struct {
+	candidates []explorelogic.RankCandidate
+	feedback   []explorelogic.ExplicitFeedbackInput
+}
+
+func (loader *fakeColdRankLoader) LoadColdCandidates(time.Time) ([]explorelogic.RankCandidate, error) {
+	return loader.candidates, nil
+}
+func (loader *fakeColdRankLoader) LoadColdFeedback(int) ([]explorelogic.ExplicitFeedbackInput, error) {
+	return loader.feedback, nil
+}
+
+type fakeColdSnapshotStore struct {
+	latest *model.ExploreBatch
+	claim  repository.ExploreSnapshotClaim
+	owned  bool
+	values []repository.ExploreSnapshotSourceInput
+	failed bool
+}
+
+func (store *fakeColdSnapshotStore) LatestDone(int) (*model.ExploreBatch, []model.ExploreBatchSource, error) {
+	if store.latest == nil {
+		return nil, nil, sql.ErrNoRows
+	}
+	return store.latest, nil, nil
+}
+func (store *fakeColdSnapshotStore) Claim(int, time.Time, time.Time, time.Duration) (*repository.ExploreSnapshotClaim, bool, error) {
+	return &store.claim, store.owned, nil
+}
+func (store *fakeColdSnapshotStore) Publish(_ int, _ repository.ExploreSnapshotGenerationToken, values []repository.ExploreSnapshotSourceInput) (*model.ExploreBatch, error) {
+	store.values = append([]repository.ExploreSnapshotSourceInput(nil), values...)
+	return &model.ExploreBatch{ID: store.claim.Batch.ID, Status: model.ExploreBatchDone}, nil
+}
+func (store *fakeColdSnapshotStore) Fail(int, repository.ExploreSnapshotGenerationToken, error) error {
+	store.failed = true
+	return nil
+}
+
+func TestExploreColdStartPublishesDeterministicUserScopedFallback(t *testing.T) {
+	now := time.Date(2026, 9, 1, 2, 0, 0, 0, time.UTC)
+	store := &fakeColdSnapshotStore{owned: true, claim: repository.ExploreSnapshotClaim{
+		Batch: model.ExploreBatch{ID: 77, UserID: 5, SlotAt: repository.ExploreColdStartSlotAt},
+	}}
+	loader := &fakeColdRankLoader{
+		feedback: []explorelogic.ExplicitFeedbackInput{{SourceID: 2, Type: explorelogic.FeedbackHideSource}},
+		candidates: []explorelogic.RankCandidate{
+			{SourceID: 2, Title: "hidden", ValidationStatus: model.ExploreValidationValid, HealthScore: 1, Articles: []explorelogic.RankArticle{{ID: 20, FetchedAt: now}}},
+			{SourceID: 1, Title: "visible", Topic: "tech", Provider: "directory", ValidationStatus: model.ExploreValidationValid, HealthScore: .9, Articles: []explorelogic.RankArticle{{ID: 10, FetchedAt: now}}},
+		},
+	}
+	service := NewExploreColdStartService(store, loader, log.New(io.Discard, "", 0))
+	if err := service.Ensure(5, now); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(store.values) != 1 || store.values[0].SourceID != 1 {
+		t.Fatalf("published=%+v", store.values)
+	}
+}
+
+func TestExploreColdStartNoCandidatesLeavesGeneratingClaimWithoutPublishing(t *testing.T) {
+	now := time.Now()
+	store := &fakeColdSnapshotStore{owned: true, claim: repository.ExploreSnapshotClaim{Batch: model.ExploreBatch{ID: 77}}}
+	service := NewExploreColdStartService(store, &fakeColdRankLoader{}, log.New(io.Discard, "", 0))
+	if err := service.Ensure(5, now); !errors.Is(err, ErrExploreColdStartPending) {
+		t.Fatalf("Ensure error=%v", err)
+	}
+	if len(store.values) != 0 || store.failed {
+		t.Fatalf("empty cold fallback was published/failed: values=%v failed=%t", store.values, store.failed)
+	}
+}
