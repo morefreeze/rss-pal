@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -112,6 +113,36 @@ func TestExploreHandlerListValidatesParametersClampsAndOmitsContent(t *testing.T
 	snapshot := payload["snapshot"].(map[string]any)
 	if snapshot["next_refresh_at"] != "2026-08-31T14:00:00+08:00" {
 		t.Fatalf("next_refresh_at=%v", snapshot["next_refresh_at"])
+	}
+	interests, ok := payload["interests"].([]any)
+	if !ok || len(interests) != 0 {
+		t.Fatalf("interests must be a stable empty array: %s", w.Body.String())
+	}
+}
+
+func TestExploreHandlerListSerializesInterestsAndThumbnailContract(t *testing.T) {
+	thumbnail := "https://images.example/thumbnail.png"
+	store := &fakeExploreStore{page: &repository.ExplorePage{
+		Articles:  []repository.ExploreArticleListItem{{ID: 3, SourceID: 4, Title: "lean", ThumbnailURL: &thumbnail}},
+		Interests: []string{"programming"},
+	}}
+	router := exploreTestRouter(newExploreHandlerWithStore(store, time.Now))
+	w := performExploreRequest(router, http.MethodGet, "/api/explore", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	articles := payload["articles"].([]any)
+	article := articles[0].(map[string]any)
+	if article["thumbnail_url"] != thumbnail {
+		t.Fatalf("thumbnail_url=%v want %q body=%s", article["thumbnail_url"], thumbnail, w.Body.String())
+	}
+	interests, ok := payload["interests"].([]any)
+	if !ok || !reflect.DeepEqual(interests, []any{"programming"}) {
+		t.Fatalf("interests=%v want [programming]: %s", interests, w.Body.String())
 	}
 }
 

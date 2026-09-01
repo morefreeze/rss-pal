@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   clearExploreNegativeFeedback,
@@ -51,9 +51,17 @@ export default function ExplorePage() {
   const [feedbackUndos, setFeedbackUndos] = useState<UndoFeedback[]>([])
   const [feedbackClearing, setFeedbackClearing] = useState(false)
   const [selectedInterests, setSelectedInterests] = useState<Set<string>>(() => new Set())
+  const interestsInitializedRef = useRef(false)
   const [interestSaving, setInterestSaving] = useState(false)
   const [interestError, setInterestError] = useState<string | null>(null)
   const [interestSaved, setInterestSaved] = useState(false)
+
+  useEffect(() => {
+    if (feed.interests === null || interestsInitializedRef.current) return
+    interestsInitializedRef.current = true
+    setSelectedInterests(new Set(feed.interests))
+    setInterestError(null)
+  }, [feed.interests])
 
   useInfiniteScrollTrigger({
     targetRef: loadMoreRef,
@@ -164,7 +172,7 @@ export default function ExplorePage() {
   }
 
   const saveInterests = async () => {
-    if (selectedInterests.size === 0 || interestSaving) return
+    if (feed.interests === null || selectedInterests.size === 0 || interestSaving) return
     setInterestSaving(true)
     setInterestError(null)
     setInterestSaved(false)
@@ -241,7 +249,7 @@ export default function ExplorePage() {
             ))}
           </div>
           <div className="explore-interest-actions">
-            <button type="button" disabled={interestSaving || selectedInterests.size === 0} onClick={() => void saveInterests()}>
+            <button type="button" disabled={feed.interests === null || interestSaving || selectedInterests.size === 0} onClick={() => void saveInterests()}>
               {interestSaving ? '保存中…' : '保存兴趣'}
             </button>
             <Link to="/interests">查看完整兴趣页</Link>
@@ -267,6 +275,7 @@ export default function ExplorePage() {
           <div className="card explore-empty-state">
             <strong>当前主题没有候选文章</strong>
             <span>可能被筛选或反馈隐藏了。</span>
+            {feed.error && <button type="button" className="secondary" onClick={() => void feed.reload()}>重试加载</button>}
             <button type="button" className="secondary" aria-label="清除主题筛选" onClick={() => pickTopic('')}>清除筛选</button>
           </div>
         ) : feed.articles.length === 0 && !feed.topic ? (

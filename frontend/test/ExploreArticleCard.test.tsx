@@ -1,4 +1,5 @@
-import { act, render } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ExploreArticleCard from '../src/components/ExploreArticleCard'
 import type { ExploreArticleListItem } from '../src/api/client'
@@ -79,5 +80,49 @@ describe('ExploreArticleCard exposure tracking', () => {
 
     view.unmount()
     expect(observer.disconnect).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['Enter', ' '])('exposes one native title action for %j without making the article interactive', async key => {
+    vi.useRealTimers()
+    const user = userEvent.setup()
+    const onOpen = vi.fn()
+    const view = render(
+      <ExploreArticleCard
+        article={article}
+        sort="published"
+        onOpen={onOpen}
+        onExposure={vi.fn().mockResolvedValue(true)}
+        onHideSource={vi.fn()}
+        onDampenTopic={vi.fn()}
+      />,
+    )
+    const card = screen.getByRole('article', { name: article.title })
+    const titleAction = screen.getByRole('button', { name: article.title })
+
+    expect(card.getAttribute('tabindex')).toBeNull()
+    titleAction.focus()
+    await user.keyboard(key === 'Enter' ? '{Enter}' : ' ')
+
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onOpen).toHaveBeenCalledWith(article)
+    expect(view.container.querySelector('article button button')).toBeNull()
+  })
+
+  it('keeps the menu action independent from the title navigation action', () => {
+    const onOpen = vi.fn()
+    render(
+      <ExploreArticleCard
+        article={article}
+        sort="published"
+        onOpen={onOpen}
+        onExposure={vi.fn().mockResolvedValue(true)}
+        onHideSource={vi.fn()}
+        onDampenTopic={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: `${article.title} 的更多操作` }))
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(onOpen).not.toHaveBeenCalled()
   })
 })
