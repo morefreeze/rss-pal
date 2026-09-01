@@ -114,3 +114,9 @@ func TestExploreColdStartNoCandidatesLeavesGeneratingClaimWithoutPublishing(t *t
 		t.Fatalf("empty cold fallback was published/failed: values=%v failed=%t", store.values, store.failed)
 	}
 }
+
+func TestExploreColdStartEmptyClaimRetriesPromptly(t *testing.T) {
+	if coldStartStaleAfter > time.Minute {
+		t.Fatalf("cold pending retry=%s, want at most one minute", coldStartStaleAfter)
+	}
+}

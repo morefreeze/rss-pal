@@ -15,7 +15,7 @@ import (
 	"github.com/lib/pq"
 )
 
-const coldStartStaleAfter = 45 * time.Minute
+const coldStartStaleAfter = time.Minute
 
 var ErrExploreColdStartPending = errors.New("explore cold start has no validated candidates yet")
 
