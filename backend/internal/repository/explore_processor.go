@@ -36,46 +36,50 @@ func NewExploreTaskProcessor(db *sql.DB, fetcher ExploreSourceFetcher, now func(
 	return &ExploreTaskProcessor{db: db, fetcher: fetcher, now: now}
 }
 
-func (p *ExploreTaskProcessor) Process(ctx context.Context, task ExploreQueueTask, owner string) error {
+func (p *ExploreTaskProcessor) Process(ctx context.Context, task ExploreQueueTask) error {
 	if p == nil || p.db == nil {
 		return errors.New("explore task processor requires a database")
 	}
 	if task.RunID == nil || *task.RunID <= 0 {
 		return fmt.Errorf("%w: task %d has no run", ErrExploreLeaseNotHeld, task.ID)
 	}
+	leaseToken, err := exploreTaskLeaseToken(task)
+	if err != nil {
+		return err
+	}
 	checkedAt := p.now()
 	catalog := NewExploreCatalogRepository(p.db)
 	source, err := catalog.GetSourceWithObservations(task.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return p.finishMissingSource(ctx, task, owner, err)
+			return p.finishMissingSource(ctx, task, leaseToken, err)
 		}
 		return err
 	}
 	decision := decideExploreTaskNetwork(task.TaskType, source.Source.ValidationStatus)
 	if decision != exploreTaskFetch {
-		return p.finishWithoutFetch(ctx, task, owner)
+		return p.finishWithoutFetch(ctx, task, leaseToken)
 	}
 
 	// checkedAt and the complete request are captured before the potentially
 	// slow network call. No database transaction is held while Fetch waits.
 	result, fetchErr := p.fetcher.Fetch(ctx, buildExploreSourceFetchRequest(*source, task))
-	return p.persistFetchOutcome(ctx, task, owner, checkedAt, result, fetchErr)
+	return p.persistFetchOutcome(ctx, task, leaseToken, checkedAt, result, fetchErr)
 }
 
-func (p *ExploreTaskProcessor) finishMissingSource(ctx context.Context, task ExploreQueueTask, owner string, cause error) error {
+func (p *ExploreTaskProcessor) finishMissingSource(ctx context.Context, task ExploreQueueTask, leaseToken string, cause error) error {
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err := NewExploreQueueRepository(p.db).WithQuerier(tx).Invalidate(task.ID, *task.RunID, owner, cause); err != nil {
+	if err := NewExploreQueueRepository(p.db).WithQuerier(tx).Invalidate(task.ID, *task.RunID, leaseToken, cause); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task ExploreQueueTask, owner string) error {
+func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task ExploreQueueTask, leaseToken string) error {
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -86,7 +90,7 @@ func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task Expl
 	source, err := catalog.GetSource(task.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			if err := queue.Invalidate(task.ID, *task.RunID, owner, err); err != nil {
+			if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, err); err != nil {
 				return err
 			}
 			return tx.Commit()
@@ -98,13 +102,13 @@ func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task Expl
 		if _, err := queue.Enqueue(task.SourceID, ExploreTaskRefreshArticles, ExplorePriorityRefresh); err != nil {
 			return err
 		}
-		if err := queue.Complete(task.ID, *task.RunID, owner); err != nil {
+		if err := queue.Complete(task.ID, *task.RunID, leaseToken); err != nil {
 			return err
 		}
 		return tx.Commit()
 	}
 	if decision == exploreTaskInvalidateWithoutFetch {
-		if err := queue.Invalidate(task.ID, *task.RunID, owner, fmt.Errorf("explore %s task is not eligible for source status %s", task.TaskType, source.ValidationStatus)); err != nil {
+		if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, fmt.Errorf("explore %s task is not eligible for source status %s", task.TaskType, source.ValidationStatus)); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -114,7 +118,7 @@ func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task Expl
 	return fmt.Errorf("explore source %d state changed before task processing", task.SourceID)
 }
 
-func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task ExploreQueueTask, owner string, checkedAt time.Time, result explore.SourceFetchResult, fetchErr error) error {
+func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task ExploreQueueTask, leaseToken string, checkedAt time.Time, result explore.SourceFetchResult, fetchErr error) error {
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -128,7 +132,7 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 	current, err := catalog.GetSourceWithObservations(task.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			if err := queue.Invalidate(task.ID, *task.RunID, owner, err); err != nil {
+			if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, err); err != nil {
 				return err
 			}
 			return tx.Commit()
@@ -140,13 +144,13 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		if _, err := queue.Enqueue(task.SourceID, ExploreTaskRefreshArticles, ExplorePriorityRefresh); err != nil {
 			return err
 		}
-		if err := queue.Complete(task.ID, *task.RunID, owner); err != nil {
+		if err := queue.Complete(task.ID, *task.RunID, leaseToken); err != nil {
 			return err
 		}
 		return tx.Commit()
 	}
 	if decision == exploreTaskInvalidateWithoutFetch {
-		if err := queue.Invalidate(task.ID, *task.RunID, owner, fmt.Errorf("explore %s task is not eligible for source status %s", task.TaskType, current.Source.ValidationStatus)); err != nil {
+		if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, fmt.Errorf("explore %s task is not eligible for source status %s", task.TaskType, current.Source.ValidationStatus)); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -167,14 +171,14 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 			if err := catalog.RecordFetchFailure(task.SourceID, checkedAt, fetchErr); err != nil {
 				return err
 			}
-			if err := queue.Retry(task.ID, *task.RunID, owner, fetchErr); err != nil {
+			if err := queue.Retry(task.ID, *task.RunID, leaseToken, fetchErr); err != nil {
 				return err
 			}
 		} else {
 			if err := catalog.MarkValidationInvalid(task.SourceID, checkedAt, fetchErr); err != nil {
 				return err
 			}
-			if err := queue.Invalidate(task.ID, *task.RunID, owner, fetchErr); err != nil {
+			if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, fetchErr); err != nil {
 				return err
 			}
 		}
@@ -182,19 +186,19 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 	}
 
 	if result.NotModified {
-		return persistExploreTerminalResult(tx, catalog, queue, task, owner, checkedAt, errors.New("validation source unexpectedly returned not modified"))
+		return persistExploreTerminalResult(tx, catalog, queue, task, leaseToken, checkedAt, errors.New("validation source unexpectedly returned not modified"))
 	}
 	if err := validateExploreTaskResult(task.TaskType, result); err != nil {
 		if task.TaskType == ExploreTaskRefreshArticles && errors.Is(err, explore.ErrInactiveSource) {
 			if recordErr := catalog.RecordFetchFailure(task.SourceID, checkedAt, err); recordErr != nil {
 				return recordErr
 			}
-			if retryErr := queue.Retry(task.ID, *task.RunID, owner, err); retryErr != nil {
+			if retryErr := queue.Retry(task.ID, *task.RunID, leaseToken, err); retryErr != nil {
 				return retryErr
 			}
 			return tx.Commit()
 		}
-		return persistExploreTerminalResult(tx, catalog, queue, task, owner, checkedAt, err)
+		return persistExploreTerminalResult(tx, catalog, queue, task, leaseToken, checkedAt, err)
 	}
 
 	canonicalID := task.SourceID
@@ -225,20 +229,27 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 			return err
 		}
 	}
-	if err := queue.Complete(task.ID, *task.RunID, owner); err != nil {
+	if err := queue.Complete(task.ID, *task.RunID, leaseToken); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func persistExploreTerminalResult(tx *sql.Tx, catalog *ExploreCatalogRepository, queue *ExploreQueueRepository, task ExploreQueueTask, owner string, checkedAt time.Time, cause error) error {
+func persistExploreTerminalResult(tx *sql.Tx, catalog *ExploreCatalogRepository, queue *ExploreQueueRepository, task ExploreQueueTask, leaseToken string, checkedAt time.Time, cause error) error {
 	if err := catalog.MarkValidationInvalid(task.SourceID, checkedAt, cause); err != nil {
 		return err
 	}
-	if err := queue.Invalidate(task.ID, *task.RunID, owner, cause); err != nil {
+	if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, cause); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func exploreTaskLeaseToken(task ExploreQueueTask) (string, error) {
+	if task.LeaseToken == nil || *task.LeaseToken == "" {
+		return "", fmt.Errorf("%w: task %d has no lease token", ErrExploreLeaseLost, task.ID)
+	}
+	return *task.LeaseToken, nil
 }
 
 type exploreTaskNetworkDecision string

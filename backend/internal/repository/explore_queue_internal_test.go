@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"os"
@@ -11,8 +12,30 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
+
+func TestExploreLeaseTokensAreUniqueOpaqueCredentials(t *testing.T) {
+	first, err := newExploreLeaseToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := newExploreLeaseToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 64 || len(second) != 64 || first == second {
+		t.Fatalf("lease tokens malformed or reused lengths=%d/%d equal=%t", len(first), len(second), first == second)
+	}
+	payload, err := json.Marshal(model.ExploreFetchTask{LeaseToken: &first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), first) || strings.Contains(string(payload), "lease_token") {
+		t.Fatalf("lease token leaked through task JSON: %s", payload)
+	}
+}
 
 func TestClipExploreErrorPreservesUTF8WithinByteLimit(t *testing.T) {
 	short := "短错误🙂"
@@ -40,9 +63,10 @@ func TestExploreQueueSQLKeepsFreshClaimsSeparateFromOriginalRunRecovery(t *testi
 	for _, required := range []string{
 		"status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP",
 		"ORDER BY run.window_at ASC, run.id ASC",
-		"SET lease_owner = $2, lease_expires_at",
-		"SET status = 'leased', run_id = $2, lease_owner = $3",
-		"WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_owner = $3",
+		"lease_token",
+		"SET lease_owner = $2, lease_token = $3, lease_expires_at",
+		"SET status = 'leased', run_id = $2, lease_owner = $3, lease_token = $4",
+		"WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_token = $3",
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("queue SQL missing %q", required)
@@ -50,6 +74,7 @@ func TestExploreQueueSQLKeepsFreshClaimsSeparateFromOriginalRunRecovery(t *testi
 	}
 	for _, forbidden := range []string{
 		"OR (status = 'leased' AND lease_expires_at <= CURRENT_TIMESTAMP)",
+		"status = 'leased' AND lease_owner = $3 AND lease_expires_at > CURRENT_TIMESTAMP",
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("fresh claim SQL still rewrites expired original-run work: %q", forbidden)

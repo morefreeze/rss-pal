@@ -158,7 +158,8 @@ func TestExploreQueueLeaseFencingAndRecovery(t *testing.T) {
 	if err != nil || len(leased) != 4 {
 		t.Fatalf("claim=%d err=%v", len(leased), err)
 	}
-	if visible, err := repo.ListLeased(run.ID, "old"); err != nil || len(visible) != 4 {
+	oldToken := exploreTaskToken(t, leased[0])
+	if visible, err := repo.ListLeased(run.ID, oldToken); err != nil || len(visible) != 4 {
 		t.Fatalf("initial visible=%d err=%v", len(visible), err)
 	}
 	result, err := db.Exec(`
@@ -171,39 +172,45 @@ func TestExploreQueueLeaseFencingAndRecovery(t *testing.T) {
 	if changed, err := result.RowsAffected(); err != nil || changed != 4 {
 		t.Fatalf("force expiry changed=%d err=%v", changed, err)
 	}
-	if visible, err := repo.ListLeased(run.ID, "old"); err != nil || len(visible) != 0 {
+	if visible, err := repo.ListLeased(run.ID, oldToken); err != nil || len(visible) != 0 {
 		t.Fatalf("expired visible=%d err=%v", len(visible), err)
 	}
-	if err := repo.Complete(leased[0].ID, run.ID, "old"); err == nil {
+	if err := repo.Complete(leased[0].ID, run.ID, oldToken); !errors.Is(err, repository.ErrLeaseLost) {
 		t.Fatal("expired old owner completed task")
 	}
-	recoveredRun, recovered, err := repo.RecoverExpired("new", time.Hour)
+	// Recovery deliberately uses the same process/base owner. Only the new
+	// per-lease token may authorize state transitions.
+	recoveredRun, recovered, err := repo.RecoverExpired("old", time.Hour)
 	if err != nil || recoveredRun == nil || recoveredRun.ID != run.ID || len(recovered) != 4 {
 		t.Fatalf("recover run=%+v tasks=%d err=%v", recoveredRun, len(recovered), err)
 	}
-	if err := repo.Complete(recovered[0].ID, run.ID, "old"); err == nil {
-		t.Fatal("old owner completed recovered task")
+	newToken := exploreTaskToken(t, recovered[0])
+	if newToken == oldToken {
+		t.Fatal("recovery reused the old lease token")
 	}
-	if err := repo.Retry(recovered[1].ID, run.ID, "old", errors.New("stale")); err == nil {
-		t.Fatal("old owner retried recovered task")
+	if err := repo.Complete(recovered[0].ID, run.ID, oldToken); !errors.Is(err, repository.ErrLeaseLost) {
+		t.Fatalf("old handler completed recovered task: %v", err)
 	}
-	if err := repo.Invalidate(recovered[2].ID, run.ID, "old", errors.New("stale")); err == nil {
-		t.Fatal("old owner invalidated recovered task")
+	if err := repo.Retry(recovered[1].ID, run.ID, oldToken, errors.New("stale")); !errors.Is(err, repository.ErrLeaseLost) {
+		t.Fatalf("old handler retried recovered task: %v", err)
+	}
+	if err := repo.Invalidate(recovered[2].ID, run.ID, oldToken, errors.New("stale")); !errors.Is(err, repository.ErrLeaseLost) {
+		t.Fatalf("old handler invalidated recovered task: %v", err)
 	}
 	var claimed int
 	if err := db.QueryRow(`SELECT claimed_count FROM explore_fetch_runs WHERE id=$1`, run.ID).Scan(&claimed); err != nil || claimed != 4 {
 		t.Fatalf("recovery changed run quota claimed=%d err=%v", claimed, err)
 	}
-	if err := repo.Complete(recovered[0].ID, run.ID, "new"); err != nil {
+	if err := repo.Complete(recovered[0].ID, run.ID, newToken); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Retry(recovered[1].ID, run.ID, "new", errors.New("temporary")); err != nil {
+	if err := repo.Retry(recovered[1].ID, run.ID, newToken, errors.New("temporary")); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Invalidate(recovered[2].ID, run.ID, "new", errors.New(strings.Repeat("中🙂", 400))); err != nil {
+	if err := repo.Invalidate(recovered[2].ID, run.ID, newToken, errors.New(strings.Repeat("中🙂", 400))); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Complete(recovered[3].ID, run.ID, "new"); err != nil {
+	if err := repo.Complete(recovered[3].ID, run.ID, newToken); err != nil {
 		t.Fatal(err)
 	}
 	var persistedError string
@@ -233,10 +240,10 @@ func TestExploreQueueRecoversOldestExpiredTasksWithoutCreatingOrChargingNewRun(t
 			t.Fatalf("recovered task run=%v, want original %d", task.RunID, oldRun.ID)
 		}
 	}
-	if err := repo.Complete(recovered[0].ID, oldRun.ID, "same-worker"); !errors.Is(err, repository.ErrExploreLeaseNotHeld) {
+	if err := repo.Complete(recovered[0].ID, oldRun.ID, exploreTaskToken(t, oldTasks[0])); !errors.Is(err, repository.ErrExploreLeaseNotHeld) {
 		t.Fatalf("old owner completed reassigned task: %v", err)
 	}
-	if err := repo.Complete(recovered[0].ID, oldRun.ID, "new-worker"); err != nil {
+	if err := repo.Complete(recovered[0].ID, oldRun.ID, exploreTaskToken(t, recovered[0])); err != nil {
 		t.Fatalf("new owner could not complete original-run task: %v", err)
 	}
 	var oldClaimed, runCount int
@@ -266,6 +273,7 @@ func TestExploreQueueConcurrentRecoveryHasOneOwnerAndPreservesOriginalQuota(t *t
 	if err != nil || len(tasks) != 5 {
 		t.Fatalf("claim tasks=%d err=%v", len(tasks), err)
 	}
+	originalToken := exploreTaskToken(t, tasks[0])
 	if _, err := db.Exec(`UPDATE explore_fetch_queue SET lease_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE run_id=$1`, original.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -301,9 +309,16 @@ func TestExploreQueueConcurrentRecoveryHasOneOwnerAndPreservesOriginalQuota(t *t
 		if result.run.ID != original.ID || result.run.ClaimedCount != 5 || len(result.tasks) != 5 {
 			t.Fatalf("winner run=%+v tasks=%d", result.run, len(result.tasks))
 		}
+		winnerToken := exploreTaskToken(t, result.tasks[0])
+		if winnerToken == originalToken {
+			t.Fatal("concurrent recovery reused original token")
+		}
 		for _, task := range result.tasks {
 			if task.RunID == nil || *task.RunID != original.ID {
 				t.Fatalf("task moved runs: %+v", task)
+			}
+			if exploreTaskToken(t, task) != winnerToken {
+				t.Fatal("one recovery operation returned multiple lease tokens")
 			}
 		}
 	}
@@ -336,7 +351,7 @@ func TestExploreQueueRetryUsesDatabaseClockAndBackoff(t *testing.T) {
 		if err != nil || len(tasks) != 1 {
 			t.Fatalf("claim tasks=%d err=%v", len(tasks), err)
 		}
-		if err := repo.Retry(tasks[0].ID, *tasks[0].RunID, "worker", errors.New("temporary")); err != nil {
+		if err := repo.Retry(tasks[0].ID, *tasks[0].RunID, exploreTaskToken(t, tasks[0]), errors.New("temporary")); err != nil {
 			t.Fatal(err)
 		}
 		var seconds int
@@ -357,7 +372,7 @@ func TestExploreQueueRetryUsesDatabaseClockAndBackoff(t *testing.T) {
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("cap claim tasks=%d err=%v", len(tasks), err)
 	}
-	if err := repo.Retry(tasks[0].ID, *tasks[0].RunID, "worker", errors.New("capped")); err != nil {
+	if err := repo.Retry(tasks[0].ID, *tasks[0].RunID, exploreTaskToken(t, tasks[0]), errors.New("capped")); err != nil {
 		t.Fatal(err)
 	}
 	var seconds int
@@ -410,17 +425,25 @@ func insertExploreSource(t *testing.T, db *sql.DB, n int) int {
 func assertTaskMatchesDB(t *testing.T, db *sql.DB, task repository.ExploreQueueTask) {
 	t.Helper()
 	var got repository.ExploreQueueTask
-	if err := db.QueryRow(`SELECT id,source_id,task_type,status,priority,not_before,attempts,run_id,lease_owner,lease_expires_at,last_error,created_at,updated_at,completed_at FROM explore_fetch_queue WHERE id=$1`, task.ID).Scan(&got.ID, &got.SourceID, &got.TaskType, &got.Status, &got.Priority, &got.NotBefore, &got.Attempts, &got.RunID, &got.LeaseOwner, &got.LeaseExpiresAt, &got.LastError, &got.CreatedAt, &got.UpdatedAt, &got.CompletedAt); err != nil {
+	if err := db.QueryRow(`SELECT id,source_id,task_type,status,priority,not_before,attempts,run_id,lease_owner,lease_token,lease_expires_at,last_error,created_at,updated_at,completed_at FROM explore_fetch_queue WHERE id=$1`, task.ID).Scan(&got.ID, &got.SourceID, &got.TaskType, &got.Status, &got.Priority, &got.NotBefore, &got.Attempts, &got.RunID, &got.LeaseOwner, &got.LeaseToken, &got.LeaseExpiresAt, &got.LastError, &got.CreatedAt, &got.UpdatedAt, &got.CompletedAt); err != nil {
 		t.Fatal(err)
 	}
 	if got.ID != task.ID || got.SourceID != task.SourceID || got.TaskType != task.TaskType ||
 		got.Status != task.Status || got.Priority != task.Priority || !got.NotBefore.Equal(task.NotBefore) ||
 		got.Attempts != task.Attempts || !equalIntPtr(got.RunID, task.RunID) ||
-		!equalStringPtr(got.LeaseOwner, task.LeaseOwner) || !equalTimePtr(got.LeaseExpiresAt, task.LeaseExpiresAt) ||
+		!equalStringPtr(got.LeaseOwner, task.LeaseOwner) || !equalStringPtr(got.LeaseToken, task.LeaseToken) || !equalTimePtr(got.LeaseExpiresAt, task.LeaseExpiresAt) ||
 		!equalStringPtr(got.LastError, task.LastError) || !got.CreatedAt.Equal(task.CreatedAt) ||
 		!got.UpdatedAt.Equal(task.UpdatedAt) || !equalTimePtr(got.CompletedAt, task.CompletedAt) {
 		t.Fatalf("returned task differs db returned=%+v db=%+v", task, got)
 	}
+}
+
+func exploreTaskToken(t *testing.T, task repository.ExploreQueueTask) string {
+	t.Helper()
+	if task.LeaseToken == nil || len(*task.LeaseToken) != 64 {
+		t.Fatalf("task %d lease token is missing or malformed", task.ID)
+	}
+	return *task.LeaseToken
 }
 func assertRunMatchesDB(t *testing.T, db *sql.DB, run *repository.ExploreFetchRun) {
 	t.Helper()

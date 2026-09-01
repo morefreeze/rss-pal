@@ -135,12 +135,14 @@ CREATE TABLE IF NOT EXISTS explore_fetch_queue (
     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     run_id INTEGER REFERENCES explore_fetch_runs(id) ON DELETE SET NULL,
     lease_owner VARCHAR(200),
+    lease_token VARCHAR(64),
     lease_expires_at TIMESTAMP,
     last_error TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMP
 );
+ALTER TABLE explore_fetch_queue ADD COLUMN IF NOT EXISTS lease_token VARCHAR(64);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_explore_fetch_queue_active_source_task
     ON explore_fetch_queue (source_id, task_type)
     WHERE status IN ('pending', 'leased');
