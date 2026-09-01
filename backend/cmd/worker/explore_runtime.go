@@ -31,10 +31,18 @@ const exploreCandidateSQL = `
 	      SELECT 1 FROM explore_source_observations observation
 	      JOIN explore_registry_providers provider ON provider.id=observation.provider_id
 	      WHERE observation.source_id=source.id AND provider.enabled
-	        AND observation.last_seen_at >= $1 - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')
+	        AND observation.last_seen_at >= $1::timestamp - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')
 	  )
 	ORDER BY COALESCE(source.health_score,0) DESC, source.last_observed_at DESC NULLS LAST, source.id
 	LIMIT $2`
+
+const exploreObservationSQL = `
+	SELECT observation.source_id,provider.provider_key,COALESCE(provider.topic,''),observation.provider_tags,observation.last_seen_at
+	FROM explore_source_observations observation
+	JOIN explore_registry_providers provider ON provider.id=observation.provider_id
+	WHERE observation.source_id=ANY($1) AND provider.enabled
+	  AND observation.last_seen_at >= $2::timestamp - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')
+	ORDER BY observation.source_id, observation.last_seen_at DESC, observation.id`
 
 func newProductionExploreCycle(db *sql.DB, cfg *config.Config) *exploreCycle {
 	queue := newSQLExploreQueue(db)
@@ -324,13 +332,7 @@ func (inputs *sqlExploreRankInputs) LoadCandidates(ctx context.Context, now time
 		return candidates, nil
 	}
 
-	rows, err = inputs.db.QueryContext(ctx, `
-		SELECT observation.source_id,provider.provider_key,COALESCE(provider.topic,''),observation.provider_tags,observation.last_seen_at
-		FROM explore_source_observations observation
-		JOIN explore_registry_providers provider ON provider.id=observation.provider_id
-		WHERE observation.source_id=ANY($1) AND provider.enabled
-		  AND observation.last_seen_at >= $2 - GREATEST(provider.sync_interval_minutes * 2 * INTERVAL '1 minute', INTERVAL '6 hours')
-		ORDER BY observation.source_id, observation.last_seen_at DESC, observation.id`, pq.Array(ids), now)
+	rows, err = inputs.db.QueryContext(ctx, exploreObservationSQL, pq.Array(ids), now)
 	if err != nil {
 		return nil, err
 	}
