@@ -529,7 +529,7 @@ func processorSuccessResult(checkedAt time.Time, feedURL string) explore.SourceF
 func insertProcessorSource(t *testing.T, db *sql.DB, rawURL, status string) int {
 	t.Helper()
 	var id int
-	if err := db.QueryRow(`INSERT INTO recommended_feeds (url,title,category,language,normalized_url,validation_status,health_score) VALUES ($1,$1,'test','en',$1,$2,CASE WHEN $2='valid' THEN 1 ELSE NULL END) RETURNING id`, rawURL, status).Scan(&id); err != nil {
+	if err := db.QueryRow(`INSERT INTO recommended_feeds (url,title,category,language,normalized_url,validation_status,health_score) VALUES ($1,$1,'test','en',$1,$2::varchar,CASE WHEN $2::text='valid' THEN 1 ELSE NULL END) RETURNING id`, rawURL, status).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id

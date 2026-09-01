@@ -296,6 +296,10 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 	if err := explore.ValidateCandidate(candidate); err != nil {
 		return 0, fmt.Errorf("invalid explore candidate: %w", err)
 	}
+	providerTags := candidate.Tags
+	if providerTags == nil {
+		providerTags = []string{}
+	}
 	q, commit, rollback, err := txOrBegin(r.db)
 	if err != nil {
 		return 0, err
@@ -314,7 +318,7 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 		VALUES ($1, $2, $3, $4, $5, $5, $6)
 		ON CONFLICT (provider_id, external_key, source_id) DO UPDATE SET
 			provider_tags=EXCLUDED.provider_tags, last_seen_at=EXCLUDED.last_seen_at, occurrence_count=EXCLUDED.occurrence_count`,
-		providerID, sourceID, candidate.ExternalKey, pq.Array(candidate.Tags), observedAt, candidate.OccurrenceCount)
+		providerID, sourceID, candidate.ExternalKey, pq.Array(providerTags), observedAt, candidate.OccurrenceCount)
 	if err != nil {
 		return 0, err
 	}

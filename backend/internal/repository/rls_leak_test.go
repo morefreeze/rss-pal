@@ -210,12 +210,12 @@ func TestRLS_PrivateTablesAreScoped(t *testing.T) {
 		},
 		{
 			name:     "explore_batches",
-			seedSQL:  `INSERT INTO explore_batches (user_id, slot_at, status) VALUES ($2, NOW(), 'pending')`,
+			seedSQL:  `INSERT INTO explore_batches (user_id, slot_at, status) VALUES ($2, NOW() + $1::integer * INTERVAL '0 seconds', 'pending')`,
 			countSQL: `SELECT COUNT(*) FROM explore_batches`,
 		},
 		{
 			name: "explore_batch_sources",
-			seedSQL: `WITH b AS (INSERT INTO explore_batches (user_id, slot_at, status) VALUES ($2, NOW(), 'pending') RETURNING id)
+			seedSQL: `WITH b AS (INSERT INTO explore_batches (user_id, slot_at, status) VALUES ($2, NOW() + $1::integer * INTERVAL '0 seconds', 'pending') RETURNING id)
 				INSERT INTO explore_batch_sources (user_id, batch_id, source_id, rank, score)
 				SELECT $2, b.id, s.id, 1, 1.0 FROM b
 				CROSS JOIN (SELECT id FROM recommended_feeds ORDER BY id LIMIT 1) s
@@ -225,13 +225,13 @@ func TestRLS_PrivateTablesAreScoped(t *testing.T) {
 		{
 			name: "explore_feedback",
 			seedSQL: `INSERT INTO explore_feedback (user_id, source_id, feedback_type)
-				SELECT $2, id, 'hide_source' FROM recommended_feeds ORDER BY id LIMIT 1`,
+				SELECT $2, id, 'hide_source' FROM recommended_feeds WHERE $1::integer IS NOT NULL ORDER BY id LIMIT 1`,
 			countSQL: `SELECT COUNT(*) FROM explore_feedback`,
 		},
 		{
 			name: "explore_article_events",
 			seedSQL: `INSERT INTO explore_article_events (user_id, explore_article_id, event_type)
-				SELECT $2, id, 'exposure' FROM explore_articles ORDER BY id LIMIT 1`,
+				SELECT $2, id, 'exposure' FROM explore_articles WHERE $1::integer IS NOT NULL ORDER BY id LIMIT 1`,
 			countSQL: `SELECT COUNT(*) FROM explore_article_events`,
 		},
 	}
