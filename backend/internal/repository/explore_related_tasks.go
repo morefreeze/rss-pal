@@ -9,7 +9,7 @@ import (
 
 const (
 	ExploreTaskDiscoverRelated = "discover_related"
-	ExplorePriorityRelatedSeed = 250
+	ExplorePriorityRelatedSeed = ExplorePriorityRelated
 	maxExploreRelatedScanPage  = 250
 )
 

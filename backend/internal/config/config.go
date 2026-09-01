@@ -132,7 +132,7 @@ func Load() *Config {
 		},
 		Explore: ExploreConfig{
 			FetchBatchLimit:  getEnvIntBounded("EXPLORE_FETCH_BATCH_LIMIT", 500, 1, 500),
-			FetchConcurrency: getEnvIntBounded("EXPLORE_FETCH_CONCURRENCY", 5, 1, 0),
+			FetchConcurrency: getEnvIntBounded("EXPLORE_FETCH_CONCURRENCY", 5, 1, 5),
 		},
 	}
 }

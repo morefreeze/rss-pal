@@ -19,6 +19,7 @@ import (
 const (
 	exploreMaxBatchLimit      = 500
 	exploreDefaultConcurrency = 5
+	exploreMaxConcurrency     = 5
 	exploreDefaultLease       = 20 * time.Minute
 	// The last queue position must remain leased while earlier concurrency
 	// waves perform the initial source request and every discovery candidate.
@@ -101,6 +102,8 @@ func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
 	}
 	if deps.fetchConcurrency <= 0 {
 		deps.fetchConcurrency = exploreDefaultConcurrency
+	} else if deps.fetchConcurrency > exploreMaxConcurrency {
+		deps.fetchConcurrency = exploreMaxConcurrency
 	}
 	if deps.leaseDuration <= 0 {
 		deps.leaseDuration = exploreDefaultLease
@@ -128,6 +131,8 @@ func requiredExploreLeaseDuration(batchLimit, concurrency int) time.Duration {
 	}
 	if concurrency <= 0 {
 		concurrency = exploreDefaultConcurrency
+	} else if concurrency > exploreMaxConcurrency {
+		concurrency = exploreMaxConcurrency
 	}
 	waves := (batchLimit + concurrency - 1) / concurrency
 	return time.Duration(waves)*exploreTaskWorstCaseDuration + exploreLeaseSafetyMargin
