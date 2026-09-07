@@ -122,3 +122,16 @@ func TestFindMediaInBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestFindMediaInHTMLBytesResolvesRelativeAudioSource(t *testing.T) {
+	got := FindMediaInHTMLBytes(
+		[]byte(`<audio src="/media/episode-final.mp3" type="audio/mpeg"></audio>`),
+		"https://example.com/articles/42",
+	)
+	if got == nil {
+		t.Fatal("expected MediaInfo, got nil")
+	}
+	if got.URL != "https://example.com/media/episode-final.mp3" || got.Type != "audio/mpeg" {
+		t.Fatalf("media = (%q, %q), want resolved audio URL", got.URL, got.Type)
+	}
+}

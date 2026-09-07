@@ -556,6 +556,21 @@ func (r *ArticleRepository) UpdateMediaIfNull(feedID int, url, mediaURL, mediaTy
 	return err
 }
 
+// UpdateMedia refreshes media metadata for an explicitly re-captured article.
+// Unlike background backfill, a user-initiated capture is authoritative and
+// may replace an obsolete media URL.
+func (r *ArticleRepository) UpdateMedia(articleID int, mediaURL, mediaType string, durationSeconds int) error {
+	_, err := r.db.Exec(`
+		UPDATE articles
+		SET media_url = $2,
+		    media_type = $3,
+		    media_duration_seconds = $4,
+		    transcript_fetched_at = NULL
+		WHERE id = $1
+	`, articleID, nullableString(mediaURL), nullableString(mediaType), nullableInt(durationSeconds))
+	return err
+}
+
 func (r *ArticleRepository) Exists(feedID int, url string) (bool, error) {
 	query := `SELECT EXISTS(SELECT 1 FROM articles WHERE feed_id = $1 AND url = $2)`
 	var exists bool

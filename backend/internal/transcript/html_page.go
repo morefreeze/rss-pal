@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/bytedance/rss-pal/internal/httpx"
 	"github.com/bytedance/rss-pal/internal/model"
 )
 
@@ -150,7 +151,7 @@ func isTranscriptMarker(tag, text string) bool {
 func (f *HTMLPageScraper) tryLinkedSubtitle(ctx context.Context, doc *goquery.Document, baseURL string) (string, string) {
 	client := f.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = httpx.NewClient(30 * time.Second)
 	}
 	var foundText, foundSource string
 	doc.Find("a[href]").EachWithBreak(func(_ int, a *goquery.Selection) bool {

@@ -89,6 +89,31 @@ func TestHTMLPageScraper_LinkedVTT(t *testing.T) {
 	}
 }
 
+func TestHTMLPageScraperDefaultClientRejectsLoopbackSubtitle(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nPrivate transcript."))
+	}))
+	defer srv.Close()
+
+	pageURL := "https://8.8.8.8/show/42"
+	html := `<html><body><a href="` + srv.URL + `/private.vtt">download transcript</a></body></html>`
+	stub := &stubDocFetcher{pages: map[string]string{pageURL: html}}
+	f := &HTMLPageScraper{Docs: stub}
+
+	got, err := f.Fetch(context.Background(), &model.Article{URL: pageURL, MediaType: "audio/mpeg"})
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected no transcript from blocked URL, got %+v", got)
+	}
+	if requests != 0 {
+		t.Fatalf("loopback subtitle server received %d requests, want 0", requests)
+	}
+}
+
 func TestHTMLPageScraper_TwoHop(t *testing.T) {
 	announce, _ := os.ReadFile(filepath.Join("testdata", "page_two_hop_announce.html"))
 	target, _ := os.ReadFile(filepath.Join("testdata", "page_two_hop_target.html"))

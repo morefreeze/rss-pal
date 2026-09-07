@@ -16,6 +16,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bytedance/rss-pal/internal/backup"
+	"github.com/bytedance/rss-pal/internal/httpx"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
@@ -106,6 +107,7 @@ type bookmarkletArticleRepo interface {
 	UpdateContent(id int, content string, wordCount, readingMinutes int) error
 	UpdateTitle(id int, title string) error
 	UpdateSummary(id int, summaryBrief, summaryDetailed string) error
+	UpdateMedia(articleID int, mediaURL, mediaType string, durationSeconds int) error
 	// PDF-specific (added for capture-pdf / capture-pdf-url):
 	CreatePDFStub(a *model.Article) error
 	UpdateContentAndMarkReady(id int, content string, wordCount, readingMinutes int) error
@@ -173,6 +175,9 @@ func (a bookmarkletArticleRepoAdapter) UpdateTitle(id int, title string) error {
 }
 func (a bookmarkletArticleRepoAdapter) UpdateSummary(id int, summaryBrief, summaryDetailed string) error {
 	return a.r.UpdateSummary(id, summaryBrief, summaryDetailed)
+}
+func (a bookmarkletArticleRepoAdapter) UpdateMedia(articleID int, mediaURL, mediaType string, durationSeconds int) error {
+	return a.r.UpdateMedia(articleID, mediaURL, mediaType, durationSeconds)
 }
 func (a bookmarkletArticleRepoAdapter) CreatePDFStub(art *model.Article) error {
 	return a.r.CreatePDFStub(art)
@@ -272,6 +277,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		title       = strings.TrimSpace(req.Title)
 		publishedAt *time.Time
 		wasTwitter  bool
+		media       *rss.MediaInfo
 	)
 
 	if statusID, ok := rss.IsTwitterStatusURL(normalized); ok {
@@ -290,12 +296,18 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	if !wasTwitter {
-		body, err := extractContentFromHTML(req.HTML, req.URL)
+		body, capturedMedia, err := extractArticleFromHTML(req.HTML, req.URL)
 		if err != nil || strings.TrimSpace(body) == "" {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "无法从页面提取正文"})
 			return
 		}
 		content = body
+		media = capturedMedia
+		if media != nil {
+			if _, err := httpx.ValidateURL(normalized); err != nil {
+				media = nil
+			}
+		}
 	}
 
 	if title == "" {
@@ -349,6 +361,14 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		if err := articleRepo.UpdateSummary(existing.ID, "", ""); err != nil {
 			log.Printf("bookmarklet: clear summary failed for article=%d: %v", existing.ID, err)
 		}
+		var mediaURL, mediaType string
+		var mediaDuration int
+		if media != nil {
+			mediaURL, mediaType, mediaDuration = media.URL, media.Type, media.Duration
+		}
+		if err := articleRepo.UpdateMedia(existing.ID, mediaURL, mediaType, mediaDuration); err != nil {
+			log.Printf("bookmarklet: media refresh failed for article=%d: %v", existing.ID, err)
+		}
 		log.Printf("bookmarklet: updated article=%d user=%d url=%s len=%d (force=%v)", existing.ID, user.ID, normalized, newLen, req.Force)
 		if h.backup != nil {
 			h.backup.TriggerAsync()
@@ -376,6 +396,11 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		PublishedAt: publishedAt, // tweet's original time for Twitter captures, nil otherwise
 		IsClip:      true,
 		Kind:        articleKind(wasTwitter),
+	}
+	if media != nil {
+		article.MediaURL = media.URL
+		article.MediaType = media.Type
+		article.MediaDurationSeconds = media.Duration
 	}
 	article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
 	if err := articleRepo.Create(article); err != nil {
@@ -423,9 +448,14 @@ func (h *BookmarkletHandler) authenticate(c *gin.Context) (*model.User, error) {
 // link URLs are resolved against baseURL so images render correctly when the
 // source page used relative or protocol-relative paths (typical for SPAs).
 func extractContentFromHTML(html, baseURL string) (string, error) {
+	content, _, err := extractArticleFromHTML(html, baseURL)
+	return content, err
+}
+
+func extractArticleFromHTML(html, baseURL string) (string, *rss.MediaInfo, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	// If the HTML is a clean extraction from our extension (body contains
 	// #js_content and optionally #wx_images), skip the aggressive generic
@@ -445,10 +475,12 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 	rss.ResolveURLs(doc, baseURL)
 
 	var content string
+	var media *rss.MediaInfo
 	candidates := []string{
 		// WeChat: #js_content is the authoritative content container; check first
 		// so the 200-char early-break doesn't settle on a noisier candidate.
 		"#js_content",
+		".user-html",
 		"article", "[role='main']", "main",
 		".post-content", ".article-content", ".article-body", ".entry-content",
 		".story-body", ".post-body", ".field-item",
@@ -462,9 +494,13 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 		if nodes.Length() == 0 {
 			continue
 		}
-		c := rss.ExtractMarkdown(nodes.First())
+		selection := nodes.First()
+		selectionHTML, _ := selection.Html()
+		candidateMedia := rss.FindMediaInHTMLBytes([]byte(selectionHTML), baseURL)
+		c := rss.ExtractMarkdown(selection)
 		if len(c) > len(content) {
 			content = c
+			media = candidateMedia
 		}
 		if len(content) > 200 {
 			break
@@ -483,7 +519,7 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 		content = b.String()
 	}
 
-	return strings.TrimSpace(content), nil
+	return strings.TrimSpace(content), media, nil
 }
 
 // GenerateBookmarkletToken returns a 32-byte random hex string suitable for

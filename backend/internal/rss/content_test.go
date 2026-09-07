@@ -72,6 +72,23 @@ func TestFetchContentFromReader_HeadingsAndParagraphs(t *testing.T) {
 	}
 }
 
+func TestNewContentFetcherRejectsLoopbackDocumentFetch(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`<html><body>private</body></html>`))
+	}))
+	defer srv.Close()
+
+	doc, err := NewContentFetcher().FetchHTMLDocument(context.Background(), srv.URL)
+	if err == nil {
+		t.Fatalf("expected SSRF rejection, got doc=%v", doc)
+	}
+	if requests != 0 {
+		t.Fatalf("loopback server received %d requests, want 0", requests)
+	}
+}
+
 func TestFetchContentWithMetadataFromReaderReturnsPageTitle(t *testing.T) {
 	html := `<html><head>
 		<title>Fallback title</title>

@@ -1,6 +1,7 @@
 package rss
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"html"
@@ -17,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/bytedance/rss-pal/internal/httpx"
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2/converter"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
@@ -54,9 +56,7 @@ type ContentResult struct {
 }
 
 func NewContentFetcher() *ContentFetcher {
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
+	client := httpx.NewClient(30 * time.Second)
 	return &ContentFetcher{
 		client:      client,
 		jinaAPIKey:  os.Getenv("JINA_API_KEY"),
@@ -1104,49 +1104,70 @@ func mediaBasename(rawURL string) string {
 // findMediaInBytes scans body for the first plausible audio/video URL and
 // returns its MediaInfo, or nil. baseURL is unused currently but kept for
 // future relative-URL resolution.
-func findMediaInBytes(body []byte, _ string) *MediaInfo {
+func findMediaInBytes(body []byte, baseURL string) *MediaInfo {
 	matches := mediaURLRegex.FindAll(body, -1)
 	for _, m := range matches {
-		raw := string(m)
-
-		// Resolve protocol-relative URLs to https
-		if strings.HasPrefix(raw, "//") {
-			raw = "https:" + raw
-		}
-
-		// Determine extension (strip query string first)
-		pathPart := raw
-		if i := strings.Index(pathPart, "?"); i >= 0 {
-			pathPart = pathPart[:i]
-		}
-		dot := strings.LastIndex(pathPart, ".")
-		if dot < 0 {
-			continue
-		}
-		ext := strings.ToLower(pathPart[dot+1:])
-		mimeType := mediaTypeFromExt(ext)
-		if mimeType == "" {
-			continue
-		}
-
-		// Basename length filter
-		base := mediaBasename(raw)
-		if len(base) < mediaBasenameMinLen {
-			continue
-		}
-
-		// Deny-list filter (case-insensitive exact match)
-		if mediaDenyList[strings.ToLower(base)] {
-			continue
-		}
-
-		return &MediaInfo{
-			URL:      raw,
-			Type:     mimeType,
-			Duration: 0,
+		if mi := mediaInfoFromURL(string(m), "", baseURL); mi != nil {
+			return mi
 		}
 	}
 	return nil
+}
+
+func mediaInfoFromURL(raw, explicitType, baseURL string) *MediaInfo {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.String() == "" {
+		return nil
+	}
+	if parsed.Scheme == "" && parsed.Host != "" && baseURL == "" {
+		parsed.Scheme = "https"
+	} else if !parsed.IsAbs() {
+		base, err := url.Parse(baseURL)
+		if err != nil || !base.IsAbs() {
+			return nil
+		}
+		parsed = base.ResolveReference(parsed)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil
+	}
+
+	mimeType := strings.ToLower(strings.TrimSpace(strings.Split(explicitType, ";")[0]))
+	if !strings.HasPrefix(mimeType, "audio/") && !strings.HasPrefix(mimeType, "video/") {
+		ext := strings.TrimPrefix(strings.ToLower(path.Ext(parsed.Path)), ".")
+		mimeType = mediaTypeFromExt(ext)
+	}
+	if mimeType == "" {
+		return nil
+	}
+
+	base := mediaBasename(parsed.String())
+	if len(base) < mediaBasenameMinLen || mediaDenyList[strings.ToLower(base)] {
+		return nil
+	}
+	return &MediaInfo{URL: parsed.String(), Type: mimeType}
+}
+
+// FindMediaInHTMLBytes returns the first plausible audio/video URL embedded in
+// an already-captured HTML document. Bookmarklet captures use this before the
+// HTML-to-Markdown conversion drops native <audio>/<video> elements.
+func FindMediaInHTMLBytes(body []byte, baseURL string) *MediaInfo {
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err == nil {
+		var found *MediaInfo
+		doc.Find("audio[src], video[src], audio source[src], video source[src]").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+			raw, ok := s.Attr("src")
+			if !ok {
+				return true
+			}
+			found = mediaInfoFromURL(raw, s.AttrOr("type", ""), baseURL)
+			return found == nil
+		})
+		if found != nil {
+			return found
+		}
+	}
+	return findMediaInBytes(body, baseURL)
 }
 
 // FindMediaInHTML fetches pageURL and returns the first plausible audio/video

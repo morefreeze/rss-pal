@@ -55,17 +55,23 @@ func (s *stubFeedRepo) GetOrCreateClipFeed(ownerID int) (*model.Feed, error) {
 func (s *stubFeedRepo) WithCtx(_ ctxkey.CtxGetter) bookmarkletFeedRepo { return s }
 
 type stubArticleRepo struct {
-	nextID         int32 // atomic so concurrent writes are safe
-	byOwnerAndURL  map[string]*model.Article
-	byID           map[int]*model.Article
-	created        []*model.Article
-	contentUpdates map[int]string
-	titleUpdates   map[int]string
-	summaryClears  map[int]bool
-	pdfStubs       []int
-	failedReasons  map[int]string
-	readyContents  map[int]string
-	resetCalls     []int
+	nextID          int32 // atomic so concurrent writes are safe
+	byOwnerAndURL   map[string]*model.Article
+	byID            map[int]*model.Article
+	created         []*model.Article
+	contentUpdates  map[int]string
+	titleUpdates    map[int]string
+	summaryClears   map[int]bool
+	pdfStubs        []int
+	failedReasons   map[int]string
+	readyContents   map[int]string
+	resetCalls      []int
+	mediaFeedID     int
+	mediaArticleID  int
+	mediaArticleURL string
+	mediaURL        string
+	mediaType       string
+	mediaDuration   int
 }
 
 func newStubArticleRepo() *stubArticleRepo {
@@ -107,6 +113,23 @@ func (s *stubArticleRepo) UpdateTitle(id int, title string) error {
 
 func (s *stubArticleRepo) UpdateSummary(id int, brief, detailed string) error {
 	s.summaryClears[id] = (brief == "" && detailed == "")
+	return nil
+}
+
+func (s *stubArticleRepo) UpdateMediaIfNull(feedID int, articleURL, mediaURL, mediaType string, durationSeconds int) error {
+	s.mediaFeedID = feedID
+	s.mediaArticleURL = articleURL
+	s.mediaURL = mediaURL
+	s.mediaType = mediaType
+	s.mediaDuration = durationSeconds
+	return nil
+}
+
+func (s *stubArticleRepo) UpdateMedia(articleID int, mediaURL, mediaType string, durationSeconds int) error {
+	s.mediaArticleID = articleID
+	s.mediaURL = mediaURL
+	s.mediaType = mediaType
+	s.mediaDuration = durationSeconds
 	return nil
 }
 

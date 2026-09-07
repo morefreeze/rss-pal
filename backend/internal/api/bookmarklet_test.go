@@ -9,6 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/gin-gonic/gin"
 )
 
@@ -114,6 +115,40 @@ func TestExtractContentFromHTML_PreservesContainerWithJunkClass(t *testing.T) {
 	for _, want := range []string{"开头段落", "第二段"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestExtractContentFromHTMLPrefersUserHTMLOverShareChrome(t *testing.T) {
+	html := `<html><body>
+		<div style="display:flex">
+			<div class="text-minor text-center">分享至
+				<img src="/assets/icons/wechat.svg">
+				<a href="https://service.weibo.com/share/share.php"><img src="/assets/icons/weibo.svg"></a>
+				<a href="https://connect.qq.com/widget/shareqq/index.html"><img src="/assets/icons/qq.svg"></a>
+			</div>
+			<div>
+				<span class="user-html">
+					<p>正文开头。这一段刻意写得足够长，用来模拟领研网页中真正的文章正文，并确保正文选择器可以独立通过长度阈值，而不需要退回到包含页面工具栏和推荐内容的 body 节点。</p>
+					<p>正文结尾。这一段继续补充足够多的文字，验证抓取结果只包含 user-html 内的文章内容，不包含外层分享按钮、收藏按钮、评论区域或其他页面装饰。</p>
+				</span>
+				<div>热门推荐</div>
+			</div>
+		</div>
+	</body></html>`
+
+	got, err := extractContentFromHTML(html, "https://www.linkresearcher.com/careers/example")
+	if err != nil {
+		t.Fatalf("extractContentFromHTML: %v", err)
+	}
+	for _, want := range []string{"正文开头", "正文结尾"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing article text %q in:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"分享至", "wechat.svg", "weibo.svg", "qq.svg", "热门推荐"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("unexpected page chrome %q in:\n%s", unwanted, got)
 		}
 	}
 }
@@ -275,6 +310,156 @@ func TestCapture_KindSetByURL(t *testing.T) {
 				t.Errorf("article.Kind = %q, want %q", art.Kind, tc.wantKind)
 			}
 		})
+	}
+}
+
+func TestCapturePersistsAudioFromCapturedHTML(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture", h.Capture)
+
+	const mediaURL = "https://8.8.8.8/media/6bd5f8e7-6e06-4788-99f0-5d6604020e57.mp3"
+	html := `<html><body>
+		<audio src="https://cdn.example.com/navigation-preview.mp3"></audio>
+		<span class="user-html">
+		<p><audio src="/media/6bd5f8e7-6e06-4788-99f0-5d6604020e57.mp3" controls></audio></p>
+		<p>音频文章正文。这一段刻意写得足够长，以便文章正文选择器直接命中当前节点，并覆盖真实音频网摘的抓取行为。</p>
+		<p>第二段继续补充正文内容，确保整个测试样本超过长度阈值，同时不会依赖页面外层的分享区或推荐区。</p>
+	</span></body></html>`
+	body, _ := json.Marshal(map[string]any{
+		"url":   "https://8.8.8.8/careers/audio-article",
+		"title": "音频文章",
+		"html":  html,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/bookmarklet/capture", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(repo.created) != 1 {
+		t.Fatalf("created articles = %d, want 1", len(repo.created))
+	}
+	article := repo.created[0]
+	if article.MediaURL != mediaURL || article.MediaType != "audio/mpeg" {
+		t.Fatalf("created media = (%q, %q), want (%q, audio/mpeg)", article.MediaURL, article.MediaType, mediaURL)
+	}
+}
+
+func TestCaptureBackfillsAudioWhenRecapturingExistingArticle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture", h.Capture)
+
+	const articleURL = "https://8.8.8.8/careers/audio-article"
+	const mediaURL = "https://cdn.linkresearcher.com/6bd5f8e7-6e06-4788-99f0-5d6604020e57.mp3"
+	repo.byOwnerAndURL["42|"+articleURL] = &model.Article{
+		ID:      2692,
+		FeedID:  7,
+		URL:     articleURL,
+		Title:   "旧标题",
+		Content: "旧正文",
+	}
+	html := `<html><body><span class="user-html">
+		<p><audio src="` + mediaURL + `" controls></audio></p>
+		<p>重新抓取后的音频文章正文。这一段刻意写得足够长，以便文章正文选择器直接命中当前节点并完成更新。</p>
+		<p>第二段继续补充正文内容，确保测试覆盖现有文章重新抓取时的媒体信息回填。</p>
+	</span></body></html>`
+	body, _ := json.Marshal(map[string]any{
+		"url":   articleURL,
+		"title": "新标题",
+		"html":  html,
+		"force": true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/bookmarklet/capture", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if repo.mediaArticleID != 2692 || repo.mediaURL != mediaURL || repo.mediaType != "audio/mpeg" {
+		t.Fatalf("media refresh = article=%d media=(%q, %q)", repo.mediaArticleID, repo.mediaURL, repo.mediaType)
+	}
+}
+
+func TestCaptureClearsStaleAudioWhenRecaptureHasNoMedia(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture", h.Capture)
+
+	const articleURL = "https://8.8.8.8/careers/text-article"
+	repo.byOwnerAndURL["42|"+articleURL] = &model.Article{
+		ID:        2692,
+		FeedID:    7,
+		URL:       articleURL,
+		Title:     "旧标题",
+		Content:   "旧正文",
+		MediaURL:  "https://cdn.example.com/obsolete-episode.mp3",
+		MediaType: "audio/mpeg",
+	}
+	html := `<html><body><span class="user-html">
+		<p>重新抓取后的普通文章正文。这一段刻意写得足够长，以便文章正文选择器直接命中当前节点并完成更新。</p>
+		<p>第二段继续补充正文内容，但页面中已经没有任何音频元素，旧播放器应当随显式重抓一起移除。</p>
+	</span></body></html>`
+	body, _ := json.Marshal(map[string]any{
+		"url":   articleURL,
+		"title": "新标题",
+		"html":  html,
+		"force": true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/bookmarklet/capture", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if repo.mediaArticleID != 2692 || repo.mediaURL != "" || repo.mediaType != "" {
+		t.Fatalf("media clear = article=%d media=(%q, %q)", repo.mediaArticleID, repo.mediaURL, repo.mediaType)
+	}
+}
+
+func TestCaptureDoesNotClassifyUnsafeArticleURLAsMedia(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newTestBookmarkletHandlerForPDF(t)
+	r := gin.New()
+	r.POST("/api/bookmarklet/capture", h.Capture)
+
+	html := `<html><body><span class="user-html">
+		<p><audio src="https://cdn.example.com/public-episode.mp3" controls></audio></p>
+		<p>正文内容足够长，以便正文选择器命中，但文章地址本身指向 loopback，不能让媒体字段触发后台网络抓取。</p>
+		<p>第二段继续补充正文，确保这个测试只验证媒体分类的 SSRF 边界。</p>
+	</span></body></html>`
+	body, _ := json.Marshal(map[string]any{
+		"url":   "http://127.0.0.1/private-audio",
+		"title": "不安全地址",
+		"html":  html,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/bookmarklet/capture", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(repo.created) != 1 {
+		t.Fatalf("created articles = %d, want 1", len(repo.created))
+	}
+	if repo.created[0].MediaURL != "" || repo.created[0].MediaType != "" {
+		t.Fatalf("unsafe article persisted media=(%q, %q)", repo.created[0].MediaURL, repo.created[0].MediaType)
 	}
 }
 
