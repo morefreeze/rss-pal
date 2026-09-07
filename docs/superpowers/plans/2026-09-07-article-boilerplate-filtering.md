@@ -30,4 +30,3 @@ the unchanged status monitor during ordinary Tencent deployments.
 - Wait for the Tencent workflow and verify its exact commit.
 - Back up article 2691, re-extract it, and update only its content/metrics.
 - Verify containers, direct/public health, and absence of the archive-year tail.
-

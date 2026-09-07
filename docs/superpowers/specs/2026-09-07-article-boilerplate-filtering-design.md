@@ -66,4 +66,3 @@ that article's content and metrics. Do not bulk rewrite historical articles.
 - Run the full backend suite, deployment-script tests, and shell syntax checks.
 - After pushing master, verify the GitHub deployment, exact Tencent revision,
   all containers, direct/public health, and article 2691's stored/public tail.
-
