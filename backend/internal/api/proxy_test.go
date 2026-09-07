@@ -52,6 +52,87 @@ func newTestProxy(validator func(string) (*url.URL, error)) *ImageProxy {
 	return p
 }
 
+func newTestMediaProxy(validator func(string) (*url.URL, error)) *MediaProxy {
+	p := &MediaProxy{Validate: validator}
+	p.Client = &http.Client{
+		Timeout: mediaProxyTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("too many redirects")
+			}
+			if _, err := p.Validate(req.URL.String()); err != nil {
+				return fmt.Errorf("redirect rejected: %w", err)
+			}
+			return nil
+		},
+	}
+	return p
+}
+
+func TestProxyMedia_ForwardsRangeAndInjectsReferer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var gotRange, gotReferer string
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRange = r.Header.Get("Range")
+		gotReferer = r.Header.Get("Referer")
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Content-Range", "bytes 0-3/8")
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Length", "4")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte("ID3x"))
+	}))
+	defer origin.Close()
+
+	proxy := newTestMediaProxy(allowLoopbackValidator)
+	r := gin.New()
+	r.GET("/api/proxy/media", proxy.Handle)
+	req := httptest.NewRequest(http.MethodGet, "/api/proxy/media?url="+url.QueryEscape(origin.URL+"/episode.mp3"), nil)
+	req.Header.Set("Range", "bytes=0-3")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206; body=%s", rec.Code, rec.Body.String())
+	}
+	if gotRange != "bytes=0-3" {
+		t.Errorf("upstream Range = %q, want bytes=0-3", gotRange)
+	}
+	if !strings.HasPrefix(gotReferer, origin.URL) {
+		t.Errorf("referer = %q, want prefix %q", gotReferer, origin.URL)
+	}
+	if got := rec.Header().Get("Content-Range"); got != "bytes 0-3/8" {
+		t.Errorf("Content-Range = %q, want bytes 0-3/8", got)
+	}
+	if got := rec.Header().Get("Accept-Ranges"); got != "bytes" {
+		t.Errorf("Accept-Ranges = %q, want bytes", got)
+	}
+	if rec.Body.String() != "ID3x" {
+		t.Errorf("body = %q, want ID3x", rec.Body.String())
+	}
+}
+
+func TestProxyMedia_RejectsNonMediaContentType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>"))
+	}))
+	defer origin.Close()
+
+	proxy := newTestMediaProxy(allowLoopbackValidator)
+	r := gin.New()
+	r.GET("/api/proxy/media", proxy.Handle)
+	req := httptest.NewRequest(http.MethodGet, "/api/proxy/media?url="+url.QueryEscape(origin.URL+"/not-media"), nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestProxyImage_StreamsAndInjectsReferer(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

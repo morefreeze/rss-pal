@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Article, ArticleListItem, getPlayback, putPlayback } from '../api/client'
+import { playableMediaURL } from './mediaURL'
 
 // Player input: any article-shaped object carrying the media metadata
 // the player actually reads (id, title, feed_title, media_url,
@@ -143,11 +144,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // ok, start from 0
     }
 
+	const src = playableMediaURL(article.media_url)
+
     setState({
       articleId: article.id,
       title: article.title,
       feedTitle: article.feed_title || '',
-      src: article.media_url,
+	  src,
       duration: article.media_duration_seconds || 0,
       position: resumeAt,
       playing: false,
@@ -160,7 +163,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // rapid switches the old listener would otherwise fire against the new src.
     clearPendingResume()
 
-    el.src = article.media_url
+	el.src = src
     el.playbackRate = stateRef.current.speed
     // Wait for the metadata before seeking — otherwise the seek is dropped.
     const playFromResume = () => {

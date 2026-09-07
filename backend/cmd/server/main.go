@@ -167,6 +167,11 @@ func main() {
 
 	// Public image proxy (no auth — <img> tags can't reliably carry auth headers).
 	router.GET("/api/proxy/image", api.NewImageProxy().Handle)
+	// Public media proxy for browser audio/video requests. It preserves Range
+	// headers and injects a source-origin Referer for hotlink-protected CDNs.
+	mediaProxy := api.NewMediaProxy()
+	router.GET("/api/proxy/media", mediaProxy.Handle)
+	router.HEAD("/api/proxy/media", mediaProxy.Handle)
 
 	// YouTube media URLs are protected by high-entropy, short-lived tickets.
 	// They stay outside JWT middleware because browser media requests do not
