@@ -465,7 +465,7 @@ func extractArticleFromHTML(html, baseURL string) (string, *rss.MediaInfo, error
 	isCleanExtraction := doc.Find("body > #js_content").Length() == 1
 
 	if !isCleanExtraction {
-		doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
+		rss.RemoveArticleChrome(doc)
 	} else {
 		doc.Find("script, style").Remove()
 	}
@@ -474,37 +474,11 @@ func extractArticleFromHTML(html, baseURL string) (string, *rss.MediaInfo, error
 	rss.PromoteLazyImages(doc)
 	rss.ResolveURLs(doc, baseURL)
 
-	var content string
+	selection, content := rss.SelectArticleContent(doc, 200)
 	var media *rss.MediaInfo
-	candidates := []string{
-		// WeChat: #js_content is the authoritative content container; check first
-		// so the 200-char early-break doesn't settle on a noisier candidate.
-		"#js_content",
-		".user-html",
-		"article", "[role='main']", "main",
-		".post-content", ".article-content", ".article-body", ".entry-content",
-		".story-body", ".post-body", ".field-item",
-		".article-text", ".article__body", ".content-article",
-		"[class*=article-detail]", "[class*=articleDetail]", "[class*=post-detail]",
-		"[id*=article-body]", "[id*=articleBody]",
-		".content", ".post", "#content", "#main", "body",
-	}
-	for _, sel := range candidates {
-		nodes := doc.Find(sel)
-		if nodes.Length() == 0 {
-			continue
-		}
-		selection := nodes.First()
+	if selection != nil {
 		selectionHTML, _ := selection.Html()
-		candidateMedia := rss.FindMediaInHTMLBytes([]byte(selectionHTML), baseURL)
-		c := rss.ExtractMarkdown(selection)
-		if len(c) > len(content) {
-			content = c
-			media = candidateMedia
-		}
-		if len(content) > 200 {
-			break
-		}
+		media = rss.FindMediaInHTMLBytes([]byte(selectionHTML), baseURL)
 	}
 
 	if strings.TrimSpace(content) == "" {

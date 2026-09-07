@@ -72,6 +72,39 @@ func TestFetchContentFromReader_HeadingsAndParagraphs(t *testing.T) {
 	}
 }
 
+func TestFetchContentFromReader_PrefersBlogEntryOverPageChrome(t *testing.T) {
+	html := `<html><body>
+		<div id="primary">
+			<div class="entry entryPage">
+				<h2>Understanding extraction boundaries</h2>
+				<p>In 2024 this article compared several approaches, and the year is legitimate article prose that must remain.</p>
+				<p>The references <a href="https://example.com/a">source A</a> and <a href="https://example.com/b">source B</a> are part of the article.</p>
+			</div>
+			<div class="recent-articles"><h2>More recent articles</h2><a href="/newer">A newer post</a></div>
+		</div>
+		<div class="monthly-newsletter"><h3>Monthly briefing</h3><a href="/subscribe">Sponsor and subscribe</a></div>
+		<div id="ft"><ul>
+			<li><a href="/2002/">2002</a></li><li><a href="/2003/">2003</a></li>
+			<li><a href="/2025/">2025</a></li><li><a href="/2026/">2026</a></li>
+		</ul></div>
+	</body></html>`
+
+	got, err := NewContentFetcher().FetchContentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("FetchContentFromReader: %v", err)
+	}
+	for _, want := range []string{"Understanding extraction boundaries", "In 2024", "source A", "source B"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing article content %q in:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"More recent articles", "Monthly briefing", "2002", "2003", "2025", "2026"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("unexpected page chrome %q in:\n%s", unwanted, got)
+		}
+	}
+}
+
 func TestNewContentFetcherRejectsLoopbackDocumentFetch(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

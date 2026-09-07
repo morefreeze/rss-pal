@@ -55,6 +55,76 @@ type ContentResult struct {
 	Title   string
 }
 
+const articleChromeSelector = "script, style, nav, header, footer, aside, " +
+	"[role='navigation'], [role='contentinfo'], " +
+	".sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, " +
+	"[class*=share], [class*=comment], [class*=recommend], [class*=social], " +
+	"[class*=footer], [class*=Footer], [id*=footer], " +
+	"[class*=related], [id*=related], [class*=recent-articles], [id*=recent-articles], " +
+	"[class*=archive], [id*=archive], [class*=pagination], [id*=pagination], " +
+	"[class*=newsletter], [id*=newsletter]"
+
+var articleContentSelectors = []string{
+	"#js_content",
+	".user-html",
+	"article",
+	"[role='main']",
+	"main",
+	".post-content",
+	".article-content",
+	".article-body",
+	".entry-content",
+	".entryPage",
+	".entry",
+	".story-body",
+	".post-body",
+	".field-item",
+	".article-text",
+	".article__body",
+	".content-article",
+	"[class*=article-detail]",
+	"[class*=articleDetail]",
+	"[class*=post-detail]",
+	"[id*=article-body]",
+	"[id*=articleBody]",
+	".content",
+	".post",
+	"#content",
+	"#main",
+	"body",
+}
+
+// RemoveArticleChrome removes common navigation and promotional containers
+// before content-root selection. Top-level document/article containers are
+// protected because some publishers attach misleading classes to them.
+func RemoveArticleChrome(doc *goquery.Document) {
+	doc.Find(articleChromeSelector).Not("html, body, head, main, article").Remove()
+}
+
+// SelectArticleContent returns the first conventional content root whose
+// Markdown clears minChars. If none clears the threshold, the longest
+// candidate is returned so callers retain the existing paragraph fallback.
+func SelectArticleContent(doc *goquery.Document, minChars int) (*goquery.Selection, string) {
+	var best *goquery.Selection
+	var bestMarkdown string
+	for _, selector := range articleContentSelectors {
+		nodes := doc.Find(selector)
+		if nodes.Length() == 0 {
+			continue
+		}
+		selection := nodes.First()
+		markdown := ExtractMarkdown(selection)
+		if len(markdown) > len(bestMarkdown) {
+			best = selection
+			bestMarkdown = markdown
+		}
+		if len(markdown) > minChars {
+			return selection, markdown
+		}
+	}
+	return best, bestMarkdown
+}
+
 func NewContentFetcher() *ContentFetcher {
 	client := httpx.NewClient(30 * time.Second)
 	return &ContentFetcher{
@@ -186,54 +256,13 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentRe
 	// attribute-substring matchers — e.g. WeChat sets
 	// <body class="… comment_feature …"> which would otherwise be wiped by
 	// [class*=comment], leaving the document empty.
-	doc.Find("script, style, nav, header, footer, aside, .sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, [class*=share], [class*=comment], [class*=recommend]").Not("html, body, head, main, article").Remove()
+	RemoveArticleChrome(doc)
 	StripAvatars(doc)
 	PromoteLazyImages(doc)
 	RemovePresentationImagePlaceholders(doc)
 	ResolveURLs(doc, url)
 
-	// Try to find main content
-	var content string
-
-	// Try common content selectors (ordered from most specific to least)
-	// Includes both English and Chinese news site class conventions
-	selectors := []string{
-		"article",
-		"[role='main']",
-		"main",
-		".post-content",
-		".article-content",
-		".article-body",
-		".entry-content",
-		".story-body",
-		".post-body",
-		".field-item",
-		// Chinese site common selectors
-		".article-text",
-		".article__body",
-		".content-article",
-		"[class*=article-detail]",
-		"[class*=articleDetail]",
-		"[class*=post-detail]",
-		"[id*=article-body]",
-		"[id*=articleBody]",
-		"[id*=js_content]", // WeChat articles
-		".content",
-		".post",
-		"#content",
-		"#main",
-		"body",
-	}
-
-	for _, selector := range selectors {
-		if doc.Find(selector).Length() > 0 {
-			selection := doc.Find(selector).First()
-			content = ExtractMarkdown(selection)
-			if len(content) > 200 {
-				break
-			}
-		}
-	}
+	_, content := SelectArticleContent(doc, 200)
 
 	if content == "" {
 		// Fallback: get all paragraph text
@@ -436,23 +465,12 @@ func (f *ContentFetcher) FetchContentWithMetadataFromReader(r io.Reader) (Conten
 	}
 	title := extractDocumentTitle(doc)
 
-	doc.Find("script, style, nav, header, footer, aside").Remove()
+	RemoveArticleChrome(doc)
 	StripAvatars(doc)
 	PromoteLazyImages(doc)
 	RemovePresentationImagePlaceholders(doc)
 
-	selectors := []string{"article", "[role='main']", "main", ".content", ".post", "#content", "body"}
-	var content string
-	for _, sel := range selectors {
-		if doc.Find(sel).Length() == 0 {
-			continue
-		}
-		md := ExtractMarkdown(doc.Find(sel).First())
-		if len(md) > 50 {
-			content = md
-			break
-		}
-	}
+	_, content := SelectArticleContent(doc, 50)
 
 	if content == "" {
 		// Last-resort paragraph fallback (kept for ultra-stripped pages)

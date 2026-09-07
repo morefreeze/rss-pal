@@ -153,6 +153,33 @@ func TestExtractContentFromHTMLPrefersUserHTMLOverShareChrome(t *testing.T) {
 	}
 }
 
+func TestExtractContentFromHTMLPrefersBlogEntryOverArchiveFooter(t *testing.T) {
+	html := `<html><body>
+		<div class="entry entryPage">
+			<h2>Article title</h2>
+			<p>The article discusses work completed in 2024, which is legitimate正文 and must stay in the capture.</p>
+			<p>Its <a href="https://example.com/reference">reference link</a> is also part of the article正文.</p>
+		</div>
+		<div class="recent-articles"><h2>More recent articles</h2><a href="/newer">Newer post</a></div>
+		<div id="ft"><a href="/2002/">2002</a><a href="/2003/">2003</a><a href="/2026/">2026</a></div>
+	</body></html>`
+
+	got, err := extractContentFromHTML(html, "https://example.com/post")
+	if err != nil {
+		t.Fatalf("extractContentFromHTML: %v", err)
+	}
+	for _, want := range []string{"Article title", "in 2024", "reference link"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing article content %q in:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"More recent articles", "2002", "2003", "2026"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("unexpected page chrome %q in:\n%s", unwanted, got)
+		}
+	}
+}
+
 func TestExtractContentFromHTMLPreservesFullUTF8ContentAboveLegacyLimit(t *testing.T) {
 	const tailMarker = "CHAPTER-END-完整"
 	body := strings.Repeat("中", 16667) + tailMarker

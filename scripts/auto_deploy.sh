@@ -10,6 +10,48 @@ AUTO_DEPLOY_CHANGED_FILES="${AUTO_DEPLOY_CHANGED_FILES:-}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 
+add_deploy_service() {
+  local candidate="$1" existing
+  for existing in "${DEPLOY_SERVICES[@]:-}"; do
+    [ "$existing" = "$candidate" ] && return
+  done
+  DEPLOY_SERVICES+=("$candidate")
+}
+
+select_deploy_services() {
+  local changed_files="$1" file
+  DEPLOY_ALL=false
+  DEPLOY_BACKEND=false
+  DEPLOY_SERVICES=()
+
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    case "$file" in
+      docker-compose*.yml)
+        DEPLOY_ALL=true
+        DEPLOY_BACKEND=true
+        ;;
+      backend/*)
+        DEPLOY_BACKEND=true
+        add_deploy_service api
+        add_deploy_service worker
+        ;;
+      frontend/*|certs/*|nginx.prod.conf|rss-pal.nginx)
+        add_deploy_service frontend
+        ;;
+      status-monitor/*)
+        add_deploy_service status-monitor
+        ;;
+    esac
+  done <<EOF_CHANGED_FILES
+$changed_files
+EOF_CHANGED_FILES
+
+  if [ "$DEPLOY_ALL" = "true" ]; then
+    DEPLOY_SERVICES=()
+  fi
+}
+
 configure_outbound_proxy() {
   if [ -n "${https_proxy:-${HTTPS_PROXY:-}}" ]; then
     log "Using existing outbound proxy settings"
@@ -96,20 +138,21 @@ if systemctl cat rss-pal-oci-egress.service >/dev/null 2>&1; then
   fi
 fi
 
-# Compose file set. With no -f flags, docker compose only auto-loads
-# docker-compose.yml + docker-compose.override.yml — the OCI egress override
-# is silently skipped and every deploy drops the egress proxy env from
-# api/worker/rsshub, breaking all GFW-blocked feeds until manually fixed.
-# Always pass the full -f list explicitly.
-COMPOSE_FILES=(-f docker-compose.yml)
-if [ -f docker-compose.override.yml ]; then
-  COMPOSE_FILES+=(-f docker-compose.override.yml)
-fi
-EGRESS_FILE=$(ls docker-compose.override.oci-egress*.yml 2>/dev/null | sort -V | tail -1 || true)
-if [ -n "$EGRESS_FILE" ]; then
-  COMPOSE_FILES+=(-f "$EGRESS_FILE")
-  log "Including egress override: $EGRESS_FILE"
-fi
+configure_compose_files() {
+  # With no -f flags, Compose only auto-loads docker-compose.yml plus the
+  # default override. Always include the newest OCI egress override explicitly.
+  # Re-run this after git changes the checkout and after rollback so the file
+  # set always describes the revision that will actually be deployed.
+  COMPOSE_FILES=(-f docker-compose.yml)
+  if [ -f docker-compose.override.yml ]; then
+    COMPOSE_FILES+=(-f docker-compose.override.yml)
+  fi
+  EGRESS_FILE=$(ls docker-compose.override.oci-egress*.yml 2>/dev/null | sort -V | tail -1 || true)
+  if [ -n "$EGRESS_FILE" ]; then
+    COMPOSE_FILES+=(-f "$EGRESS_FILE")
+    log "Including egress override: $EGRESS_FILE"
+  fi
+}
 
 check_runtime_services() {
   local services service container_ids container_id runtime_state runtime_status failed=0
@@ -154,10 +197,42 @@ check_runtime_services() {
   fi
 }
 
+deploy_runtime_services() {
+  local service
+  local independent_services=()
+
+  if [ "$DEPLOY_ALL" = "true" ]; then
+    $COMPOSE "${COMPOSE_FILES[@]}" up -d --build || return
+    return
+  fi
+
+  $COMPOSE "${COMPOSE_FILES[@]}" build "${DEPLOY_SERVICES[@]}" || return
+
+  if [ "$DEPLOY_BACKEND" = "true" ]; then
+    # api/worker intentionally bring up their dependencies so the one-shot
+    # status migration completes before either backend process starts.
+    $COMPOSE "${COMPOSE_FILES[@]}" up -d api worker || return
+  fi
+
+  for service in "${DEPLOY_SERVICES[@]}"; do
+    case "$service" in
+      api|worker) ;;
+      *) independent_services+=("$service") ;;
+    esac
+  done
+  if [ "${#independent_services[@]}" -gt 0 ]; then
+    # frontend depends on api in Compose, but a frontend-only deployment must
+    # not recreate api/status-migrate. These services are already running and
+    # are validated by check_runtime_services below.
+    $COMPOSE "${COMPOSE_FILES[@]}" up -d --no-deps "${independent_services[@]}" || return
+  fi
+}
+
 rollback_deployment() {
   log "Rolling back to $PREV_COMMIT..."
   git checkout "$PREV_COMMIT"
-  if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
+  configure_compose_files
+  if deploy_runtime_services 2>&1 | tee -a "$LOG_FILE"; then
     sleep 10
     log "Rollback complete. Staying on $(git rev-parse --short HEAD)"
   else
@@ -208,18 +283,11 @@ else
   fi
 fi
 
+configure_compose_files
+select_deploy_services "$CHANGED_FILES"
 RUNTIME_CHANGED=false
-if [ -n "$CHANGED_FILES" ]; then
-  while IFS= read -r file; do
-    case "$file" in
-      backend/*|frontend/*|status-monitor/*|docker-compose*.yml|certs/*|nginx.prod.conf|rss-pal.nginx)
-        RUNTIME_CHANGED=true
-        break
-        ;;
-    esac
-  done <<EOF_CHANGED
-$CHANGED_FILES
-EOF_CHANGED
+if [ "$DEPLOY_ALL" = "true" ] || [ "${#DEPLOY_SERVICES[@]}" -gt 0 ]; then
+  RUNTIME_CHANGED=true
 fi
 
 if [ "$RUNTIME_CHANGED" != "true" ]; then
@@ -228,13 +296,19 @@ if [ "$RUNTIME_CHANGED" != "true" ]; then
 fi
 
 # 3. Rebuild and restart
-log "Building and restarting containers..."
-if $COMPOSE "${COMPOSE_FILES[@]}" up -d --build 2>&1 | tee -a "$LOG_FILE"; then
+if [ "$DEPLOY_ALL" = "true" ]; then
+  log "Building and restarting all containers..."
+else
+  log "Building and restarting selected services: ${DEPLOY_SERVICES[*]}"
+fi
+if deploy_runtime_services 2>&1 | tee -a "$LOG_FILE"; then
   # 4. Health check: wait and verify containers are healthy
   log "Build succeeded, running health check..."
   sleep 15
 
-  if ! STATUS_MIGRATE_IDS=$($COMPOSE "${COMPOSE_FILES[@]}" ps -a -q status-migrate 2>/dev/null); then
+  if [ "$DEPLOY_BACKEND" != "true" ]; then
+    log "No backend changes; status-migrate check is not required"
+  elif ! STATUS_MIGRATE_IDS=$($COMPOSE "${COMPOSE_FILES[@]}" ps -a -q status-migrate 2>/dev/null); then
     log "⚠️  could not query status-migrate after compose up, rolling back..."
     ROLLBACK=true
   else
