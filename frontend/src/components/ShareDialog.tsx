@@ -73,11 +73,14 @@ export function ShareDialog({
   const [customExpiry, setCustomExpiry] = useState('')
   const [creating, setCreating] = useState(false)
   const [revoking, setRevoking] = useState<Set<string>>(() => new Set())
+  const [fallbackURL, setFallbackURL] = useState('')
   const generationRef = useRef(0)
+  const listReadyForRef = useRef<number | null>(null)
   const createRequestRef = useRef<Promise<ArticleShareListItem> | null>(null)
   const revokeRequestsRef = useRef(new Map<string, Promise<ArticleShareListItem>>())
   const dialogRef = useRef<HTMLElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const fallbackInputRef = useRef<HTMLInputElement>(null)
   const onCloseRef = useRef(onClose)
 
   useEffect(() => {
@@ -87,9 +90,11 @@ export function ShareDialog({
   useEffect(() => {
     if (!open) return
     const generation = ++generationRef.current
+    listReadyForRef.current = null
     setRows([])
     setLoading(true)
     setError('')
+    setFallbackURL('')
     setCreating(false)
     setRevoking(new Set())
     createRequestRef.current = null
@@ -102,13 +107,25 @@ export function ShareDialog({
         setError(requestError(cause, '加载分享链接失败，请稍后重试'))
       }
     }).finally(() => {
-      if (generationRef.current === generation) setLoading(false)
+      if (generationRef.current === generation) {
+        listReadyForRef.current = articleId
+        setLoading(false)
+      }
     })
 
     return () => {
-      if (generationRef.current === generation) generationRef.current += 1
+      if (generationRef.current === generation) {
+        generationRef.current += 1
+        listReadyForRef.current = null
+      }
     }
   }, [articleId, open])
+
+  useEffect(() => {
+    if (!fallbackURL) return
+    fallbackInputRef.current?.focus()
+    fallbackInputRef.current?.select()
+  }, [fallbackURL])
 
   useEffect(() => {
     if (!open) return
@@ -150,8 +167,12 @@ export function ShareDialog({
     }
   }, [open])
 
-  if (!open) return null
+  if (!open) {
+    listReadyForRef.current = null
+    return null
+  }
 
+  const listReady = listReadyForRef.current === articleId && !loading
   const selectedExpiry = expiryValue(expiry, customExpiry)
   const customInvalid = expiry === 'custom' && selectedExpiry === undefined
 
@@ -163,6 +184,7 @@ export function ShareDialog({
     const url = absoluteShareURL(row)
     if (!url) {
       if (generationRef.current === generation) {
+        setFallbackURL('')
         setError(created ? '链接已创建，但未返回可复制的地址' : '该分享链接当前不可复制')
       }
       return
@@ -170,9 +192,13 @@ export function ShareDialog({
     try {
       if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
       await navigator.clipboard.writeText(url)
-      if (generationRef.current === generation) setError('')
+      if (generationRef.current === generation) {
+        setFallbackURL('')
+        setError('')
+      }
     } catch {
       if (generationRef.current === generation) {
+        setFallbackURL(url)
         setError(created ? '链接已创建，但复制失败，请手动复制链接' : '复制失败，请手动复制链接')
       }
     }
@@ -180,7 +206,7 @@ export function ShareDialog({
 
   const createShare = async () => {
     const expiresAt = expiryValue(expiry, customExpiry)
-    if (expiresAt === undefined || createRequestRef.current) return
+    if (!listReady || expiresAt === undefined || createRequestRef.current) return
     setError('')
     setCreating(true)
     const generation = generationRef.current
@@ -260,7 +286,7 @@ export function ShareDialog({
         </header>
 
         <div className="share-dialog-body">
-          <fieldset className="share-expiry-options">
+          <fieldset className="share-expiry-options" disabled={!listReady || creating}>
             <legend>链接有效期</legend>
             <label><input type="radio" name="share-expiry" checked={expiry === 'permanent'} onChange={() => setExpiry('permanent')} />永久</label>
             <label><input type="radio" name="share-expiry" checked={expiry === '7d'} onChange={() => setExpiry('7d')} />7 天</label>
@@ -276,6 +302,7 @@ export function ShareDialog({
                 value={customExpiry}
                 onChange={(event) => setCustomExpiry(event.target.value)}
                 aria-invalid={customInvalid}
+                disabled={!listReady || creating}
               />
               {customInvalid && customExpiry && <span className="text-muted text-sm">请选择未来时间</span>}
             </div>
@@ -283,12 +310,25 @@ export function ShareDialog({
           <button
             type="button"
             onClick={() => void createShare()}
-            disabled={creating || customInvalid}
+            disabled={!listReady || creating || customInvalid}
           >
             {creating ? '创建中…' : '创建新链接'}
           </button>
 
           {error && <p className="share-dialog-error" role="alert">{error}</p>}
+          {fallbackURL && (
+            <div className="share-copy-fallback">
+              <label htmlFor="share-copy-fallback">手动复制链接</label>
+              <input
+                ref={fallbackInputRef}
+                id="share-copy-fallback"
+                type="text"
+                value={fallbackURL}
+                readOnly
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            </div>
+          )}
 
           <div className="share-list-section">
             <h3>已有链接</h3>
@@ -299,7 +339,8 @@ export function ShareDialog({
             ) : (
               <ul className="share-list">
                 {rows.map((row) => {
-                  const actionable = row.status === 'active' && !row.legacy && Boolean(absoluteShareURL(row))
+                  const revocable = row.status === 'active'
+                  const copyable = revocable && !row.legacy && Boolean(absoluteShareURL(row))
                   return (
                     <li key={row.id}>
                       <div className="share-list-meta">
@@ -311,18 +352,24 @@ export function ShareDialog({
                           {row.expires_at ? `到期于 ${formatDate(row.expires_at)}` : '永久有效'}
                         </span>
                       </div>
-                      {actionable && (
+                      {(copyable || revocable) && (
                         <div className="share-list-actions">
-                          <button type="button" className="secondary btn-sm" onClick={() => void copyURL(row)}>复制链接</button>
-                          <button type="button" className="secondary btn-sm" onClick={() => shareToX(row)}>分享到 X</button>
-                          <button
-                            type="button"
-                            className="secondary btn-sm"
-                            disabled={revoking.has(row.id)}
-                            onClick={() => void revokeShare(row)}
-                          >
-                            {revoking.has(row.id) ? '撤销中…' : '撤销'}
-                          </button>
+                          {copyable && (
+                            <>
+                              <button type="button" className="secondary btn-sm" onClick={() => void copyURL(row)}>复制链接</button>
+                              <button type="button" className="secondary btn-sm" onClick={() => shareToX(row)}>分享到 X</button>
+                            </>
+                          )}
+                          {revocable && (
+                            <button
+                              type="button"
+                              className="secondary btn-sm"
+                              disabled={revoking.has(row.id)}
+                              onClick={() => void revokeShare(row)}
+                            >
+                              {revoking.has(row.id) ? '撤销中…' : '撤销'}
+                            </button>
+                          )}
                         </div>
                       )}
                     </li>

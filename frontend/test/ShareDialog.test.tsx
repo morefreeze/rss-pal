@@ -90,6 +90,24 @@ describe('ShareDialog', () => {
     await waitFor(() => expect(apiMocks.listArticleShares).toHaveBeenCalledTimes(2))
   })
 
+  it('disables creation until the initial list request finishes', async () => {
+    const listPending = deferred<ArticleShareListItem[]>()
+    apiMocks.listArticleShares.mockReturnValue(listPending.promise)
+    apiMocks.createArticleShare.mockResolvedValue(activeShare('after-load'))
+    const user = userEvent.setup()
+    renderShareDialog()
+
+    const create = screen.getByRole('button', { name: '创建新链接' }) as HTMLButtonElement
+    expect(create.disabled).toBe(true)
+    await user.click(create)
+    expect(apiMocks.createArticleShare).not.toHaveBeenCalled()
+
+    listPending.resolve([])
+    await waitFor(() => expect(create.disabled).toBe(false))
+    await user.click(create)
+    expect(apiMocks.createArticleShare).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores a stale list response after close and reopen, and reports list errors', async () => {
     const stale = deferred<ArticleShareListItem[]>()
     apiMocks.listArticleShares
@@ -197,10 +215,11 @@ describe('ShareDialog', () => {
     expect(screen.getByRole('dialog')).toBeTruthy()
   })
 
-  it('lists all statuses and only allows actions on active non-legacy rows', async () => {
+  it('lists all statuses, allows legacy revocation, and reserves copy and X for current active rows', async () => {
     apiMocks.listArticleShares.mockResolvedValue([
       activeShare('active'), expiredShare('expired'), revokedShare('revoked'), legacyShare('legacy'),
     ])
+    apiMocks.revokeArticleShare.mockResolvedValue(share('legacy', 'revoked', { legacy: true }))
     const user = userEvent.setup()
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     renderShareDialog()
@@ -210,7 +229,14 @@ describe('ShareDialog', () => {
     expect(screen.getByText('旧版链接')).toBeTruthy()
     expect(screen.getAllByRole('button', { name: '复制链接' })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: '分享到 X' })).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: '撤销' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '撤销' })).toHaveLength(2)
+
+    const legacyRow = screen.getByText('legacy').closest('li')!
+    expect(within(legacyRow).queryByRole('button', { name: '复制链接' })).toBeNull()
+    expect(within(legacyRow).queryByRole('button', { name: '分享到 X' })).toBeNull()
+    await user.click(within(legacyRow).getByRole('button', { name: '撤销' }))
+    expect(apiMocks.revokeArticleShare).toHaveBeenCalledWith(42, 'legacy')
+    expect(await within(legacyRow).findByText('已撤销')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: '分享到 X' }))
     const intent = new URL(String(open.mock.calls[0][0]))
@@ -261,6 +287,42 @@ describe('ShareDialog', () => {
     await user.click(within(rows[1]).getByRole('button', { name: '撤销' }))
     expect(await screen.findByText('撤销被拒绝')).toBeTruthy()
     view.unmount()
+  })
+
+  it('shows and selects the absolute URL when the Clipboard API is unavailable', async () => {
+    apiMocks.createArticleShare.mockResolvedValue(activeShare('no-clipboard', '/share/manual-copy'))
+    const user = userEvent.setup()
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    renderShareDialog()
+
+    await user.click(await screen.findByRole('button', { name: '创建新链接' }))
+    const fallback = await screen.findByLabelText('手动复制链接') as HTMLInputElement
+    expect(fallback.value).toBe('https://rss.example/share/manual-copy')
+    expect(document.activeElement).toBe(fallback)
+    expect(fallback.selectionStart).toBe(0)
+    expect(fallback.selectionEnd).toBe(fallback.value.length)
+    expect(screen.getByText('链接已创建，但复制失败，请手动复制链接')).toBeTruthy()
+    expect(screen.getByText('no-clipboard')).toBeTruthy()
+  })
+
+  it('shows a selectable fallback after rejection and clears it after a successful retry', async () => {
+    apiMocks.createArticleShare.mockResolvedValue(activeShare('retry-copy', '/share/retry-copy'))
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText')
+      .mockRejectedValueOnce(new Error('denied'))
+      .mockResolvedValueOnce(undefined)
+    renderShareDialog()
+
+    await user.click(await screen.findByRole('button', { name: '创建新链接' }))
+    const fallback = await screen.findByLabelText('手动复制链接') as HTMLInputElement
+    expect(fallback.value).toBe('https://rss.example/share/retry-copy')
+    expect(fallback.selectionStart).toBe(0)
+    expect(fallback.selectionEnd).toBe(fallback.value.length)
+
+    const row = screen.getByText('retry-copy').closest('li')!
+    await user.click(within(row).getByRole('button', { name: '复制链接' }))
+    expect(writeText).toHaveBeenCalledTimes(2)
+    expect(screen.queryByLabelText('手动复制链接')).toBeNull()
   })
 
   it('preserves Xiaohongshu and Markdown callbacks and exposes accessible close controls', async () => {
