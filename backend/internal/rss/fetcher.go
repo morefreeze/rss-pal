@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ func newTrustedClient() *http.Client {
 // resolver derives a target on the configured RSSHub origin use the trusted
 // client.
 func NewPublicFetcher(rsshubBase string) *Fetcher {
-	return newPublicFetcherWithClients(rsshubBase, httpx.NewClient(30*time.Second), newTrustedClient())
+	return newPublicFetcherWithClients(rsshubBase, httpx.NewClient(30*time.Second), newTrustedRSSHubClient(rsshubBase))
 }
 
 func newPublicFetcherWithClients(rsshubBase string, publicClient, trustedClient *http.Client) *Fetcher {
@@ -61,6 +62,74 @@ func newPublicFetcherWithClients(rsshubBase string, publicClient, trustedClient 
 		publicClient: publicClient,
 		rsshubBase:   rsshubBase,
 	}
+}
+
+type rssHubOrigin struct {
+	scheme string
+	host   string
+	port   string
+}
+
+func parseRSSHubOrigin(raw string) (rssHubOrigin, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return rssHubOrigin{}, err
+	}
+	return rssHubURLOrigin(u)
+}
+
+func rssHubURLOrigin(u *url.URL) (rssHubOrigin, error) {
+	if u == nil {
+		return rssHubOrigin{}, fmt.Errorf("RSSHub origin must use http or https")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return rssHubOrigin{}, fmt.Errorf("RSSHub origin must use http or https")
+	}
+	if u.User != nil {
+		return rssHubOrigin{}, fmt.Errorf("RSSHub origin credentials are not allowed")
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return rssHubOrigin{}, fmt.Errorf("RSSHub origin is missing a hostname")
+	}
+	port := u.Port()
+	if port == "" {
+		if scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	} else {
+		parsedPort, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || parsedPort == 0 {
+			return rssHubOrigin{}, fmt.Errorf("RSSHub origin has an invalid port")
+		}
+		port = strconv.FormatUint(parsedPort, 10)
+	}
+	return rssHubOrigin{scheme: scheme, host: host, port: port}, nil
+}
+
+func newTrustedRSSHubClient(rsshubBase string) *http.Client {
+	client := newTrustedClient()
+	configuredOrigin, configuredErr := parseRSSHubOrigin(rsshubBase)
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("too many RSSHub redirects")
+		}
+		if configuredErr != nil {
+			return fmt.Errorf("redirect rejected: invalid configured RSSHub origin: %w", configuredErr)
+		}
+		redirectOrigin, err := rssHubURLOrigin(req.URL)
+		if err != nil {
+			return fmt.Errorf("redirect rejected: %w", err)
+		}
+		if redirectOrigin != configuredOrigin {
+			return errors.New("redirect rejected: target escaped configured RSSHub origin")
+		}
+		return nil
+	}
+	return client
 }
 
 type FetchResult struct {
@@ -83,7 +152,10 @@ func (e *feedRequestCreationError) Unwrap() error {
 
 func (f *Fetcher) resolveTarget(input string) (string, *http.Client) {
 	target, trustedRSSHub := resolveFeedURL(input, f.rsshubBase)
-	if targetURL, err := url.Parse(target); err != nil || !isRSSHubURL(targetURL, f.rsshubBase) {
+	configuredOrigin, configuredErr := parseRSSHubOrigin(f.rsshubBase)
+	targetURL, targetErr := url.Parse(target)
+	targetOrigin, targetOriginErr := rssHubURLOrigin(targetURL)
+	if configuredErr != nil || targetErr != nil || targetOriginErr != nil || targetOrigin != configuredOrigin {
 		trustedRSSHub = false
 	}
 	if f.publicClient != nil && !trustedRSSHub {

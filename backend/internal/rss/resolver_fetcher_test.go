@@ -5,8 +5,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -73,6 +77,134 @@ func TestNewPublicFetcherRejectsLoopbackBeforeRequest(t *testing.T) {
 		_, err := fetcher.Fetch(context.Background(), target, "", "")
 		if err == nil || !strings.Contains(err.Error(), "blocked address") {
 			t.Fatalf("Fetch(%q) error = %v, want blocked address", target, err)
+		}
+	}
+}
+
+func TestPublicFetcherRejectsTrustedRSSHubCrossOriginRedirectBeforeSecondRequest(t *testing.T) {
+	var escapedRequests atomic.Int32
+	escaped := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		escapedRequests.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer escaped.Close()
+
+	rsshub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, escaped.URL+"/metadata", http.StatusFound)
+	}))
+	defer rsshub.Close()
+
+	fetcher := NewPublicFetcher(rsshub.URL)
+	_, err := fetcher.Fetch(context.Background(), "https://blog.csdn.net/csdngeeknews", "", "")
+	if err == nil || !strings.Contains(err.Error(), "redirect rejected") {
+		t.Fatalf("Fetch() error = %v, want redirect rejected", err)
+	}
+	if got := escapedRequests.Load(); got != 0 {
+		t.Fatalf("cross-origin redirect target received %d requests, want 0", got)
+	}
+}
+
+func TestPublicFetcherAllowsTrustedRSSHubSameOriginRedirect(t *testing.T) {
+	rsshub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/feed" {
+			http.Redirect(w, r, "/feed", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = io.WriteString(w, weiboRSSBody)
+	}))
+	defer rsshub.Close()
+
+	fetcher := NewPublicFetcher(rsshub.URL)
+	result, err := fetcher.Fetch(context.Background(), "https://blog.csdn.net/csdngeeknews", "", "")
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if result == nil || result.Feed == nil || result.Feed.Title != "Weibo" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestPublicFetcherLimitsTrustedRSSHubRedirects(t *testing.T) {
+	rsshub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hop := 0
+		if strings.HasPrefix(r.URL.Path, "/hop/") {
+			hop, _ = strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/hop/"))
+		}
+		http.Redirect(w, r, "/hop/"+strconv.Itoa(hop+1), http.StatusFound)
+	}))
+	defer rsshub.Close()
+
+	fetcher := NewPublicFetcher(rsshub.URL)
+	_, err := fetcher.Fetch(context.Background(), "https://blog.csdn.net/csdngeeknews", "", "")
+	if err == nil || !strings.Contains(err.Error(), "too many RSSHub redirects") {
+		t.Fatalf("Fetch() error = %v, want trusted redirect limit", err)
+	}
+}
+
+func TestPublicFetcherRejectsInvalidTrustedRSSHubRedirectTargets(t *testing.T) {
+	for _, targetKind := range []string{"credentials", "scheme"} {
+		t.Run(targetKind, func(t *testing.T) {
+			var requests atomic.Int32
+			var rsshub *httptest.Server
+			rsshub = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				location := "ftp://rsshub.example/feed"
+				if targetKind == "credentials" {
+					u, err := url.Parse(rsshub.URL + "/feed")
+					if err != nil {
+						t.Fatal(err)
+					}
+					u.User = url.UserPassword("user", "secret")
+					location = u.String()
+				}
+				http.Redirect(w, r, location, http.StatusFound)
+			}))
+			defer rsshub.Close()
+
+			fetcher := NewPublicFetcher(rsshub.URL)
+			_, err := fetcher.Fetch(context.Background(), "https://blog.csdn.net/csdngeeknews", "", "")
+			if err == nil || !strings.Contains(err.Error(), "redirect rejected") {
+				t.Fatalf("Fetch() error = %v, want redirect rejected", err)
+			}
+			if got := requests.Load(); got != 1 {
+				t.Fatalf("redirect target was requested: total requests = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestRSSHubOriginCanonicalizesDefaultPorts(t *testing.T) {
+	implicitHTTP, err := parseRSSHubOrigin("http://rsshub.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitHTTP, err := parseRSSHubOrigin("HTTP://RSSHUB.EXAMPLE:80/path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	implicitHTTPS, err := parseRSSHubOrigin("https://rsshub.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if implicitHTTP != explicitHTTP {
+		t.Fatalf("implicit HTTP origin = %#v, explicit = %#v", implicitHTTP, explicitHTTP)
+	}
+	if implicitHTTP == implicitHTTPS {
+		t.Fatalf("HTTP and HTTPS origins unexpectedly match: %#v", implicitHTTP)
+	}
+}
+
+func TestPublicFetcherRejectsInvalidTrustedRSSHubOrigins(t *testing.T) {
+	for _, base := range []string{
+		"ftp://rsshub.example",
+		"https://user:secret@rsshub.example",
+		"https://rsshub.example:bad",
+	} {
+		fetcher := NewPublicFetcher(base)
+		_, err := fetcher.Fetch(context.Background(), "https://blog.csdn.net/csdngeeknews", "", "")
+		if err == nil {
+			t.Fatalf("NewPublicFetcher(%q).Fetch() error = nil, want rejection", base)
 		}
 	}
 }
