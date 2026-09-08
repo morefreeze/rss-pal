@@ -49,6 +49,30 @@ func TestSignParseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSignParseRoundTripWithUnderscoreInSignature(t *testing.T) {
+	signer, err := NewSigner(testSecret)
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+	const id = "00000000000000000000000000000001"
+	const wantToken = "v1_00000000000000000000000000000001_kVCen8vHGjySlZF_mC5N22Bs13LHqfgxBbnHY7Botcg"
+	token := signer.Sign(id)
+	if token != wantToken {
+		t.Fatalf("Sign() = %q, want %q", token, wantToken)
+	}
+
+	value, legacy, err := signer.Parse(token)
+	if err != nil {
+		t.Fatalf("Parse(Sign()) error = %v", err)
+	}
+	if legacy {
+		t.Fatal("Parse(Sign()) legacy = true, want false")
+	}
+	if value != id {
+		t.Fatalf("Parse(Sign()) value = %q, want %q", value, id)
+	}
+}
+
 func TestParseRejectsTamperedToken(t *testing.T) {
 	signer, err := NewSigner(testSecret)
 	if err != nil {
@@ -70,10 +94,14 @@ func TestParseRejectsNonCanonicalEquivalentSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSigner() error = %v", err)
 	}
-	const tampered = "v1_0123456789abcdef0123456789abcdef_eBVS-nqwfm3pAEH22cstXDcqq33wf6dgjV2ceEFuiAZ"
 
-	if _, _, err := signer.Parse(tampered); err == nil {
-		t.Fatal("Parse() accepted a non-canonical signature with altered pad bits")
+	for _, suffix := range []string{"Z", "a", "b"} {
+		t.Run(suffix, func(t *testing.T) {
+			tampered := "v1_0123456789abcdef0123456789abcdef_eBVS-nqwfm3pAEH22cstXDcqq33wf6dgjV2ceEFuiA" + suffix
+			if _, _, err := signer.Parse(tampered); err == nil {
+				t.Fatal("Parse() accepted a non-canonical signature with altered pad bits")
+			}
+		})
 	}
 }
 

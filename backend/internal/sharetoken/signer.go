@@ -46,7 +46,7 @@ func (s *Signer) Parse(token string) (value string, legacy bool, err error) {
 		return token, true, nil
 	}
 
-	parts := strings.Split(token, "_")
+	parts := strings.SplitN(token, "_", 3)
 	if len(parts) != 3 || parts[0] != "v1" {
 		return "", false, errors.New("invalid share token format")
 	}
