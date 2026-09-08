@@ -301,7 +301,7 @@ func TestMigration039RelocatesPollutedPGCryptoAndCopiesLegacyShare(t *testing.T)
 	db, cleanup := testdb.NewThroughMigration(t, "038_subscription_explore.sql")
 	defer cleanup()
 	db.SetMaxOpenConns(1)
-	if err := testdb.WithSchemaBootstrapLock(db, func(conn *sql.Conn) error {
+	if err := testdb.WithSchemaBootstrapLock(t.Context(), db, func(conn *sql.Conn) error {
 		tx, err := conn.BeginTx(t.Context(), nil)
 		if err != nil {
 			return err

@@ -56,7 +56,9 @@ func newWithSchema(t *testing.T, throughFile string) (*sql.DB, string, func()) {
 		_ = adminDB.Close()
 		t.Skipf("postgres not available at %s: %v", dsn, err)
 	}
-	setupLock, err := acquireTestSchemaBootstrapLock(adminDB)
+	setupContext, cancelSetup := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancelSetup()
+	setupLock, err := acquireTestSchemaBootstrapLock(setupContext, adminDB)
 	if err != nil {
 		_ = adminDB.Close()
 		t.Fatalf("lock test schema bootstrap: %v", err)
@@ -136,7 +138,6 @@ func newWithSchema(t *testing.T, throughFile string) (*sql.DB, string, func()) {
 const testSchemaBootstrapAdvisoryLock int64 = 0x72737370616c
 
 type testSchemaBootstrapLock struct {
-	ctx    context.Context
 	conn   *sql.Conn
 	locked bool
 }
@@ -144,35 +145,44 @@ type testSchemaBootstrapLock struct {
 // acquireTestSchemaBootstrapLock serializes database-global bootstrap DDL
 // across concurrently running Go package processes. The dedicated connection
 // is retained because PostgreSQL advisory locks are session-scoped.
-func acquireTestSchemaBootstrapLock(db *sql.DB) (*testSchemaBootstrapLock, error) {
-	ctx := context.Background()
+func acquireTestSchemaBootstrapLock(ctx context.Context, db *sql.DB) (*testSchemaBootstrapLock, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open advisory-lock connection: %w", err)
 	}
+	closeWaiter := func(waitErr error) (*testSchemaBootstrapLock, error) {
+		if closeErr := conn.Close(); closeErr != nil {
+			waitErr = errors.Join(waitErr, fmt.Errorf("close advisory-lock connection: %w", closeErr))
+		}
+		return nil, waitErr
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		var acquired bool
 		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, testSchemaBootstrapAdvisoryLock).Scan(&acquired); err != nil {
-			_ = conn.Close()
-			return nil, fmt.Errorf("lock test schema bootstrap: %w", err)
+			return closeWaiter(fmt.Errorf("lock test schema bootstrap: %w", err))
 		}
 		if acquired {
-			break
+			return &testSchemaBootstrapLock{conn: conn, locked: true}, nil
 		}
 		// A blocking pg_advisory_lock query keeps a virtual transaction ID
 		// while waiting. CREATE INDEX CONCURRENTLY in another schema then waits
 		// for that virtual transaction and deadlocks with the lock owner. Short
 		// try-lock queries release their virtual IDs between attempts.
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return closeWaiter(fmt.Errorf("wait for test schema bootstrap lock: %w", ctx.Err()))
+		case <-ticker.C:
+		}
 	}
-	return &testSchemaBootstrapLock{ctx: ctx, conn: conn, locked: true}, nil
 }
 
 // WithSchemaBootstrapLock lets migration tests stage database-global partial
 // states without racing another package's schema bootstrap. fn receives the
 // same dedicated connection that owns the advisory lock.
-func WithSchemaBootstrapLock(db *sql.DB, fn func(*sql.Conn) error) (err error) {
-	lock, err := acquireTestSchemaBootstrapLock(db)
+func WithSchemaBootstrapLock(ctx context.Context, db *sql.DB, fn func(*sql.Conn) error) (err error) {
+	lock, err := acquireTestSchemaBootstrapLock(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -187,8 +197,10 @@ func (l *testSchemaBootstrapLock) release() (err error) {
 		return nil
 	}
 	if l.locked {
+		releaseContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		var unlocked bool
-		unlockErr := l.conn.QueryRowContext(l.ctx, `SELECT pg_advisory_unlock($1)`, testSchemaBootstrapAdvisoryLock).Scan(&unlocked)
+		unlockErr := l.conn.QueryRowContext(releaseContext, `SELECT pg_advisory_unlock($1)`, testSchemaBootstrapAdvisoryLock).Scan(&unlocked)
 		if unlockErr != nil {
 			err = errors.Join(err, fmt.Errorf("unlock test schema bootstrap: %w", unlockErr))
 		} else if !unlocked {
