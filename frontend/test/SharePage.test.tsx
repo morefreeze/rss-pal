@@ -110,6 +110,44 @@ describe('SharePage public reader', () => {
     expect(subscribe.getAttribute('href')).toBe('/login?intent=subscribe')
   })
 
+  it('limits the encoded subscription source and does not double-encode a normal source', async () => {
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ url: `https://source.example/${'中'.repeat(2000)}` }) })
+    const oversized = renderSharePage()
+    expect((await screen.findByRole('link', { name: '订阅原始来源' })).getAttribute('href')).toBe(
+      '/login?intent=subscribe',
+    )
+    oversized.unmount()
+
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ url: 'https://source.example/文章?q=阅读' }) })
+    renderSharePage()
+    const normal = await screen.findByRole('link', { name: '订阅原始来源' })
+    expect(normal.getAttribute('href')).toBe(
+      `/login?intent=subscribe&source=${encodeURIComponent('https://source.example/文章?q=阅读')}`,
+    )
+    expect(normal.getAttribute('href')).not.toContain('%25E6')
+  })
+
+  it('opens public summary links safely while preserving internal article-anchor navigation', async () => {
+    axiosMock.get.mockResolvedValue({
+      data: sharedSnapshot({
+        summary_brief: '[Brief external](https://brief.example/read) [Jump](#article-section-001)',
+        summary_detailed: '[Detailed external](https://detailed.example/read)',
+      }),
+    })
+    renderSharePage()
+
+    const brief = await screen.findByRole('link', { name: 'Brief external' })
+    const detailed = screen.getByRole('link', { name: 'Detailed external' })
+    for (const link of [brief, detailed]) {
+      expect(link.getAttribute('target')).toBe('_blank')
+      expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    }
+    const internal = screen.getByRole('link', { name: '跳转原文' })
+    expect(internal.getAttribute('href')).toBe('#article-section-001')
+    expect(internal.getAttribute('target')).toBeNull()
+    expect(internal.getAttribute('rel')).toBeNull()
+  })
+
   it('uses VideoEmbed for a public stored YouTube embed', async () => {
     axiosMock.get.mockResolvedValue({
       data: sharedSnapshot({
@@ -142,6 +180,19 @@ describe('SharePage public reader', () => {
   })
 
   it.each([
+    ['HTTP://media.example/episode.mp3', 'http://media.example/episode.mp3'],
+    ['  https://media.example/episode.mp3  ', 'https://media.example/episode.mp3'],
+  ])('accepts and normalizes public audio URL %s', async (mediaURL, expected) => {
+    axiosMock.get.mockResolvedValue({
+      data: sharedSnapshot({ media_url: mediaURL, media_type: 'audio/mpeg' }),
+    })
+    const { container } = renderSharePage()
+
+    await screen.findByRole('heading', { name: 'Shared title' })
+    expect(container.querySelector('audio')?.getAttribute('src')).toBe(expected)
+  })
+
+  it.each([
     ['/api/media/youtube/private-ticket', 'video/youtube'],
     ['/local/media.mp3', 'audio/mpeg'],
     ['file:///etc/passwd', 'audio/mpeg'],
@@ -150,6 +201,7 @@ describe('SharePage public reader', () => {
     ['blob:https://source.example/id', 'audio/mpeg'],
     ['//media.example/episode.mp3', 'audio/mpeg'],
     ['https://user:secret@media.example/episode.mp3', 'audio/mpeg'],
+    ['https://rss.example/api/media/youtube/private-ticket', 'audio/mpeg'],
   ])('replaces non-public media %s with an origin link and no playback surface', async (mediaURL, mediaType) => {
     axiosMock.get.mockResolvedValue({
       data: sharedSnapshot({ media_url: mediaURL, media_type: mediaType }),

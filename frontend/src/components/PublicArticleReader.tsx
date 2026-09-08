@@ -37,15 +37,17 @@ function formatDuration(seconds?: number): string {
 }
 
 export function publicMediaURL(rawURL?: string): string | null {
-  if (!rawURL || rawURL.startsWith('//')) return null
+  const value = rawURL?.trim()
+  if (!value || value.startsWith('//')) return null
   let parsed: URL
   try {
-    parsed = new URL(rawURL)
+    parsed = new URL(value)
   } catch {
     return null
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) return null
   if (parsed.username || parsed.password) return null
+  if (parsed.pathname.startsWith('/api/media/youtube/')) return null
   return parsed.href
 }
 
@@ -56,7 +58,6 @@ function normalizedVideoType(mediaType?: string): string {
 }
 
 function subscribeHref(source: string): string {
-  if (source.length > 2048) return '/login?intent=subscribe'
   try {
     const parsed = new URL(source)
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
@@ -65,7 +66,8 @@ function subscribeHref(source: string): string {
   } catch {
     return '/login?intent=subscribe'
   }
-  return `/login?intent=subscribe&source=${encodeURIComponent(source)}`
+  const href = `/login?intent=subscribe&source=${encodeURIComponent(source)}`
+  return href.length <= 2048 ? href : '/login?intent=subscribe'
 }
 
 function PublicMedia({ article }: Props) {
@@ -118,9 +120,9 @@ export default function PublicArticleReader({ article }: Props) {
           <section className="card public-reader-summary">
             <h2>AI 总结</h2>
             <div className="markdown-body">
-              {article.summary_brief && <SummaryMarkdown source={article.summary_brief} />}
+              {article.summary_brief && <SummaryMarkdown source={article.summary_brief} externalLinksNewTab />}
               {article.summary_brief && article.summary_detailed && <hr />}
-              {article.summary_detailed && <SummaryMarkdown source={article.summary_detailed} />}
+              {article.summary_detailed && <SummaryMarkdown source={article.summary_detailed} externalLinksNewTab />}
             </div>
           </section>
         )}

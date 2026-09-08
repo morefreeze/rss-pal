@@ -13,6 +13,19 @@ const readerContext: ReaderActionContextValue = {
 }
 
 describe('MarkdownArticle article anchors', () => {
+  it('keeps only a precisely shaped public share asset on the same-origin path', () => {
+    const valid = '/api/share/v1_0123456789abcdef_signature/assets/3.jpeg'
+    const invalid = '/api/share/v1_0123456789abcdef_signature/assets/avatar.svg'
+    const { container } = render(
+      <MarkdownArticle source={`![shared](${valid})\n\n![invalid](${invalid})`} readOnly />,
+    )
+
+    expect(container.querySelector('img[alt="shared"]')?.getAttribute('src')).toBe(valid)
+    expect(container.querySelector('img[alt="invalid"]')?.getAttribute('src')).toBe(
+      `/api/proxy/image?url=${encodeURIComponent(invalid)}`,
+    )
+  })
+
   it('keeps authenticated interaction by default but disables it in read-only mode', () => {
     const source = '[Alpha readable link](https://example.com/a)'
     const onLinkDiscovered = vi.fn()

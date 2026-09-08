@@ -7,6 +7,7 @@ import { clearArticleAnchorRoundTrip, startArticleAnchorRoundTrip } from '../uti
 
 type Props = {
   source: string
+  externalLinksNewTab?: boolean
 }
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -53,9 +54,11 @@ function isNativelyFocusable(target: HTMLElement): boolean {
   ].join(','))
 }
 
-type SummaryLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraProps
+type SummaryLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraProps & {
+  externalLinksNewTab?: boolean
+}
 
-function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest }: SummaryLinkProps) {
+function SummaryLink({ href, children, node: _node, onClick, onAuxClick, externalLinksNewTab, ...rest }: SummaryLinkProps) {
   const targetID = parseArticleAnchor(href)
   const reactID = useId().replace(/:/g, '')
   const sourceID = targetID ? `summary-article-source-${reactID}` : undefined
@@ -102,6 +105,7 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
   }
 
   const className = [rest.className, targetID ? 'summary-article-link' : ''].filter(Boolean).join(' ') || undefined
+  const externalHTTPLink = externalLinksNewTab && /^https?:\/\//i.test(href ?? '')
 
   return (
     <a
@@ -112,6 +116,8 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
       onAuxClick={handleAuxClick}
       {...rest}
       className={className}
+      target={externalHTTPLink ? '_blank' : rest.target}
+      rel={externalHTTPLink ? 'noopener noreferrer' : rest.rel}
       aria-label={targetID ? ARTICLE_LINK_LABEL : rest['aria-label']}
       title={targetID ? ARTICLE_LINK_LABEL : rest.title}
     >
@@ -126,15 +132,21 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, ...rest
 }
 
 const COMPONENTS: Components = { a: SummaryLink }
+const EXTERNAL_LINK_COMPONENTS: Components = {
+  a: props => <SummaryLink {...props} externalLinksNewTab />,
+}
 
 export function normalizeSummaryMarkdown(source: string): string {
   return source.replace(/(^|\n)([ \t]*)[•▸]\s+/g, '$1$2- ')
 }
 
-export default function SummaryMarkdown({ source }: Props) {
+export default function SummaryMarkdown({ source, externalLinksNewTab = false }: Props) {
   const normalized = useMemo(() => normalizeSummaryMarkdown(source), [source])
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+    <ReactMarkdown
+      remarkPlugins={REMARK_PLUGINS}
+      components={externalLinksNewTab ? EXTERNAL_LINK_COMPONENTS : COMPONENTS}
+    >
       {normalized}
     </ReactMarkdown>
   )

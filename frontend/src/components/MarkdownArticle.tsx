@@ -213,14 +213,14 @@ function ArticleLink({ href, children, className, node: _node, ...rest }: Articl
 // remounted (cancelling and re-issuing image fetches mid-load).
 const REMARK_PLUGINS = [remarkGfm, remarkCjkFriendly, remarkMath]
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
+const PUBLIC_SHARE_ASSET_RE = /^\/api\/share\/[A-Za-z0-9_-]+\/assets\/[0-9]+\.(?:png|jpe?g)$/
 const COMPONENTS: Components = {
   img: ({ src, alt, ...rest }) => {
     if (isAvatarImg(src, alt)) return null
-    // Same-origin images served by our backend (PDF clip images at
-    // /api/articles/<id>/images/<idx>.<ext>) already pass through nginx +
-    // our auth; double-proxying through /api/proxy/image would fail the
-    // proxy's allow-list (SSRF guard) and add a useless round-trip.
-    const isOwnImage = src?.startsWith('/api/articles/')
+    // Exact same-origin article images and signed public-share assets already
+    // pass through nginx. Keep the share pattern narrow so an arbitrary
+    // /api/share path cannot bypass the image proxy allow-list.
+    const isOwnImage = src?.startsWith('/api/articles/') || (src ? PUBLIC_SHARE_ASSET_RE.test(src) : false)
     const proxied = src
       ? isOwnImage
         ? src
