@@ -64,6 +64,129 @@ func TestNewFetcherUsesProxyFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestNewPublicFetcherRejectsLoopbackBeforeRequest(t *testing.T) {
+	for _, target := range []string{
+		"http://127.0.0.1:8080/feed",
+		"http://127.0.0.1:1200/csdn/blog/direct",
+	} {
+		fetcher := NewPublicFetcher("http://127.0.0.1:1200")
+		_, err := fetcher.Fetch(context.Background(), target, "", "")
+		if err == nil || !strings.Contains(err.Error(), "blocked address") {
+			t.Fatalf("Fetch(%q) error = %v, want blocked address", target, err)
+		}
+	}
+}
+
+func TestPublicFetcherRoutesOnlyDerivedRSSHubTargetsToTrustedClient(t *testing.T) {
+	const rsshubBase = "http://rsshub.internal:1200"
+	var publicURLs, trustedURLs []string
+	response := func(title string) *http.Response {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body: io.NopCloser(strings.NewReader(`<?xml version="1.0"?><rss version="2.0"><channel><title>` + title + `</title>` +
+				`<link>https://example.com</link><description>feed</description>` +
+				`<item><title>post</title><link>https://example.com/post</link><guid>post</guid></item>` +
+				`</channel></rss>`)),
+		}
+	}
+	publicClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		publicURLs = append(publicURLs, req.URL.String())
+		return response("public"), nil
+	})}
+	trustedClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		trustedURLs = append(trustedURLs, req.URL.String())
+		return response("trusted"), nil
+	})}
+	fetcher := newPublicFetcherWithClients(rsshubBase, publicClient, trustedClient)
+
+	if _, err := fetcher.Fetch(context.Background(), "https://blog.csdn.net/csdngeeknews", "", ""); err != nil {
+		t.Fatalf("derived RSSHub Fetch() error = %v", err)
+	}
+	if _, err := fetcher.Fetch(context.Background(), rsshubBase+"/csdn/blog/direct", "", ""); err != nil {
+		t.Fatalf("direct RSSHub Fetch() error = %v", err)
+	}
+	if _, err := fetcher.Fetch(context.Background(), "https://ordinary.example/feed", "", ""); err != nil {
+		t.Fatalf("ordinary Fetch() error = %v", err)
+	}
+
+	if want := []string{rsshubBase + "/csdn/blog/csdngeeknews"}; !reflect.DeepEqual(trustedURLs, want) {
+		t.Fatalf("trusted URLs = %#v, want %#v", trustedURLs, want)
+	}
+	wantPublic := []string{rsshubBase + "/csdn/blog/direct", "https://ordinary.example/feed"}
+	if !reflect.DeepEqual(publicURLs, wantPublic) {
+		t.Fatalf("public URLs = %#v, want %#v", publicURLs, wantPublic)
+	}
+}
+
+func TestPublicFetcherKeepsAutodiscoveredFeedOnPublicClient(t *testing.T) {
+	const pageURL = "https://ordinary.example/posts"
+	var publicURLs, trustedURLs []string
+	publicClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		publicURLs = append(publicURLs, req.URL.String())
+		if req.URL.String() == pageURL {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/html"}},
+				Body:       io.NopCloser(strings.NewReader(`<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"></head></html>`)),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body:       io.NopCloser(strings.NewReader(weiboRSSBody)),
+		}, nil
+	})}
+	trustedClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		trustedURLs = append(trustedURLs, req.URL.String())
+		return nil, errors.New("trusted client must not fetch discovered URLs")
+	})}
+	fetcher := newPublicFetcherWithClients("http://rsshub.internal:1200", publicClient, trustedClient)
+
+	result, err := fetcher.Preview(context.Background(), pageURL)
+	if err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+	if result.DiscoveredRSSURL != "https://ordinary.example/feed.xml" {
+		t.Fatalf("DiscoveredRSSURL = %q", result.DiscoveredRSSURL)
+	}
+	wantPublic := []string{pageURL, "https://ordinary.example/feed.xml"}
+	if !reflect.DeepEqual(publicURLs, wantPublic) || len(trustedURLs) != 0 {
+		t.Fatalf("public URLs = %#v; trusted URLs = %#v", publicURLs, trustedURLs)
+	}
+}
+
+func TestPublicFetcherKeepsDerivedWeiboFallbackOnTrustedClient(t *testing.T) {
+	var publicURLs, trustedURLs []string
+	publicClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		publicURLs = append(publicURLs, req.URL.String())
+		return nil, errors.New("public client must not fetch a derived RSSHub route")
+	})}
+	trustedClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		trustedURLs = append(trustedURLs, req.URL.String())
+		if strings.HasSuffix(req.URL.Path, "/displayComments=1") {
+			return &http.Response{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader("bad gateway"))}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body:       io.NopCloser(strings.NewReader(weiboRSSBody)),
+		}, nil
+	})}
+	fetcher := newPublicFetcherWithClients("http://rsshub.internal:1200", publicClient, trustedClient)
+
+	if _, err := fetcher.Fetch(context.Background(), "https://weibo.com/u/1195230310", "", ""); err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	wantTrusted := []string{
+		"http://rsshub.internal:1200/weibo/user/1195230310/displayComments=1",
+		"http://rsshub.internal:1200/weibo/user/1195230310",
+	}
+	if !reflect.DeepEqual(trustedURLs, wantTrusted) || len(publicURLs) != 0 {
+		t.Fatalf("trusted URLs = %#v; public URLs = %#v", trustedURLs, publicURLs)
+	}
+}
+
 const weiboRSSBody = `<?xml version="1.0"?><rss version="2.0"><channel><title>Weibo</title>` +
 	`<link>https://weibo.com/u/1195230310</link><description>feed</description>` +
 	`<item><title>post</title><link>https://weibo.com/1195230310/post</link><guid>post</guid></item>` +

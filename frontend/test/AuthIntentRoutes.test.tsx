@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import FeedListPage from '../src/pages/FeedListPage'
@@ -29,6 +29,15 @@ vi.mock('../src/api/client', () => apiMocks)
 function LocationProbe() {
   const location = useLocation()
   return <output data-testid="location">{location.pathname}{location.search}</output>
+}
+
+function FeedIntentNavigator() {
+  const navigate = useNavigate()
+  return (
+    <button onClick={() => navigate('/feeds?add=1&source=https%3A%2F%2Fsecond.example%2Ffeed')}>
+      second intent
+    </button>
+  )
 }
 
 function renderAuth(path: string) {
@@ -64,6 +73,7 @@ function renderFeeds(path: string, strict = false) {
   const tree = (
     <MemoryRouter initialEntries={[path]}>
       <LocationProbe />
+      <FeedIntentNavigator />
       <Routes>
         <Route path="/feeds" element={<FeedListPage />} />
       </Routes>
@@ -258,5 +268,37 @@ describe('feed subscription intent', () => {
     fireEvent.click(screen.getByRole('button', { name: '预览' }))
     await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(2))
     expect(apiMocks.addFeed).not.toHaveBeenCalled()
+  })
+
+  it('ignores an older automatic preview response after a newer intent starts', async () => {
+    let resolveFirst!: (value: any) => void
+    let resolveSecond!: (value: any) => void
+    apiMocks.previewFeed
+      .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { resolveSecond = resolve }))
+    renderFeeds('/feeds?add=1&source=https%3A%2F%2Ffirst.example%2Ffeed')
+    await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'second intent' }))
+    await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(2))
+    resolveSecond({ feed_title: 'Second preview', feed_type: 'rss', actual_url: 'https://second.example/feed', items: [] })
+    expect(await screen.findByText('Second preview')).toBeTruthy()
+
+    resolveFirst({ feed_title: 'Stale first preview', feed_type: 'rss', actual_url: 'https://first.example/feed', items: [] })
+    await waitFor(() => expect(screen.queryByText('Stale first preview')).toBeNull())
+    expect(screen.getByText('Second preview')).toBeTruthy()
+  })
+
+  it('clears the delayed preview-status timer when an in-flight preview unmounts', async () => {
+    apiMocks.previewFeed.mockReturnValue(new Promise(() => {}))
+    const clearTimer = vi.spyOn(globalThis, 'clearTimeout')
+    const view = renderFeeds('/feeds?add=1&source=https%3A%2F%2Fsource.example%2Ffeed')
+    await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
+    clearTimer.mockClear()
+
+    view.unmount()
+
+    expect(clearTimer).toHaveBeenCalledTimes(1)
+    clearTimer.mockRestore()
   })
 })

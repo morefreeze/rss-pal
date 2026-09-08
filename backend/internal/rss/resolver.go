@@ -24,26 +24,35 @@ var rssHubResolvers = []platformResolver{
 // ResolveFeedURL maps a user-facing platform URL to a native Feed or to an
 // RSSHub route. Unknown and incomplete URLs are returned unchanged.
 func ResolveFeedURL(input, rsshubBase string) string {
+	resolved, _ := resolveFeedURL(input, rsshubBase)
+	return resolved
+}
+
+// resolveFeedURL also reports whether the result is an RSSHub target derived
+// from a supported public-platform URL. Callers may use that provenance to
+// select the explicitly trusted RSSHub transport; a direct RSSHub URL never
+// receives that trust bit.
+func resolveFeedURL(input, rsshubBase string) (string, bool) {
 	if rsshubBase == "" || input == "" {
-		return input
+		return input, false
 	}
 
 	u, err := url.Parse(input)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return input
+	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return input, false
 	}
 	if isRSSHubURL(u, rsshubBase) {
-		return normalizeRSSHubWeiboUserURL(u, rsshubBase)
+		return normalizeRSSHubWeiboUserURL(u, rsshubBase), false
 	}
 	if native, ok := resolveNativeFeed(u); ok {
-		return native
+		return native, false
 	}
 	for _, resolve := range rssHubResolvers {
 		if route, ok := resolve(u); ok {
-			return joinRSSHubURL(rsshubBase, route)
+			return joinRSSHubURL(rsshubBase, route), true
 		}
 	}
-	return input
+	return input, false
 }
 
 func normalizeRSSHubWeiboUserURL(u *url.URL, rsshubBase string) string {

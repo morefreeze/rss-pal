@@ -90,8 +90,17 @@ export default function FeedListPage() {
   const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const consumedSubscribeIntents = useRef(new Set<string>())
+  const previewGeneration = useRef(0)
+  const mounted = useRef(true)
 
   useEffect(() => { loadFeeds() }, [])
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      if (previewTimer.current) clearTimeout(previewTimer.current)
+    }
+  }, [])
 
   const loadFeeds = async () => {
     try {
@@ -113,6 +122,7 @@ export default function FeedListPage() {
   const doPreview = async (url: string) => {
     const normalized = normalizeURL(url)
     if (!normalized) return
+    const generation = ++previewGeneration.current
     setNewUrl(normalized)
     setPreviewing(true)
     setPreviewStatus('获取中...')
@@ -120,16 +130,30 @@ export default function FeedListPage() {
     setPreviewError('')
     // After 4s show "probing RSS" hint so user knows it's still working
     if (previewTimer.current) clearTimeout(previewTimer.current)
-    previewTimer.current = setTimeout(() => setPreviewStatus('正在探测 RSS 地址...'), 4000)
+    const timer = setTimeout(() => {
+      if (mounted.current && generation === previewGeneration.current) {
+        setPreviewStatus('正在探测 RSS 地址...')
+      }
+    }, 4000)
+    previewTimer.current = timer
     try {
       const result = await previewFeed(normalized)
-      setPreview(result)
+      if (mounted.current && generation === previewGeneration.current) setPreview(result)
     } catch (err: any) {
-      setPreviewError(err?.response?.data?.error || '无法获取该地址的内容，请检查 URL 是否正确')
+      if (mounted.current && generation === previewGeneration.current) {
+        setPreviewError(err?.response?.data?.error || '无法获取该地址的内容，请检查 URL 是否正确')
+      }
     } finally {
-      if (previewTimer.current) clearTimeout(previewTimer.current)
-      setPreviewing(false)
-      setPreviewStatus('')
+      if (generation === previewGeneration.current) {
+        if (previewTimer.current === timer) {
+          clearTimeout(timer)
+          previewTimer.current = null
+        }
+        if (mounted.current) {
+          setPreviewing(false)
+          setPreviewStatus('')
+        }
+      }
     }
   }
 
