@@ -10,7 +10,7 @@ type ExpiryOption = '7d' | '30d' | 'custom' | 'permanent'
 
 export type ShareDialogProps = {
   articleId: number
-  title: string
+  articleTitle: string
   open: boolean
   onClose(): void
   onCopyXiaohongshu(): void
@@ -60,7 +60,7 @@ function expiryValue(option: ExpiryOption, customExpiry: string): string | null 
 
 export function ShareDialog({
   articleId,
-  title,
+  articleTitle,
   open,
   onClose,
   onCopyXiaohongshu,
@@ -76,6 +76,13 @@ export function ShareDialog({
   const generationRef = useRef(0)
   const createRequestRef = useRef<Promise<ArticleShareListItem> | null>(null)
   const revokeRequestsRef = useRef(new Map<string, Promise<ArticleShareListItem>>())
+  const dialogRef = useRef<HTMLElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!open) return
@@ -105,12 +112,43 @@ export function ShareDialog({
 
   useEffect(() => {
     if (!open) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const dialog = dialogRef.current
+      if (!dialog) return
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ))
+      if (focusable.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault()
+        first.focus()
+      }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, open])
+    document.addEventListener('keydown', onKeyDown)
+    closeButtonRef.current?.focus()
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (opener?.isConnected) opener.focus()
+    }
+  }, [open])
 
   if (!open) return null
 
@@ -199,7 +237,7 @@ export function ShareDialog({
       return
     }
     const intent = new URL('https://twitter.com/intent/tweet')
-    intent.searchParams.set('text', title)
+    intent.searchParams.set('text', articleTitle)
     intent.searchParams.set('url', url)
     window.open(intent.toString(), '_blank', 'noopener,noreferrer')
   }
@@ -209,14 +247,16 @@ export function ShareDialog({
       if (event.target === event.currentTarget) onClose()
     }}>
       <section
+        ref={dialogRef}
         className="share-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="share-dialog-title"
+        tabIndex={-1}
       >
         <header className="share-dialog-header">
           <h2 id="share-dialog-title">管理分享链接</h2>
-          <button type="button" className="btn-ghost" aria-label="关闭" onClick={onClose}>×</button>
+          <button ref={closeButtonRef} type="button" className="btn-ghost" aria-label="关闭" onClick={onClose}>×</button>
         </header>
 
         <div className="share-dialog-body">

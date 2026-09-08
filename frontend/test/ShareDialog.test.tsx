@@ -1,7 +1,8 @@
 // @vitest-environment-options { "url": "https://rss.example/articles/42" }
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ShareDialog } from '../src/components/ShareDialog'
 import type { ArticleShareListItem } from '../src/api/client'
 
@@ -47,7 +48,7 @@ function deferred<T>() {
 function renderShareDialog(overrides: Partial<React.ComponentProps<typeof ShareDialog>> = {}) {
   const props: React.ComponentProps<typeof ShareDialog> = {
     articleId: 42,
-    title: 'A useful article',
+    articleTitle: 'A useful article',
     open: true,
     onClose: vi.fn(),
     onCopyXiaohongshu: vi.fn(),
@@ -68,6 +69,8 @@ describe('ShareDialog', () => {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
     })
   })
+
+  afterEach(() => vi.useRealTimers())
 
   it('loads only while open, shows loading, and loads again after reopening', async () => {
     const first = deferred<ArticleShareListItem[]>()
@@ -138,6 +141,7 @@ describe('ShareDialog', () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-08T12:00:00Z').getTime())
     apiMocks.createArticleShare.mockResolvedValue(activeShare('custom'))
     const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
     renderShareDialog()
     await screen.findByText('还没有分享链接')
 
@@ -152,6 +156,45 @@ describe('ShareDialog', () => {
     expect((submit as HTMLButtonElement).disabled).toBe(false)
     await user.click(submit)
     expect(apiMocks.createArticleShare).toHaveBeenCalledWith(42, new Date('2026-09-10T09:30').toISOString())
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://rss.example/share/signed-custom'))
+  })
+
+  it('rejects a custom expiry exactly equal to now', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-08T12:00:00'))
+    renderShareDialog()
+
+    fireEvent.click(screen.getByRole('radio', { name: '自定义' }))
+    const input = screen.getByLabelText('到期时间')
+    fireEvent.change(input, { target: { value: '2026-09-08T12:00' } })
+    expect((screen.getByRole('button', { name: '创建新链接' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(apiMocks.createArticleShare).not.toHaveBeenCalled()
+  })
+
+  it('disables create while pending and prevents duplicate submissions', async () => {
+    const pending = deferred<ArticleShareListItem>()
+    apiMocks.createArticleShare.mockReturnValue(pending.promise)
+    const user = userEvent.setup()
+    renderShareDialog()
+    const create = await screen.findByRole('button', { name: '创建新链接' })
+
+    await user.dblClick(create)
+    expect(apiMocks.createArticleShare).toHaveBeenCalledTimes(1)
+    expect((screen.getByRole('button', { name: '创建中…' }) as HTMLButtonElement).disabled).toBe(true)
+    pending.resolve(activeShare('created-once'))
+    expect(await screen.findByText('created-once')).toBeTruthy()
+  })
+
+  it('retains the created row and dialog when its automatic clipboard copy fails', async () => {
+    apiMocks.createArticleShare.mockResolvedValue(activeShare('created-but-not-copied'))
+    const user = userEvent.setup()
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('denied'))
+    renderShareDialog()
+
+    await user.click(await screen.findByRole('button', { name: '创建新链接' }))
+    expect(await screen.findByText('链接已创建，但复制失败，请手动复制链接')).toBeTruthy()
+    expect(screen.getByText('created-but-not-copied')).toBeTruthy()
+    expect(screen.getByRole('dialog')).toBeTruthy()
   })
 
   it('lists all statuses and only allows actions on active non-legacy rows', async () => {
@@ -231,5 +274,75 @@ describe('ShareDialog', () => {
     expect(props.onCopyXiaohongshu).toHaveBeenCalledTimes(1)
     expect(props.onExportMarkdown).toHaveBeenCalledTimes(1)
     expect(props.onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves focus into the dialog, traps Tab, closes with Escape, and restores the opener', async () => {
+    const onClose = vi.fn()
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>打开分享</button>
+          <a href="/outside">背景链接</a>
+          <ShareDialog
+            articleId={42}
+            articleTitle="A useful article"
+            open={open}
+            onClose={() => {
+              onClose()
+              setOpen(false)
+            }}
+            onCopyXiaohongshu={vi.fn()}
+            onExportMarkdown={vi.fn()}
+          />
+        </>
+      )
+    }
+    const user = userEvent.setup()
+    render(<Harness />)
+    const opener = screen.getByRole('button', { name: '打开分享' })
+    await user.click(opener)
+
+    const close = screen.getByRole('button', { name: '关闭' })
+    await waitFor(() => expect(document.activeElement).toBe(close))
+    await user.tab({ shift: true })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '导出 Markdown' }))
+    await user.tab()
+    expect(document.activeElement).toBe(close)
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it('ignores pending create and revoke results from a previous open generation', async () => {
+    const createPending = deferred<ArticleShareListItem>()
+    apiMocks.createArticleShare.mockReturnValue(createPending.promise)
+    const user = userEvent.setup()
+    const createView = renderShareDialog()
+    await user.click(await screen.findByRole('button', { name: '创建新链接' }))
+    createView.rerender(<ShareDialog {...createView.props} open={false} />)
+    createView.rerender(<ShareDialog {...createView.props} open />)
+    await screen.findByText('还没有分享链接')
+    createPending.resolve(activeShare('stale-created'))
+    await Promise.resolve()
+    expect(screen.queryByText('stale-created')).toBeNull()
+    createView.unmount()
+
+    const revokePending = deferred<ArticleShareListItem>()
+    apiMocks.listArticleShares
+      .mockResolvedValueOnce([activeShare('old-row')])
+      .mockResolvedValueOnce([activeShare('fresh-row')])
+    apiMocks.revokeArticleShare.mockReturnValue(revokePending.promise)
+    const revokeView = renderShareDialog()
+    const oldRow = (await screen.findByText('old-row')).closest('li')!
+    await user.click(within(oldRow).getByRole('button', { name: '撤销' }))
+    revokeView.rerender(<ShareDialog {...revokeView.props} open={false} />)
+    revokeView.rerender(<ShareDialog {...revokeView.props} open />)
+    expect(await screen.findByText('fresh-row')).toBeTruthy()
+    revokePending.resolve(revokedShare('old-row'))
+    await Promise.resolve()
+    expect(screen.queryByText('old-row')).toBeNull()
+    expect(within(screen.getByText('fresh-row').closest('li')!).getByRole('button', { name: '撤销' })).toBeTruthy()
   })
 })
