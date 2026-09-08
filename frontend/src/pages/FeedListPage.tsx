@@ -104,7 +104,7 @@ export default function FeedListPage() {
 
   const normalizeURL = (raw: string) => {
     const trimmed = raw.trim()
-    if (trimmed && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    if (trimmed && !/^https?:\/\//i.test(trimmed)) {
       return 'https://' + trimmed
     }
     return trimmed

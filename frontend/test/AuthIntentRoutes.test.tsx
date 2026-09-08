@@ -223,6 +223,17 @@ describe('feed subscription intent', () => {
     expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1)
   })
 
+  it('preserves an uppercase HTTPS subscription source without adding a second scheme', async () => {
+    const source = 'HTTPS://source.example/post'
+    renderFeeds(`/feeds?add=1&source=${encodeURIComponent(source)}`)
+
+    const input = await screen.findByPlaceholderText('输入 RSS 地址、网站 URL 或 PDF 链接') as HTMLInputElement
+    await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
+    expect(apiMocks.previewFeed).toHaveBeenCalledWith(source)
+    expect(input.value).toBe(source)
+    expect(input.value).not.toContain('https://HTTPS://')
+  })
+
   it.each([
     '/feeds?add=1&source=http%3A%2F%2F10.0.0.1%2Ffeed',
     '/feeds?add=1&source=javascript%3Aalert(1)',
