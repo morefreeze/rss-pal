@@ -62,7 +62,10 @@ func (h *ArticleImageHandler) Serve(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
+	h.serve(c, articleID, idxStr, "public, max-age=31536000, immutable")
+}
 
+func (h *ArticleImageHandler) serve(c *gin.Context, articleID int, idxStr string, cacheControl string) {
 	// idxStr looks like "3.png" — split into numeric index + extension.
 	// LastIndex(".") with dot > 0 also rejects ".png" (empty index).
 	dot := strings.LastIndex(idxStr, ".")
@@ -71,7 +74,7 @@ func (h *ArticleImageHandler) Serve(c *gin.Context) {
 		return
 	}
 	idx, err := strconv.Atoi(idxStr[:dot])
-	if err != nil {
+	if err != nil || idx < 0 {
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
@@ -82,6 +85,9 @@ func (h *ArticleImageHandler) Serve(c *gin.Context) {
 		contentType = "image/png"
 	case "jpg", "jpeg":
 		contentType = "image/jpeg"
+	default:
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
 	}
 
 	path := pdfextract.ImagePath(h.baseDir, articleID, idx, ext)
@@ -100,12 +106,12 @@ func (h *ArticleImageHandler) Serve(c *gin.Context) {
 
 	sum := sha256.Sum256(body)
 	etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+	c.Header("Cache-Control", cacheControl)
+	c.Header("ETag", etag)
 	if c.GetHeader("If-None-Match") == etag {
 		c.Status(http.StatusNotModified)
 		return
 	}
 
-	c.Header("Cache-Control", "public, max-age=31536000, immutable")
-	c.Header("ETag", etag)
 	c.Data(http.StatusOK, contentType, body)
 }

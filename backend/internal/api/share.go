@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +48,122 @@ type shareManagementResponse struct {
 	ExpiresAt *time.Time `json:"expires_at"`
 	Status    string     `json:"status"`
 	Legacy    bool       `json:"legacy"`
+}
+
+var localShareAssetPattern = regexp.MustCompile(`/api/articles/[0-9]+/images/[0-9]+\.(?:png|jpg|jpeg)`)
+
+func (h *ShareHandler) GetPublic(c *gin.Context) {
+	setPublicShareHeaders(c)
+	row, ok := h.resolveActive(c.Param("token"))
+	if !ok {
+		shareUnavailable(c)
+		return
+	}
+
+	snapshot := row.Snapshot
+	snapshot.Content = rewriteShareAssets(snapshot.Content, c.Param("token"))
+	c.JSON(http.StatusOK, snapshot)
+}
+
+func (h *ShareHandler) GetAsset(c *gin.Context) {
+	setPublicShareHeaders(c)
+	row, ok := h.resolveActive(c.Param("token"))
+	if !ok {
+		shareUnavailable(c)
+		return
+	}
+	if h.images == nil {
+		log.Printf("share asset failed: image handler unavailable")
+		shareUnavailable(c)
+		return
+	}
+	h.images.serve(c, row.ArticleID, c.Param("asset"), "no-store")
+}
+
+func (h *ShareHandler) resolveActive(token string) (*model.ArticleShare, bool) {
+	value, legacy, err := h.signer.Parse(token)
+	if err != nil {
+		return nil, false
+	}
+	var row *model.ArticleShare
+	if legacy {
+		row, err = h.shares.GetActiveByLegacyDigest(sharetoken.LegacyDigest(value), h.now())
+	} else {
+		row, err = h.shares.GetActiveByPublicID(value, h.now())
+	}
+	if err != nil {
+		log.Printf("share public resolve failed: %v", err)
+		return nil, false
+	}
+	return row, row != nil
+}
+
+func rewriteShareAssets(content, token string) string {
+	indices := localShareAssetPattern.FindAllStringIndex(content, -1)
+	if len(indices) == 0 {
+		return content
+	}
+	escapedToken := url.PathEscape(token)
+	var result strings.Builder
+	result.Grow(len(content))
+	last := 0
+	for _, match := range indices {
+		start, end := match[0], match[1]
+		if !shareAssetBoundary(content, start, end) {
+			continue
+		}
+		result.WriteString(content[last:start])
+		path := content[start:end]
+		asset := path[strings.LastIndex(path, "/")+1:]
+		result.WriteString("/api/share/")
+		result.WriteString(escapedToken)
+		result.WriteString("/assets/")
+		result.WriteString(asset)
+		last = end
+	}
+	if last == 0 {
+		return content
+	}
+	result.WriteString(content[last:])
+	return result.String()
+}
+
+func shareAssetBoundary(content string, start, end int) bool {
+	if start > 0 && !isShareAssetStartBoundary(content[start-1]) {
+		return false
+	}
+	if end < len(content) && !isShareAssetEndBoundary(content[end]) {
+		return false
+	}
+	return true
+}
+
+func isShareAssetStartBoundary(b byte) bool {
+	switch b {
+	case '"', '\'', '(', '[', '{', '=', ' ', '\t', '\r', '\n', '>':
+		return true
+	default:
+		return false
+	}
+}
+
+func isShareAssetEndBoundary(b byte) bool {
+	switch b {
+	case '"', '\'', ')', ']', '}', ' ', '\t', '\r', '\n', '<', '>':
+		return true
+	default:
+		return false
+	}
+}
+
+func setPublicShareHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("X-Content-Type-Options", "nosniff")
+}
+
+func shareUnavailable(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{"error": "share unavailable"})
 }
 
 func (h *ShareHandler) Create(c *gin.Context) {

@@ -188,6 +188,9 @@ func main() {
 	// sets app.bypass_rls LOCAL for the article→feed→owner_id chase, then
 	// returns the owner_id so the middleware can set app.user_id.
 	router.GET("/api/articles/:id/images/:idx", pdfImgHandler.Serve)
+	shareLimit := api.NewShareRateLimiter(60, time.Minute, 4096, time.Now)
+	router.GET("/api/share/:token", shareLimit, shareHandler.GetPublic)
+	router.GET("/api/share/:token/assets/:asset", shareLimit, shareHandler.GetAsset)
 
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT).
 	// PublicTokenMiddleware resolves the owning user from the bearer

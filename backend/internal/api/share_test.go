@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,14 +25,15 @@ import (
 var shareAPINow = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 
 type shareAPIFixture struct {
-	privDB  *sql.DB
-	appDB   *sql.DB
-	router  *gin.Engine
-	signer  *sharetoken.Signer
-	now     time.Time
-	article int
-	userA   int
-	userB   int
+	privDB   *sql.DB
+	appDB    *sql.DB
+	router   *gin.Engine
+	signer   *sharetoken.Signer
+	now      time.Time
+	article  int
+	userA    int
+	userB    int
+	imageDir string
 }
 
 func newShareAPIFixture(t *testing.T) *shareAPIFixture {
@@ -67,11 +70,14 @@ func newShareAPIFixture(t *testing.T) *shareAPIFixture {
 		t.Fatalf("new signer: %v", err)
 	}
 	f.signer = signer
-	images := api.NewArticleImageHandler(t.TempDir(), func(*gin.Context, int) (bool, error) { return true, nil })
+	f.imageDir = t.TempDir()
+	images := api.NewArticleImageHandler(f.imageDir, func(*gin.Context, int) (bool, error) { return true, nil })
 	handler := api.NewShareHandler(repository.NewShareRepository(appDB), repository.NewArticleRepository(appDB), signer, images, func() time.Time { return f.now })
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.GET("/api/share/:token", handler.GetPublic)
+	router.GET("/api/share/:token/assets/:asset", handler.GetAsset)
 	group := router.Group("/api")
 	group.Use(auth.AuthMiddleware())
 	group.Use(api.RLSTxMiddleware(appDB))
@@ -80,6 +86,20 @@ func newShareAPIFixture(t *testing.T) *shareAPIFixture {
 	group.DELETE("/articles/:id/shares/:share_id", handler.Revoke)
 	f.router = router
 	return f
+}
+
+func (f *shareAPIFixture) publicRequest(method, path string) *httptest.ResponseRecorder {
+	return f.publicRequestWithHeaders(method, path, nil)
+}
+
+func (f *shareAPIFixture) publicRequestWithHeaders(method, path string, headers map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, nil)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	w := httptest.NewRecorder()
+	f.router.ServeHTTP(w, req)
+	return w
 }
 
 func (f *shareAPIFixture) request(t *testing.T, method, path string, userID int, body string) *httptest.ResponseRecorder {
@@ -166,6 +186,187 @@ func assertShareResponseKeys(t *testing.T, raw []byte) {
 			t.Fatalf("response exposes forbidden key %q: %s", key, raw)
 		}
 	}
+}
+
+func assertPublicSecurityHeaders(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	for key, want := range map[string]string{
+		"Cache-Control":          "no-store",
+		"Referrer-Policy":        "no-referrer",
+		"X-Content-Type-Options": "nosniff",
+	} {
+		if got := w.Header().Get(key); got != want {
+			t.Errorf("%s=%q, want %q", key, got, want)
+		}
+	}
+}
+
+func assertShareUnavailable(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	if w.Code != http.StatusNotFound || w.Body.String() != `{"error":"share unavailable"}` {
+		t.Fatalf("status=%d body=%q, want generic 404", w.Code, w.Body.String())
+	}
+	assertPublicSecurityHeaders(t, w)
+}
+
+func TestPublicShareReturnsImmutableSnapshotAndRewritesOnlyExactAssets(t *testing.T) {
+	f := newShareAPIFixture(t)
+	content := `<p>snapshot</p><img src="/api/articles/123/images/0.png"><img src='/api/articles/456/images/9.jpeg'>` +
+		`<img src="https://cdn.example/x.png"><code>/api/articles/123/images/2.gif</code>` +
+		`<code>/prefix/api/articles/123/images/3.jpg</code><code>/api/articles/123/images/4.png?x=1</code>`
+	f.setArticleState(t, "ready", content)
+	share := f.createShare(t, f.userA, `{"expires_at":null}`)
+	token := strings.TrimPrefix(share.URL, "/share/")
+	f.setArticleState(t, "ready", "mutated article body")
+
+	w := f.publicRequest(http.MethodGet, "/api/share/"+token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	assertPublicSecurityHeaders(t, w)
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode public response: %v", err)
+	}
+	wantKeys := map[string]bool{
+		"title": true, "url": true, "feed_title": true, "published_at": true,
+		"content": true, "snapshotted_at": true,
+	}
+	for key := range got {
+		switch key {
+		case "title", "url", "feed_title", "published_at", "word_count", "reading_minutes",
+			"summary_brief", "summary_detailed", "content", "media_url", "media_type",
+			"media_duration_seconds", "image_dimensions", "snapshotted_at":
+		default:
+			t.Fatalf("public response exposed forbidden key %q: %s", key, w.Body.String())
+		}
+	}
+	for key := range wantKeys {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("public response missing key %q: %s", key, w.Body.String())
+		}
+	}
+	var rewritten string
+	if err := json.Unmarshal(got["content"], &rewritten); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rewritten, "/api/share/"+token+"/assets/0.png") ||
+		!strings.Contains(rewritten, "/api/share/"+token+"/assets/9.jpeg") {
+		t.Fatalf("exact local assets not rewritten: %s", rewritten)
+	}
+	for _, unchanged := range []string{
+		"https://cdn.example/x.png", "/api/articles/123/images/2.gif",
+		"/prefix/api/articles/123/images/3.jpg", "/api/articles/123/images/4.png?x=1",
+	} {
+		if !strings.Contains(rewritten, unchanged) {
+			t.Errorf("non-exact path %q was changed: %s", unchanged, rewritten)
+		}
+	}
+	if strings.Contains(rewritten, "mutated article body") {
+		t.Fatal("public response reread mutable article content")
+	}
+}
+
+func TestPublicShareUnavailableIsUniform(t *testing.T) {
+	f := newShareAPIFixture(t)
+	active := f.createShare(t, f.userA, `{"expires_at":null}`)
+	revoked := f.createShare(t, f.userA, `{"expires_at":null}`)
+	expired := f.createShare(t, f.userA, `{"expires_at":"2026-09-08T12:00:01Z"}`)
+	if got := f.request(t, http.MethodDelete, f.articlePath("/shares/"+revoked.ID), f.userA, ""); got.Code != http.StatusOK {
+		t.Fatalf("revoke status=%d", got.Code)
+	}
+	f.now = shareAPINow.Add(2 * time.Second)
+	activeToken := strings.TrimPrefix(active.URL, "/share/")
+	tampered := activeToken[:len(activeToken)-1] + "A"
+	if tampered == activeToken {
+		tampered = activeToken[:len(activeToken)-1] + "B"
+	}
+	for name, token := range map[string]string{
+		"malformed": "not-a-token", "unknown": f.signer.Sign("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		"tampered": tampered, "revoked": strings.TrimPrefix(revoked.URL, "/share/"),
+		"expired": strings.TrimPrefix(expired.URL, "/share/"), "legacy missing": "aB3dE6gH",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertShareUnavailable(t, f.publicRequest(http.MethodGet, "/api/share/"+token))
+		})
+	}
+}
+
+func TestPublicShareDatabaseFailureIsUnavailable(t *testing.T) {
+	f := newShareAPIFixture(t)
+	share := f.createShare(t, f.userA, `{"expires_at":null}`)
+	if _, err := f.privDB.Exec(`DROP TABLE article_shares`); err != nil {
+		t.Fatal(err)
+	}
+	assertShareUnavailable(t, f.publicRequest(http.MethodGet, "/api/share/"+strings.TrimPrefix(share.URL, "/share/")))
+}
+
+func TestLegacyShareResolvesByDigestWithStrictExpiryBoundary(t *testing.T) {
+	f := newShareAPIFixture(t)
+	share := f.createShare(t, f.userA, `{"expires_at":"2026-09-08T13:00:00Z"}`)
+	const legacy = "aB3dE6gH"
+	if _, err := f.privDB.Exec(`UPDATE article_shares SET legacy_token_digest = $1 WHERE public_id = $2`, sharetoken.LegacyDigest(legacy), share.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.publicRequest(http.MethodGet, "/api/share/"+legacy); got.Code != http.StatusOK {
+		t.Fatalf("legacy active status=%d body=%s", got.Code, got.Body.String())
+	}
+	f.now = time.Date(2026, 9, 8, 13, 0, 0, 0, time.UTC)
+	assertShareUnavailable(t, f.publicRequest(http.MethodGet, "/api/share/"+legacy))
+}
+
+func TestShareAssetRequiresActiveShareAndPreservesAssetSemantics(t *testing.T) {
+	f := newShareAPIFixture(t)
+	share := f.createShare(t, f.userA, `{"expires_at":null}`)
+	expiring := f.createShare(t, f.userA, `{"expires_at":"2026-09-08T12:00:01Z"}`)
+	token := strings.TrimPrefix(share.URL, "/share/")
+	dir := filepath.Join(f.imageDir, "article_images", strconv.Itoa(f.article))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("shared-png")
+	if err := os.WriteFile(filepath.Join(dir, "0.png"), want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	w := f.publicRequest(http.MethodGet, "/api/share/"+token+"/assets/0.png")
+	if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), want) {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.Bytes())
+	}
+	if w.Header().Get("ETag") == "" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("asset headers=%v", w.Header())
+	}
+	assertPublicSecurityHeaders(t, w)
+	etag := w.Header().Get("ETag")
+	revalidated := f.publicRequestWithHeaders(http.MethodGet, "/api/share/"+token+"/assets/0.png", map[string]string{"If-None-Match": etag})
+	if revalidated.Code != http.StatusNotModified || revalidated.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("repeat asset status=%d", revalidated.Code)
+	}
+
+	for _, asset := range []string{"bad", "-1.png", "0.gif", "0.png%2F..%2F1.png"} {
+		got := f.publicRequest(http.MethodGet, "/api/share/"+token+"/assets/"+asset)
+		if got.Code < 400 {
+			t.Errorf("unsafe asset %q status=%d", asset, got.Code)
+		}
+	}
+	tampered := token[:len(token)-1] + "A"
+	if tampered == token {
+		tampered = token[:len(token)-1] + "B"
+	}
+	for name, invalidToken := range map[string]string{
+		"tampered":       tampered,
+		"legacy missing": "aB3dE6gH",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertShareUnavailable(t, f.publicRequest(http.MethodGet, "/api/share/"+invalidToken+"/assets/0.png"))
+		})
+	}
+	f.now = shareAPINow.Add(2 * time.Second)
+	assertShareUnavailable(t, f.publicRequest(http.MethodGet, "/api/share/"+strings.TrimPrefix(expiring.URL, "/share/")+"/assets/0.png"))
+	if got := f.request(t, http.MethodDelete, f.articlePath("/shares/"+share.ID), f.userA, ""); got.Code != http.StatusOK {
+		t.Fatalf("revoke status=%d", got.Code)
+	}
+	assertShareUnavailable(t, f.publicRequest(http.MethodGet, "/api/share/"+token+"/assets/0.png"))
 }
 
 func TestCreateShareRequiresVisibleReadyArticle(t *testing.T) {
