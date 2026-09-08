@@ -2,7 +2,9 @@ package repository
 
 import (
 	"database/sql"
-	"math/rand"
+	"encoding/json"
+	"errors"
+	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
@@ -28,67 +30,137 @@ func (r *ShareRepository) WithCtx(c ctxkey.CtxGetter) *ShareRepository {
 	return r
 }
 
-// GetOrCreate 创建 share token（如果该 article 已有 token，返回已有的）
-func (r *ShareRepository) GetOrCreate(articleID, createdBy int) (*model.ShareToken, error) {
-	// 先查是否已有
-	st := &model.ShareToken{}
-	err := r.db.QueryRow(
-		`SELECT id, article_id, token, created_by, created_at FROM share_tokens WHERE article_id = $1`,
-		articleID,
-	).Scan(&st.ID, &st.ArticleID, &st.Token, &st.CreatedBy, &st.CreatedAt)
-	if err == nil {
-		return st, nil
+// SnapshotFromArticle selects only fields that are safe to expose on the
+// unauthenticated share surface.
+func SnapshotFromArticle(a *model.Article, now time.Time) model.ArticleShareSnapshot {
+	return model.ArticleShareSnapshot{
+		Title:                a.Title,
+		URL:                  a.URL,
+		FeedTitle:            a.FeedTitle,
+		PublishedAt:          a.PublishedAt,
+		WordCount:            a.WordCount,
+		ReadingMinutes:       a.ReadingMinutes,
+		SummaryBrief:         a.SummaryBrief,
+		SummaryDetailed:      a.SummaryDetailed,
+		Content:              a.Content,
+		MediaURL:             a.MediaURL,
+		MediaType:            a.MediaType,
+		MediaDurationSeconds: a.MediaDurationSeconds,
+		ImageDimensions:      a.ImageDimensions,
+		SnapshottedAt:        now,
 	}
-	if err != sql.ErrNoRows {
-		return nil, err
-	}
+}
 
-	// 生成8位随机字母数字 token
-	token := generateShareToken(8)
-
-	err = r.db.QueryRow(
-		`INSERT INTO share_tokens (article_id, token, created_by) VALUES ($1, $2, $3)
-		 RETURNING id, created_at`,
-		articleID, token, createdBy,
-	).Scan(&st.ID, &st.CreatedAt)
+func (r *ShareRepository) Create(article *model.Article, createdBy int, publicID string, expiresAt *time.Time, now time.Time) (*model.ArticleShare, error) {
+	snapshotJSON, err := json.Marshal(SnapshotFromArticle(article, now))
 	if err != nil {
 		return nil, err
 	}
-
-	st.ArticleID = articleID
-	st.Token = token
-	st.CreatedBy = createdBy
-	return st, nil
+	return scanArticleShare(r.db.QueryRow(`
+		INSERT INTO article_shares (
+			public_id, article_id, created_by, snapshot_version, snapshot, expires_at, created_at
+		) VALUES ($1, $2, $3, 1, $4, $5, $6)
+		RETURNING public_id, article_id, created_by, snapshot_version, snapshot,
+		          expires_at, revoked_at, legacy_token_digest, created_at`,
+		publicID, article.ID, createdBy, snapshotJSON, expiresAt, now,
+	))
 }
 
-// GetArticleByToken 通过 token 获取 article
-func (r *ShareRepository) GetArticleByToken(token string) (*model.Article, error) {
-	var a model.Article
-	var content, summaryBrief, summaryDetailed sql.NullString
-	err := r.db.QueryRow(
-		`SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at
-		 FROM articles a
-		 JOIN share_tokens st ON a.id = st.article_id
-		 WHERE st.token = $1`,
-		token,
-	).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+// List returns all shares for the article and owner, including expired and
+// revoked rows so the management UI can display their lifecycle state.
+func (r *ShareRepository) List(articleID, createdBy int, _ time.Time) ([]model.ArticleShare, error) {
+	rows, err := r.db.Query(`
+		SELECT public_id, article_id, created_by, snapshot_version, snapshot,
+		       expires_at, revoked_at, legacy_token_digest, created_at
+		  FROM article_shares
+		 WHERE article_id = $1 AND created_by = $2
+		 ORDER BY created_at DESC, public_id DESC`, articleID, createdBy)
 	if err != nil {
 		return nil, err
 	}
-	a.Content = content.String
-	a.SummaryBrief = summaryBrief.String
-	a.SummaryDetailed = summaryDetailed.String
-	return &a, nil
+	defer rows.Close()
+
+	shares := make([]model.ArticleShare, 0)
+	for rows.Next() {
+		share, err := scanArticleShare(rows)
+		if err != nil {
+			return nil, err
+		}
+		shares = append(shares, *share)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return shares, nil
 }
 
-func generateShareToken(length int) string {
-	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))]
+func (r *ShareRepository) Revoke(publicID string, articleID, createdBy int, now time.Time) (*model.ArticleShare, error) {
+	return scanArticleShare(r.db.QueryRow(`
+		UPDATE article_shares
+		   SET revoked_at = COALESCE(revoked_at, $4)
+		 WHERE public_id = $1 AND article_id = $2 AND created_by = $3
+		RETURNING public_id, article_id, created_by, snapshot_version, snapshot,
+		          expires_at, revoked_at, legacy_token_digest, created_at`,
+		publicID, articleID, createdBy, now,
+	))
+}
+
+func (r *ShareRepository) GetActiveByPublicID(publicID string, now time.Time) (*model.ArticleShare, error) {
+	return scanArticleShare(r.db.QueryRow(`
+		SELECT public_id, article_id, created_by, snapshot_version, snapshot,
+		       expires_at, revoked_at, legacy_token_digest, created_at
+		  FROM article_shares
+		 WHERE public_id = $1
+		   AND revoked_at IS NULL
+		   AND (expires_at IS NULL OR expires_at > $2)`, publicID, now))
+}
+
+func (r *ShareRepository) GetActiveByLegacyDigest(digest string, now time.Time) (*model.ArticleShare, error) {
+	return scanArticleShare(r.db.QueryRow(`
+		SELECT public_id, article_id, created_by, snapshot_version, snapshot,
+		       expires_at, revoked_at, legacy_token_digest, created_at
+		  FROM article_shares
+		 WHERE legacy_token_digest = $1
+		   AND revoked_at IS NULL
+		   AND (expires_at IS NULL OR expires_at > $2)`, digest, now))
+}
+
+type shareScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanArticleShare(scanner shareScanner) (*model.ArticleShare, error) {
+	var share model.ArticleShare
+	var snapshotJSON []byte
+	var expiresAt, revokedAt sql.NullTime
+	var legacyTokenDigest sql.NullString
+	if err := scanner.Scan(
+		&share.PublicID,
+		&share.ArticleID,
+		&share.CreatedBy,
+		&share.SnapshotVersion,
+		&snapshotJSON,
+		&expiresAt,
+		&revokedAt,
+		&legacyTokenDigest,
+		&share.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	return string(b)
+	if err := json.Unmarshal(snapshotJSON, &share.Snapshot); err != nil {
+		return nil, err
+	}
+	if expiresAt.Valid {
+		share.ExpiresAt = &expiresAt.Time
+	}
+	if revokedAt.Valid {
+		share.RevokedAt = &revokedAt.Time
+	}
+	if legacyTokenDigest.Valid {
+		share.LegacyTokenDigest = &legacyTokenDigest.String
+	}
+	return &share, nil
 }

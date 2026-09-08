@@ -23,11 +23,3 @@ type UserAIConfig struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
-
-type ShareToken struct {
-	ID        int       `json:"id"`
-	ArticleID int       `json:"article_id"`
-	Token     string    `json:"token"`
-	CreatedBy int       `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
-}
