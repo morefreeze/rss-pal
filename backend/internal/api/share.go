@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -95,48 +96,140 @@ func (h *ShareHandler) resolveActive(token string) (*model.ArticleShare, bool) {
 	return row, row != nil
 }
 
+var (
+	strictMarkdownImagePattern = regexp.MustCompile(`!\[[^\]\r\n]*\]\(/api/articles/[0-9]+/images/[0-9]+\.(png|jpg|jpeg)\)`)
+	htmlTagPattern             = regexp.MustCompile(`(?i)<[a-z][^<>]*>`)
+)
+
 func rewriteShareAssets(content, token string, articleID int) string {
 	// Deliberately avoid substring replacement: putting a signed share URL into
 	// an attacker-controlled external URL would disclose the token when loaded.
 	// Only image destinations/attributes are inspected, and localShareAsset
 	// requires their complete value to name this share's article.
 	assetPrefix := "/api/share/" + url.PathEscape(token) + "/assets/"
+	return rewriteOutsideFencedCode(content, articleID, assetPrefix)
+}
+
+func rewriteOutsideFencedCode(content string, articleID int, assetPrefix string) string {
 	var result strings.Builder
 	result.Grow(len(content))
-	for i := 0; i < len(content); {
+	normalStart := 0
+	for i := 0; i < len(content); i++ {
 		if end, ok := fencedCodeEnd(content, i); ok {
+			result.WriteString(rewriteOutsideInlineCode(content[normalStart:i], articleID, assetPrefix))
 			result.WriteString(content[i:end])
-			i = end
-			continue
+			i = end - 1
+			normalStart = end
 		}
-		if content[i] == '`' {
-			end := inlineCodeEnd(content, i)
-			result.WriteString(content[i:end])
-			i = end
-			continue
-		}
-		if isHTMLImageStart(content, i) {
-			if end := htmlTagEnd(content, i); end > i {
-				result.WriteString(rewriteHTMLImageTag(content[i:end], articleID, assetPrefix))
-				i = end
-				continue
-			}
-		}
-		if strings.HasPrefix(content[i:], "![") {
-			if end, destinationStart, destinationEnd, ok := markdownImageDestination(content, i); ok {
-				if asset, valid := localShareAsset(content[destinationStart:destinationEnd], articleID); valid {
-					result.WriteString(content[i:destinationStart])
-					result.WriteString(assetPrefix)
-					result.WriteString(asset)
-					result.WriteString(content[destinationEnd:end])
-					i = end
-					continue
-				}
-			}
-		}
-		result.WriteByte(content[i])
-		i++
 	}
+	result.WriteString(rewriteOutsideInlineCode(content[normalStart:], articleID, assetPrefix))
+	return result.String()
+}
+
+type backtickRun struct {
+	start  int
+	length int
+}
+
+func rewriteOutsideInlineCode(content string, articleID int, assetPrefix string) string {
+	runs := make([]backtickRun, 0)
+	for i := 0; i < len(content); {
+		if content[i] != '`' {
+			i++
+			continue
+		}
+		length := byteRun(content, i, '`')
+		runs = append(runs, backtickRun{start: i, length: length})
+		i += length
+	}
+	if len(runs) == 0 {
+		return rewriteNonCode(content, articleID, assetPrefix)
+	}
+
+	nextSameLength := make([]int, len(runs))
+	lastByLength := make(map[int]int)
+	for i := len(runs) - 1; i >= 0; i-- {
+		nextSameLength[i] = -1
+		if next, ok := lastByLength[runs[i].length]; ok {
+			nextSameLength[i] = next
+		}
+		lastByLength[runs[i].length] = i
+	}
+
+	var result strings.Builder
+	result.Grow(len(content))
+	normalStart := 0
+	for i := 0; i < len(runs); {
+		opening := runs[i]
+		if opening.start < normalStart {
+			i++
+			continue
+		}
+		closingIndex := nextSameLength[i]
+		if closingIndex < 0 {
+			// An unmatched run is ordinary text. Leave it in the non-code
+			// segment so valid images later in the document are still handled.
+			i++
+			continue
+		}
+		closing := runs[closingIndex]
+		result.WriteString(rewriteNonCode(content[normalStart:opening.start], articleID, assetPrefix))
+		codeEnd := closing.start + closing.length
+		result.WriteString(content[opening.start:codeEnd])
+		normalStart = codeEnd
+		i = closingIndex + 1
+	}
+	result.WriteString(rewriteNonCode(content[normalStart:], articleID, assetPrefix))
+	return result.String()
+}
+
+func rewriteNonCode(content string, articleID int, assetPrefix string) string {
+	tags := htmlTagPattern.FindAllStringIndex(content, -1)
+	if len(tags) == 0 {
+		return rewriteMarkdownImages(content, articleID, assetPrefix)
+	}
+	var result strings.Builder
+	result.Grow(len(content))
+	last := 0
+	for _, tagRange := range tags {
+		result.WriteString(rewriteMarkdownImages(content[last:tagRange[0]], articleID, assetPrefix))
+		tag := content[tagRange[0]:tagRange[1]]
+		if isHTMLImageTag(tag) {
+			result.WriteString(rewriteHTMLImageTag(tag, articleID, assetPrefix))
+		} else {
+			result.WriteString(tag)
+		}
+		last = tagRange[1]
+	}
+	result.WriteString(rewriteMarkdownImages(content[last:], articleID, assetPrefix))
+	return result.String()
+}
+
+func rewriteMarkdownImages(content string, articleID int, assetPrefix string) string {
+	matches := strictMarkdownImagePattern.FindAllStringIndex(content, -1)
+	if len(matches) == 0 {
+		return content
+	}
+	var result strings.Builder
+	result.Grow(len(content))
+	last := 0
+	for _, matchRange := range matches {
+		match := content[matchRange[0]:matchRange[1]]
+		destinationStart := strings.Index(match, "](") + 2
+		destinationEnd := len(match) - 1
+		asset, ok := localShareAsset(match[destinationStart:destinationEnd], articleID)
+		if !ok {
+			continue
+		}
+		result.WriteString(content[last : matchRange[0]+destinationStart])
+		result.WriteString(assetPrefix)
+		result.WriteString(asset)
+		last = matchRange[0] + destinationEnd
+	}
+	if last == 0 {
+		return content
+	}
+	result.WriteString(content[last:])
 	return result.String()
 }
 
@@ -188,22 +281,6 @@ func fencedCodeEnd(content string, start int) (int, bool) {
 	return len(content), true
 }
 
-func inlineCodeEnd(content string, start int) int {
-	run := byteRun(content, start, '`')
-	for search := start + run; search < len(content); {
-		relative := strings.IndexByte(content[search:], '`')
-		if relative < 0 {
-			return len(content)
-		}
-		candidate := search + relative
-		if byteRun(content, candidate, '`') == run {
-			return candidate + run
-		}
-		search = candidate + byteRun(content, candidate, '`')
-	}
-	return len(content)
-}
-
 func byteRun(content string, start int, value byte) int {
 	end := start
 	for end < len(content) && content[end] == value {
@@ -212,30 +289,11 @@ func byteRun(content string, start int, value byte) int {
 	return end - start
 }
 
-func isHTMLImageStart(content string, start int) bool {
-	if start+4 > len(content) || content[start] != '<' || !strings.EqualFold(content[start+1:start+4], "img") {
+func isHTMLImageTag(tag string) bool {
+	if len(tag) < 5 || !strings.EqualFold(tag[1:4], "img") {
 		return false
 	}
-	return start+4 == len(content) || content[start+4] == '>' || content[start+4] == '/' || isHTMLSpace(content[start+4])
-}
-
-func htmlTagEnd(content string, start int) int {
-	var quote byte
-	for i := start + 4; i < len(content); i++ {
-		if quote != 0 {
-			if content[i] == quote {
-				quote = 0
-			}
-			continue
-		}
-		switch content[i] {
-		case '\'', '"':
-			quote = content[i]
-		case '>':
-			return i + 1
-		}
-	}
-	return 0
+	return tag[4] == '>' || tag[4] == '/' || isHTMLSpace(tag[4])
 }
 
 func rewriteHTMLImageTag(tag string, articleID int, assetPrefix string) string {
@@ -305,48 +363,6 @@ func isHTMLSpace(b byte) bool {
 func isHTMLAttributeNameByte(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') ||
 		(b >= '0' && b <= '9') || b == ':' || b == '-' || b == '_'
-}
-
-func markdownImageDestination(content string, start int) (end, destinationStart, destinationEnd int, ok bool) {
-	depth := 1
-	closeAlt := -1
-	for i := start + 2; i < len(content); i++ {
-		if content[i] == '\\' {
-			i++
-			continue
-		}
-		switch content[i] {
-		case '[':
-			depth++
-		case ']':
-			depth--
-			if depth == 0 {
-				closeAlt = i
-				i = len(content)
-			}
-		}
-	}
-	if closeAlt < 0 || closeAlt+1 >= len(content) || content[closeAlt+1] != '(' {
-		return 0, 0, 0, false
-	}
-	destinationStart = closeAlt + 2
-	depth = 1
-	for i := destinationStart; i < len(content); i++ {
-		if content[i] == '\\' {
-			i++
-			continue
-		}
-		switch content[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return i + 1, destinationStart, i, true
-			}
-		}
-	}
-	return 0, 0, 0, false
 }
 
 func localShareAsset(value string, articleID int) (string, bool) {
