@@ -16,6 +16,7 @@ type Config struct {
 	RSSHub   RSSHubConfig
 	Backup   BackupConfig
 	Explore  ExploreConfig
+	Share    ShareConfig
 }
 
 type BackupConfig struct {
@@ -86,6 +87,10 @@ type ExploreConfig struct {
 	FetchConcurrency int
 }
 
+type ShareConfig struct {
+	Secret string
+}
+
 func Load() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -133,6 +138,9 @@ func Load() *Config {
 		Explore: ExploreConfig{
 			FetchBatchLimit:  getEnvIntBounded("EXPLORE_FETCH_BATCH_LIMIT", 500, 1, 500),
 			FetchConcurrency: getEnvIntBounded("EXPLORE_FETCH_CONCURRENCY", 5, 1, 5),
+		},
+		Share: ShareConfig{
+			Secret: getEnv("SHARE_SECRET", ""),
 		},
 	}
 }
