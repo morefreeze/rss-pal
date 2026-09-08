@@ -1,7 +1,9 @@
 package testdb
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -50,7 +53,23 @@ func newWithSchema(t *testing.T, throughFile string) (*sql.DB, string, func()) {
 		t.Fatalf("open admin db: %v", err)
 	}
 	if err := adminDB.Ping(); err != nil {
+		_ = adminDB.Close()
 		t.Skipf("postgres not available at %s: %v", dsn, err)
+	}
+	setupLock, err := acquireTestSchemaBootstrapLock(adminDB)
+	if err != nil {
+		_ = adminDB.Close()
+		t.Fatalf("lock test schema bootstrap: %v", err)
+	}
+	defer func() {
+		if setupLock != nil {
+			if err := setupLock.release(); err != nil {
+				t.Errorf("release test schema bootstrap lock: %v", err)
+			}
+		}
+	}()
+	if err := ensurePGCrypto(setupLock.conn); err != nil {
+		t.Fatalf("bootstrap pgcrypto: %v", err)
 	}
 
 	schema := fmt.Sprintf("test_%s", strings.ReplaceAll(t.Name(), "/", "_"))
@@ -71,7 +90,7 @@ func newWithSchema(t *testing.T, throughFile string) (*sql.DB, string, func()) {
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	schemaDSN = fmt.Sprintf("%s%ssearch_path=%s", dsn, sep, schema)
+	schemaDSN = fmt.Sprintf("%s%ssearch_path=%s,public", dsn, sep, schema)
 
 	// Append app.bypass_rls=true to the session defaults so existing
 	// repository tests (which don't SET app.user_id) continue to work
@@ -101,6 +120,10 @@ func newWithSchema(t *testing.T, throughFile string) (*sql.DB, string, func()) {
 	if err := runMigrationsThrough(db, throughFile); err != nil {
 		t.Fatalf("migrations: %v", err)
 	}
+	if err := setupLock.release(); err != nil {
+		t.Fatalf("release test schema bootstrap lock: %v", err)
+	}
+	setupLock = nil
 
 	cleanup := func() {
 		db.Close()
@@ -108,6 +131,102 @@ func newWithSchema(t *testing.T, throughFile string) (*sql.DB, string, func()) {
 		adminDB.Close()
 	}
 	return db, schema, cleanup
+}
+
+const testSchemaBootstrapAdvisoryLock int64 = 0x72737370616c
+
+type testSchemaBootstrapLock struct {
+	ctx    context.Context
+	conn   *sql.Conn
+	locked bool
+}
+
+// acquireTestSchemaBootstrapLock serializes database-global bootstrap DDL
+// across concurrently running Go package processes. The dedicated connection
+// is retained because PostgreSQL advisory locks are session-scoped.
+func acquireTestSchemaBootstrapLock(db *sql.DB) (*testSchemaBootstrapLock, error) {
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open advisory-lock connection: %w", err)
+	}
+	for {
+		var acquired bool
+		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, testSchemaBootstrapAdvisoryLock).Scan(&acquired); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("lock test schema bootstrap: %w", err)
+		}
+		if acquired {
+			break
+		}
+		// A blocking pg_advisory_lock query keeps a virtual transaction ID
+		// while waiting. CREATE INDEX CONCURRENTLY in another schema then waits
+		// for that virtual transaction and deadlocks with the lock owner. Short
+		// try-lock queries release their virtual IDs between attempts.
+		time.Sleep(10 * time.Millisecond)
+	}
+	return &testSchemaBootstrapLock{ctx: ctx, conn: conn, locked: true}, nil
+}
+
+// WithSchemaBootstrapLock lets migration tests stage database-global partial
+// states without racing another package's schema bootstrap. fn receives the
+// same dedicated connection that owns the advisory lock.
+func WithSchemaBootstrapLock(db *sql.DB, fn func(*sql.Conn) error) (err error) {
+	lock, err := acquireTestSchemaBootstrapLock(db)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, lock.release())
+	}()
+	return fn(lock.conn)
+}
+
+func (l *testSchemaBootstrapLock) release() (err error) {
+	if l == nil || l.conn == nil {
+		return nil
+	}
+	if l.locked {
+		var unlocked bool
+		unlockErr := l.conn.QueryRowContext(l.ctx, `SELECT pg_advisory_unlock($1)`, testSchemaBootstrapAdvisoryLock).Scan(&unlocked)
+		if unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("unlock test schema bootstrap: %w", unlockErr))
+		} else if !unlocked {
+			err = errors.Join(err, errors.New("unlock test schema bootstrap: lock was not held"))
+		}
+		l.locked = false
+	}
+	if closeErr := l.conn.Close(); closeErr != nil {
+		err = errors.Join(err, fmt.Errorf("close test schema bootstrap connection: %w", closeErr))
+	}
+	l.conn = nil
+	return err
+}
+
+// ensurePGCrypto installs the database-global extension exactly once in
+// public while the caller holds the test schema bootstrap advisory lock.
+func ensurePGCrypto(conn *sql.Conn) error {
+	ctx := context.Background()
+	if _, err := conn.ExecContext(ctx, `
+		DO $pgcrypto$
+		DECLARE
+			installed_schema TEXT;
+		BEGIN
+			SELECT n.nspname
+			  INTO installed_schema
+			  FROM pg_extension e
+			  JOIN pg_namespace n ON n.oid = e.extnamespace
+			 WHERE e.extname = 'pgcrypto';
+			IF installed_schema IS NOT NULL AND installed_schema <> 'public' THEN
+				EXECUTE 'ALTER EXTENSION pgcrypto SET SCHEMA public';
+			END IF;
+		END
+		$pgcrypto$;
+		CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+	`); err != nil {
+		return fmt.Errorf("install pgcrypto in public: %w", err)
+	}
+	return nil
 }
 
 func runMigrations(db *sql.DB) error {

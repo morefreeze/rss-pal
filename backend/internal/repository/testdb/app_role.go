@@ -30,7 +30,7 @@ func NewAsApp(t *testing.T, schema string) (*sql.DB, func()) {
 	u.User = url.UserPassword("rsspal_app", AppRolePlaceholderPassword)
 	q := u.Query()
 	q.Del("options") // don't inherit app.bypass_rls=true from base DSN
-	q.Set("search_path", schema)
+	q.Set("search_path", schema+",public")
 	u.RawQuery = q.Encode()
 
 	db, err := sql.Open("postgres", u.String())

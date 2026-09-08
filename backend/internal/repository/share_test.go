@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +17,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 	"github.com/bytedance/rss-pal/internal/sharetoken"
+	"github.com/lib/pq"
 )
 
 type shareRepoFixture struct {
@@ -295,13 +297,100 @@ func TestMigrations039CopiesLegacySharesAndCanBeReapplied(t *testing.T) {
 	}
 }
 
+func TestMigration039RelocatesPollutedPGCryptoAndCopiesLegacyShare(t *testing.T) {
+	db, cleanup := testdb.NewThroughMigration(t, "038_subscription_explore.sql")
+	defer cleanup()
+	db.SetMaxOpenConns(1)
+	if err := testdb.WithSchemaBootstrapLock(db, func(conn *sql.Conn) error {
+		tx, err := conn.BeginTx(t.Context(), nil)
+		if err != nil {
+			return err
+		}
+		rolledBack := false
+		defer func() {
+			if !rolledBack {
+				_ = tx.Rollback()
+			}
+		}()
+
+		var schema string
+		if err := tx.QueryRow(`SELECT current_schema()`).Scan(&schema); err != nil {
+			return err
+		}
+		var extensionSchema string
+		err = tx.QueryRow(`
+			SELECT n.nspname
+			  FROM pg_extension e
+			  JOIN pg_namespace n ON n.oid = e.extnamespace
+			 WHERE e.extname = 'pgcrypto'`).Scan(&extensionSchema)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			if _, err := tx.Exec(`CREATE EXTENSION pgcrypto WITH SCHEMA ` + pq.QuoteIdentifier(schema)); err != nil {
+				return err
+			}
+		case err != nil:
+			return err
+		case extensionSchema != schema:
+			if _, err := tx.Exec(`ALTER EXTENSION pgcrypto SET SCHEMA ` + pq.QuoteIdentifier(schema)); err != nil {
+				return err
+			}
+		}
+
+		var userID, feedID, articleID int
+		if err := tx.QueryRow(`INSERT INTO users(username,password_hash) VALUES('polluted-share-owner','x') RETURNING id`).Scan(&userID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES('https://polluted.example/feed','Polluted Feed',$1) RETURNING id`, userID).Scan(&feedID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(`INSERT INTO articles(feed_id,title,url,content) VALUES($1,'Polluted','https://polluted.example/post','body') RETURNING id`, feedID).Scan(&articleID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO share_tokens(article_id,token,created_by) VALUES($1,'pG3cR7yP',$2)`, articleID, userID); err != nil {
+			return err
+		}
+
+		raw, err := os.ReadFile(filepath.Join("..", "..", "migrations", "039_article_shares.sql"))
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(string(raw)); err != nil {
+			return fmt.Errorf("execute migration 039 from polluted pgcrypto schema: %w", err)
+		}
+		if err := tx.QueryRow(`
+			SELECT n.nspname
+			  FROM pg_extension e
+			  JOIN pg_namespace n ON n.oid = e.extnamespace
+			 WHERE e.extname = 'pgcrypto'`).Scan(&extensionSchema); err != nil {
+			return err
+		}
+		if extensionSchema != "public" {
+			return fmt.Errorf("pgcrypto schema=%q, want public", extensionSchema)
+		}
+		var count int
+		if err := tx.QueryRow(`SELECT count(*) FROM article_shares WHERE legacy_token_digest=$1`, sharetoken.LegacyDigest("pG3cR7yP")).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			return fmt.Errorf("migrated legacy shares=%d, want 1", count)
+		}
+		if err := tx.Rollback(); err != nil {
+			return err
+		}
+		rolledBack = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func executeMigration039DDLPrefix(t *testing.T, db *sql.DB) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "migrations", "039_article_shares.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	prefix, _, ok := strings.Cut(string(raw), "DO $$")
+	prefix, _, ok := strings.Cut(string(raw), "-- Legacy share-token migration begins here.")
 	if !ok {
 		t.Fatal("migration 039 has no legacy-copy DO block")
 	}
