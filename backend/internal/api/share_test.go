@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -211,9 +212,18 @@ func assertShareUnavailable(t *testing.T, w *httptest.ResponseRecorder) {
 
 func TestPublicShareReturnsImmutableSnapshotAndRewritesOnlyExactAssets(t *testing.T) {
 	f := newShareAPIFixture(t)
-	content := `<p>snapshot</p><img src="/api/articles/123/images/0.png"><img src='/api/articles/456/images/9.jpeg'>` +
+	localPNG := fmt.Sprintf("/api/articles/%d/images/0.png", f.article)
+	localJPEG := fmt.Sprintf("/api/articles/%d/images/9.jpeg", f.article)
+	mismatched := fmt.Sprintf("/api/articles/%d/images/7.png", f.article+1)
+	attack := "https://attacker.example/collect?x=" + localPNG
+	content := `<p>snapshot</p><img src="` + localPNG + `"><img alt="x" src='` + localJPEG + `'>` +
+		`![valid](` + localPNG + `)` +
+		`![attack](` + attack + `)` +
+		`[ordinary link](` + localPNG + `)` +
+		"`" + localPNG + "`\n```md\n![code](" + localPNG + ")\n```\n" +
+		`plain ` + localPNG + ` mismatch <img src="` + mismatched + `">` +
 		`<img src="https://cdn.example/x.png"><code>/api/articles/123/images/2.gif</code>` +
-		`<code>/prefix/api/articles/123/images/3.jpg</code><code>/api/articles/123/images/4.png?x=1</code>`
+		`<code>/prefix/api/articles/123/images/3.jpg</code><code>` + localPNG + `?x=1</code>`
 	f.setArticleState(t, "ready", content)
 	share := f.createShare(t, f.userA, `{"expires_at":null}`)
 	token := strings.TrimPrefix(share.URL, "/share/")
@@ -254,9 +264,14 @@ func TestPublicShareReturnsImmutableSnapshotAndRewritesOnlyExactAssets(t *testin
 		!strings.Contains(rewritten, "/api/share/"+token+"/assets/9.jpeg") {
 		t.Fatalf("exact local assets not rewritten: %s", rewritten)
 	}
+	if got := strings.Count(rewritten, "/api/share/"+token+"/assets/0.png"); got != 2 {
+		t.Fatalf("HTML and Markdown image rewrites=%d want=2: %s", got, rewritten)
+	}
 	for _, unchanged := range []string{
+		attack, "[ordinary link](" + localPNG + ")", "`" + localPNG + "`",
+		"![code](" + localPNG + ")", "plain " + localPNG, mismatched,
 		"https://cdn.example/x.png", "/api/articles/123/images/2.gif",
-		"/prefix/api/articles/123/images/3.jpg", "/api/articles/123/images/4.png?x=1",
+		"/prefix/api/articles/123/images/3.jpg", localPNG + "?x=1",
 	} {
 		if !strings.Contains(rewritten, unchanged) {
 			t.Errorf("non-exact path %q was changed: %s", unchanged, rewritten)

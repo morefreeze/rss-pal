@@ -133,7 +133,11 @@ func main() {
 			"/api/media/youtube/.*",
 		}),
 	))
-	// Trust only requests from localhost/private networks (running behind nginx)
+	// Trust only requests from localhost/private networks (running behind nginx).
+	// nginx uses $proxy_add_x_forwarded_for, so Gin walks the chain right-to-left
+	// and selects the first untrusted address. This assumes the API port remains
+	// reachable only through controlled proxies: a private-network client that
+	// can connect directly to the API could still supply a forged XFF chain.
 	router.SetTrustedProxies([]string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
 
 	router.Use(func(c *gin.Context) {
@@ -188,9 +192,9 @@ func main() {
 	// sets app.bypass_rls LOCAL for the article→feed→owner_id chase, then
 	// returns the owner_id so the middleware can set app.user_id.
 	router.GET("/api/articles/:id/images/:idx", pdfImgHandler.Serve)
-	shareLimit := api.NewShareRateLimiter(60, time.Minute, 4096, time.Now)
-	router.GET("/api/share/:token", shareLimit, shareHandler.GetPublic)
-	router.GET("/api/share/:token/assets/:asset", shareLimit, shareHandler.GetAsset)
+	sharePageLimit, shareAssetLimit := api.NewPublicShareRateLimiters(time.Now)
+	router.GET("/api/share/:token", sharePageLimit, shareHandler.GetPublic)
+	router.GET("/api/share/:token/assets/:asset", shareAssetLimit, shareHandler.GetAsset)
 
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT).
 	// PublicTokenMiddleware resolves the owning user from the bearer

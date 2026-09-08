@@ -9,6 +9,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	PublicSharePageLimit  = 60
+	PublicShareAssetLimit = 240
+	PublicShareMaxClients = 4096
+	PublicShareWindow     = time.Minute
+)
+
 type shareWindow struct {
 	reset time.Time
 	count int
@@ -98,4 +105,12 @@ func NewShareRateLimiter(limit int, window time.Duration, maxClients int, now fu
 		}
 		c.Next()
 	}
+}
+
+// NewPublicShareRateLimiters returns distinct limiter states. Keeping page and
+// asset budgets separate lets a large PDF render all of its images without
+// consuming the public document request budget.
+func NewPublicShareRateLimiters(now func() time.Time) (page gin.HandlerFunc, asset gin.HandlerFunc) {
+	return NewShareRateLimiter(PublicSharePageLimit, PublicShareWindow, PublicShareMaxClients, now),
+		NewShareRateLimiter(PublicShareAssetLimit, PublicShareWindow, PublicShareMaxClients, now)
 }
