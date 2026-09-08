@@ -1,113 +1,89 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import axios from 'axios'
-import SummaryMarkdown from '../components/SummaryMarkdown'
+import PublicArticleReader, { type SharedArticleSnapshot } from '../components/PublicArticleReader'
 
-interface SharedArticle {
-  id: number
-  title: string
-  url: string
-  summary_brief: string
-  summary_detailed: string
-  published_at: string | null
-}
+type LoadError = 'unavailable' | 'retryable' | null
 
 export default function SharePage() {
   const { token } = useParams<{ token: string }>()
-  const [article, setArticle] = useState<SharedArticle | null>(null)
+  const [article, setArticle] = useState<SharedArticleSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<LoadError>(null)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    if (!token) return
-    axios.get<SharedArticle>('/api/share/' + token)
-      .then(res => setArticle(res.data))
-      .catch(() => setError('分享链接无效或已过期'))
-      .finally(() => setLoading(false))
-  }, [token])
+    const previousTitle = document.title
+    let meta = document.querySelector<HTMLMetaElement>('meta[name="referrer"]')
+    const createdMeta = !meta
+    const previousContent = meta?.getAttribute('content') ?? null
+    if (!meta) {
+      meta = document.createElement('meta')
+      meta.name = 'referrer'
+      document.head.append(meta)
+    }
+    meta.content = 'no-referrer'
 
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return ''
-    return new Date(dateStr).toLocaleString('zh-CN')
-  }
+    return () => {
+      document.title = previousTitle
+      if (createdMeta) {
+        meta?.remove()
+      } else if (previousContent === null) {
+        meta?.removeAttribute('content')
+      } else {
+        meta?.setAttribute('content', previousContent)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (article) document.title = `${article.title} - RSS Pal`
+  }, [article])
+
+  useEffect(() => {
+    let current = true
+    setLoading(true)
+    setArticle(null)
+    setError(null)
+
+    if (!token) {
+      setLoading(false)
+      setError('unavailable')
+      return () => { current = false }
+    }
+
+    axios.get<SharedArticleSnapshot>(`/api/share/${encodeURIComponent(token)}`)
+      .then(response => {
+        if (current) setArticle(response.data)
+      })
+      .catch((cause: unknown) => {
+        if (!current) return
+        const status = (cause as { response?: { status?: number } })?.response?.status
+        setError(status === 404 ? 'unavailable' : 'retryable')
+      })
+      .finally(() => {
+        if (current) setLoading(false)
+      })
+
+    return () => { current = false }
+  }, [attempt, token])
 
   if (loading) {
+    return <div className="public-reader-state card" aria-live="polite">加载中...</div>
+  }
+
+  if (error === 'unavailable' || (!article && !error)) {
+    return <div className="public-reader-state card">分享链接无效或已过期</div>
+  }
+
+  if (error === 'retryable' || !article) {
     return (
-      <div style={{ maxWidth: 720, margin: '40px auto', padding: '0 16px' }}>
-        <div className="card">加载中...</div>
+      <div className="public-reader-state card">
+        <p>暂时无法加载分享文章</p>
+        <button type="button" onClick={() => setAttempt(value => value + 1)}>重试</button>
       </div>
     )
   }
 
-  if (error || !article) {
-    return (
-      <div style={{ maxWidth: 720, margin: '40px auto', padding: '0 16px' }}>
-        <div className="card" style={{ textAlign: 'center' }}>
-          <p style={{ color: '#ef4444', marginBottom: 16 }}>{error || '文章不存在'}</p>
-          <a href="/" style={{ color: 'var(--link)' }}>返回 RSS Pal 首页</a>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ maxWidth: 720, margin: '40px auto', padding: '0 16px' }}>
-      {/* Header branding */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-        <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--accent)' }}>RSS Pal</span>
-        <span style={{ color: 'var(--fg-muted)', fontSize: 14 }}>· 分享文章</span>
-      </div>
-
-      {/* Article title card */}
-      <div className="card">
-        <h2 style={{ marginBottom: 8 }}>{article.title}</h2>
-        {article.published_at && (
-          <div className="text-muted text-sm mb-2">{formatDate(article.published_at)}</div>
-        )}
-        <a
-          href={article.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontSize: 14, color: 'var(--link)', wordBreak: 'break-all' }}
-        >
-          {article.url}
-        </a>
-      </div>
-
-      {/* Summary */}
-      {(article.summary_brief || article.summary_detailed) && (
-        <div className="card">
-          <h3 style={{ marginBottom: 10 }}>AI 总结</h3>
-          <div className="markdown-body">
-            {article.summary_brief && <SummaryMarkdown source={article.summary_brief} />}
-            {article.summary_brief && article.summary_detailed && (
-              <hr style={{ margin: '12px 0', borderColor: 'var(--border)' }} />
-            )}
-            {article.summary_detailed && <SummaryMarkdown source={article.summary_detailed} />}
-          </div>
-        </div>
-      )}
-
-      {/* Original link button */}
-      <div className="card" style={{ textAlign: 'center' }}>
-        <a
-          href={article.url}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <button style={{ fontSize: 15, padding: '8px 24px' }}>
-            阅读原文
-          </button>
-        </a>
-      </div>
-
-      {/* Footer watermark */}
-      <div style={{ textAlign: 'center', marginTop: 32, marginBottom: 24, color: 'var(--fg-muted)', fontSize: 13 }}>
-        <span>由 </span>
-        <a href="/" style={{ color: 'var(--accent)', fontWeight: 600 }}>RSS Pal</a>
-        <span> 提供 · </span>
-        <a href="/" style={{ color: 'var(--fg-muted)' }}>在 RSS Pal 中阅读更多</a>
-      </div>
-    </div>
-  )
+  return <PublicArticleReader article={article} />
 }

@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import MarkdownArticle from '../src/components/MarkdownArticle'
 import { ReaderActionContext } from '../src/reader/ReaderActionContext'
@@ -13,6 +13,47 @@ const readerContext: ReaderActionContextValue = {
 }
 
 describe('MarkdownArticle article anchors', () => {
+  it('keeps authenticated interaction by default but disables it in read-only mode', () => {
+    const source = '[Alpha readable link](https://example.com/a)'
+    const onLinkDiscovered = vi.fn()
+    const view = render(
+      <ReaderActionContext.Provider value={{
+        ...readerContext,
+        getActions: () => [{ id: 'add', label: '加入待抓取', run: () => {} }],
+        onLinkDiscovered,
+      }}>
+        <MarkdownArticle source={source} />
+      </ReaderActionContext.Provider>,
+    )
+    const anchor = screen.getByRole('link', { name: 'Alpha readable link' })
+    const range = document.createRange()
+    range.selectNodeContents(anchor)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    fireEvent.pointerUp(anchor, { pointerType: 'mouse', button: 0 })
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(onLinkDiscovered).toHaveBeenCalled()
+
+    onLinkDiscovered.mockReset()
+    view.rerender(
+      <ReaderActionContext.Provider value={{
+        ...readerContext,
+        getActions: () => [{ id: 'add', label: '加入待抓取', run: () => {} }],
+        onLinkDiscovered,
+      }}>
+        <MarkdownArticle source={source} readOnly />
+      </ReaderActionContext.Provider>,
+    )
+    window.getSelection()?.removeAllRanges()
+    const readOnlyAnchor = screen.getByRole('link', { name: 'Alpha readable link' })
+    const readOnlyRange = document.createRange()
+    readOnlyRange.selectNodeContents(readOnlyAnchor)
+    window.getSelection()?.addRange(readOnlyRange)
+    fireEvent.pointerUp(readOnlyAnchor, { pointerType: 'mouse', button: 0 })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(onLinkDiscovered).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['image-first blockquote', '> ![](https://example.com/image.png)\n> meaningful quote', 'blockquote', 'article-section-001'],
     ['GFM table', '| Name | Value |\n| --- | --- |\n| A | B |', 'table', 'article-section-001'],

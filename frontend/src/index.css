@@ -399,6 +399,72 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .card-clickable { cursor: pointer; }
 .card-clickable:hover { background: var(--surface-hover); }
 
+/* === Public article reader === */
+.public-reader {
+  width: min(100%, var(--content-max));
+  margin: 32px auto;
+  padding: 0 16px;
+}
+.public-reader-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 700;
+}
+.public-reader-heading h1 {
+  margin-bottom: 8px;
+  font-family: var(--font-serif);
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  line-height: 1.35;
+}
+.public-reader-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.public-reader-summary h2 { margin-bottom: 8px; }
+.public-reader-content { line-height: 1.8; }
+.public-reader-media iframe { max-width: 100%; }
+.public-reader-media audio { width: 100%; }
+.public-reader-media-title { margin-bottom: 8px; font-weight: 600; }
+.public-reader-media-fallback,
+.public-reader-actions { text-align: center; }
+.public-reader-primary-cta,
+.public-reader-ctas a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 7px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.public-reader-primary-cta:hover,
+.public-reader-ctas a:hover { background: var(--accent-soft); }
+.public-reader-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 28px 0 20px;
+  font-size: 13px;
+}
+.public-reader-ctas { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.public-reader-state {
+  max-width: 560px;
+  margin: 40px auto;
+  text-align: center;
+}
+.public-reader-state button { margin-top: 12px; }
+
 /* === Layout utilities === */
 .flex { display: flex; }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
@@ -1179,6 +1245,11 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
 @media (max-width: 640px) {
   #root { padding: 12px; }
   .card { padding: 12px; }
+  .public-reader { margin: 12px auto 24px; padding: 0; }
+  .public-reader-brand { margin: 4px 0 12px; }
+  .public-reader-heading h1 { font-size: 1.45rem; }
+  .public-reader-ctas { width: 100%; }
+  .public-reader-ctas a { flex: 1 1 140px; }
 
   .article-list-header--compact {
     align-items: stretch;

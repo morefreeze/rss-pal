@@ -20,6 +20,7 @@ type VideoIdentity = Pick<VideoEmbedData, 'platform' | 'id'>
 
 type Props = {
   source: string
+  readOnly?: boolean
   // Optional map of original-URL → [width, height]. When present, the
   // matching <img> renders with explicit dimensions so the browser reserves
   // layout space before the bytes arrive — which prevents reading-progress
@@ -275,7 +276,7 @@ const COMPONENTS: Components = {
 // Wrapped in React.memo so the parent (ArticlePage) re-rendering on every
 // scroll-progress / activity-tick state change doesn't force a full
 // markdown re-parse and image remount.
-function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
+function MarkdownArticle({ source, imageDimensions, suppressVideo, readOnly = false }: Props) {
   const cleaned = useMemo(
     () => prepareArticleMarkdown(source),
     [source],
@@ -291,8 +292,8 @@ function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
   )
   const articleLang = useMemo(() => detectArticleLang(cleaned), [cleaned])
   const dims = imageDimensions ?? null
-  return (
-    <ReaderInteractionSurface articleKey={source} className="markdown-body" lang={articleLang}>
+  const content = (
+    <>
       <SuppressedVideoContext.Provider value={suppressVideo ?? null}>
         <ImageDimensionsContext.Provider value={dims}>
           <ReactMarkdown
@@ -304,6 +305,18 @@ function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
           </ReactMarkdown>
         </ImageDimensionsContext.Provider>
       </SuppressedVideoContext.Provider>
+    </>
+  )
+  if (readOnly) {
+    return (
+      <ReaderActionContext.Provider value={null}>
+        <div className="markdown-body" lang={articleLang}>{content}</div>
+      </ReaderActionContext.Provider>
+    )
+  }
+  return (
+    <ReaderInteractionSurface articleKey={source} className="markdown-body" lang={articleLang}>
+      {content}
     </ReaderInteractionSurface>
   )
 }
