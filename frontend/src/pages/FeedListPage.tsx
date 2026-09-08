@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
 import { getInitialPopularFeedsExpanded } from '../utils/popularFeedsVisibility'
+import { parseAuthIntent } from '../utils/authIntent'
 
 // isPDFURL returns true when the user-supplied URL looks like a PDF.
 // Detection is intentionally URL-only (no HEAD probe) — the backend
@@ -73,6 +74,7 @@ const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; u
 
 export default function FeedListPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [newUrl, setNewUrl] = useState('')
   const [loading, setLoading] = useState(true)
@@ -87,6 +89,7 @@ export default function FeedListPage() {
   const [popularFeedsExpanded, setPopularFeedsExpanded] = useState(getInitialPopularFeedsExpanded)
   const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const consumedSubscribeIntents = useRef(new Set<string>())
 
   useEffect(() => { loadFeeds() }, [])
 
@@ -129,6 +132,31 @@ export default function FeedListPage() {
       setPreviewStatus('')
     }
   }
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const hasSubscriptionParams = params.has('add') || params.has('source')
+    if (!hasSubscriptionParams) return
+
+    const validAdd = params.getAll('add').length === 1 && params.get('add') === '1'
+    const parsed = validAdd
+      ? parseAuthIntent(`${location.search}&intent=subscribe`)
+      : parseAuthIntent('')
+
+    if (parsed.kind === 'subscribe') {
+      const key = `${location.pathname}${location.search}`
+      if (!consumedSubscribeIntents.current.has(key)) {
+        consumedSubscribeIntents.current.add(key)
+        void doPreview(parsed.source)
+      }
+    }
+    // The intent is single-use. Removing it immediately also means a refresh
+    // cannot repeat a backend preview request.
+    navigate('/feeds', { replace: true })
+    // doPreview intentionally is not a dependency: ordinary state changes and
+    // manual previews must never replay the URL-carried intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search, navigate])
 
   const handleSubmitPDF = async (rawUrl: string) => {
     const actualUrl = normalizeURL(rawUrl)

@@ -3,6 +3,9 @@ import ReadingMeta from './ReadingMeta'
 import SummaryMarkdown from './SummaryMarkdown'
 import VideoEmbed from './VideoEmbed'
 import { parseStoredEmbedURL } from './parseVideoPlaceholder'
+import { authSearch, parseAuthIntent, safePublicSourceURL } from '../utils/authIntent'
+
+export { safePublicSourceURL } from '../utils/authIntent'
 
 export interface SharedArticleSnapshot {
   title: string
@@ -86,11 +89,6 @@ function parseSafePublicURL(rawURL?: string): { value: string; parsed: URL } | n
   return { value, parsed }
 }
 
-function isIPLiteral(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, '')
-  return /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(':')
-}
-
 function normalizedDecodedPathname(pathname: string): string | null {
   let decoded = pathname
   for (let pass = 0; pass < 4; pass += 1) {
@@ -114,12 +112,6 @@ function normalizedDecodedPathname(pathname: string): string | null {
   return `/${segments.join('/')}`
 }
 
-export function safePublicSourceURL(rawURL?: string): string | null {
-  const safe = parseSafePublicURL(rawURL)
-  if (!safe || isIPLiteral(safe.parsed.hostname)) return null
-  return safe.value
-}
-
 export function safePublicMediaURL(rawURL?: string): string | null {
   const safe = parseSafePublicURL(rawURL)
   if (!safe) return null
@@ -137,8 +129,8 @@ function normalizedVideoType(mediaType?: string): string {
 
 function subscribeHref(source: string | null): string {
   if (!source) return '/login?intent=subscribe'
-  const href = `/login?intent=subscribe&source=${encodeURIComponent(source)}`
-  return href.length <= 2048 ? href : '/login?intent=subscribe'
+  const intent = parseAuthIntent(`?intent=subscribe&source=${encodeURIComponent(source)}`)
+  return intent.kind === 'subscribe' ? `/login${authSearch(intent)}` : '/login?intent=subscribe'
 }
 
 function PublicMedia({ article, sourceURL }: Props & { sourceURL: string | null }) {
@@ -223,7 +215,7 @@ export default function PublicArticleReader({ article }: Props) {
       <footer className="public-reader-footer">
         <span className="text-muted">由 RSS Pal 提供</span>
         <div className="public-reader-ctas">
-          <a href="/login?intent=use">使用 RSS Pal</a>
+          <a href={`/login${authSearch({ kind: 'use', returnTo: '/articles' })}`}>使用 RSS Pal</a>
           <a href={subscribeHref(sourceURL)}>订阅原始来源</a>
         </div>
       </footer>
