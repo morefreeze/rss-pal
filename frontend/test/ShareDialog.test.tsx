@@ -377,6 +377,54 @@ describe('ShareDialog', () => {
     expect(document.activeElement).toBe(opener)
   })
 
+  it('restores the external opener across reopen after clipboard fallback autofocus', async () => {
+    apiMocks.createArticleShare.mockResolvedValue(activeShare('focus-fallback', '/share/focus-fallback'))
+    const user = userEvent.setup()
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('denied'))
+
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      const [closeRequested, setCloseRequested] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => {
+            setCloseRequested(false)
+            setOpen(true)
+          }}>外部分享按钮</button>
+          {closeRequested && (
+            <button type="button" onClick={() => setOpen(false)}>父级确认关闭</button>
+          )}
+          <ShareDialog
+            articleId={42}
+            articleTitle="A useful article"
+            open={open}
+            onClose={() => setCloseRequested(true)}
+            onCopyXiaohongshu={vi.fn()}
+            onExportMarkdown={vi.fn()}
+          />
+        </>
+      )
+    }
+
+    render(<Harness />)
+    const opener = screen.getByRole('button', { name: '外部分享按钮' })
+    opener.focus()
+    await user.click(opener)
+    await user.click(await screen.findByRole('button', { name: '创建新链接' }))
+    expect(document.activeElement).toBe(await screen.findByLabelText('手动复制链接'))
+
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    expect(screen.queryByLabelText('手动复制链接')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '父级确认关闭' }))
+    expect(document.activeElement).toBe(opener)
+    await user.click(opener)
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    expect(screen.queryByLabelText('手动复制链接')).toBeNull()
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    fireEvent.click(screen.getByRole('button', { name: '父级确认关闭' }))
+    expect(document.activeElement).toBe(opener)
+  })
+
   it('ignores pending create and revoke results from a previous open generation', async () => {
     const createPending = deferred<ArticleShareListItem>()
     apiMocks.createArticleShare.mockReturnValue(createPending.promise)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   createArticleShare,
   listArticleShares,
@@ -83,9 +83,28 @@ export function ShareDialog({
   const fallbackInputRef = useRef<HTMLInputElement>(null)
   const onCloseRef = useRef(onClose)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onCloseRef.current = onClose
   }, [onClose])
+
+  const closeDialog = useCallback(() => {
+    setError('')
+    setFallbackURL('')
+    onCloseRef.current()
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    // Clear old action state before paint and before the fallback autofocus
+    // effect can run for a newly mounted dialog surface.
+    setError('')
+    setFallbackURL('')
+    closeButtonRef.current?.focus()
+    return () => {
+      if (opener?.isConnected) opener.focus()
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -129,11 +148,10 @@ export function ShareDialog({
 
   useEffect(() => {
     if (!open) return
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        onCloseRef.current()
+        closeDialog()
         return
       }
       if (event.key !== 'Tab') return
@@ -160,12 +178,8 @@ export function ShareDialog({
       }
     }
     document.addEventListener('keydown', onKeyDown)
-    closeButtonRef.current?.focus()
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      if (opener?.isConnected) opener.focus()
-    }
-  }, [open])
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [closeDialog, open])
 
   if (!open) {
     listReadyForRef.current = null
@@ -270,7 +284,7 @@ export function ShareDialog({
 
   return (
     <div className="share-dialog-overlay" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose()
+      if (event.target === event.currentTarget) closeDialog()
     }}>
       <section
         ref={dialogRef}
@@ -282,7 +296,7 @@ export function ShareDialog({
       >
         <header className="share-dialog-header">
           <h2 id="share-dialog-title">管理分享链接</h2>
-          <button ref={closeButtonRef} type="button" className="btn-ghost" aria-label="关闭" onClick={onClose}>×</button>
+          <button ref={closeButtonRef} type="button" className="btn-ghost" aria-label="关闭" onClick={closeDialog}>×</button>
         </header>
 
         <div className="share-dialog-body">
