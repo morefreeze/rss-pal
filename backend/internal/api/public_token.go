@@ -15,8 +15,8 @@ import (
 var ErrPublicTokenInvalid = errors.New("public token invalid")
 
 // PublicTokenResolver inspects the request and the open tx to determine
-// the owning user_id. Resolvers may run non-RLS queries on tx (e.g.
-// share_tokens, users.bookmarklet_token) before app.user_id is set.
+// the owning user_id. Resolvers may query the non-RLS token column on users
+// (users.bookmarklet_token) before app.user_id is set.
 // Return ErrPublicTokenInvalid to surface a 401; any other error becomes
 // a 500. A zero/negative uid is also treated as invalid.
 type PublicTokenResolver func(c *gin.Context, tx *sql.Tx) (userID int, err error)

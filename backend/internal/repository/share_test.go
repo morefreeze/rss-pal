@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func newShareRepoFixture(t *testing.T) *shareRepoFixture {
 	}
 
 	var feedID int
-	if err := db.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES('https://feed.example/rss?secret=private','Feed A',$1) RETURNING id`, f.userA).Scan(&feedID); err != nil {
+	if err := db.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES('https://feed.example/rss?token=feed-secret','Feed A',$1) RETURNING id`, f.userA).Scan(&feedID); err != nil {
 		t.Fatal(err)
 	}
 	publishedAt := time.Date(2026, 9, 7, 8, 30, 0, 0, time.UTC)
@@ -61,8 +62,8 @@ func newShareRepoFixture(t *testing.T) *shareRepoFixture {
 		FeedID:               feedID,
 		FeedTitle:            "Feed A",
 		Title:                "Original",
-		URL:                  "https://article.example/post",
-		Content:              "Body",
+		URL:                  "https://article.example/public-post",
+		Content:              "Body mentions feed_id and editor_note as ordinary text",
 		PublishedAt:          &publishedAt,
 		SummaryBrief:         "Brief",
 		SummaryDetailed:      "Detail",
@@ -70,7 +71,7 @@ func newShareRepoFixture(t *testing.T) *shareRepoFixture {
 		ReadingMinutes:       2,
 		IsRead:               true,
 		ProcessingState:      "ready",
-		EditorNote:           "private note",
+		EditorNote:           "editor-note-secret",
 		MediaURL:             "https://cdn.example/audio.mp3",
 		MediaType:            "audio/mpeg",
 		MediaDurationSeconds: 125,
@@ -116,7 +117,7 @@ func TestShareRepositoryCreateListRevokeAndSnapshotImmutability(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := f.repo.GetActiveByPublicID(first.PublicID, now)
-	if err != nil || got == nil || got.Snapshot.Title != "Original" || got.Snapshot.Content != "Body" {
+	if err != nil || got == nil || got.Snapshot.Title != "Original" || got.Snapshot.Content != "Body mentions feed_id and editor_note as ordinary text" {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 
@@ -319,6 +320,33 @@ func assertWireSafeSnapshot(t *testing.T, db *sql.DB, publicID string) {
 	if err := json.Unmarshal(snapshotJSON, &got); err != nil {
 		t.Fatal(err)
 	}
+	var decoded any
+	if err := json.Unmarshal(snapshotJSON, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	forbidden := map[string]struct{}{}
+	for _, key := range []string{
+		"created_by", "user_id", "feed_id", "editor_note", "processing_error", "is_read", "manual_tags",
+	} {
+		forbidden[key] = struct{}{}
+	}
+	var walk func(any, string)
+	walk = func(value any, path string) {
+		switch value := value.(type) {
+		case map[string]any:
+			for key, child := range value {
+				if _, private := forbidden[key]; private {
+					t.Errorf("snapshot exposes private key %q at %s", key, path)
+				}
+				walk(child, path+"."+key)
+			}
+		case []any:
+			for i, child := range value {
+				walk(child, path+"["+strconv.Itoa(i)+"]")
+			}
+		}
+	}
+	walk(decoded, "$")
 	wantKeys := map[string]struct{}{}
 	for _, key := range []string{
 		"title", "url", "feed_title", "published_at", "word_count", "reading_minutes",
@@ -334,9 +362,17 @@ func assertWireSafeSnapshot(t *testing.T, db *sql.DB, publicID string) {
 	if !reflect.DeepEqual(gotKeys, wantKeys) {
 		t.Fatalf("snapshot keys=%v, want exact allowlist=%v: %s", gotKeys, wantKeys, snapshotJSON)
 	}
+	var articleURL string
+	if err := json.Unmarshal(got["url"], &articleURL); err != nil {
+		t.Fatal(err)
+	}
+	if articleURL != "https://article.example/public-post" {
+		t.Errorf("snapshot article url=%q", articleURL)
+	}
 	for _, sentinel := range [][]byte{
-		[]byte("https://feed.example/rss?secret=private"),
-		[]byte("private note"),
+		[]byte("https://feed.example/rss?token=feed-secret"),
+		[]byte("feed-secret"),
+		[]byte("editor-note-secret"),
 	} {
 		if bytes.Contains(snapshotJSON, sentinel) {
 			t.Errorf("snapshot leaked private sentinel %q: %s", sentinel, snapshotJSON)

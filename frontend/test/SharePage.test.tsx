@@ -109,6 +109,27 @@ describe('SharePage public reader', () => {
     expect(axiosMock.get).toHaveBeenCalledWith('/api/share/token%2Fwith%20spaces', { signal: expect.any(AbortSignal) })
   })
 
+  it('builds authentication CTAs only from the public article URL and ignores private extra fields', async () => {
+    const articleURL = 'https://article.example/public-post'
+    const feedURL = 'https://feed.example/rss?token=feed-secret'
+    axiosMock.get.mockResolvedValue({
+      data: sharedSnapshot({
+        url: articleURL,
+        feed_url: feedURL,
+        editor_note: 'editor-note-secret',
+      }),
+    })
+    const { container } = renderSharePage()
+
+    expect((await screen.findByRole('link', { name: '阅读原文' })).getAttribute('href')).toBe(articleURL)
+    expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
+      `/login?intent=subscribe&source=${encodeURIComponent(articleURL)}`,
+    )
+    expect(container.textContent).not.toContain(feedURL)
+    expect(container.textContent).not.toContain('editor-note-secret')
+    expect(container.querySelector(`[href*="feed-secret"]`)).toBeNull()
+  })
+
   it.each([
     'javascript:alert(1)',
     'data:text/html,bad',

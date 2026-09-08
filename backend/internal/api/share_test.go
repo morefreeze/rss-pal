@@ -54,12 +54,12 @@ func newShareAPIFixture(t *testing.T) *shareAPIFixture {
 		t.Fatalf("seed user B: %v", err)
 	}
 	var feedID int
-	if err := privDB.QueryRow(`INSERT INTO feeds (url, title, owner_id) VALUES ('https://share.example/feed', 'Share Feed', $1) RETURNING id`, f.userA).Scan(&feedID); err != nil {
+	if err := privDB.QueryRow(`INSERT INTO feeds (url, title, owner_id) VALUES ('https://feed.example/rss?token=feed-secret', 'Share Feed', $1) RETURNING id`, f.userA).Scan(&feedID); err != nil {
 		t.Fatalf("seed feed: %v", err)
 	}
 	if err := privDB.QueryRow(`
-		INSERT INTO articles (feed_id, title, url, content, published_at, processing_state)
-		VALUES ($1, 'Ready Article', 'https://share.example/article', 'shareable body', $2, 'ready')
+		INSERT INTO articles (feed_id, title, url, content, published_at, processing_state, editor_note)
+		VALUES ($1, 'Ready Article', 'https://article.example/public-post', 'shareable body', $2, 'ready', 'editor-note-secret')
 		RETURNING id`, feedID, shareAPINow.Add(-time.Hour)).Scan(&f.article); err != nil {
 		t.Fatalf("seed article: %v", err)
 	}
@@ -189,6 +189,37 @@ func assertShareResponseKeys(t *testing.T, raw []byte) {
 	}
 }
 
+func assertNoPrivateJSONKeys(t *testing.T, raw []byte) {
+	t.Helper()
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode public JSON: %v", err)
+	}
+	forbidden := map[string]struct{}{}
+	for _, key := range []string{
+		"created_by", "user_id", "feed_id", "editor_note", "processing_error", "is_read", "manual_tags",
+	} {
+		forbidden[key] = struct{}{}
+	}
+	var walk func(any, string)
+	walk = func(value any, path string) {
+		switch value := value.(type) {
+		case map[string]any:
+			for key, child := range value {
+				if _, private := forbidden[key]; private {
+					t.Errorf("public JSON exposes private key %q at %s", key, path)
+				}
+				walk(child, path+"."+key)
+			}
+		case []any:
+			for i, child := range value {
+				walk(child, fmt.Sprintf("%s[%d]", path, i))
+			}
+		}
+	}
+	walk(decoded, "$")
+}
+
 func assertPublicSecurityHeaders(t *testing.T, w *httptest.ResponseRecorder) {
 	t.Helper()
 	for key, want := range map[string]string{
@@ -216,7 +247,7 @@ func TestPublicShareReturnsImmutableSnapshotAndRewritesOnlyExactAssets(t *testin
 	localJPEG := fmt.Sprintf("/api/articles/%d/images/9.jpeg", f.article)
 	mismatched := fmt.Sprintf("/api/articles/%d/images/7.png", f.article+1)
 	attack := "https://attacker.example/collect?x=" + localPNG
-	content := `<p>snapshot</p><img src="` + localPNG + `"><img alt="x" src='` + localJPEG + `'>` +
+	content := `<p>snapshot text may mention feed_id and editor_note without defining JSON keys</p><img src="` + localPNG + `"><img alt="x" src='` + localJPEG + `'>` +
 		`![valid](` + localPNG + `)` +
 		`![attack](` + attack + `)` +
 		`[ordinary link](` + localPNG + `)` +
@@ -234,6 +265,7 @@ func TestPublicShareReturnsImmutableSnapshotAndRewritesOnlyExactAssets(t *testin
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 	assertPublicSecurityHeaders(t, w)
+	assertNoPrivateJSONKeys(t, w.Body.Bytes())
 	var got map[string]json.RawMessage
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode public response: %v", err)
@@ -254,6 +286,18 @@ func TestPublicShareReturnsImmutableSnapshotAndRewritesOnlyExactAssets(t *testin
 	for key := range wantKeys {
 		if _, ok := got[key]; !ok {
 			t.Fatalf("public response missing key %q: %s", key, w.Body.String())
+		}
+	}
+	var articleURL string
+	if err := json.Unmarshal(got["url"], &articleURL); err != nil {
+		t.Fatal(err)
+	}
+	if articleURL != "https://article.example/public-post" {
+		t.Fatalf("public article url=%q", articleURL)
+	}
+	for _, secret := range []string{"https://feed.example/rss?token=feed-secret", "feed-secret", "editor-note-secret"} {
+		if strings.Contains(w.Body.String(), secret) {
+			t.Errorf("public response leaked private value %q", secret)
 		}
 	}
 	var rewritten string
