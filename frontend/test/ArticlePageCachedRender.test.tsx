@@ -22,7 +22,9 @@ const apiMocks = vi.hoisted(() => ({
   recordReadDuration: vi.fn(async () => undefined),
   resetProgress: vi.fn(async () => undefined),
   saveArticle: vi.fn(async () => undefined),
-  shareArticle: vi.fn(async () => ({ token: 'token' })),
+  listArticleShares: vi.fn(async () => []),
+  createArticleShare: vi.fn(),
+  revokeArticleShare: vi.fn(),
   unhideArticle: vi.fn(async () => undefined),
   unsaveArticle: vi.fn(async () => undefined),
   updateProgress: vi.fn(async () => ({
