@@ -5,83 +5,173 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/sharetoken"
 	"github.com/gin-gonic/gin"
 )
 
 type ShareHandler struct {
-	shareRepo   *repository.ShareRepository
-	articleRepo *repository.ArticleRepository
+	shares   *repository.ShareRepository
+	articles *repository.ArticleRepository
+	signer   *sharetoken.Signer
+	now      func() time.Time
+	images   *ArticleImageHandler
 }
 
-func NewShareHandler(shareRepo *repository.ShareRepository, articleRepo *repository.ArticleRepository) *ShareHandler {
-	return &ShareHandler{shareRepo: shareRepo, articleRepo: articleRepo}
+func NewShareHandler(
+	shares *repository.ShareRepository,
+	articles *repository.ArticleRepository,
+	signer *sharetoken.Signer,
+	images *ArticleImageHandler,
+	now func() time.Time,
+) *ShareHandler {
+	if now == nil {
+		now = time.Now
+	}
+	return &ShareHandler{shares: shares, articles: articles, signer: signer, now: now, images: images}
 }
 
-// Create POST /api/articles/:id/share — 生成/获取 share token
+type shareManagementResponse struct {
+	ID        string     `json:"id"`
+	URL       string     `json:"url"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	Status    string     `json:"status"`
+	Legacy    bool       `json:"legacy"`
+}
+
 func (h *ShareHandler) Create(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	articleID, ok := parseShareArticleID(c)
+	if !ok {
 		return
+	}
+	var request struct {
+		ExpiresAt *string `json:"expires_at"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	now := h.now()
+	var expiresAt *time.Time
+	if request.ExpiresAt != nil {
+		parsed, err := time.Parse(time.RFC3339, *request.ExpiresAt)
+		if err != nil || !parsed.After(now) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at must be a future RFC3339 timestamp"})
+			return
+		}
+		expiresAt = &parsed
 	}
 
 	userID := getUserID(c)
-	st, err := h.shareRepo.WithCtx(c).GetOrCreate(id, userID)
+	article, ok := h.visibleArticle(c, articleID, userID)
+	if !ok {
+		return
+	}
+	if (article.ProcessingState != "" && article.ProcessingState != "ready") || strings.TrimSpace(article.Content) == "" {
+		c.JSON(http.StatusConflict, gin.H{"error": "article is not ready to share"})
+		return
+	}
+
+	publicID, err := sharetoken.NewPublicID()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"token": st.Token,
-		"url":   "/share/" + st.Token,
-	})
+	row, err := h.shares.WithCtx(c).Create(article, userID, publicID, expiresAt, now)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, h.managementResponse(row, now))
 }
 
-// ResolveOwner implements PublicTokenResolver for the share endpoint. It
-// looks up the share_tokens row by :token path param (share_tokens is not
-// RLS-protected by migration 033, so a plain SELECT on the open tx is
-// sufficient before app.user_id is set) and returns the owning user_id.
-//
-// Missing/unknown tokens map to ErrPublicTokenInvalid so the middleware
-// emits 401 rather than 500.
-func (h *ShareHandler) ResolveOwner(c *gin.Context, tx *sql.Tx) (int, error) {
-	token := c.Param("token")
-	if token == "" {
-		return 0, ErrPublicTokenInvalid
+func (h *ShareHandler) List(c *gin.Context) {
+	articleID, ok := parseShareArticleID(c)
+	if !ok {
+		return
 	}
-	var createdBy int
-	err := tx.QueryRow(`SELECT created_by FROM share_tokens WHERE token = $1`, token).Scan(&createdBy)
+	userID := getUserID(c)
+	if _, ok := h.visibleArticle(c, articleID, userID); !ok {
+		return
+	}
+
+	now := h.now()
+	rows, err := h.shares.WithCtx(c).List(articleID, userID, now)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	response := make([]shareManagementResponse, 0, len(rows))
+	for i := range rows {
+		response = append(response, h.managementResponse(&rows[i], now))
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *ShareHandler) Revoke(c *gin.Context) {
+	articleID, ok := parseShareArticleID(c)
+	if !ok {
+		return
+	}
+	userID := getUserID(c)
+	if _, ok := h.visibleArticle(c, articleID, userID); !ok {
+		return
+	}
+
+	now := h.now()
+	row, err := h.shares.WithCtx(c).Revoke(c.Param("share_id"), articleID, userID, now)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if row == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "share not found"})
+		return
+	}
+	c.JSON(http.StatusOK, h.managementResponse(row, now))
+}
+
+func (h *ShareHandler) visibleArticle(c *gin.Context, articleID, userID int) (*model.Article, bool) {
+	article, err := h.articles.WithCtx(c).GetByID(articleID, userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrPublicTokenInvalid
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
+		return nil, false
 	}
-	if err != nil {
-		return 0, err
-	}
-	return createdBy, nil
-}
-
-// GetByToken GET /api/share/:token — 公开接口（无需认证）
-func (h *ShareHandler) GetByToken(c *gin.Context) {
-	token := c.Param("token")
-
-	article, err := h.shareRepo.WithCtx(c).GetArticleByToken(token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return nil, false
 	}
-	if article == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "share token not found"})
-		return
-	}
+	return article, true
+}
 
-	c.JSON(http.StatusOK, gin.H{
-		"title":            article.Title,
-		"url":              article.URL,
-		"summary_brief":    article.SummaryBrief,
-		"summary_detailed": article.SummaryDetailed,
-		"published_at":     article.PublishedAt,
-	})
+func (h *ShareHandler) managementResponse(row *model.ArticleShare, now time.Time) shareManagementResponse {
+	status := "active"
+	if row.RevokedAt != nil {
+		status = "revoked"
+	} else if row.ExpiresAt != nil && !row.ExpiresAt.After(now) {
+		status = "expired"
+	}
+	return shareManagementResponse{
+		ID:        row.PublicID,
+		URL:       "/share/" + h.signer.Sign(row.PublicID),
+		CreatedAt: row.CreatedAt,
+		ExpiresAt: row.ExpiresAt,
+		Status:    status,
+		Legacy:    row.LegacyTokenDigest != nil,
+	}
+}
+
+func parseShareArticleID(c *gin.Context) (int, bool) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return 0, false
+	}
+	return id, true
 }

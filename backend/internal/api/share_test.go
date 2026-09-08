@@ -1,0 +1,305 @@
+package api_test
+
+import (
+	"bytes"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/bytedance/rss-pal/internal/api"
+	"github.com/bytedance/rss-pal/internal/config"
+	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/repository/testdb"
+	"github.com/bytedance/rss-pal/internal/sharetoken"
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v4"
+)
+
+var shareAPINow = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+
+type shareAPIFixture struct {
+	privDB  *sql.DB
+	appDB   *sql.DB
+	router  *gin.Engine
+	signer  *sharetoken.Signer
+	now     time.Time
+	article int
+	userA   int
+	userB   int
+}
+
+func newShareAPIFixture(t *testing.T) *shareAPIFixture {
+	t.Helper()
+	privDB, schema, cleanupSchema := testdb.NewWithSchema(t)
+	appDB, cleanupApp := testdb.NewAsApp(t, schema)
+	t.Cleanup(func() {
+		cleanupApp()
+		cleanupSchema()
+	})
+
+	f := &shareAPIFixture{privDB: privDB, appDB: appDB, now: shareAPINow}
+	if err := privDB.QueryRow(`INSERT INTO users (username, password_hash) VALUES ('share-a', 'x') RETURNING id`).Scan(&f.userA); err != nil {
+		t.Fatalf("seed user A: %v", err)
+	}
+	if err := privDB.QueryRow(`INSERT INTO users (username, password_hash) VALUES ('share-b', 'x') RETURNING id`).Scan(&f.userB); err != nil {
+		t.Fatalf("seed user B: %v", err)
+	}
+	var feedID int
+	if err := privDB.QueryRow(`INSERT INTO feeds (url, title, owner_id) VALUES ('https://share.example/feed', 'Share Feed', $1) RETURNING id`, f.userA).Scan(&feedID); err != nil {
+		t.Fatalf("seed feed: %v", err)
+	}
+	if err := privDB.QueryRow(`
+		INSERT INTO articles (feed_id, title, url, content, published_at, processing_state)
+		VALUES ($1, 'Ready Article', 'https://share.example/article', 'shareable body', $2, 'ready')
+		RETURNING id`, feedID, shareAPINow.Add(-time.Hour)).Scan(&f.article); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "share-api-jwt-secret"}}
+	auth := api.NewAuthHandler(cfg, repository.NewUserRepository(appDB), repository.NewRefreshTokenRepository(appDB))
+	signer, err := sharetoken.NewSigner("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	f.signer = signer
+	images := api.NewArticleImageHandler(t.TempDir(), func(*gin.Context, int) (bool, error) { return true, nil })
+	handler := api.NewShareHandler(repository.NewShareRepository(appDB), repository.NewArticleRepository(appDB), signer, images, func() time.Time { return f.now })
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	group := router.Group("/api")
+	group.Use(auth.AuthMiddleware())
+	group.Use(api.RLSTxMiddleware(appDB))
+	group.POST("/articles/:id/shares", handler.Create)
+	group.GET("/articles/:id/shares", handler.List)
+	group.DELETE("/articles/:id/shares/:share_id", handler.Revoke)
+	f.router = router
+	return f
+}
+
+func (f *shareAPIFixture) request(t *testing.T, method, path string, userID int, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	claims := api.Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte("share-api-jwt-secret"))
+	if err != nil {
+		t.Fatalf("sign jwt: %v", err)
+	}
+	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+signed)
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	w := httptest.NewRecorder()
+	f.router.ServeHTTP(w, req)
+	return w
+}
+
+type shareAPIResponse struct {
+	ID        string     `json:"id"`
+	URL       string     `json:"url"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	Status    string     `json:"status"`
+	Legacy    bool       `json:"legacy"`
+}
+
+func (f *shareAPIFixture) articlePath(suffix string) string {
+	return "/api/articles/" + strconv.Itoa(f.article) + suffix
+}
+
+func (f *shareAPIFixture) setArticleState(t *testing.T, state, content string) {
+	t.Helper()
+	if _, err := f.privDB.Exec(`UPDATE articles SET processing_state = $1, content = $2 WHERE id = $3`, state, content, f.article); err != nil {
+		t.Fatalf("set article state: %v", err)
+	}
+}
+
+func (f *shareAPIFixture) createShare(t *testing.T, userID int, body string) shareAPIResponse {
+	t.Helper()
+	w := f.request(t, http.MethodPost, f.articlePath("/shares"), userID, body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create share status=%d body=%s", w.Code, w.Body.String())
+	}
+	assertShareResponseKeys(t, w.Body.Bytes())
+	var response shareAPIResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode share: %v", err)
+	}
+	if response.ID == "" || response.URL == "" || response.Status != "active" || response.CreatedAt.IsZero() {
+		t.Fatalf("invalid create response: %+v", response)
+	}
+	token := strings.TrimPrefix(response.URL, "/share/")
+	publicID, legacy, err := f.signer.Parse(token)
+	if err != nil || legacy || publicID != response.ID {
+		t.Fatalf("signed URL mismatch: id=%q url=%q parsed=%q legacy=%v err=%v", response.ID, response.URL, publicID, legacy, err)
+	}
+	return response
+}
+
+func assertShareResponseKeys(t *testing.T, raw []byte) {
+	t.Helper()
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode response keys: %v", err)
+	}
+	want := map[string]bool{
+		"id": true, "url": true, "created_at": true, "expires_at": true,
+		"status": true, "legacy": true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("response keys=%v, want exactly id,url,created_at,expires_at,status,legacy", got)
+	}
+	for key := range got {
+		if !want[key] {
+			t.Fatalf("response exposes forbidden key %q: %s", key, raw)
+		}
+	}
+}
+
+func TestCreateShareRequiresVisibleReadyArticle(t *testing.T) {
+	f := newShareAPIFixture(t)
+	path := f.articlePath("/shares")
+	if got := f.request(t, http.MethodPost, path, f.userA, `{"expires_at":null}`); got.Code != http.StatusCreated {
+		t.Fatalf("owner status=%d body=%s", got.Code, got.Body.String())
+	}
+	if got := f.request(t, http.MethodPost, path, f.userB, `{"expires_at":null}`); got.Code != http.StatusNotFound {
+		t.Fatalf("other status=%d body=%s", got.Code, got.Body.String())
+	}
+	f.setArticleState(t, "processing", "still fetching")
+	if got := f.request(t, http.MethodPost, path, f.userA, `{"expires_at":null}`); got.Code != http.StatusConflict {
+		t.Fatalf("processing status=%d body=%s", got.Code, got.Body.String())
+	}
+	f.setArticleState(t, "ready", " \n\t ")
+	if got := f.request(t, http.MethodPost, path, f.userA, `{"expires_at":null}`); got.Code != http.StatusConflict {
+		t.Fatalf("empty content status=%d body=%s", got.Code, got.Body.String())
+	}
+	f.setArticleState(t, "", "legacy ready body")
+	if got := f.request(t, http.MethodPost, path, f.userA, `{"expires_at":null}`); got.Code != http.StatusCreated {
+		t.Fatalf("empty processing_state status=%d body=%s", got.Code, got.Body.String())
+	}
+}
+
+func TestCreateShareValidatesExpiryAndCreatesMultipleRows(t *testing.T) {
+	f := newShareAPIFixture(t)
+	for name, body := range map[string]string{
+		"malformed": `{"expires_at":"tomorrow"}`,
+		"past":      `{"expires_at":"2026-09-08T11:59:59Z"}`,
+		"equal":     `{"expires_at":"2026-09-08T12:00:00Z"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := f.request(t, http.MethodPost, f.articlePath("/shares"), f.userA, body); got.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", got.Code, got.Body.String())
+			}
+		})
+	}
+
+	a := f.createShare(t, f.userA, `{"expires_at":null}`)
+	b := f.createShare(t, f.userA, `{"expires_at":"2026-10-08T12:00:00Z"}`)
+	if a.ID == b.ID || a.URL == b.URL {
+		t.Fatalf("shares must be independent: a=%+v b=%+v", a, b)
+	}
+	if b.ExpiresAt == nil || !b.ExpiresAt.Equal(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("future expiry=%v", b.ExpiresAt)
+	}
+	var count int
+	if err := f.privDB.QueryRow(`SELECT count(*) FROM article_shares WHERE article_id = $1`, f.article).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("persisted share count=%d err=%v", count, err)
+	}
+}
+
+func TestListSharesAndRevokeAreOwnerScoped(t *testing.T) {
+	f := newShareAPIFixture(t)
+	active := f.createShare(t, f.userA, `{"expires_at":null}`)
+	expiring := f.createShare(t, f.userA, `{"expires_at":"2026-09-08T13:00:00Z"}`)
+	revoked := f.createShare(t, f.userA, `{"expires_at":null}`)
+	if _, err := f.privDB.Exec(`UPDATE article_shares SET legacy_token_digest = $1 WHERE public_id = $2`, sharetoken.LegacyDigest("aB3dE6gH"), active.ID); err != nil {
+		t.Fatalf("mark legacy row: %v", err)
+	}
+
+	if got := f.request(t, http.MethodGet, f.articlePath("/shares"), f.userB, ""); got.Code != http.StatusNotFound {
+		t.Fatalf("other list status=%d body=%s", got.Code, got.Body.String())
+	}
+	revokePath := f.articlePath("/shares/" + revoked.ID)
+	if got := f.request(t, http.MethodDelete, revokePath, f.userB, ""); got.Code != http.StatusNotFound {
+		t.Fatalf("other revoke status=%d body=%s", got.Code, got.Body.String())
+	}
+	for i := 0; i < 2; i++ {
+		got := f.request(t, http.MethodDelete, revokePath, f.userA, "")
+		if got.Code != http.StatusOK {
+			t.Fatalf("revoke attempt %d status=%d body=%s", i, got.Code, got.Body.String())
+		}
+		assertShareResponseKeys(t, got.Body.Bytes())
+		var response shareAPIResponse
+		if err := json.Unmarshal(got.Body.Bytes(), &response); err != nil || response.Status != "revoked" {
+			t.Fatalf("revoke attempt %d response=%+v err=%v", i, response, err)
+		}
+	}
+
+	f.now = shareAPINow.Add(2 * time.Hour)
+	got := f.request(t, http.MethodGet, f.articlePath("/shares"), f.userA, "")
+	if got.Code != http.StatusOK {
+		t.Fatalf("owner list status=%d body=%s", got.Code, got.Body.String())
+	}
+	var rawRows []json.RawMessage
+	if err := json.Unmarshal(got.Body.Bytes(), &rawRows); err != nil {
+		t.Fatalf("decode list: %v body=%s", err, got.Body.String())
+	}
+	if len(rawRows) != 3 {
+		t.Fatalf("list rows=%d body=%s", len(rawRows), got.Body.String())
+	}
+	statuses := make(map[string]shareAPIResponse)
+	for _, raw := range rawRows {
+		assertShareResponseKeys(t, raw)
+		var response shareAPIResponse
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatalf("decode list row: %v", err)
+		}
+		statuses[response.ID] = response
+	}
+	if statuses[active.ID].Status != "active" || !statuses[active.ID].Legacy {
+		t.Fatalf("active legacy row=%+v", statuses[active.ID])
+	}
+	if statuses[expiring.ID].Status != "expired" {
+		t.Fatalf("expired row=%+v", statuses[expiring.ID])
+	}
+	if statuses[revoked.ID].Status != "revoked" {
+		t.Fatalf("revoked row=%+v", statuses[revoked.ID])
+	}
+}
+
+func TestRevokeShareHandlesMalformedAndMissingIDs(t *testing.T) {
+	f := newShareAPIFixture(t)
+	checks := []struct {
+		method string
+		path   string
+		want   int
+	}{
+		{http.MethodPost, "/api/articles/not-a-number/shares", http.StatusBadRequest},
+		{http.MethodGet, "/api/articles/not-a-number/shares", http.StatusBadRequest},
+		{http.MethodDelete, "/api/articles/not-a-number/shares/nope", http.StatusBadRequest},
+		{http.MethodDelete, f.articlePath("/shares/not-a-public-id"), http.StatusNotFound},
+		{http.MethodGet, "/api/articles/99999999/shares", http.StatusNotFound},
+	}
+	for _, check := range checks {
+		body := ""
+		if check.method == http.MethodPost {
+			body = `{"expires_at":null}`
+		}
+		got := f.request(t, check.method, check.path, f.userA, body)
+		if got.Code != check.want {
+			t.Errorf("%s %s status=%d want=%d body=%s", check.method, check.path, got.Code, check.want, got.Body.String())
+		}
+	}
+}
