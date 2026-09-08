@@ -194,9 +194,13 @@ func TestCreateShareRequiresVisibleReadyArticle(t *testing.T) {
 func TestCreateShareValidatesExpiryAndCreatesMultipleRows(t *testing.T) {
 	f := newShareAPIFixture(t)
 	for name, body := range map[string]string{
-		"malformed": `{"expires_at":"tomorrow"}`,
-		"past":      `{"expires_at":"2026-09-08T11:59:59Z"}`,
-		"equal":     `{"expires_at":"2026-09-08T12:00:00Z"}`,
+		"missing":       `{}`,
+		"misspelled":    `{"expiresAt":null}`,
+		"unknown field": `{"expires_at":null,"unexpected":true}`,
+		"trailing JSON": `{"expires_at":null}{"expires_at":null}`,
+		"malformed":     `{"expires_at":"tomorrow"}`,
+		"past":          `{"expires_at":"2026-09-08T11:59:59Z"}`,
+		"equal":         `{"expires_at":"2026-09-08T12:00:00Z"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := f.request(t, http.MethodPost, f.articlePath("/shares"), f.userA, body); got.Code != http.StatusBadRequest {
@@ -206,16 +210,38 @@ func TestCreateShareValidatesExpiryAndCreatesMultipleRows(t *testing.T) {
 	}
 
 	a := f.createShare(t, f.userA, `{"expires_at":null}`)
-	b := f.createShare(t, f.userA, `{"expires_at":"2026-10-08T12:00:00Z"}`)
+	if a.ExpiresAt != nil {
+		t.Fatalf("explicit null must create a permanent share: %+v", a)
+	}
+	b := f.createShare(t, f.userA, `{"expires_at":"2026-09-08T21:30:00+08:00"}`)
 	if a.ID == b.ID || a.URL == b.URL {
 		t.Fatalf("shares must be independent: a=%+v b=%+v", a, b)
 	}
-	if b.ExpiresAt == nil || !b.ExpiresAt.Equal(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)) {
+	if b.ExpiresAt == nil || !b.ExpiresAt.Equal(time.Date(2026, 9, 8, 13, 30, 0, 0, time.UTC)) {
 		t.Fatalf("future expiry=%v", b.ExpiresAt)
 	}
+	var encoded map[string]json.RawMessage
+	w := f.request(t, http.MethodPost, f.articlePath("/shares"), f.userA, `{"expires_at":"2026-09-08T22:00:00+08:00"}`)
+	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &encoded) != nil || string(encoded["expires_at"]) != `"2026-09-08T14:00:00Z"` {
+		t.Fatalf("offset expiry was not normalized to UTC: status=%d body=%s", w.Code, w.Body.String())
+	}
 	var count int
-	if err := f.privDB.QueryRow(`SELECT count(*) FROM article_shares WHERE article_id = $1`, f.article).Scan(&count); err != nil || count != 2 {
+	if err := f.privDB.QueryRow(`SELECT count(*) FROM article_shares WHERE article_id = $1`, f.article).Scan(&count); err != nil || count != 3 {
 		t.Fatalf("persisted share count=%d err=%v", count, err)
+	}
+}
+
+func TestCreateShareDoesNotLeakDatabaseErrors(t *testing.T) {
+	f := newShareAPIFixture(t)
+	if _, err := f.privDB.Exec(`DROP TABLE article_shares`); err != nil {
+		t.Fatalf("drop share table: %v", err)
+	}
+	w := f.request(t, http.MethodPost, f.articlePath("/shares"), f.userA, `{"expires_at":null}`)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != `{"error":"internal server error"}` {
+		t.Fatalf("database details leaked: %s", w.Body.String())
 	}
 }
 
@@ -289,7 +315,6 @@ func TestRevokeShareHandlesMalformedAndMissingIDs(t *testing.T) {
 		{http.MethodPost, "/api/articles/not-a-number/shares", http.StatusBadRequest},
 		{http.MethodGet, "/api/articles/not-a-number/shares", http.StatusBadRequest},
 		{http.MethodDelete, "/api/articles/not-a-number/shares/nope", http.StatusBadRequest},
-		{http.MethodDelete, f.articlePath("/shares/not-a-public-id"), http.StatusNotFound},
 		{http.MethodGet, "/api/articles/99999999/shares", http.StatusNotFound},
 	}
 	for _, check := range checks {
@@ -300,6 +325,22 @@ func TestRevokeShareHandlesMalformedAndMissingIDs(t *testing.T) {
 		got := f.request(t, check.method, check.path, f.userA, body)
 		if got.Code != check.want {
 			t.Errorf("%s %s status=%d want=%d body=%s", check.method, check.path, got.Code, check.want, got.Body.String())
+		}
+	}
+
+	if _, err := f.privDB.Exec(`DROP TABLE article_shares`); err != nil {
+		t.Fatalf("drop share table: %v", err)
+	}
+	for _, shareID := range []string{
+		"not-a-public-id",
+		strings.Repeat("a", 31),
+		strings.Repeat("a", 33),
+		strings.Repeat("A", 32),
+		strings.Repeat("a", 31) + "g",
+	} {
+		got := f.request(t, http.MethodDelete, f.articlePath("/shares/"+shareID), f.userA, "")
+		if got.Code != http.StatusNotFound {
+			t.Errorf("invalid share ID %q reached database: status=%d body=%s", shareID, got.Code, got.Body.String())
 		}
 	}
 }
