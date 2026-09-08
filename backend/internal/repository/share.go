@@ -95,34 +95,34 @@ func (r *ShareRepository) List(articleID, createdBy int, _ time.Time) ([]model.A
 }
 
 func (r *ShareRepository) Revoke(publicID string, articleID, createdBy int, now time.Time) (*model.ArticleShare, error) {
-	return scanArticleShare(r.db.QueryRow(`
+	return nilOnNoRows(scanArticleShare(r.db.QueryRow(`
 		UPDATE article_shares
 		   SET revoked_at = COALESCE(revoked_at, $4)
 		 WHERE public_id = $1 AND article_id = $2 AND created_by = $3
 		RETURNING public_id, article_id, created_by, snapshot_version, snapshot,
 		          expires_at, revoked_at, legacy_token_digest, created_at`,
 		publicID, articleID, createdBy, now,
-	))
+	)))
 }
 
 func (r *ShareRepository) GetActiveByPublicID(publicID string, now time.Time) (*model.ArticleShare, error) {
-	return scanArticleShare(r.db.QueryRow(`
+	return nilOnNoRows(scanArticleShare(r.db.QueryRow(`
 		SELECT public_id, article_id, created_by, snapshot_version, snapshot,
 		       expires_at, revoked_at, legacy_token_digest, created_at
 		  FROM article_shares
 		 WHERE public_id = $1
 		   AND revoked_at IS NULL
-		   AND (expires_at IS NULL OR expires_at > $2)`, publicID, now))
+		   AND (expires_at IS NULL OR expires_at > $2)`, publicID, now)))
 }
 
 func (r *ShareRepository) GetActiveByLegacyDigest(digest string, now time.Time) (*model.ArticleShare, error) {
-	return scanArticleShare(r.db.QueryRow(`
+	return nilOnNoRows(scanArticleShare(r.db.QueryRow(`
 		SELECT public_id, article_id, created_by, snapshot_version, snapshot,
 		       expires_at, revoked_at, legacy_token_digest, created_at
 		  FROM article_shares
 		 WHERE legacy_token_digest = $1
 		   AND revoked_at IS NULL
-		   AND (expires_at IS NULL OR expires_at > $2)`, digest, now))
+		   AND (expires_at IS NULL OR expires_at > $2)`, digest, now)))
 }
 
 type shareScanner interface {
@@ -145,9 +145,6 @@ func scanArticleShare(scanner shareScanner) (*model.ArticleShare, error) {
 		&legacyTokenDigest,
 		&share.CreatedAt,
 	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	if err := json.Unmarshal(snapshotJSON, &share.Snapshot); err != nil {
@@ -163,4 +160,11 @@ func scanArticleShare(scanner shareScanner) (*model.ArticleShare, error) {
 		share.LegacyTokenDigest = &legacyTokenDigest.String
 	}
 	return &share, nil
+}
+
+func nilOnNoRows(share *model.ArticleShare, err error) (*model.ArticleShare, error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return share, err
 }

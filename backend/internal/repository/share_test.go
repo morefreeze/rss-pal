@@ -1,9 +1,14 @@
 package repository
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +23,21 @@ type shareRepoFixture struct {
 	userA   int
 	userB   int
 	article *model.Article
+}
+
+type errShareScanner struct {
+	err error
+}
+
+func (s errShareScanner) Scan(...interface{}) error {
+	return s.err
+}
+
+func TestShareRepositoryScannerPreservesNoRowsForCreateContract(t *testing.T) {
+	got, err := scanArticleShare(errShareScanner{err: sql.ErrNoRows})
+	if got != nil || !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("got=%+v err=%v, want nil, sql.ErrNoRows", got, err)
+	}
 }
 
 func newShareRepoFixture(t *testing.T) *shareRepoFixture {
@@ -172,9 +192,41 @@ func TestShareRepositoryExpirationAndLegacyDigest(t *testing.T) {
 	}
 }
 
+func TestShareRepositorySnapshotOmitsEmptyImageDimensions(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	for name, dimensions := range map[string]map[string][2]int{
+		"nil":   nil,
+		"empty": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(SnapshotFromArticle(&model.Article{
+				Title:           "Public title",
+				URL:             "https://article.example/public",
+				Content:         "Public body",
+				ImageDimensions: dimensions,
+			}, now))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := got["image_dimensions"]; ok {
+				t.Fatalf("empty image dimensions must be omitted: %s", raw)
+			}
+		})
+	}
+}
+
 func TestMigrations039CopiesLegacySharesAndCanBeReapplied(t *testing.T) {
 	db, cleanup := testdb.NewThroughMigration(t, "038_subscription_explore.sql")
 	defer cleanup()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`SET TIME ZONE 'Asia/Shanghai'`); err != nil {
+		t.Fatal(err)
+	}
+	executeMigration039DDLPrefix(t, db)
 
 	var userID, feedID, articleID int
 	if err := db.QueryRow(`INSERT INTO users(username,password_hash) VALUES('legacy-share-owner','x') RETURNING id`).Scan(&userID); err != nil {
@@ -183,7 +235,7 @@ func TestMigrations039CopiesLegacySharesAndCanBeReapplied(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES('https://legacy.example/feed','Legacy Feed',$1) RETURNING id`, userID).Scan(&feedID); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow(`INSERT INTO articles(feed_id,title,url,content,summary_brief,summary_detailed,word_count,reading_minutes,media_url,media_type,media_duration_seconds,image_dimensions) VALUES($1,'Legacy','https://legacy.example/post','Legacy body','Legacy brief','Legacy detail',20,3,'https://legacy.example/audio','audio/mpeg',60,'{"https://legacy.example/image":[640,480]}') RETURNING id`, feedID).Scan(&articleID); err != nil {
+	if err := db.QueryRow(`INSERT INTO articles(feed_id,title,url,content,published_at,summary_brief,summary_detailed,word_count,reading_minutes,media_url,media_type,media_duration_seconds,image_dimensions) VALUES($1,'Legacy','https://legacy.example/post','Legacy body','2026-09-01 12:34:56','Legacy brief','Legacy detail',20,3,'https://legacy.example/audio','audio/mpeg',60,'{"https://legacy.example/image":[640,480]}') RETURNING id`, feedID).Scan(&articleID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO share_tokens(article_id,token,created_by,created_at) VALUES($1,'aB3dE6gH',$2,'2026-09-01 10:00:00')`, articleID, userID); err != nil {
@@ -205,6 +257,14 @@ func TestMigrations039CopiesLegacySharesAndCanBeReapplied(t *testing.T) {
 		t.Fatal("share_tokens table still exists")
 	}
 
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM article_shares`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("migrated share count=%d, want 1", count)
+	}
+
 	var publicID, digest string
 	var snapshotJSON []byte
 	var createdAt, expiresAt time.Time
@@ -217,12 +277,35 @@ func TestMigrations039CopiesLegacySharesAndCanBeReapplied(t *testing.T) {
 	if !expiresAt.After(createdAt) {
 		t.Fatalf("created_at=%s expires_at=%s", createdAt, expiresAt)
 	}
+	wantCreatedAt := time.Date(2026, 9, 1, 2, 0, 0, 0, time.UTC)
+	if !createdAt.Equal(wantCreatedAt) {
+		t.Fatalf("legacy created_at instant=%s, want %s", createdAt, wantCreatedAt)
+	}
 	var snapshot model.ArticleShareSnapshot
 	if err := json.Unmarshal(snapshotJSON, &snapshot); err != nil {
 		t.Fatal(err)
 	}
 	if snapshot.Title != "Legacy" || snapshot.FeedTitle != "Legacy Feed" || snapshot.Content != "Legacy body" {
 		t.Fatalf("snapshot=%+v", snapshot)
+	}
+	wantPublishedAt := time.Date(2026, 9, 1, 4, 34, 56, 0, time.UTC)
+	if snapshot.PublishedAt == nil || !snapshot.PublishedAt.Equal(wantPublishedAt) {
+		t.Fatalf("legacy published_at=%v, want instant %s", snapshot.PublishedAt, wantPublishedAt)
+	}
+}
+
+func executeMigration039DDLPrefix(t *testing.T, db *sql.DB) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "migrations", "039_article_shares.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix, _, ok := strings.Cut(string(raw), "DO $$")
+	if !ok {
+		t.Fatal("migration 039 has no legacy-copy DO block")
+	}
+	if _, err := db.Exec(prefix); err != nil {
+		t.Fatalf("execute migration 039 DDL prefix: %v", err)
 	}
 }
 
@@ -236,18 +319,27 @@ func assertWireSafeSnapshot(t *testing.T, db *sql.DB, publicID string) {
 	if err := json.Unmarshal(snapshotJSON, &got); err != nil {
 		t.Fatal(err)
 	}
+	wantKeys := map[string]struct{}{}
 	for _, key := range []string{
 		"title", "url", "feed_title", "published_at", "word_count", "reading_minutes",
 		"summary_brief", "summary_detailed", "content", "media_url", "media_type",
 		"media_duration_seconds", "image_dimensions", "snapshotted_at",
 	} {
-		if _, ok := got[key]; !ok {
-			t.Errorf("snapshot missing %q: %s", key, snapshotJSON)
-		}
+		wantKeys[key] = struct{}{}
 	}
-	for _, key := range []string{"created_by", "editor_note", "feed_id", "manual_tags", "is_read"} {
-		if _, ok := got[key]; ok {
-			t.Errorf("snapshot leaked %q: %s", key, snapshotJSON)
+	gotKeys := make(map[string]struct{}, len(got))
+	for key := range got {
+		gotKeys[key] = struct{}{}
+	}
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("snapshot keys=%v, want exact allowlist=%v: %s", gotKeys, wantKeys, snapshotJSON)
+	}
+	for _, sentinel := range [][]byte{
+		[]byte("https://feed.example/rss?secret=private"),
+		[]byte("private note"),
+	} {
+		if bytes.Contains(snapshotJSON, sentinel) {
+			t.Errorf("snapshot leaked private sentinel %q: %s", sentinel, snapshotJSON)
 		}
 	}
 }
