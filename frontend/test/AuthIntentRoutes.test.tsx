@@ -216,7 +216,7 @@ describe('feed subscription intent', () => {
     const input = await screen.findByPlaceholderText('输入 RSS 地址、网站 URL 或 PDF 链接') as HTMLInputElement
     await waitFor(() => expect(input.value).toBe(source))
     await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
-    expect(apiMocks.previewFeed).toHaveBeenCalledWith(source)
+    expect(apiMocks.previewFeed).toHaveBeenCalledWith(source, expect.any(AbortSignal))
     expect(apiMocks.addFeed).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/feeds'))
 
@@ -239,7 +239,7 @@ describe('feed subscription intent', () => {
 
     const input = await screen.findByPlaceholderText('输入 RSS 地址、网站 URL 或 PDF 链接') as HTMLInputElement
     await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
-    expect(apiMocks.previewFeed).toHaveBeenCalledWith(source)
+    expect(apiMocks.previewFeed).toHaveBeenCalledWith(source, expect.any(AbortSignal))
     expect(input.value).toBe(source)
     expect(input.value).not.toContain('https://HTTPS://')
   })
@@ -270,27 +270,50 @@ describe('feed subscription intent', () => {
     expect(apiMocks.addFeed).not.toHaveBeenCalled()
   })
 
-  it('ignores an older automatic preview response after a newer intent starts', async () => {
+  it.each(['resolve', 'reject'] as const)('aborts an older preview and ignores its later %s after a newer intent starts', async outcome => {
     let resolveFirst!: (value: any) => void
+    let rejectFirst!: (reason: any) => void
     let resolveSecond!: (value: any) => void
+    const signals: AbortSignal[] = []
     apiMocks.previewFeed
-      .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
-      .mockReturnValueOnce(new Promise(resolve => { resolveSecond = resolve }))
+      .mockImplementationOnce((_url, signal) => {
+        signals.push(signal)
+        return new Promise((resolve, reject) => {
+          resolveFirst = resolve
+          rejectFirst = reject
+        })
+      })
+      .mockImplementationOnce((_url, signal) => {
+        signals.push(signal)
+        return new Promise(resolve => { resolveSecond = resolve })
+      })
     renderFeeds('/feeds?add=1&source=https%3A%2F%2Ffirst.example%2Ffeed')
     await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
+    expect(signals[0].aborted).toBe(false)
 
     fireEvent.click(screen.getByRole('button', { name: 'second intent' }))
     await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(2))
+    expect(signals[0].aborted).toBe(true)
+    expect(signals[1].aborted).toBe(false)
     resolveSecond({ feed_title: 'Second preview', feed_type: 'rss', actual_url: 'https://second.example/feed', items: [] })
     expect(await screen.findByText('Second preview')).toBeTruthy()
 
-    resolveFirst({ feed_title: 'Stale first preview', feed_type: 'rss', actual_url: 'https://first.example/feed', items: [] })
+    if (outcome === 'resolve') {
+      resolveFirst({ feed_title: 'Stale first preview', feed_type: 'rss', actual_url: 'https://first.example/feed', items: [] })
+    } else {
+      rejectFirst(Object.assign(new Error('cancelled'), { code: 'ERR_CANCELED' }))
+    }
     await waitFor(() => expect(screen.queryByText('Stale first preview')).toBeNull())
     expect(screen.getByText('Second preview')).toBeTruthy()
+    expect(screen.queryByText('无法获取该地址的内容，请检查 URL 是否正确')).toBeNull()
   })
 
   it('clears the delayed preview-status timer when an in-flight preview unmounts', async () => {
-    apiMocks.previewFeed.mockReturnValue(new Promise(() => {}))
+    let capturedSignal: AbortSignal | undefined
+    apiMocks.previewFeed.mockImplementation((_url, signal) => {
+      capturedSignal = signal
+      return new Promise(() => {})
+    })
     const clearTimer = vi.spyOn(globalThis, 'clearTimeout')
     const view = renderFeeds('/feeds?add=1&source=https%3A%2F%2Fsource.example%2Ffeed')
     await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
@@ -299,6 +322,7 @@ describe('feed subscription intent', () => {
     view.unmount()
 
     expect(clearTimer).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(capturedSignal?.aborted).toBe(true))
     clearTimer.mockRestore()
   })
 })

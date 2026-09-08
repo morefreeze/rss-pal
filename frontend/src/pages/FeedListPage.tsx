@@ -91,6 +91,7 @@ export default function FeedListPage() {
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const consumedSubscribeIntents = useRef(new Set<string>())
   const previewGeneration = useRef(0)
+  const previewAbortController = useRef<AbortController | null>(null)
   const mounted = useRef(true)
 
   useEffect(() => { loadFeeds() }, [])
@@ -98,7 +99,20 @@ export default function FeedListPage() {
     mounted.current = true
     return () => {
       mounted.current = false
-      if (previewTimer.current) clearTimeout(previewTimer.current)
+      if (previewTimer.current) {
+        clearTimeout(previewTimer.current)
+        previewTimer.current = null
+      }
+      const controller = previewAbortController.current
+      // React StrictMode immediately re-runs effects after its development-only
+      // cleanup. Deferring the abort lets that remount retain the single intent
+      // request, while a real unmount still cancels it before another task runs.
+      queueMicrotask(() => {
+        if (!mounted.current && previewAbortController.current === controller) {
+          controller?.abort()
+          previewAbortController.current = null
+        }
+      })
     }
   }, [])
 
@@ -122,6 +136,9 @@ export default function FeedListPage() {
   const doPreview = async (url: string) => {
     const normalized = normalizeURL(url)
     if (!normalized) return
+    previewAbortController.current?.abort()
+    const controller = new AbortController()
+    previewAbortController.current = controller
     const generation = ++previewGeneration.current
     setNewUrl(normalized)
     setPreviewing(true)
@@ -131,16 +148,17 @@ export default function FeedListPage() {
     // After 4s show "probing RSS" hint so user knows it's still working
     if (previewTimer.current) clearTimeout(previewTimer.current)
     const timer = setTimeout(() => {
-      if (mounted.current && generation === previewGeneration.current) {
+      if (mounted.current && !controller.signal.aborted && generation === previewGeneration.current) {
         setPreviewStatus('正在探测 RSS 地址...')
       }
     }, 4000)
     previewTimer.current = timer
     try {
-      const result = await previewFeed(normalized)
-      if (mounted.current && generation === previewGeneration.current) setPreview(result)
+      const result = await previewFeed(normalized, controller.signal)
+      if (mounted.current && !controller.signal.aborted && generation === previewGeneration.current) setPreview(result)
     } catch (err: any) {
-      if (mounted.current && generation === previewGeneration.current) {
+      const cancelled = controller.signal.aborted || err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError'
+      if (!cancelled && mounted.current && generation === previewGeneration.current) {
         setPreviewError(err?.response?.data?.error || '无法获取该地址的内容，请检查 URL 是否正确')
       }
     } finally {
@@ -148,6 +166,9 @@ export default function FeedListPage() {
         if (previewTimer.current === timer) {
           clearTimeout(timer)
           previewTimer.current = null
+        }
+        if (previewAbortController.current === controller) {
+          previewAbortController.current = null
         }
         if (mounted.current) {
           setPreviewing(false)
@@ -172,6 +193,20 @@ export default function FeedListPage() {
       if (!consumedSubscribeIntents.current.has(key)) {
         consumedSubscribeIntents.current.add(key)
         void doPreview(parsed.source)
+      }
+    } else if (previewAbortController.current) {
+      // An invalid replacement intent must not leave the previous request able
+      // to update this screen after the malicious query is cleaned.
+      ++previewGeneration.current
+      previewAbortController.current.abort()
+      previewAbortController.current = null
+      if (previewTimer.current) {
+        clearTimeout(previewTimer.current)
+        previewTimer.current = null
+      }
+      if (mounted.current) {
+        setPreviewing(false)
+        setPreviewStatus('')
       }
     }
     // The intent is single-use. Removing it immediately also means a refresh
