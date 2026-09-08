@@ -65,6 +65,18 @@ func TestParseRejectsTamperedToken(t *testing.T) {
 	}
 }
 
+func TestParseRejectsNonCanonicalEquivalentSignature(t *testing.T) {
+	signer, err := NewSigner(testSecret)
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+	const tampered = "v1_0123456789abcdef0123456789abcdef_eBVS-nqwfm3pAEH22cstXDcqq33wf6dgjV2ceEFuiAZ"
+
+	if _, _, err := signer.Parse(tampered); err == nil {
+		t.Fatal("Parse() accepted a non-canonical signature with altered pad bits")
+	}
+}
+
 func TestParseRejectsUnknownVersion(t *testing.T) {
 	signer, err := NewSigner(testSecret)
 	if err != nil {

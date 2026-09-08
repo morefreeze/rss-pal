@@ -58,8 +58,11 @@ func (s *Signer) Parse(token string) (value string, legacy bool, err error) {
 		return "", false, errors.New("invalid share token public ID")
 	}
 
-	provided, err := base64.RawURLEncoding.DecodeString(parts[2])
+	provided, err := base64.RawURLEncoding.Strict().DecodeString(parts[2])
 	if err != nil {
+		return "", false, errors.New("invalid share token signature")
+	}
+	if base64.RawURLEncoding.EncodeToString(provided) != parts[2] {
 		return "", false, errors.New("invalid share token signature")
 	}
 	if !hmac.Equal(provided, s.signature(publicID)) {
