@@ -213,7 +213,7 @@ function ArticleLink({ href, children, className, node: _node, ...rest }: Articl
 // remounted (cancelling and re-issuing image fetches mid-load).
 const REMARK_PLUGINS = [remarkGfm, remarkCjkFriendly, remarkMath]
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
-const PUBLIC_SHARE_ASSET_RE = /^\/api\/share\/[A-Za-z0-9_-]+\/assets\/[0-9]+\.(?:png|jpe?g)$/
+const PUBLIC_SHARE_ASSET_RE = /^\/api\/share\/(?:[A-Za-z0-9]{8}|v1_[0-9a-f]{32}_[A-Za-z0-9_-]{43})\/assets\/[0-9]+\.(?:png|jpe?g)$/
 const COMPONENTS: Components = {
   img: ({ src, alt, ...rest }) => {
     if (isAvatarImg(src, alt)) return null

@@ -14,13 +14,16 @@ const readerContext: ReaderActionContextValue = {
 
 describe('MarkdownArticle article anchors', () => {
   it('keeps only a precisely shaped public share asset on the same-origin path', () => {
-    const valid = '/api/share/v1_0123456789abcdef_signature/assets/3.jpeg'
-    const invalid = '/api/share/v1_0123456789abcdef_signature/assets/avatar.svg'
+    const token = 'v1_00000000000000000000000000000001_kVCen8vHGjySlZF_mC5N22Bs13LHqfgxBbnHY7Botcg'
+    const valid = `/api/share/${token}/assets/3.jpeg`
+    const legacy = '/api/share/aB3dE6gH/assets/9.png'
+    const invalid = '/api/share/v1_0123456789abcdef_signature/assets/3.jpeg'
     const { container } = render(
-      <MarkdownArticle source={`![shared](${valid})\n\n![invalid](${invalid})`} readOnly />,
+      <MarkdownArticle source={`![shared](${valid})\n\n![legacy](${legacy})\n\n![invalid](${invalid})`} readOnly />,
     )
 
     expect(container.querySelector('img[alt="shared"]')?.getAttribute('src')).toBe(valid)
+    expect(container.querySelector('img[alt="legacy"]')?.getAttribute('src')).toBe(legacy)
     expect(container.querySelector('img[alt="invalid"]')?.getAttribute('src')).toBe(
       `/api/proxy/image?url=${encodeURIComponent(invalid)}`,
     )

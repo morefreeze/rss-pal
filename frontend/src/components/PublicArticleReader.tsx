@@ -36,7 +36,42 @@ function formatDuration(seconds?: number): string {
   return `${minutes}分${remainder.toString().padStart(2, '0')}秒`
 }
 
-export function publicMediaURL(rawURL?: string): string | null {
+function isNonPublicHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '')
+  if (host === 'localhost' || host.endsWith('.localhost')) return true
+
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    const octets = host.split('.').map(Number)
+    if (octets.some(octet => octet < 0 || octet > 255)) return true
+    const [a, b, c] = octets
+    return a === 0
+      || a === 10
+      || a === 127
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 0)
+      || (a === 192 && b === 88 && c === 99)
+      || (a === 192 && b === 168)
+      || (a === 198 && (b === 18 || b === 19))
+      || (a === 198 && b === 51 && c === 100)
+      || (a === 203 && b === 0 && c === 113)
+      || a >= 224
+  }
+
+  if (host.includes(':')) {
+    if (host === '::' || host === '::1' || host.startsWith('::ffff:')) return true
+    const first = Number.parseInt(host.split(':', 1)[0] || '0', 16)
+    return (first & 0xfe00) === 0xfc00
+      || (first & 0xffc0) === 0xfe80
+      || (first & 0xff00) === 0xff00
+      || host.startsWith('2001:db8:')
+  }
+
+  return false
+}
+
+function parseSafePublicURL(rawURL?: string): { value: string; parsed: URL } | null {
   const value = rawURL?.trim()
   if (!value || value.startsWith('//')) return null
   let parsed: URL
@@ -47,7 +82,50 @@ export function publicMediaURL(rawURL?: string): string | null {
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) return null
   if (parsed.username || parsed.password) return null
-  if (parsed.pathname.startsWith('/api/media/youtube/')) return null
+  if (isNonPublicHostname(parsed.hostname)) return null
+  return { value, parsed }
+}
+
+function isIPLiteral(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '')
+  return /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(':')
+}
+
+function normalizedDecodedPathname(pathname: string): string | null {
+  let decoded = pathname
+  for (let pass = 0; pass < 4; pass += 1) {
+    let next: string
+    try {
+      next = decodeURIComponent(decoded)
+    } catch {
+      return null
+    }
+    if (next === decoded) break
+    decoded = next
+  }
+  if (/%[0-9a-f]{2}/i.test(decoded)) return null
+
+  const segments: string[] = []
+  for (const segment of decoded.replace(/\\/g, '/').split('/')) {
+    if (!segment || segment === '.') continue
+    if (segment === '..') segments.pop()
+    else segments.push(segment)
+  }
+  return `/${segments.join('/')}`
+}
+
+export function safePublicSourceURL(rawURL?: string): string | null {
+  const safe = parseSafePublicURL(rawURL)
+  if (!safe || isIPLiteral(safe.parsed.hostname)) return null
+  return safe.value
+}
+
+export function safePublicMediaURL(rawURL?: string): string | null {
+  const safe = parseSafePublicURL(rawURL)
+  if (!safe) return null
+  const pathname = normalizedDecodedPathname(safe.parsed.pathname)
+  if (!pathname || pathname.startsWith('/api/media/youtube/')) return null
+  const parsed = safe.parsed
   return parsed.href
 }
 
@@ -57,22 +135,15 @@ function normalizedVideoType(mediaType?: string): string {
   return mediaType ?? ''
 }
 
-function subscribeHref(source: string): string {
-  try {
-    const parsed = new URL(source)
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-      return '/login?intent=subscribe'
-    }
-  } catch {
-    return '/login?intent=subscribe'
-  }
+function subscribeHref(source: string | null): string {
+  if (!source) return '/login?intent=subscribe'
   const href = `/login?intent=subscribe&source=${encodeURIComponent(source)}`
   return href.length <= 2048 ? href : '/login?intent=subscribe'
 }
 
-function PublicMedia({ article }: Props) {
+function PublicMedia({ article, sourceURL }: Props & { sourceURL: string | null }) {
   if (!article.media_url) return null
-  const mediaURL = publicMediaURL(article.media_url)
+  const mediaURL = safePublicMediaURL(article.media_url)
   const mediaType = normalizedVideoType(article.media_type)
 
   if (mediaURL && mediaType.startsWith('video/')) {
@@ -84,7 +155,7 @@ function PublicMedia({ article }: Props) {
     return (
       <div className="public-reader-media card">
         <div className="public-reader-media-title">音频节目</div>
-        <audio controls preload="metadata" src={mediaURL} />
+        <audio controls preload="none" src={mediaURL} />
         <div className="text-muted text-sm">{formatDuration(article.media_duration_seconds)}</div>
       </div>
     )
@@ -92,13 +163,16 @@ function PublicMedia({ article }: Props) {
 
   return (
     <div className="public-reader-media-fallback card">
-      <a href={article.url} target="_blank" rel="noopener noreferrer">前往原网站播放</a>
+      {sourceURL
+        ? <a href={sourceURL} target="_blank" rel="noopener noreferrer">前往原网站播放</a>
+        : <span>前往原网站播放</span>}
     </div>
   )
 }
 
 export default function PublicArticleReader({ article }: Props) {
   const published = formatDate(article.published_at)
+  const sourceURL = safePublicSourceURL(article.url)
   return (
     <main className="public-reader">
       <header className="public-reader-brand">
@@ -133,12 +207,16 @@ export default function PublicArticleReader({ article }: Props) {
           </section>
         )}
 
-        <PublicMedia article={article} />
+        <PublicMedia article={article} sourceURL={sourceURL} />
 
         <section className="card public-reader-actions">
-          <a className="public-reader-primary-cta" href={article.url} target="_blank" rel="noopener noreferrer">
-            阅读原文
-          </a>
+          {sourceURL
+            ? (
+              <a className="public-reader-primary-cta" href={sourceURL} target="_blank" rel="noopener noreferrer">
+                阅读原文
+              </a>
+            )
+            : <span className="text-muted">原文链接不可用</span>}
         </section>
       </article>
 
@@ -146,7 +224,7 @@ export default function PublicArticleReader({ article }: Props) {
         <span className="text-muted">由 RSS Pal 提供</span>
         <div className="public-reader-ctas">
           <a href="/login?intent=use">使用 RSS Pal</a>
-          <a href={subscribeHref(article.url)}>订阅原始来源</a>
+          <a href={subscribeHref(sourceURL)}>订阅原始来源</a>
         </div>
       </footer>
     </main>

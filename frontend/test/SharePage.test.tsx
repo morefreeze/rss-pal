@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -33,18 +34,24 @@ function sharedSnapshot(overrides: Record<string, unknown> = {}) {
 
 function NavigateToFresh() {
   const navigate = useNavigate()
-  return <button onClick={() => navigate('/share/fresh_token')}>next token</button>
+  return (
+    <>
+      <button onClick={() => navigate('/share/fresh_token')}>next token</button>
+      <button onClick={() => navigate('/share/missing_token')}>missing token</button>
+    </>
+  )
 }
 
-function renderSharePage(path = '/share/v1_token', withNavigator = false) {
-  return render(
+function renderSharePage(path = '/share/v1_token', withNavigator = false, strict = false) {
+  const tree = (
     <MemoryRouter initialEntries={[path]}>
       {withNavigator && <NavigateToFresh />}
       <Routes>
         <Route path="/share/:token" element={<SharePage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree)
 }
 
 function deferred<T>() {
@@ -80,7 +87,7 @@ describe('SharePage public reader', () => {
     expect(screen.getByText('Detailed summary')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Full body' })).toBeTruthy()
 
-    expect(axiosMock.get).toHaveBeenCalledWith('/api/share/v1_token')
+    expect(axiosMock.get).toHaveBeenCalledWith('/api/share/v1_token', { signal: expect.any(AbortSignal) })
     const original = screen.getByRole('link', { name: '阅读原文' })
     expect(original.getAttribute('href')).toBe('https://source.example/post?from=share')
     expect(original.getAttribute('target')).toBe('_blank')
@@ -99,7 +106,50 @@ describe('SharePage public reader', () => {
     expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
       '/login?intent=subscribe&source=https%3A%2F%2Fsource.example%2Fpost%3Ffrom%3Dshare',
     )
-    expect(axiosMock.get).toHaveBeenCalledWith('/api/share/token%2Fwith%20spaces')
+    expect(axiosMock.get).toHaveBeenCalledWith('/api/share/token%2Fwith%20spaces', { signal: expect.any(AbortSignal) })
+  })
+
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,bad',
+    'file:///etc/passwd',
+    'https://user:secret@source.example/post',
+    'http://localhost/post',
+    'http://localhost./post',
+    'https://preview.localhost/post',
+    'http://10.1.2.3/post',
+    'http://127.0.0.1/post',
+    'http://[::1]/post',
+    'https://8.8.8.8/post',
+    'https://[2606:4700:4700::1111]/post',
+  ])('never makes an unsafe source URL clickable or forwards it to subscribe: %s', async sourceURL => {
+    axiosMock.get.mockResolvedValue({
+      data: sharedSnapshot({
+        url: sourceURL,
+        media_url: '/api/media/youtube/private-ticket',
+        media_type: 'video/youtube',
+      }),
+    })
+    renderSharePage()
+
+    await screen.findByRole('heading', { name: 'Shared title' })
+    expect(screen.queryByRole('link', { name: '阅读原文' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '前往原网站播放' })).toBeNull()
+    expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
+      '/login?intent=subscribe',
+    )
+  })
+
+  it('trims a safe source URL before rendering and preserving its subscribe intent', async () => {
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ url: '  HTTPS://source.example/post  ' }) })
+    renderSharePage()
+
+    expect((await screen.findByRole('link', { name: '阅读原文' })).getAttribute('href')).toBe(
+      'HTTPS://source.example/post',
+    )
+    expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
+      `/login?intent=subscribe&source=${encodeURIComponent('HTTPS://source.example/post')}`,
+    )
   })
 
   it('does not forward an oversized source value into the authentication intent', async () => {
@@ -176,7 +226,36 @@ describe('SharePage public reader', () => {
     const audio = container.querySelector('audio')
     expect(audio?.getAttribute('src')).toBe('https://media.example/episode.mp3')
     expect(audio?.hasAttribute('controls')).toBe(true)
+    expect(audio?.getAttribute('preload')).toBe('none')
     expect(screen.getByText('2分05秒')).toBeTruthy()
+  })
+
+  it.each([
+    'http://localhost/episode.mp3',
+    'http://localhost./episode.mp3',
+    'https://media.localhost/episode.mp3',
+    'http://0.0.0.0/episode.mp3',
+    'http://10.1.2.3/episode.mp3',
+    'http://100.64.0.1/episode.mp3',
+    'http://127.0.0.1/episode.mp3',
+    'http://169.254.1.2/episode.mp3',
+    'http://172.16.1.2/episode.mp3',
+    'http://192.168.1.2/episode.mp3',
+    'http://2130706433/episode.mp3',
+    'http://[::1]/episode.mp3',
+    'http://[fe80::1]/episode.mp3',
+    'http://[fc00::1]/episode.mp3',
+    'http://[fd00::1]/episode.mp3',
+    'https://rss.example/api%2Fmedia%2Fyoutube%2Fprivate-ticket',
+    'https://rss.example/api%252Fmedia%252Fyoutube%252Fprivate-ticket',
+    'https://rss.example/bad%ZZpath/episode.mp3',
+  ])('does not preload non-public or encoded private media: %s', async mediaURL => {
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ media_url: mediaURL, media_type: 'audio/mpeg' }) })
+    const { container } = renderSharePage()
+
+    await screen.findByRole('heading', { name: 'Shared title' })
+    expect(container.querySelector('audio,video,iframe')).toBeNull()
+    expect(screen.getByText('前往原网站播放')).toBeTruthy()
   })
 
   it.each([
@@ -264,6 +343,86 @@ describe('SharePage public reader', () => {
     await act(async () => { await stale.promise })
     expect(screen.queryByRole('heading', { name: 'Stale title' })).toBeNull()
     expect(screen.getByRole('heading', { name: 'Fresh title' })).toBeTruthy()
+  })
+
+  it('aborts an obsolete request without showing retry state', async () => {
+    const obsolete = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
+    const fresh = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
+    axiosMock.get
+      .mockReturnValueOnce(obsolete.promise)
+      .mockReturnValueOnce(fresh.promise)
+    renderSharePage('/share/obsolete_token', true)
+    const obsoleteSignal = axiosMock.get.mock.calls[0]?.[1]?.signal as AbortSignal | undefined
+
+    fireEvent.click(screen.getByRole('button', { name: 'next token' }))
+    expect(obsoleteSignal?.aborted).toBe(true)
+    obsolete.reject(new Error('canceled'))
+    await act(async () => { await obsolete.promise.catch(() => undefined) })
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+
+    fresh.resolve({ data: sharedSnapshot({ title: 'Fresh after cancel' }) })
+    expect(await screen.findByRole('heading', { name: 'Fresh after cancel' })).toBeTruthy()
+  })
+
+  it('uses a reentrant head lease across two mounted share pages and restores every original meta', async () => {
+    document.title = 'Original title'
+    const firstMeta = document.createElement('meta')
+    firstMeta.name = 'referrer'
+    firstMeta.content = 'origin'
+    const secondMeta = document.createElement('meta')
+    secondMeta.name = 'referrer'
+    document.head.append(firstMeta, secondMeta)
+    axiosMock.get
+      .mockResolvedValueOnce({ data: sharedSnapshot({ title: 'First owner' }) })
+      .mockResolvedValueOnce({ data: sharedSnapshot({ title: 'Second owner' }) })
+
+    const first = renderSharePage('/share/first')
+    const second = renderSharePage('/share/second')
+    await waitFor(() => expect(document.title).toBe('Second owner - RSS Pal'))
+    expect(firstMeta.content).toBe('no-referrer')
+    expect(secondMeta.content).toBe('no-referrer')
+
+    first.unmount()
+    expect(document.title).toBe('Second owner - RSS Pal')
+    expect(firstMeta.content).toBe('no-referrer')
+    expect(secondMeta.content).toBe('no-referrer')
+
+    second.unmount()
+    expect(document.title).toBe('Original title')
+    expect(firstMeta.getAttribute('content')).toBe('origin')
+    expect(secondMeta.hasAttribute('content')).toBe(false)
+  })
+
+  it('resets a loaded article title when navigation starts and keeps it generic after 404', async () => {
+    axiosMock.get
+      .mockResolvedValueOnce({ data: sharedSnapshot({ title: 'Previous article' }) })
+      .mockRejectedValueOnce({ response: { status: 404 } })
+    renderSharePage('/share/previous', true)
+    await waitFor(() => expect(document.title).toBe('Previous article - RSS Pal'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'missing token' }))
+    expect(document.title).toBe('RSS Pal')
+    expect(await screen.findByText('分享链接无效或已过期')).toBeTruthy()
+    expect(document.title).toBe('RSS Pal')
+  })
+
+  it('keeps the head lease balanced and aborts pending work under StrictMode', async () => {
+    document.title = 'Strict baseline'
+    const pending = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
+    axiosMock.get.mockReturnValue(pending.promise)
+    const view = renderSharePage('/share/strict', false, true)
+    const calls = axiosMock.get.mock.calls
+    const activeSignal = calls[calls.length - 1]?.[1]?.signal as AbortSignal | undefined
+
+    expect(document.querySelectorAll('meta[name="referrer"]')).toHaveLength(1)
+    expect(document.querySelector('meta[name="referrer"]')?.getAttribute('content')).toBe('no-referrer')
+    view.unmount()
+    expect(activeSignal?.aborted).toBe(true)
+    expect(document.querySelector('meta[name="referrer"]')).toBeNull()
+    expect(document.title).toBe('Strict baseline')
+
+    pending.reject(new Error('canceled'))
+    await act(async () => { await pending.promise.catch(() => undefined) })
   })
 
   it('blocks unsafe markdown link protocols and never emits unsafe media src values', async () => {

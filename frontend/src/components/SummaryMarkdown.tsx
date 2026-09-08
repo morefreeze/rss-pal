@@ -58,6 +58,17 @@ type SummaryLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraPro
   externalLinksNewTab?: boolean
 }
 
+function isExternalHTTPLink(href?: string): boolean {
+  if (!href) return false
+  try {
+    const target = new URL(href, window.location.href)
+    return (target.protocol === 'http:' || target.protocol === 'https:')
+      && target.origin !== window.location.origin
+  } catch {
+    return false
+  }
+}
+
 function SummaryLink({ href, children, node: _node, onClick, onAuxClick, externalLinksNewTab, ...rest }: SummaryLinkProps) {
   const targetID = parseArticleAnchor(href)
   const reactID = useId().replace(/:/g, '')
@@ -105,7 +116,7 @@ function SummaryLink({ href, children, node: _node, onClick, onAuxClick, externa
   }
 
   const className = [rest.className, targetID ? 'summary-article-link' : ''].filter(Boolean).join(' ') || undefined
-  const externalHTTPLink = externalLinksNewTab && /^https?:\/\//i.test(href ?? '')
+  const externalHTTPLink = externalLinksNewTab && isExternalHTTPLink(href)
 
   return (
     <a

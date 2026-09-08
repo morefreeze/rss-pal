@@ -104,6 +104,29 @@ describe('SummaryMarkdown article links', () => {
     expect(internal.getAttribute('rel')).toBeNull()
   })
 
+  it('treats protocol-relative cross-origin links as external in hardened mode', () => {
+    render(<SummaryMarkdown source="[External](//outside.example/read)" externalLinksNewTab />)
+
+    const external = screen.getByRole('link', { name: 'External' })
+    expect(external.getAttribute('target')).toBe('_blank')
+    expect(external.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('does not mark same-origin or unsafe links as external in hardened mode', () => {
+    const sameOrigin = `${window.location.origin}/inside`
+    render(
+      <SummaryMarkdown
+        source={`[Inside](${sameOrigin})\n\n[Unsafe](javascript:alert(1))`}
+        externalLinksNewTab
+      />,
+    )
+
+    const inside = screen.getByRole('link', { name: 'Inside' })
+    expect(inside.getAttribute('target')).toBeNull()
+    expect(inside.getAttribute('rel')).toBeNull()
+    expect(document.querySelector('a[href^="javascript:"]')).toBeNull()
+  })
+
   it('scrolls a valid body target, highlights it, and cleans up after its animation', () => {
     const target = addArticleTarget()
     render(<SummaryMarkdown source="[Jump](#article-section-001)" />)
