@@ -69,6 +69,14 @@ func TestArticleSearchMatchesChineseTitleByPinyin(t *testing.T) {
 	`).Scan(&feedID); err != nil {
 		t.Fatalf("insert feed: %v", err)
 	}
+	var otherFeedID int
+	if err := db.QueryRow(`
+		INSERT INTO feeds (url, title)
+		VALUES ('https://kitchen.example.com/feed.xml', '厨房札记')
+		RETURNING id
+	`).Scan(&otherFeedID); err != nil {
+		t.Fatalf("insert other feed: %v", err)
+	}
 
 	var weeklyID int
 	if err := db.QueryRow(`
@@ -81,7 +89,7 @@ func TestArticleSearchMatchesChineseTitleByPinyin(t *testing.T) {
 	if _, err := db.Exec(`
 		INSERT INTO articles (feed_id, title, url, content, published_at, summary_brief)
 		VALUES ($1, '厨房札记', 'https://weekly.example.com/kitchen', '正文', NOW(), '摘要')
-	`, feedID); err != nil {
+	`, otherFeedID); err != nil {
 		t.Fatalf("insert other article: %v", err)
 	}
 

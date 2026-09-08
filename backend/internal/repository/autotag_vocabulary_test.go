@@ -54,7 +54,7 @@ func TestGetTopTagVocabulary(t *testing.T) {
 	} {
 		if _, err := db.Exec(`
 			INSERT INTO articles (feed_id, title, url, content, published_at, tags)
-			VALUES ($1, $2, 'https://example.com/' || $2, '正文', NOW(), `+row.tags+`)
+			VALUES ($1, $2::text, 'https://example.com/' || $2::text, '正文', NOW(), `+row.tags+`)
 		`, feedID, row.title); err != nil {
 			t.Fatalf("insert article %s: %v", row.title, err)
 		}
