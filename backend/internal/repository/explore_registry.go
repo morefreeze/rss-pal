@@ -24,7 +24,7 @@ const exploreRegistryCandidateUpsertSQL = `
 		title = CASE WHEN NULLIF(EXCLUDED.title, '') IS NULL THEN recommended_feeds.title ELSE EXCLUDED.title END,
 		site_url = COALESCE(NULLIF(EXCLUDED.site_url, ''), recommended_feeds.site_url),
 		category = COALESCE(NULLIF(EXCLUDED.category, ''), recommended_feeds.category),
-		last_observed_at = EXCLUDED.last_observed_at
+		last_observed_at = GREATEST(recommended_feeds.last_observed_at, EXCLUDED.last_observed_at)
 	RETURNING id`
 
 const ExploreRelatedSeedsSQL = `
@@ -317,7 +317,7 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 		INSERT INTO explore_source_observations (provider_id, source_id, external_key, provider_tags, first_seen_at, last_seen_at, occurrence_count)
 		VALUES ($1, $2, $3, $4, $5, $5, $6)
 		ON CONFLICT (provider_id, external_key, source_id) DO UPDATE SET
-			provider_tags=EXCLUDED.provider_tags, last_seen_at=EXCLUDED.last_seen_at, occurrence_count=EXCLUDED.occurrence_count`,
+			provider_tags=EXCLUDED.provider_tags, last_seen_at=GREATEST(explore_source_observations.last_seen_at,EXCLUDED.last_seen_at), occurrence_count=EXCLUDED.occurrence_count`,
 		providerID, sourceID, candidate.ExternalKey, pq.Array(providerTags), observedAt, candidate.OccurrenceCount)
 	if err != nil {
 		return 0, err
@@ -329,8 +329,26 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 }
 
 func (r *ExploreRegistryRepository) RecordSuccess(providerID int, syncedAt time.Time, etag, lastModified string) error {
-	result, err := r.db.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, last_materialized_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
-	return expectProviderUpdate(result, err, providerID)
+	q, commit, rollback, err := txOrBegin(r.db)
+	if err != nil {
+		return err
+	}
+	defer rollback()
+	var previousSyncAt sql.NullTime
+	if err := q.QueryRow(`SELECT last_sync_at FROM explore_registry_providers WHERE id=$1 FOR UPDATE`, providerID).Scan(&previousSyncAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("explore registry provider %d not found", providerID)
+		}
+		return err
+	}
+	if previousSyncAt.Valid && syncedAt.Before(previousSyncAt.Time) {
+		return commit()
+	}
+	result, err := q.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, last_materialized_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
+	if err := expectProviderUpdate(result, err, providerID); err != nil {
+		return err
+	}
+	return commit()
 }
 
 func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt time.Time, etag, lastModified string) error {
@@ -339,12 +357,15 @@ func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt t
 		return err
 	}
 	defer rollback()
-	var previousMaterializedAt sql.NullTime
-	if err := q.QueryRow(`SELECT last_materialized_at FROM explore_registry_providers WHERE id=$1 FOR UPDATE`, providerID).Scan(&previousMaterializedAt); err != nil {
+	var previousMaterializedAt, previousSyncAt sql.NullTime
+	if err := q.QueryRow(`SELECT last_materialized_at,last_sync_at FROM explore_registry_providers WHERE id=$1 FOR UPDATE`, providerID).Scan(&previousMaterializedAt, &previousSyncAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("explore registry provider %d not found", providerID)
 		}
 		return err
+	}
+	if previousSyncAt.Valid && syncedAt.Before(previousSyncAt.Time) {
+		return commit()
 	}
 	result, err := q.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, last_materialized_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
 	if err := expectProviderUpdate(result, err, providerID); err != nil {

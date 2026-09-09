@@ -24,12 +24,13 @@ Migration `040_explore_provider_materialized_at.sql` backfills a provider only w
 
 ## Error Handling
 
-The operation locks the provider row, reads its previous `last_materialized_at`, and commits provider success, matching-generation observation refresh, source timestamp refresh, and the new materialized timestamp atomically. A missing provider or any database failure returns an error; the existing registry flow records that synchronization as failed. Observation and source timestamps use `GREATEST(existing, synced_at)` so an out-of-order call cannot move freshness backward. A provider with no matching observations succeeds without creating any.
+The operation locks the provider row, reads its previous `last_materialized_at` and `last_sync_at`, and commits provider success, matching-generation observation refresh, source timestamp refresh, and the new materialized timestamp atomically. A synchronization older than the locked `last_sync_at` is an idempotent no-op; ordinary 200 success uses the same lock and guard. Candidate upserts use `GREATEST` for observation and source timestamps, so delayed writes cannot move freshness backward. A missing provider or any database failure returns an error; the existing registry flow records that synchronization as failed. A provider with no matching observations succeeds without creating any.
 
 ## Verification
 
 - Unit test: a `304` uses the not-modified persistence path and performs no candidate upsert or queue enqueue.
 - Repository tests: after `A+B` at `t1` and `A` at `t2`, a `304` at `t3` advances only A; after `A+B` at `t1` and an empty successful `200` at `t2`, a `304` at `t3` advances neither entry. Source timestamps, other providers, and occurrence counts remain correct.
+- Ordering tests: delayed 200 and 304 success calls older than the committed provider state do not regress validators, provider generation, observations, or source timestamps.
 - Migration test: a legacy provider whose `last_success_at` is newer than its observations has its validators and scheduling timestamp cleared, then a forced full 200 establishes the generation that a later 304 safely renews.
 - Full backend tests, race tests for the affected packages, and `go vet` pass.
 - Tencent production verification confirms the deployed SHA, running worker image/container, provider sync, non-zero candidate inputs, a new `done` Explore batch, and healthy internal/public endpoints.

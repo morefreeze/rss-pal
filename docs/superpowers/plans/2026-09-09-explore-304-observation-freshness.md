@@ -82,6 +82,8 @@ SET last_observed_at=GREATEST(last_observed_at,$2)
 WHERE id IN (SELECT source_id FROM refreshed)
 ```
 
+Read `last_sync_at` under the provider lock. Treat an older 200 or 304 completion as a no-op, and use monotonic timestamp updates in candidate upserts so delayed work cannot regress freshness state.
+
 Commit only after both writes succeed.
 
 - [ ] **Step 3: Verify GREEN**

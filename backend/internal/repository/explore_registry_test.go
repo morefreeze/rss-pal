@@ -292,6 +292,9 @@ func TestExploreRegistryRecordNotModifiedRefreshesProviderObservations(t *testin
 	if err := repo.RecordNotModified(providerID, syncedAt, `"new-etag"`, "Thu"); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.RecordNotModified(providerID, currentRepresentationAt.Add(time.Hour), `"stale-etag"`, "Stale"); err != nil {
+		t.Fatal(err)
+	}
 
 	var etag, modified string
 	var lastSyncAt, lastSuccessAt time.Time
@@ -378,6 +381,19 @@ func TestExploreRegistryRecordNotModifiedDoesNotReviveAfterEmptySuccess(t *testi
 	}
 	if err := repo.RecordNotModified(providerID, notModifiedAt, `"empty-etag"`, "Wed"); err != nil {
 		t.Fatal(err)
+	}
+	if err := repo.RecordSuccess(providerID, emptySuccessAt, `"stale-success"`, "Stale"); err != nil {
+		t.Fatal(err)
+	}
+	var materializedAt, lastSyncAt time.Time
+	var etag string
+	if err := db.QueryRow(`
+		SELECT last_materialized_at,last_sync_at,etag
+		FROM explore_registry_providers WHERE id=$1`, providerID).Scan(&materializedAt, &lastSyncAt, &etag); err != nil {
+		t.Fatal(err)
+	}
+	if !materializedAt.Equal(notModifiedAt) || !lastSyncAt.Equal(notModifiedAt) || etag != `"empty-etag"` {
+		t.Fatalf("stale success regressed provider: materialized=%s sync=%s etag=%q", materializedAt, lastSyncAt, etag)
 	}
 	var lastSeenAt, sourceObservedAt time.Time
 	if err := db.QueryRow(`
