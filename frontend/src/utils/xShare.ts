@@ -13,6 +13,23 @@ type GraphemeSegmenterConstructor = new (
 const Segmenter = (Intl as typeof Intl & { Segmenter?: GraphemeSegmenterConstructor }).Segmenter
 const segmenter = Segmenter ? new Segmenter(undefined, { granularity: 'grapheme' }) : null
 
+const COMBINING_MARK_PATTERN = /\p{Mark}/u
+
+function isRegionalIndicator(character: string): boolean {
+  const codePoint = character.codePointAt(0) ?? 0
+  return codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff
+}
+
+function isGraphemeExtension(character: string): boolean {
+  const codePoint = character.codePointAt(0) ?? 0
+  return COMBINING_MARK_PATTERN.test(character)
+    || codePoint === 0xfe0e
+    || codePoint === 0xfe0f
+    || (codePoint >= 0xe0100 && codePoint <= 0xe01ef)
+    || (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff)
+    || (codePoint >= 0xe0020 && codePoint <= 0xe007f)
+}
+
 export type XPostInput = {
   title: string
   summaryBrief?: string
@@ -20,10 +37,41 @@ export type XPostInput = {
   shareURL: string
 }
 
+export function fallbackGraphemes(text: string): string[] {
+  const result: string[] = []
+
+  for (const character of Array.from(text)) {
+    const lastIndex = result.length - 1
+    if (lastIndex < 0) {
+      result.push(character)
+      continue
+    }
+
+    const current = result[lastIndex]
+    const currentCharacters = Array.from(current)
+    const completesRegionalIndicatorPair = isRegionalIndicator(character)
+      && currentCharacters.every(isRegionalIndicator)
+      && currentCharacters.length % 2 === 1
+
+    if (
+      character === '\u200d'
+      || current.endsWith('\u200d')
+      || isGraphemeExtension(character)
+      || completesRegionalIndicatorPair
+    ) {
+      result[lastIndex] += character
+    } else {
+      result.push(character)
+    }
+  }
+
+  return result
+}
+
 function graphemes(text: string): string[] {
   return segmenter
     ? Array.from(segmenter.segment(text), part => part.segment)
-    : Array.from(text)
+    : fallbackGraphemes(text)
 }
 
 function graphemeWeight(grapheme: string): number {

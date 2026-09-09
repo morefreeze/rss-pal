@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildXIntentURL, buildXPostText, plainSocialText, xWeightedLength } from '../src/utils/xShare'
+import {
+  buildXIntentURL,
+  buildXPostText,
+  fallbackGraphemes,
+  plainSocialText,
+  xWeightedLength,
+} from '../src/utils/xShare'
 
 describe('X share post composer', () => {
   it('uses X weights for ASCII, CJK, emoji, and URLs', () => {
@@ -46,6 +52,18 @@ describe('X share post composer', () => {
     expect(text).not.toMatch(/[\u200d\ufe0f]…/u)
     expect(xWeightedLength(text)).toBeLessThanOrEqual(280)
     expect(text.endsWith('https://rss.example/share/token')).toBe(true)
+  })
+
+  it('keeps composed graphemes whole when Intl.Segmenter is unavailable', () => {
+    expect(fallbackGraphemes('e\u0301 👍🏽 👨‍👩‍👧‍👦 🇨🇳')).toEqual([
+      'e\u0301',
+      ' ',
+      '👍🏽',
+      ' ',
+      '👨‍👩‍👧‍👦',
+      ' ',
+      '🇨🇳',
+    ])
   })
 
   it('removes bare URLs, list syntax, and code markers from social text', () => {
