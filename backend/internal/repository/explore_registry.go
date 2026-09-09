@@ -339,26 +339,32 @@ func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt t
 		return err
 	}
 	defer rollback()
+	var previousSuccessAt sql.NullTime
+	if err := q.QueryRow(`SELECT last_success_at FROM explore_registry_providers WHERE id=$1 FOR UPDATE`, providerID).Scan(&previousSuccessAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("explore registry provider %d not found", providerID)
+		}
+		return err
+	}
 	result, err := q.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
 	if err := expectProviderUpdate(result, err, providerID); err != nil {
 		return err
 	}
+	var previousSuccess any
+	if previousSuccessAt.Valid {
+		previousSuccess = previousSuccessAt.Time
+	}
 	if _, err := q.Exec(`
-		WITH latest_generation AS (
-			SELECT MAX(last_seen_at) AS observed_at
-			FROM explore_source_observations
-			WHERE provider_id=$1
-		), refreshed AS (
+		WITH refreshed AS (
 			UPDATE explore_source_observations AS observation
 			SET last_seen_at=GREATEST(observation.last_seen_at,$2)
-			FROM latest_generation
 			WHERE observation.provider_id=$1
-			  AND observation.last_seen_at=latest_generation.observed_at
+			  AND observation.last_seen_at=$3
 			RETURNING observation.source_id
 		)
 		UPDATE recommended_feeds AS source
 		SET last_observed_at=GREATEST(source.last_observed_at,$2)
-		WHERE source.id IN (SELECT source_id FROM refreshed)`, providerID, syncedAt); err != nil {
+		WHERE source.id IN (SELECT source_id FROM refreshed)`, providerID, syncedAt, previousSuccess); err != nil {
 		return err
 	}
 	return commit()

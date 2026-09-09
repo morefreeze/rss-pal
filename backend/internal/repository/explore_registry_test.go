@@ -350,6 +350,48 @@ func TestExploreRegistryRecordNotModifiedRefreshesProviderObservations(t *testin
 	}
 }
 
+func TestExploreRegistryRecordNotModifiedDoesNotReviveAfterEmptySuccess(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	var providerID int
+	if err := db.QueryRow(`
+		INSERT INTO explore_registry_providers (provider_key,provider_kind,endpoint)
+		VALUES ('empty-opml','opml','https://registry.example/empty')
+		RETURNING id`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewExploreRegistryRepository(db)
+	observedAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	emptySuccessAt := observedAt.Add(12 * time.Hour)
+	notModifiedAt := observedAt.Add(24 * time.Hour)
+	sourceID, err := repo.UpsertCandidate(providerID, explore.Candidate{
+		ExternalKey: "removed", FeedURL: "https://empty.example/removed",
+		Title: "Removed", Topic: "test", OccurrenceCount: 4,
+	}, observedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A successful empty 200 materializes an empty generation: no observation
+	// receives emptySuccessAt, but provider success still advances to it.
+	if err := repo.RecordSuccess(providerID, emptySuccessAt, `"empty-etag"`, "Wed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordNotModified(providerID, notModifiedAt, `"empty-etag"`, "Wed"); err != nil {
+		t.Fatal(err)
+	}
+	var lastSeenAt, sourceObservedAt time.Time
+	if err := db.QueryRow(`
+		SELECT observation.last_seen_at,source.last_observed_at
+		FROM explore_source_observations observation
+		JOIN recommended_feeds source ON source.id=observation.source_id
+		WHERE observation.provider_id=$1 AND observation.source_id=$2`, providerID, sourceID).Scan(&lastSeenAt, &sourceObservedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !lastSeenAt.Equal(observedAt) || !sourceObservedAt.Equal(observedAt) {
+		t.Fatalf("empty generation revived removed source: last_seen=%s last_observed=%s", lastSeenAt, sourceObservedAt)
+	}
+}
+
 func TestExploreRegistryQueueAdapterEnqueuesValidation(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()

@@ -36,6 +36,8 @@ consecutive_failures == 0
 last_error == nil
 ```
 
+Add `TestExploreRegistryRecordNotModifiedDoesNotReviveAfterEmptySuccess`. Model `A+B` at `t1`, an empty successful `200` at `t2`, and `304` at `t3`; assert neither observation nor source timestamp advances past `t1`.
+
 - [ ] **Step 3: Verify RED**
 
 Run:
@@ -64,12 +66,12 @@ In `syncOne`, call a not-modified helper for `fetched.NotModified`; keep the exi
 
 - [ ] **Step 2: Persist provider success and observation freshness atomically**
 
-Implement `ExploreRegistryRepository.RecordNotModified` with `txOrBegin`. Update the provider success fields, validate one provider row was affected, then refresh only observations whose timestamp equals that provider's maximum `last_seen_at`. Use the refreshed source IDs to advance `recommended_feeds.last_observed_at` in the same statement:
+Implement `ExploreRegistryRepository.RecordNotModified` with `txOrBegin`. Lock the provider row and capture its previous `last_success_at`, update the provider success fields, then refresh only observations written during that previous successful synchronization. Use the refreshed source IDs to advance `recommended_feeds.last_observed_at` in the same statement:
 
 ```sql
-WITH latest_generation AS (... MAX(last_seen_at) ...), refreshed AS (
+WITH refreshed AS (
   UPDATE explore_source_observations ...
-  WHERE provider_id=$1 AND last_seen_at=latest_generation.observed_at
+  WHERE provider_id=$1 AND last_seen_at=previous_success_at
   RETURNING source_id
 )
 UPDATE recommended_feeds
