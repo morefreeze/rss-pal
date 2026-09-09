@@ -2,7 +2,16 @@ export const X_MAX_WEIGHT = 280
 export const X_URL_WEIGHT = 23
 
 const URL_PATTERN = /https?:\/\/[^\s]+/giu
-const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+type GraphemeSegment = { segment: string }
+type GraphemeSegmenter = { segment: (text: string) => Iterable<GraphemeSegment> }
+type GraphemeSegmenterConstructor = new (
+  locales?: string | string[],
+  options?: { granularity: 'grapheme' },
+) => GraphemeSegmenter
+
+const Segmenter = (Intl as typeof Intl & { Segmenter?: GraphemeSegmenterConstructor }).Segmenter
+const segmenter = Segmenter ? new Segmenter(undefined, { granularity: 'grapheme' }) : null
 
 export type XPostInput = {
   title: string
@@ -12,7 +21,9 @@ export type XPostInput = {
 }
 
 function graphemes(text: string): string[] {
-  return Array.from(segmenter.segment(text), part => part.segment)
+  return segmenter
+    ? Array.from(segmenter.segment(text), part => part.segment)
+    : Array.from(text)
 }
 
 function graphemeWeight(grapheme: string): number {
