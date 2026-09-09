@@ -67,7 +67,7 @@ In `syncOne`, call a not-modified helper for `fetched.NotModified`; keep the exi
 
 - [ ] **Step 2: Persist provider success and observation freshness atomically**
 
-Add `explore_registry_providers.last_materialized_at`. Backfill it from each provider's maximum persisted observation timestamp so stale installations whose old worker advanced only `last_success_at` can recover on the first post-upgrade 304. Record every successful 200 timestamp in this field, including empty responses.
+Add `explore_registry_providers.last_materialized_at`. Backfill only when the provider's maximum persisted observation timestamp equals `last_success_at`. For ambiguous mismatches, clear ETag, Last-Modified, and `last_sync_at` so the provider is immediately due for an unconditional 200 rather than risking revival of a historical or pre-empty generation. Record every successful 200 timestamp in this field, including empty responses.
 
 Implement `ExploreRegistryRepository.RecordNotModified` with `txOrBegin`. Lock the provider row and capture its previous `last_materialized_at`, update the provider success and materialized fields, then refresh only observations written during that materialized generation. Use the refreshed source IDs to advance `recommended_feeds.last_observed_at` in the same statement:
 

@@ -14,7 +14,7 @@ Add a dedicated `RecordNotModified` operation to the registry store. It will run
 
 All candidates from one successful `200` synchronization are written with the same timestamp that is then stored in `provider.last_materialized_at`. Entries absent from that response retain an older timestamp. An empty successful `200` advances `last_materialized_at` without advancing any observation, deliberately representing an empty generation. A following `304` therefore refreshes exactly the prior materialized generation without reviving entries removed by either a partial or empty `200`. The `304` path returns without parsing the response body, upserting candidates, or enqueueing validation work. Updating `recommended_feeds.last_observed_at` keeps unchanged current members correctly ordered before the worker's bounded candidate input.
 
-Migration `040_explore_provider_materialized_at.sql` backfills existing providers from their maximum persisted observation timestamp. This is intentionally independent from `last_success_at`, because older workers advanced success on every 304 while leaving observations stale. The first 304 after upgrade can therefore renew the stored generation.
+Migration `040_explore_provider_materialized_at.sql` backfills a provider only when its maximum persisted observation timestamp exactly matches `last_success_at`. A mismatch is ambiguous: it can mean either that an older worker advanced success on 304 while leaving observations stale, or that the last successful 200 was empty. The migration therefore fails closed for mismatches by clearing conditional validators and `last_sync_at`; the provider becomes immediately due for a full 200 rematerialization. It never guesses that historical observations are current.
 
 ## Alternatives Rejected
 
@@ -30,6 +30,6 @@ The operation locks the provider row, reads its previous `last_materialized_at`,
 
 - Unit test: a `304` uses the not-modified persistence path and performs no candidate upsert or queue enqueue.
 - Repository tests: after `A+B` at `t1` and `A` at `t2`, a `304` at `t3` advances only A; after `A+B` at `t1` and an empty successful `200` at `t2`, a `304` at `t3` advances neither entry. Source timestamps, other providers, and occurrence counts remain correct.
-- Migration test: a legacy provider whose `last_success_at` is newer than its observations is backfilled from the observation generation, allowing its first post-upgrade 304 to recover freshness.
+- Migration test: a legacy provider whose `last_success_at` is newer than its observations has its validators and scheduling timestamp cleared, then a forced full 200 establishes the generation that a later 304 safely renews.
 - Full backend tests, race tests for the affected packages, and `go vet` pass.
 - Tencent production verification confirms the deployed SHA, running worker image/container, provider sync, non-zero candidate inputs, a new `done` Explore batch, and healthy internal/public endpoints.

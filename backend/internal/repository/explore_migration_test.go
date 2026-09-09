@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
@@ -459,17 +460,24 @@ func TestMigration038_FeedURLIsOwnerScoped(t *testing.T) {
 	}
 }
 
-func TestMigration040_BackfillsProviderMaterializedGeneration(t *testing.T) {
+func TestMigration040_ForcesRematerializationWhenLegacyStateIsAmbiguous(t *testing.T) {
 	db, cleanup := testdb.NewThroughMigration(t, "039_article_shares.sql")
 	defer cleanup()
 	observedAt := time.Date(2026, 9, 7, 9, 0, 0, 0, time.UTC)
 	lastSuccessAt := observedAt.Add(48 * time.Hour)
-	var providerID, sourceID int
+	var providerID, alignedProviderID, sourceID int
 	if err := db.QueryRow(`
 		INSERT INTO explore_registry_providers
-			(provider_key,provider_kind,endpoint,last_sync_at,last_success_at)
-		VALUES ('legacy-304','opml','https://registry.example/legacy',$1,$1)
+			(provider_key,provider_kind,endpoint,last_sync_at,last_success_at,etag,last_modified)
+		VALUES ('legacy-304','opml','https://registry.example/legacy',$1,$1,'"legacy"','Wed')
 		RETURNING id`, lastSuccessAt).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`
+		INSERT INTO explore_registry_providers
+			(provider_key,provider_kind,endpoint,last_sync_at,last_success_at,etag,last_modified)
+		VALUES ('legacy-aligned','opml','https://registry.example/aligned',$1,$1,'"aligned"','Tue')
+		RETURNING id`, observedAt).Scan(&alignedProviderID); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRow(`
@@ -485,18 +493,46 @@ func TestMigration040_BackfillsProviderMaterializedGeneration(t *testing.T) {
 		VALUES ($1,$2,'legacy',$3)`, providerID, sourceID, observedAt); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`
+		INSERT INTO explore_source_observations
+			(provider_id,source_id,external_key,last_seen_at)
+		VALUES ($1,$2,'aligned',$3)`, alignedProviderID, sourceID, observedAt); err != nil {
+		t.Fatal(err)
+	}
 	if err := testdb.ExecuteMigrationFile(db, "040_explore_provider_materialized_at.sql"); err != nil {
 		t.Fatalf("apply real 040: %v", err)
 	}
-	var materializedAt time.Time
-	if err := db.QueryRow(`SELECT last_materialized_at FROM explore_registry_providers WHERE id=$1`, providerID).Scan(&materializedAt); err != nil {
+	var materializedAt, lastSyncAt sql.NullTime
+	var etag, lastModified sql.NullString
+	if err := db.QueryRow(`SELECT last_materialized_at,last_sync_at,etag,last_modified FROM explore_registry_providers WHERE id=$1`, providerID).Scan(&materializedAt, &lastSyncAt, &etag, &lastModified); err != nil {
 		t.Fatal(err)
 	}
-	if !materializedAt.Equal(observedAt) {
-		t.Fatalf("materialized generation=%s want=%s", materializedAt, observedAt)
+	if materializedAt.Valid || lastSyncAt.Valid || etag.Valid || lastModified.Valid {
+		t.Fatalf("ambiguous legacy provider was trusted: materialized=%v sync=%v etag=%v modified=%v", materializedAt, lastSyncAt, etag, lastModified)
 	}
+	var alignedMaterializedAt, alignedSyncAt time.Time
+	var alignedETag, alignedModified string
+	if err := db.QueryRow(`SELECT last_materialized_at,last_sync_at,etag,last_modified FROM explore_registry_providers WHERE id=$1`, alignedProviderID).Scan(&alignedMaterializedAt, &alignedSyncAt, &alignedETag, &alignedModified); err != nil {
+		t.Fatal(err)
+	}
+	if !alignedMaterializedAt.Equal(observedAt) || !alignedSyncAt.Equal(observedAt) || alignedETag != `"aligned"` || alignedModified != "Tue" {
+		t.Fatalf("aligned legacy provider changed: materialized=%s sync=%s etag=%q modified=%q", alignedMaterializedAt, alignedSyncAt, alignedETag, alignedModified)
+	}
+	// Clearing validators forces a full 200. Model that response before the
+	// next 304 and verify the newly materialized generation renews normally.
 	recoveredAt := lastSuccessAt.Add(time.Hour)
-	if err := repository.NewExploreRegistryRepository(db).RecordNotModified(providerID, recoveredAt, `"legacy-etag"`, "Thu"); err != nil {
+	repo := repository.NewExploreRegistryRepository(db)
+	if _, err := repo.UpsertCandidate(providerID, explore.Candidate{
+		ExternalKey: "legacy", FeedURL: "https://legacy.example/feed",
+		Title: "Legacy", Topic: "test", OccurrenceCount: 1,
+	}, recoveredAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordSuccess(providerID, recoveredAt, `"fresh-etag"`, "Thu"); err != nil {
+		t.Fatal(err)
+	}
+	notModifiedAt := recoveredAt.Add(time.Hour)
+	if err := repo.RecordNotModified(providerID, notModifiedAt, `"fresh-etag"`, "Thu"); err != nil {
 		t.Fatal(err)
 	}
 	var lastSeenAt, lastObservedAt time.Time
@@ -507,8 +543,8 @@ func TestMigration040_BackfillsProviderMaterializedGeneration(t *testing.T) {
 		WHERE observation.provider_id=$1 AND observation.source_id=$2`, providerID, sourceID).Scan(&lastSeenAt, &lastObservedAt); err != nil {
 		t.Fatal(err)
 	}
-	if !lastSeenAt.Equal(recoveredAt) || !lastObservedAt.Equal(recoveredAt) {
-		t.Fatalf("legacy generation did not recover: last_seen=%s last_observed=%s want=%s", lastSeenAt, lastObservedAt, recoveredAt)
+	if !lastSeenAt.Equal(notModifiedAt) || !lastObservedAt.Equal(notModifiedAt) {
+		t.Fatalf("rematerialized generation did not renew: last_seen=%s last_observed=%s want=%s", lastSeenAt, lastObservedAt, notModifiedAt)
 	}
 }
 
