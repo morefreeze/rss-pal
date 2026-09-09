@@ -344,9 +344,21 @@ func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt t
 		return err
 	}
 	if _, err := q.Exec(`
-		UPDATE explore_source_observations
-		SET last_seen_at=GREATEST(last_seen_at,$2)
-		WHERE provider_id=$1`, providerID, syncedAt); err != nil {
+		WITH latest_generation AS (
+			SELECT MAX(last_seen_at) AS observed_at
+			FROM explore_source_observations
+			WHERE provider_id=$1
+		), refreshed AS (
+			UPDATE explore_source_observations AS observation
+			SET last_seen_at=GREATEST(observation.last_seen_at,$2)
+			FROM latest_generation
+			WHERE observation.provider_id=$1
+			  AND observation.last_seen_at=latest_generation.observed_at
+			RETURNING observation.source_id
+		)
+		UPDATE recommended_feeds AS source
+		SET last_observed_at=GREATEST(source.last_observed_at,$2)
+		WHERE source.id IN (SELECT source_id FROM refreshed)`, providerID, syncedAt); err != nil {
 		return err
 	}
 	return commit()

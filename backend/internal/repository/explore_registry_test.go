@@ -248,10 +248,18 @@ func TestExploreRegistryRecordNotModifiedRefreshesProviderObservations(t *testin
 	}
 	repo := repository.NewExploreRegistryRepository(db)
 	observedAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	currentRepresentationAt := observedAt.Add(12 * time.Hour)
 	syncedAt := observedAt.Add(24 * time.Hour)
 	firstSourceID, err := repo.UpsertCandidate(providerID, explore.Candidate{
 		ExternalKey: "unchanged", FeedURL: "https://unchanged.example/feed",
 		Title: "Unchanged", Topic: "test", OccurrenceCount: 7,
+	}, observedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removedSourceID, err := repo.UpsertCandidate(providerID, explore.Candidate{
+		ExternalKey: "removed", FeedURL: "https://removed.example/feed",
+		Title: "Removed", Topic: "test", OccurrenceCount: 3,
 	}, observedAt)
 	if err != nil {
 		t.Fatal(err)
@@ -261,6 +269,23 @@ func TestExploreRegistryRecordNotModifiedRefreshesProviderObservations(t *testin
 		Title: "Other", Topic: "test", OccurrenceCount: 5,
 	}, observedAt)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a changed 200 response that now contains only the first source. The
+	// removed source remains as history at the older observation timestamp.
+	if _, err := repo.UpsertCandidate(providerID, explore.Candidate{
+		ExternalKey: "unchanged", FeedURL: "https://unchanged.example/feed",
+		Title: "Unchanged", Topic: "test", OccurrenceCount: 9,
+	}, currentRepresentationAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordSuccess(providerID, currentRepresentationAt, `"current-etag"`, "Wed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		UPDATE explore_registry_providers
+		SET consecutive_failures=3,last_error='temporary failure'
+		WHERE id=$1`, providerID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -282,15 +307,37 @@ func TestExploreRegistryRecordNotModifiedRefreshesProviderObservations(t *testin
 	if etag != `"new-etag"` || modified != "Thu" || !lastSyncAt.Equal(syncedAt) || !lastSuccessAt.Equal(syncedAt) || failures != 0 || lastError != nil {
 		t.Fatalf("provider etag=%q modified=%q sync=%s success=%s failures=%d error=%v", etag, modified, lastSyncAt, lastSuccessAt, failures, lastError)
 	}
-	var refreshedAt time.Time
+	var refreshedAt, sourceObservedAt time.Time
 	var occurrences int
 	if err := db.QueryRow(`
 		SELECT last_seen_at,occurrence_count FROM explore_source_observations
 		WHERE provider_id=$1 AND source_id=$2`, providerID, firstSourceID).Scan(&refreshedAt, &occurrences); err != nil {
 		t.Fatal(err)
 	}
-	if !refreshedAt.Equal(syncedAt) || occurrences != 7 {
+	if !refreshedAt.Equal(syncedAt) || occurrences != 9 {
 		t.Fatalf("refreshed observation last_seen=%s occurrences=%d", refreshedAt, occurrences)
+	}
+	if err := db.QueryRow(`SELECT last_observed_at FROM recommended_feeds WHERE id=$1`, firstSourceID).Scan(&sourceObservedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !sourceObservedAt.Equal(syncedAt) {
+		t.Fatalf("refreshed source last_observed=%s", sourceObservedAt)
+	}
+	var removedLastSeenAt, removedSourceObservedAt time.Time
+	var removedOccurrences int
+	if err := db.QueryRow(`
+		SELECT last_seen_at,occurrence_count FROM explore_source_observations
+		WHERE provider_id=$1 AND source_id=$2`, providerID, removedSourceID).Scan(&removedLastSeenAt, &removedOccurrences); err != nil {
+		t.Fatal(err)
+	}
+	if !removedLastSeenAt.Equal(observedAt) || removedOccurrences != 3 {
+		t.Fatalf("removed observation was revived: last_seen=%s occurrences=%d", removedLastSeenAt, removedOccurrences)
+	}
+	if err := db.QueryRow(`SELECT last_observed_at FROM recommended_feeds WHERE id=$1`, removedSourceID).Scan(&removedSourceObservedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !removedSourceObservedAt.Equal(observedAt) {
+		t.Fatalf("removed source was revived: last_observed=%s", removedSourceObservedAt)
 	}
 	var otherLastSeenAt time.Time
 	if err := db.QueryRow(`

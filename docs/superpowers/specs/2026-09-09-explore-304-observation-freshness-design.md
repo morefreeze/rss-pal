@@ -9,9 +9,9 @@ Explore registry providers use conditional HTTP requests. A successful `304 Not 
 Add a dedicated `RecordNotModified` operation to the registry store. It will run one transaction that:
 
 1. records provider success, validators, and the synchronization timestamp; and
-2. advances `last_seen_at` for every existing observation owned by that provider to the synchronization timestamp.
+2. advances `last_seen_at` only for observations in that provider's latest materialized generation, and advances their canonical sources' `last_observed_at`, to the synchronization timestamp.
 
-The `304` path will call this operation and return without parsing the response body, upserting candidates, or enqueueing validation work. Normal `200` synchronization retains its current per-candidate upsert behavior, so entries removed from a changed registry are not incorrectly refreshed.
+All candidates from one successful `200` synchronization are written with the same observation timestamp. Entries absent from a later `200` retain an older timestamp, so the provider-scoped maximum `last_seen_at` identifies current membership without introducing a new schema field. The `304` path will call this operation and return without parsing the response body, upserting candidates, or enqueueing validation work. Normal `200` synchronization retains its current per-candidate upsert behavior, so entries removed from a changed registry are not incorrectly refreshed. Updating `recommended_feeds.last_observed_at` keeps unchanged current members correctly ordered before the worker's bounded candidate input.
 
 ## Alternatives Rejected
 
@@ -21,11 +21,11 @@ The `304` path will call this operation and return without parsing the response 
 
 ## Error Handling
 
-Provider success and observation refresh must commit atomically. A missing provider or any database failure returns an error; the existing registry flow records that synchronization as failed. Observation timestamps use `GREATEST(last_seen_at, synced_at)` so an out-of-order call cannot move freshness backward.
+Provider success, latest-generation observation refresh, and source timestamp refresh must commit atomically. A missing provider or any database failure returns an error; the existing registry flow records that synchronization as failed. Observation and source timestamps use `GREATEST(existing, synced_at)` so an out-of-order call cannot move freshness backward. A provider with no observations succeeds without creating any.
 
 ## Verification
 
 - Unit test: a `304` uses the not-modified persistence path and performs no candidate upsert or queue enqueue.
-- Repository test: `RecordNotModified` updates provider success fields and only that provider's observation timestamps, without changing occurrence counts.
+- Repository test: after `A+B` at `t1` and `A` at `t2`, a `304` at `t3` advances only A's observation and source timestamps, leaves B and another provider unchanged, and preserves occurrence counts.
 - Full backend tests, race tests for the affected packages, and `go vet` pass.
 - Tencent production verification confirms the deployed SHA, running worker image/container, provider sync, non-zero candidate inputs, a new `done` Explore batch, and healthy internal/public endpoints.

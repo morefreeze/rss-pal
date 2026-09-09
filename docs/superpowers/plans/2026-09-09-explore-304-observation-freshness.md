@@ -22,11 +22,14 @@ Update `TestRegistrySyncDueDoesNotEnqueueOn304` so its store records `RecordNotM
 
 - [ ] **Step 2: Add the repository integration test**
 
-Create `TestExploreRegistryRecordNotModifiedRefreshesProviderObservations` with two providers and observations. Call `RecordNotModified` for one provider and assert:
+Create `TestExploreRegistryRecordNotModifiedRefreshesProviderObservations` with two providers. Model `A+B` at `t1`, a changed response containing only `A` at `t2`, then call `RecordNotModified` at `t3` and assert:
 
 ```go
 last_seen_at == syncedAt
+sourceLastObservedAt == syncedAt
 occurrence_count == originalOccurrenceCount
+removedSourceLastSeenAt == originalObservedAt
+removedSourceLastObservedAt == originalObservedAt
 otherProviderLastSeenAt == originalOtherProviderLastSeenAt
 last_success_at == syncedAt
 consecutive_failures == 0
@@ -61,12 +64,17 @@ In `syncOne`, call a not-modified helper for `fetched.NotModified`; keep the exi
 
 - [ ] **Step 2: Persist provider success and observation freshness atomically**
 
-Implement `ExploreRegistryRepository.RecordNotModified` with `txOrBegin`. Update the provider success fields, validate one provider row was affected, then execute:
+Implement `ExploreRegistryRepository.RecordNotModified` with `txOrBegin`. Update the provider success fields, validate one provider row was affected, then refresh only observations whose timestamp equals that provider's maximum `last_seen_at`. Use the refreshed source IDs to advance `recommended_feeds.last_observed_at` in the same statement:
 
 ```sql
-UPDATE explore_source_observations
-SET last_seen_at=GREATEST(last_seen_at,$2)
-WHERE provider_id=$1
+WITH latest_generation AS (... MAX(last_seen_at) ...), refreshed AS (
+  UPDATE explore_source_observations ...
+  WHERE provider_id=$1 AND last_seen_at=latest_generation.observed_at
+  RETURNING source_id
+)
+UPDATE recommended_feeds
+SET last_observed_at=GREATEST(last_observed_at,$2)
+WHERE id IN (SELECT source_id FROM refreshed)
 ```
 
 Commit only after both writes succeed.
