@@ -305,6 +305,16 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 		return 0, err
 	}
 	defer rollback()
+	var previousSyncAt sql.NullTime
+	if err := q.QueryRow(`SELECT last_sync_at FROM explore_registry_providers WHERE id=$1 FOR UPDATE`, providerID).Scan(&previousSyncAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("explore registry provider %d not found", providerID)
+		}
+		return 0, err
+	}
+	if previousSyncAt.Valid && observedAt.Before(previousSyncAt.Time) {
+		return 0, explore.ErrStaleRegistrySync
+	}
 	if err := lockExploreCanonicalURL(q, candidate.FeedURL); err != nil {
 		return 0, err
 	}
@@ -392,8 +402,26 @@ func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt t
 }
 
 func (r *ExploreRegistryRepository) RecordFailure(providerID int, syncedAt time.Time, cause error) error {
-	result, err := r.db.Exec(`UPDATE explore_registry_providers SET last_sync_at=$2, consecutive_failures=consecutive_failures+1, last_error=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, ClipExploreError(cause))
-	return expectProviderUpdate(result, err, providerID)
+	q, commit, rollback, err := txOrBegin(r.db)
+	if err != nil {
+		return err
+	}
+	defer rollback()
+	var previousSyncAt sql.NullTime
+	if err := q.QueryRow(`SELECT last_sync_at FROM explore_registry_providers WHERE id=$1 FOR UPDATE`, providerID).Scan(&previousSyncAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("explore registry provider %d not found", providerID)
+		}
+		return err
+	}
+	if previousSyncAt.Valid && syncedAt.Before(previousSyncAt.Time) {
+		return commit()
+	}
+	result, err := q.Exec(`UPDATE explore_registry_providers SET last_sync_at=$2, consecutive_failures=consecutive_failures+1, last_error=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, ClipExploreError(cause))
+	if err := expectProviderUpdate(result, err, providerID); err != nil {
+		return err
+	}
+	return commit()
 }
 
 func expectProviderUpdate(result sql.Result, err error, providerID int) error {

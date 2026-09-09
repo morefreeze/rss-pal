@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -295,6 +296,12 @@ func TestExploreRegistryRecordNotModifiedRefreshesProviderObservations(t *testin
 	if err := repo.RecordNotModified(providerID, currentRepresentationAt.Add(time.Hour), `"stale-etag"`, "Stale"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.UpsertCandidate(providerID, explore.Candidate{
+		ExternalKey: "stale-new", FeedURL: "https://stale.example/feed",
+		Title: "Stale", Topic: "test", OccurrenceCount: 1,
+	}, currentRepresentationAt.Add(time.Hour)); !errors.Is(err, explore.ErrStaleRegistrySync) {
+		t.Fatalf("stale candidate error=%v", err)
+	}
 
 	var etag, modified string
 	var lastSyncAt, lastSuccessAt time.Time
@@ -385,15 +392,20 @@ func TestExploreRegistryRecordNotModifiedDoesNotReviveAfterEmptySuccess(t *testi
 	if err := repo.RecordSuccess(providerID, emptySuccessAt, `"stale-success"`, "Stale"); err != nil {
 		t.Fatal(err)
 	}
-	var materializedAt, lastSyncAt time.Time
-	var etag string
-	if err := db.QueryRow(`
-		SELECT last_materialized_at,last_sync_at,etag
-		FROM explore_registry_providers WHERE id=$1`, providerID).Scan(&materializedAt, &lastSyncAt, &etag); err != nil {
+	if err := repo.RecordFailure(providerID, emptySuccessAt, assertErr("stale failure")); err != nil {
 		t.Fatal(err)
 	}
-	if !materializedAt.Equal(notModifiedAt) || !lastSyncAt.Equal(notModifiedAt) || etag != `"empty-etag"` {
-		t.Fatalf("stale success regressed provider: materialized=%s sync=%s etag=%q", materializedAt, lastSyncAt, etag)
+	var materializedAt, lastSyncAt time.Time
+	var etag string
+	var failures int
+	var lastError *string
+	if err := db.QueryRow(`
+		SELECT last_materialized_at,last_sync_at,etag,consecutive_failures,last_error
+		FROM explore_registry_providers WHERE id=$1`, providerID).Scan(&materializedAt, &lastSyncAt, &etag, &failures, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if !materializedAt.Equal(notModifiedAt) || !lastSyncAt.Equal(notModifiedAt) || etag != `"empty-etag"` || failures != 0 || lastError != nil {
+		t.Fatalf("stale completion regressed provider: materialized=%s sync=%s etag=%q failures=%d error=%v", materializedAt, lastSyncAt, etag, failures, lastError)
 	}
 	var lastSeenAt, sourceObservedAt time.Time
 	if err := db.QueryRow(`

@@ -11,6 +11,8 @@ import (
 
 const StructuredProviderPriority = 300
 
+var ErrStaleRegistrySync = errors.New("registry synchronization was superseded")
+
 // RegistryProvider is persisted provider state required for conditional sync.
 type RegistryProvider struct {
 	ID                        int
@@ -114,6 +116,9 @@ func (r Registry) syncOne(ctx context.Context, now time.Time, provider RegistryP
 	}
 	for _, candidate := range NormalizeCandidates(candidates) {
 		sourceID, err := r.Store.UpsertCandidate(provider.ID, candidate, now)
+		if errors.Is(err, ErrStaleRegistrySync) {
+			return result
+		}
 		if err == nil && r.Queue != nil {
 			err = r.Queue.Enqueue(sourceID, model.ExploreFetchTaskValidateSource, StructuredProviderPriority)
 		}

@@ -51,12 +51,33 @@ func TestRegistrySyncDueDoesNotEnqueueOn304(t *testing.T) {
 	}
 }
 
+func TestRegistrySyncDueStopsSupersededProviderWithoutFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("registry")) }))
+	defer server.Close()
+	store := &registryStoreStub{
+		providers: []RegistryProvider{{ID: 1, Key: "good", Kind: "good", Endpoint: server.URL}},
+		upsertErr: ErrStaleRegistrySync,
+	}
+	queue := &registryQueueStub{}
+	registry := Registry{Store: store, Queue: queue, Client: testProviderClient(server.Client()), Adapters: map[string]ProviderAdapter{
+		"good": adapterStub{kind: "good", candidates: []Candidate{{ExternalKey: "feed", FeedURL: "https://example.com/feed"}}},
+	}}
+	results, err := registry.SyncDue(context.Background(), time.Now())
+	if err != nil || len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("results=%#v err=%v", results, err)
+	}
+	if len(store.failures) != 0 || len(store.successes) != 0 || len(queue.items) != 0 {
+		t.Fatalf("superseded sync mutated completion state: store=%#v queue=%#v", store, queue.items)
+	}
+}
+
 type registryStoreStub struct {
 	providers           []RegistryProvider
 	upserts             []Candidate
 	successes, failures []int
 	notModified         []int
 	successETags        []string
+	upsertErr           error
 	successErr          error
 	failureErr          error
 }
@@ -66,7 +87,7 @@ func (s *registryStoreStub) LoadDueProviders(time.Time) ([]RegistryProvider, err
 }
 func (s *registryStoreStub) UpsertCandidate(_ int, candidate Candidate, _ time.Time) (int, error) {
 	s.upserts = append(s.upserts, candidate)
-	return 42, nil
+	return 42, s.upsertErr
 }
 func (s *registryStoreStub) RecordSuccess(id int, _ time.Time, etag, _ string) error {
 	s.successes = append(s.successes, id)
