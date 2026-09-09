@@ -37,7 +37,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql"]
+    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql"]
 
   api:
     restart: unless-stopped
@@ -68,6 +68,7 @@ services:
       AI_VISION_CACHE_TTL_HOURS: ${AI_VISION_CACHE_TTL_HOURS:-24}
       AUTH_PASSWORD: ${AUTH_PASSWORD:?AUTH_PASSWORD required in .env}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required in .env}
+      SHARE_SECRET: ${SHARE_SECRET:?SHARE_SECRET required in .env}
       JINA_API_KEY: ${JINA_API_KEY}
       ZAI_READER_API_KEY: ${ZAI_READER_API_KEY:-}
       ZAI_READER_MCP_URL: ${ZAI_READER_MCP_URL:-}

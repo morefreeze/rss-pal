@@ -12,6 +12,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
+	"github.com/bytedance/rss-pal/internal/sharetoken"
 	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/bytedance/rss-pal/internal/version"
 	"github.com/bytedance/rss-pal/internal/youtuberelay"
@@ -55,6 +56,10 @@ func main() {
 	clipRepo := repository.NewClipRepository(db)
 	hiddenRepo := repository.NewHiddenArticleRepository(db)
 	heartbeatRepo := repository.NewServiceHeartbeatRepository(db)
+	shareSigner, err := sharetoken.NewSigner(cfg.Share.Secret)
+	if err != nil {
+		log.Fatalf("invalid SHARE_SECRET: %v", err)
+	}
 
 	summarizer := ai.NewSummarizerWithModel(cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	summarizer.SetVisionModel(cfg.AI.Vision.Model)
@@ -72,6 +77,8 @@ func main() {
 		},
 	}
 
+	pdfImgHandler := api.NewArticleImageHandler(cfg.Backup.Dir,
+		func(c *gin.Context, articleID int) (bool, error) { return true, nil })
 	authHandler := api.NewAuthHandler(cfg, userRepo, refreshTokenRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(adminDB, backupRunner, cfg)
@@ -84,7 +91,7 @@ func main() {
 	contentHandler := api.NewContentHandler(articleRepo, feedRepo, rssFetcher)
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
-	shareHandler := api.NewShareHandler(shareRepo, articleRepo)
+	shareHandler := api.NewShareHandler(shareRepo, articleRepo, shareSigner, pdfImgHandler, time.Now)
 	userInterestsRepo := repository.NewUserInterestRepository(db)
 	interestsHandler := api.NewInterestsHandler(prefRepo, articleRepo, templateRepo, userInterestsRepo, summarizer, cfg)
 	exploreRepo := repository.NewExploreRepository(db)
@@ -126,7 +133,11 @@ func main() {
 			"/api/media/youtube/.*",
 		}),
 	))
-	// Trust only requests from localhost/private networks (running behind nginx)
+	// Trust only requests from localhost/private networks (running behind nginx).
+	// nginx uses $proxy_add_x_forwarded_for, so Gin walks the chain right-to-left
+	// and selects the first untrusted address. This assumes the API port remains
+	// reachable only through controlled proxies: a private-network client that
+	// can connect directly to the API could still supply a forged XFF chain.
 	router.SetTrustedProxies([]string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
 
 	router.Use(func(c *gin.Context) {
@@ -157,14 +168,6 @@ func main() {
 	router.POST("/api/auth/refresh", authHandler.Refresh)
 	router.POST("/api/auth/logout", authHandler.Logout)
 
-	// Public share route — no JWT, but PublicTokenMiddleware opens a tx and
-	// sets app.user_id to the share token's creator so RLS-protected reads
-	// (articles, feeds) see the owner's rows. Without this wrap the handler
-	// would silently return empty rows after migration 033.
-	router.GET("/api/share/:token",
-		api.PublicTokenMiddleware(db, shareHandler.ResolveOwner),
-		shareHandler.GetByToken)
-
 	// Public image proxy (no auth — <img> tags can't reliably carry auth headers).
 	router.GET("/api/proxy/image", api.NewImageProxy().Handle)
 	// Public media proxy for browser audio/video requests. It preserves Range
@@ -193,9 +196,10 @@ func main() {
 	// articles/feeds, switch the closure to a resolver that opens the tx,
 	// sets app.bypass_rls LOCAL for the article→feed→owner_id chase, then
 	// returns the owner_id so the middleware can set app.user_id.
-	pdfImgHandler := api.NewArticleImageHandler(cfg.Backup.Dir,
-		func(c *gin.Context, articleID int) (bool, error) { return true, nil })
 	router.GET("/api/articles/:id/images/:idx", pdfImgHandler.Serve)
+	sharePageLimit, shareAssetLimit := api.NewPublicShareRateLimiters(time.Now)
+	router.GET("/api/share/:token", sharePageLimit, shareHandler.GetPublic)
+	router.GET("/api/share/:token/assets/:asset", shareAssetLimit, shareHandler.GetAsset)
 
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT).
 	// PublicTokenMiddleware resolves the owning user from the bearer
@@ -268,7 +272,9 @@ func main() {
 		apiGroup.POST("/articles/:id/summary", articleHandler.GenerateSummary)
 		apiGroup.POST("/articles/:id/content", contentHandler.FetchContent)
 		apiGroup.GET("/articles/:id/export/md", contentHandler.ExportMarkdown)
-		apiGroup.POST("/articles/:id/share", shareHandler.Create)
+		apiGroup.POST("/articles/:id/shares", shareHandler.Create)
+		apiGroup.GET("/articles/:id/shares", shareHandler.List)
+		apiGroup.DELETE("/articles/:id/shares/:share_id", shareHandler.Revoke)
 		apiGroup.GET("/articles/:id/playback", playbackHandler.Get)
 		apiGroup.PUT("/articles/:id/playback", playbackHandler.Put)
 		apiGroup.GET("/articles/:id/tags", userTagHandler.GetArticleTags)

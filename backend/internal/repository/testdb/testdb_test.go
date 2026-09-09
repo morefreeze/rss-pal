@@ -1,8 +1,100 @@
 package testdb
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 )
+
+func TestAcquireTestSchemaBootstrapLockHonorsContextAndClosesWaiter(t *testing.T) {
+	db, cleanup := New(t)
+	defer cleanup()
+	db.SetMaxOpenConns(4)
+
+	for _, tc := range []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+	}{
+		{
+			name: "deadline",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(t.Context(), 40*time.Millisecond)
+			},
+		},
+		{
+			name: "cancel",
+			ctx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(t.Context())
+				time.AfterFunc(20*time.Millisecond, cancel)
+				return ctx, cancel
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			holder, err := acquireTestSchemaBootstrapLock(t.Context(), db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			holderReleased := false
+			defer func() {
+				if !holderReleased {
+					_ = holder.release()
+				}
+			}()
+
+			ctx, cancel := tc.ctx()
+			defer cancel()
+			type result struct {
+				lock *testSchemaBootstrapLock
+				err  error
+			}
+			resultCh := make(chan result, 1)
+			go func() {
+				lock, err := acquireTestSchemaBootstrapLock(ctx, db)
+				resultCh <- result{lock: lock, err: err}
+			}()
+
+			select {
+			case got := <-resultCh:
+				if got.lock != nil {
+					_ = got.lock.release()
+					t.Fatal("waiting acquisition unexpectedly obtained the held lock")
+				}
+				if !errors.Is(got.err, ctx.Err()) {
+					t.Fatalf("acquire error=%v, want %v", got.err, ctx.Err())
+				}
+				if inUse := db.Stats().InUse; inUse != 1 {
+					t.Fatalf("in-use connections=%d, want only the original lock holder", inUse)
+				}
+			case <-time.After(500 * time.Millisecond):
+				if err := holder.release(); err != nil {
+					t.Fatalf("release holder after bounded-wait failure: %v", err)
+				}
+				holderReleased = true
+				got := <-resultCh
+				if got.lock != nil {
+					_ = got.lock.release()
+				}
+				t.Fatal("waiting acquisition ignored context for 500ms")
+			}
+
+			if err := holder.release(); err != nil {
+				t.Fatalf("release original holder: %v", err)
+			}
+			holderReleased = true
+			reacquireCtx, cancelReacquire := context.WithTimeout(t.Context(), time.Second)
+			defer cancelReacquire()
+			reacquired, err := acquireTestSchemaBootstrapLock(reacquireCtx, db)
+			if err != nil {
+				t.Fatalf("reacquire after release: %v", err)
+			}
+			if err := reacquired.release(); err != nil {
+				t.Fatalf("release reacquired lock: %v", err)
+			}
+		})
+	}
+}
 
 func TestNewBootsAndRunsMigrations(t *testing.T) {
 	db, cleanup := New(t)

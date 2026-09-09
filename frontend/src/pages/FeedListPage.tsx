@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
 import { toast } from '../utils/toast'
 import { getInitialPopularFeedsExpanded } from '../utils/popularFeedsVisibility'
+import { parseAuthIntent } from '../utils/authIntent'
 
 // isPDFURL returns true when the user-supplied URL looks like a PDF.
 // Detection is intentionally URL-only (no HEAD probe) — the backend
@@ -73,6 +74,7 @@ const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; u
 
 export default function FeedListPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [newUrl, setNewUrl] = useState('')
   const [loading, setLoading] = useState(true)
@@ -87,8 +89,32 @@ export default function FeedListPage() {
   const [popularFeedsExpanded, setPopularFeedsExpanded] = useState(getInitialPopularFeedsExpanded)
   const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const consumedSubscribeIntents = useRef(new Set<string>())
+  const previewGeneration = useRef(0)
+  const previewAbortController = useRef<AbortController | null>(null)
+  const mounted = useRef(true)
 
   useEffect(() => { loadFeeds() }, [])
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      if (previewTimer.current) {
+        clearTimeout(previewTimer.current)
+        previewTimer.current = null
+      }
+      const controller = previewAbortController.current
+      // React StrictMode immediately re-runs effects after its development-only
+      // cleanup. Deferring the abort lets that remount retain the single intent
+      // request, while a real unmount still cancels it before another task runs.
+      queueMicrotask(() => {
+        if (!mounted.current && previewAbortController.current === controller) {
+          controller?.abort()
+          previewAbortController.current = null
+        }
+      })
+    }
+  }, [])
 
   const loadFeeds = async () => {
     try {
@@ -101,7 +127,7 @@ export default function FeedListPage() {
 
   const normalizeURL = (raw: string) => {
     const trimmed = raw.trim()
-    if (trimmed && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    if (trimmed && !/^https?:\/\//i.test(trimmed)) {
       return 'https://' + trimmed
     }
     return trimmed
@@ -110,6 +136,10 @@ export default function FeedListPage() {
   const doPreview = async (url: string) => {
     const normalized = normalizeURL(url)
     if (!normalized) return
+    previewAbortController.current?.abort()
+    const controller = new AbortController()
+    previewAbortController.current = controller
+    const generation = ++previewGeneration.current
     setNewUrl(normalized)
     setPreviewing(true)
     setPreviewStatus('获取中...')
@@ -117,18 +147,75 @@ export default function FeedListPage() {
     setPreviewError('')
     // After 4s show "probing RSS" hint so user knows it's still working
     if (previewTimer.current) clearTimeout(previewTimer.current)
-    previewTimer.current = setTimeout(() => setPreviewStatus('正在探测 RSS 地址...'), 4000)
+    const timer = setTimeout(() => {
+      if (mounted.current && !controller.signal.aborted && generation === previewGeneration.current) {
+        setPreviewStatus('正在探测 RSS 地址...')
+      }
+    }, 4000)
+    previewTimer.current = timer
     try {
-      const result = await previewFeed(normalized)
-      setPreview(result)
+      const result = await previewFeed(normalized, controller.signal)
+      if (mounted.current && !controller.signal.aborted && generation === previewGeneration.current) setPreview(result)
     } catch (err: any) {
-      setPreviewError(err?.response?.data?.error || '无法获取该地址的内容，请检查 URL 是否正确')
+      const cancelled = controller.signal.aborted || err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError'
+      if (!cancelled && mounted.current && generation === previewGeneration.current) {
+        setPreviewError(err?.response?.data?.error || '无法获取该地址的内容，请检查 URL 是否正确')
+      }
     } finally {
-      if (previewTimer.current) clearTimeout(previewTimer.current)
-      setPreviewing(false)
-      setPreviewStatus('')
+      if (generation === previewGeneration.current) {
+        if (previewTimer.current === timer) {
+          clearTimeout(timer)
+          previewTimer.current = null
+        }
+        if (previewAbortController.current === controller) {
+          previewAbortController.current = null
+        }
+        if (mounted.current) {
+          setPreviewing(false)
+          setPreviewStatus('')
+        }
+      }
     }
   }
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const hasSubscriptionParams = params.has('add') || params.has('source')
+    if (!hasSubscriptionParams) return
+
+    const validAdd = params.getAll('add').length === 1 && params.get('add') === '1'
+    const parsed = validAdd
+      ? parseAuthIntent(`${location.search}&intent=subscribe`)
+      : parseAuthIntent('')
+
+    if (parsed.kind === 'subscribe') {
+      const key = `${location.pathname}${location.search}`
+      if (!consumedSubscribeIntents.current.has(key)) {
+        consumedSubscribeIntents.current.add(key)
+        void doPreview(parsed.source)
+      }
+    } else if (previewAbortController.current) {
+      // An invalid replacement intent must not leave the previous request able
+      // to update this screen after the malicious query is cleaned.
+      ++previewGeneration.current
+      previewAbortController.current.abort()
+      previewAbortController.current = null
+      if (previewTimer.current) {
+        clearTimeout(previewTimer.current)
+        previewTimer.current = null
+      }
+      if (mounted.current) {
+        setPreviewing(false)
+        setPreviewStatus('')
+      }
+    }
+    // The intent is single-use. Removing it immediately also means a refresh
+    // cannot repeat a backend preview request.
+    navigate('/feeds', { replace: true })
+    // doPreview intentionally is not a dependency: ordinary state changes and
+    // manual previews must never replay the URL-carried intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search, navigate])
 
   const handleSubmitPDF = async (rawUrl: string) => {
     const actualUrl = normalizeURL(rawUrl)

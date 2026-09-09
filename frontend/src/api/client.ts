@@ -569,8 +569,8 @@ export const subscribeExploreSources = (sourceIds: number[]) =>
 export const getFeeds = () =>
   api.get<Feed[]>('/feeds').then(res => res.data)
 
-export const previewFeed = (url: string) =>
-  api.post<FeedPreview>('/feeds/preview', { url }).then(res => res.data)
+export const previewFeed = (url: string, signal?: AbortSignal) =>
+  api.post<FeedPreview>('/feeds/preview', { url }, { signal }).then(res => res.data)
 
 export const addFeed = (url: string, feedType?: string, expandLinks: boolean = false) =>
   api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss', expand_links: expandLinks }).then(res => res.data)
@@ -841,9 +841,15 @@ export interface UserAIConfig {
   model: string
 }
 
-export interface ShareInfo {
-  token: string
-  url: string
+export type ArticleShareStatus = 'active' | 'expired' | 'revoked'
+
+export interface ArticleShareListItem {
+  id: string
+  url?: string
+  created_at: string
+  expires_at: string | null
+  status: ArticleShareStatus
+  legacy: boolean
 }
 
 export const getTemplates = () =>
@@ -864,8 +870,14 @@ export const saveAIConfig = (cfg: UserAIConfig) =>
 export const setDefaultTemplate = (templateId: number) =>
   api.put('/settings/template', { template_id: templateId })
 
-export const shareArticle = (articleId: number) =>
-  api.post<ShareInfo>(`/articles/${articleId}/share`).then(res => res.data)
+export const listArticleShares = (articleId: number) =>
+  api.get<ArticleShareListItem[]>(`/articles/${articleId}/shares`).then(r => r.data)
+
+export const createArticleShare = (articleId: number, expiresAt: string | null) =>
+  api.post<ArticleShareListItem>(`/articles/${articleId}/shares`, { expires_at: expiresAt }).then(r => r.data)
+
+export const revokeArticleShare = (articleId: number, shareId: string) =>
+  api.delete<ArticleShareListItem>(`/articles/${articleId}/shares/${shareId}`).then(r => r.data)
 
 export const generateSummaryWithTemplate = (articleId: number, templateId?: number) =>
   api.post(`/articles/${articleId}/summary`, templateId ? { template_id: templateId } : {}).then(res => res.data)

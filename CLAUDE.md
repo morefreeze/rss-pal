@@ -76,6 +76,7 @@ Backend follows a layered pattern: `api/` (HTTP handlers) → `service/` (busine
 
 ### RSSHub
 - Docker Compose includes a `diygod/rsshub:chromium-bundled` sidecar for routes requiring browser-mode (e.g. Bilibili). Requires `BILIBILI_COOKIE` in `.env` for authenticated routes.
+- Authenticated feed preview uses `rss.NewPublicFetcher`: user-controlled, discovered, and probed URLs use the DNS/redirect/rebinding-safe `httpx` client. Only supported-platform URLs safely derived onto the configured RSSHub origin use the trusted RSSHub client, whose redirects are confined to that exact canonical origin. Worker fetches retain `rss.NewFetcher` for trusted stored workflows.
 
 ## Environment Variables
 
@@ -87,6 +88,7 @@ Backend follows a layered pattern: `api/` (HTTP handlers) → `service/` (busine
 | `CLAUDE_API_KEY` | (empty) | Required for AI summaries |
 | `CLAUDE_BASE_URL` | `https://api.anthropic.com` | OpenAI-compatible API base URL |
 | `JWT_SECRET` | `rss-pal-default-secret-change-me` | JWT signing key (change in production) |
+| `SHARE_SECRET` | (empty; required by Compose) | Separate share-token signing key; minimum 32 bytes and never reuse `JWT_SECRET` |
 | `AUTH_PASSWORD` | `admin` | Initial admin password |
 | `RSSHUB_BASE_URL` | `http://rsshub:1200` | RSSHub instance URL |
 | `BACKUP_DIR` | `/backups` | Database backup directory |
@@ -95,9 +97,9 @@ Backend follows a layered pattern: `api/` (HTTP handlers) → `service/` (busine
 
 ## Database
 
-PostgreSQL 15. Incremental migrations at `backend/migrations/001_init.sql` through `022_link_set_candidates.sql`. Migrations auto-run via Docker entrypoint (`/docker-entrypoint-initdb.d`) on first start only — subsequent migrations need manual application.
+PostgreSQL 15. Incremental migrations currently run through `backend/migrations/039_article_shares.sql`. Migrations auto-run via Docker entrypoint (`/docker-entrypoint-initdb.d`) on first start only. For existing volumes, Compose's one-shot `status-migrate` applies migrations 037, 038, and 039 before API and Worker start.
 
-Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`, `interest_categories`, `reading_progress`, `playback_progress`, `article_events`, `user_insights`, `user_tags`, `article_user_tags`, `saved_articles`, `feed_health_metrics`, `weekly_digests`, `share_tokens`, `ai_templates`, `link_set_candidates`.
+Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`, `interest_categories`, `reading_progress`, `playback_progress`, `article_events`, `user_insights`, `user_tags`, `article_user_tags`, `saved_articles`, `feed_health_metrics`, `weekly_digests`, `article_shares`, `ai_templates`, `link_set_candidates`, and the subscription Explore tables.
 
 ## Important Details
 
@@ -109,11 +111,21 @@ Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`,
 - Feeds support two types: `rss` (standard RSS/Atom) and `html` (scrapes arbitrary web pages for article links).
 - Articles can be classified by AI into categories defined in `model.ValidCategories`.
 - Link sets: feeds with `expand_links=true` have the worker extract linked articles as child articles (`parent_article_id`).
-- The module path is `github.com/bytedance/rss-pal` (Go 1.24).
+- The module path is `github.com/bytedance/rss-pal` (Go 1.25).
+
+## Article sharing contract
+
+- Owner-scoped management routes are `POST /api/articles/:id/shares`, `GET /api/articles/:id/shares`, and idempotent `DELETE /api/articles/:id/shares/:share_id`. Multiple links per article are supported and management responses report `active`, `expired`, or `revoked`.
+- Public routes are `GET /api/share/:token` for the immutable allowlisted snapshot and `GET /api/share/:token/assets/:asset` for token-protected local PDF assets. All invalid, unknown, tampered, expired, revoked, and database-failure cases use the same public 404. Both responses are `no-store`; page and asset limits are independently 60/minute/IP and 240/minute/IP.
+- `SHARE_SECRET` signs versioned tokens, must be at least 32 bytes, and is deliberately independent from `JWT_SECRET`. Legacy compatibility accepts only exactly eight ASCII alphanumeric characters, hashes them with SHA-256 for lookup, and migration 039 grants migrated links a 30-day grace period.
+- Snapshots never expose ownership, feed URL, reader state, editor notes, processing errors, or manual tags. Remote media bytes are not archived; only their safe snapshot metadata is retained. Local PDF image references are rewritten to the token-protected asset route.
+- Public-reader authentication links use normalized `intent=use` or `intent=subscribe&source=...`; no caller-controlled `next` is honored. After login/registration, a safe subscription source is prefilled and previewed exactly once but never auto-subscribed.
 
 ## Multi-tenant rules (RLS)
 
-Every per-user table has Postgres Row-Level Security enabled (migration 033). The HTTP middleware `api.RLSTxMiddleware` opens a transaction per JWT-authenticated request and sets `app.user_id` via `set_config(..., true)` so policies filter rows automatically. Public-token endpoints use `api.PublicTokenMiddleware` with a per-route resolver that derives the owner from the token (share token, bookmarklet token, extension token). The worker sets `app.bypass_rls=true` on its pool DSN (via `repository.NewBypassDB`) so cross-user batch work isn't blocked.
+Per-user tables have Postgres Row-Level Security enabled (migration 033). The HTTP middleware `api.RLSTxMiddleware` opens a transaction per JWT-authenticated request and sets `app.user_id` via `set_config(..., true)` so policies filter rows automatically. Bookmarklet and extension token endpoints use `api.PublicTokenMiddleware` to derive an owner before accessing RLS-protected data. The worker sets `app.bypass_rls=true` on its pool DSN (via `repository.NewBypassDB`) so cross-user batch work isn't blocked.
+
+`article_shares` is an intentional exception and has no RLS: signed-token resolution must happen before any user identity exists. Public reads may access only its immutable wire-safe snapshot. Every owner-facing create/list/revoke path must first authorize the article through the request's RLS transaction and must filter `created_by`; keep both obligations covered by repository and HTTP tests.
 
 The runtime role `rsspal_app` is NOSUPERUSER NOBYPASSRLS (migration 034). Until the operator switches `.env` (see the Phase 3 prep section below), the app connects as `postgres` and RLS is paper-only — every test that needs to verify enforcement uses `testdb.NewAsApp(t, schema)` to open a `rsspal_app`-bound connection.
 
@@ -142,7 +154,7 @@ If a repository method opens its own inner transaction (`r.db.Begin()`), use `tx
 ### When adding a new HTTP endpoint
 
 - **JWT-authenticated route** (under `apiGroup` in `cmd/server/main.go`): nothing extra. `AuthMiddleware` + `RLSTxMiddleware` already set `userID` on the gin context and stash the tx under `ctxkey.Tx`. Repositories pick it up via `WithCtx(c)`.
-- **Public-token route** (registered on root `router`): wrap with `api.PublicTokenMiddleware(db, yourHandler.ResolveOwner)`. The resolver receives `(c *gin.Context, tx *sql.Tx)` and returns `(userID int, err error)`. Look up the owner from a non-RLS table (`share_tokens`, `users.bookmarklet_token`). Return `api.ErrPublicTokenInvalid` for invalid tokens — the middleware turns that into 401.
+- **Bookmarklet/extension public-token route** (registered on root `router`): preserve `api.PublicTokenMiddleware(db, yourHandler.ResolveOwner)`. The resolver receives `(c *gin.Context, tx *sql.Tx)` and returns `(userID int, err error)`, derives the owner from the existing bookmarklet/extension token record, and returns `api.ErrPublicTokenInvalid` for invalid tokens so middleware emits 401. Article sharing is not this pattern: its signed token resolves an `article_shares` snapshot directly and all unavailable cases must remain the uniform public 404.
 - **Best-effort writes inside a handler**: do NOT use `_ = repo.X(...)`. A failure inside the outer tx poisons the whole transaction. Use `bestEffort(c, "label", func() error { return repo.X(...) })` from `backend/internal/api/savepoint.go` — it opens a SAVEPOINT and rolls back to it on failure, leaving the outer tx healthy.
 
 ### When adding a new worker task

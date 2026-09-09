@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
-  getTemplates, generateSummaryStream, shareArticle, exportMarkdown, expandLinkSetChild,
+  getTemplates, generateSummaryStream, exportMarkdown, expandLinkSetChild,
   hideArticle, unhideArticle,
   Article, ReadingProgress, SummaryTemplate,
   type ArticleDetailResponse, type ArticleListItem,
@@ -49,6 +49,7 @@ import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
 import ArticleProgressBar from '../components/ArticleProgressBar'
+import ShareDialog from '../components/ShareDialog'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 import FeedSourceLink from '../components/FeedSourceLink'
 import { extractSearchFromPath } from '../utils/feedFilterLink'
@@ -219,9 +220,7 @@ export default function ArticlePage() {
   const [streamPhase, setStreamPhase] = useState<'idle' | 'brief' | 'detailed'>('idle')
   const streamAbortRef = useRef<AbortController | null>(null)
 
-  // Share state
-  const [shareToken, setShareToken] = useState<string>('')
-  const [copyLinkText, setCopyLinkText] = useState('复制链接')
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
 
   // Bookmarklet state
   const [fromBookmarklet, setFromBookmarklet] = useState(() => Boolean(initialDetail?.from_bookmarklet))
@@ -995,28 +994,6 @@ export default function ArticlePage() {
     window.dispatchEvent(new Event('refresh-unread'))
   }
 
-  const getOrFetchShareToken = async (): Promise<string> => {
-    if (shareToken) return shareToken
-    if (!article) return ''
-    const result = await shareArticle(article.id)
-    setShareToken(result.token)
-    return result.token
-  }
-
-  const handleShareTwitter = async () => {
-    if (!article) return
-    try {
-      const token = await getOrFetchShareToken()
-      const shareUrl = window.location.origin + '/share/' + token
-      window.open(
-        'https://twitter.com/intent/tweet?text=' + encodeURIComponent(article.title) + '&url=' + encodeURIComponent(shareUrl),
-        '_blank'
-      )
-    } catch {
-      toast.error('获取分享链接失败')
-    }
-  }
-
   const handleShareXiaohongshu = () => {
     if (!article) return
     const feedTitle = (article as any).feed_title || ''
@@ -1046,19 +1023,6 @@ export default function ArticlePage() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(a.href)
-  }
-
-  const handleCopyLink = async () => {
-    if (!article) return
-    try {
-      const token = await getOrFetchShareToken()
-      const shareUrl = window.location.origin + '/share/' + token
-      await navigator.clipboard.writeText(shareUrl)
-      setCopyLinkText('已复制！')
-      setTimeout(() => setCopyLinkText('复制链接'), 2000)
-    } catch {
-      toast.error('复制失败，请手动复制')
-    }
   }
 
   const formatDate = (dateStr: string | null) => {
@@ -1311,6 +1275,13 @@ export default function ArticlePage() {
           >
             📖 阅读模式
           </button>
+          <button
+            className="secondary"
+            onClick={() => setShareDialogOpen(true)}
+            style={{ fontSize: 13 }}
+          >
+            分享
+          </button>
           <ArticleActionsMenu onDelete={handleDelete} />
         </div>
       </div>
@@ -1495,42 +1466,14 @@ export default function ArticlePage() {
         )
       })()}
 
-      {/* Share section */}
-      <div className="card">
-        <div className="flex-between">
-          <span style={{ fontWeight: 600, fontSize: 15 }}>分享到：</span>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              className="secondary"
-              onClick={handleShareTwitter}
-              title="分享到 X (Twitter)"
-            >
-              𝕏
-            </button>
-            <button
-              className="secondary"
-              onClick={handleShareXiaohongshu}
-              title="分享到小红书"
-            >
-              小红书
-            </button>
-            <button
-              className="secondary"
-              onClick={handleExportMarkdown}
-              title="导出 Markdown"
-            >
-              MD
-            </button>
-            <button
-              className="secondary"
-              onClick={handleCopyLink}
-              title="复制分享链接"
-            >
-              {copyLinkText}
-            </button>
-          </div>
-        </div>
-      </div>
+      <ShareDialog
+        articleId={article.id}
+        articleTitle={article.title}
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        onCopyXiaohongshu={handleShareXiaohongshu}
+        onExportMarkdown={() => void handleExportMarkdown()}
+      />
       {draftControls}
       {(article.links_extendable === true || (linkSetChildren?.length ?? 0) > 0) && (
         <LinkSetChildren

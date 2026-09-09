@@ -12,7 +12,7 @@
 - **多用户支持** — 邀请码注册，最多 10 名测试用户
 - **搜索** — 全文搜索文章标题、摘要和正文
 - **未读计数** — 导航栏显示未读数量，支持一键全部已读
-- **文章分享** — 生成公开分享链接，展示 AI 总结
+- **文章分享** — 为同一文章创建多个可撤销/可过期的公开快照链接，展示分享时的正文与 AI 总结
 
 ## 快速开始
 
@@ -43,7 +43,7 @@ docker compose up -d
 - 鼠标悬停或触摸点击小时格可查看该小时的状态、可用率、检测次数、延迟与最近错误。
 - Worker 使用独立心跳：启动时立即上报，之后每 60 秒上报一次。心跳恰好 3 分钟未更新仍视为健康；仅超过 3 分钟没有心跳才标记为故障。该心跳独立于抓取或其他长耗时工作，因此长时间抓取不会让 Worker 误报故障。
 - Worker 内部健康检查 `/api/internal/health/worker` 仅供 Docker 网络中的 status-monitor 使用，Nginx 对外精确拦截并返回 404，不会被通用 `/api` 代理暴露。
-- `docker compose up` 会自动运行一次 `status-migrate`：它在 PostgreSQL 健康后执行幂等的 `037_service_heartbeats.sql`，并且 API 与 Worker 只会在该迁移成功后启动；迁移失败会阻止它们启动。
+- `docker compose up` 会自动运行一次 `status-migrate`：它在 PostgreSQL 健康后依次执行幂等的 `037_service_heartbeats.sql`、`038_subscription_explore.sql` 和 `039_article_shares.sql`，并且 API 与 Worker 只会在迁移成功后启动；迁移失败会阻止它们启动。
 - 两个部署辅助脚本会确认 `status-migrate` 的退出码为 `0` 后移除该一次性容器，避免把正常的 `Exited (0)` 计为运行时故障。手动执行 Compose 时可能会看到 `status-migrate` 为 `Exited (0)`；只有通过 `docker inspect` 确认退出码为 `0` 才表示迁移成功。
 
 首次从不含 re-exec guard 的旧版 `auto_deploy.sh`（pre-guard）升级时，已启动的旧 Bash 进程不能自动读取合并后的新脚本。请在仓库根目录安全地 fetch 后，将远端最新脚本导出到 `scripts/` 下未跟踪的临时文件并执行一次；后续自动更新由 guard 处理：
@@ -106,6 +106,7 @@ npm run dev   # 开发模式，代理到 :8080
 | `CLAUDE_BASE_URL` | `https://api.anthropic.com` | AI API 地址 |
 | `AUTH_PASSWORD` | `admin` | 管理员初始密码 |
 | `JWT_SECRET` | — | JWT 签名密钥（**生产环境必须设置**） |
+| `SHARE_SECRET` | — | 分享链接签名密钥；必须至少 32 bytes，并与 `JWT_SECRET` 独立设置 |
 
 ## 云服务器部署（生产环境）
 
@@ -259,11 +260,20 @@ rss-pal/
 - `POST /api/auth/init` — 首次运行初始化管理员
 - `POST /api/auth/login` — 登录，返回 JWT
 - `POST /api/auth/register` — 使用邀请码注册
+- `POST /api/auth/refresh` — 使用 refresh token 换取新的访问 JWT
+- `POST /api/auth/logout` — 撤销 refresh token（访问 JWT 已过期时也可调用）
 - `GET /api/share/:token` — 查看分享文章（公开）
+- `GET /api/share/:token/assets/:asset` — 读取该分享允许的本地 PDF 图片资源（公开 token 鉴权）
+
+### 账号管理（需登录）
+- `GET /api/auth/me` — 当前用户
+- `PUT /api/auth/password` — 修改密码
+- `PUT /api/auth/visibility-floor` — 修改文章可见时间下限
+- `POST /api/auth/invite-codes` / `GET /api/auth/invite-codes` — 创建/列出邀请码
 
 ### 订阅管理（需登录）
 - `GET /api/feeds` — 订阅列表
-- `POST /api/feeds/preview` — 预览订阅源（添加前）
+- `POST /api/feeds/preview` — 预览订阅源（添加前；用户 URL、发现 URL 与探测 URL 均经过 SSRF 防护）
 - `POST /api/feeds` — 添加订阅
 - `DELETE /api/feeds/:id` — 删除订阅
 - `POST /api/feeds/:id/fetch` — 立即抓取
@@ -278,8 +288,18 @@ rss-pal/
 - `POST /api/articles/:id/summary` — 生成 AI 总结
 - `POST /api/articles/:id/content` — 重新抓取原文
 - `GET /api/articles/:id/export/md` — 导出 Markdown
-- `POST /api/articles/:id/share` — 生成分享链接
+- `POST /api/articles/:id/shares` — 创建一个不可变分享快照（可选过期时间；同一文章可创建多个链接）
+- `GET /api/articles/:id/shares` — 列出当前用户为文章创建的分享（`active` / `expired` / `revoked`）
+- `DELETE /api/articles/:id/shares/:share_id` — 幂等撤销一个分享
 - `GET /api/articles/:id/images/:idx` — PDF 网摘抽出的图片（强缓存 + ETag）
+
+### 公开文章分享的安全契约
+
+分享链接使用独立于 JWT 的 `SHARE_SECRET` 签名，服务启动时会拒绝短于 32 bytes 的值。公开接口只返回创建分享时固化的 allowlist 快照字段；之后原文章变化不会改变既有分享。无效、未知、篡改、过期和已撤销 token 均返回相同的 404。历史 8 位字母数字 token 仅按 SHA-256 摘要查找，迁移 039 为它们保留迁移日起 30 天的兼容期，不保存或比较明文 token。
+
+远程音视频只保存 URL/类型等快照元数据，不归档远程媒体字节。本地 PDF 图片会被改写为 `/api/share/:token/assets/:asset`，每次读取都重新校验分享仍为 active，并返回 `Cache-Control: no-store`。公开快照与图片分别按客户端 IP 限制为每分钟 60 和 240 次。
+
+公开阅读页的“使用 RSS Pal”和“订阅原始来源”只携带规范化的认证 intent，不接受调用方提供的任意跳转地址。订阅 intent 登录或注册成功后会打开订阅页，安全 source 只会自动填入并预览，绝不会自动添加订阅。公开订阅预览使用 DNS/重定向/重绑定感知的安全客户端；仅受支持平台 URL 安全派生出的 RSSHub 目标可走受信客户端，且其每次重定向都必须留在配置的 RSSHub 同源范围内。
 
 ### PDF 网摘
 

@@ -20,6 +20,7 @@ type VideoIdentity = Pick<VideoEmbedData, 'platform' | 'id'>
 
 type Props = {
   source: string
+  readOnly?: boolean
   // Optional map of original-URL → [width, height]. When present, the
   // matching <img> renders with explicit dimensions so the browser reserves
   // layout space before the bytes arrive — which prevents reading-progress
@@ -212,14 +213,14 @@ function ArticleLink({ href, children, className, node: _node, ...rest }: Articl
 // remounted (cancelling and re-issuing image fetches mid-load).
 const REMARK_PLUGINS = [remarkGfm, remarkCjkFriendly, remarkMath]
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
+const PUBLIC_SHARE_ASSET_RE = /^\/api\/share\/(?:[A-Za-z0-9]{8}|v1_[0-9a-f]{32}_[A-Za-z0-9_-]{43})\/assets\/[0-9]+\.(?:png|jpe?g)$/
 const COMPONENTS: Components = {
   img: ({ src, alt, ...rest }) => {
     if (isAvatarImg(src, alt)) return null
-    // Same-origin images served by our backend (PDF clip images at
-    // /api/articles/<id>/images/<idx>.<ext>) already pass through nginx +
-    // our auth; double-proxying through /api/proxy/image would fail the
-    // proxy's allow-list (SSRF guard) and add a useless round-trip.
-    const isOwnImage = src?.startsWith('/api/articles/')
+    // Exact same-origin article images and signed public-share assets already
+    // pass through nginx. Keep the share pattern narrow so an arbitrary
+    // /api/share path cannot bypass the image proxy allow-list.
+    const isOwnImage = src?.startsWith('/api/articles/') || (src ? PUBLIC_SHARE_ASSET_RE.test(src) : false)
     const proxied = src
       ? isOwnImage
         ? src
@@ -275,7 +276,7 @@ const COMPONENTS: Components = {
 // Wrapped in React.memo so the parent (ArticlePage) re-rendering on every
 // scroll-progress / activity-tick state change doesn't force a full
 // markdown re-parse and image remount.
-function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
+function MarkdownArticle({ source, imageDimensions, suppressVideo, readOnly = false }: Props) {
   const cleaned = useMemo(
     () => prepareArticleMarkdown(source),
     [source],
@@ -291,8 +292,8 @@ function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
   )
   const articleLang = useMemo(() => detectArticleLang(cleaned), [cleaned])
   const dims = imageDimensions ?? null
-  return (
-    <ReaderInteractionSurface articleKey={source} className="markdown-body" lang={articleLang}>
+  const content = (
+    <>
       <SuppressedVideoContext.Provider value={suppressVideo ?? null}>
         <ImageDimensionsContext.Provider value={dims}>
           <ReactMarkdown
@@ -304,6 +305,18 @@ function MarkdownArticle({ source, imageDimensions, suppressVideo }: Props) {
           </ReactMarkdown>
         </ImageDimensionsContext.Provider>
       </SuppressedVideoContext.Provider>
+    </>
+  )
+  if (readOnly) {
+    return (
+      <ReaderActionContext.Provider value={null}>
+        <div className="markdown-body" lang={articleLang}>{content}</div>
+      </ReaderActionContext.Provider>
+    )
+  }
+  return (
+    <ReaderInteractionSurface articleKey={source} className="markdown-body" lang={articleLang}>
+      {content}
     </ReaderInteractionSurface>
   )
 }

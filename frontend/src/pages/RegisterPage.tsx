@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { register } from '../api/client'
+import { authSearch, parseAuthIntent, postAuthURL } from '../utils/authIntent'
 
 interface RegisterPageProps {
   onLogin: (user: any) => void
@@ -8,6 +9,8 @@ interface RegisterPageProps {
 
 export default function RegisterPage({ onLogin }: RegisterPageProps) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const intent = parseAuthIntent(location.search)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
@@ -28,7 +31,7 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
     try {
       const data = await register(username, password, code)
       onLogin(data.user)
-      navigate('/articles', { replace: true })
+      navigate(postAuthURL(intent), { replace: true })
     } catch (err: any) {
       setError(err?.response?.data?.error || '注册失败')
     } finally {
@@ -75,7 +78,7 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
           {submitting ? '注册中...' : '注册'}
         </button>
         <div style={{ textAlign: 'center', marginTop: 12 }}>
-          <Link to="/login">
+          <Link to={`/login${authSearch(intent)}`}>
             <button type="button" className="secondary">已有账号？登录</button>
           </Link>
         </div>

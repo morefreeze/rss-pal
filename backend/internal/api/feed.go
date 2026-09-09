@@ -30,7 +30,7 @@ func NewFeedHandler(repo *repository.FeedRepository, articleRepo *repository.Art
 	return &FeedHandler{
 		repo:           repo,
 		articleRepo:    articleRepo,
-		fetcher:        rss.NewFetcher(rsshubBase),
+		fetcher:        rss.NewPublicFetcher(rsshubBase),
 		contentFetcher: rss.NewContentFetcher(),
 	}
 }
@@ -77,9 +77,11 @@ func (h *FeedHandler) Preview(c *gin.Context) {
 		return
 	}
 
-	// Auto-add https:// if no scheme provided
-	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-		req.URL = "https://" + req.URL
+	var err error
+	req.URL, err = normalizeFeedURL(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid URL"})
+		return
 	}
 
 	if err := validatePublicURL(req.URL); err != nil {
@@ -109,8 +111,11 @@ func (h *FeedHandler) Create(c *gin.Context) {
 		return
 	}
 
-	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-		req.URL = "https://" + req.URL
+	var err error
+	req.URL, err = normalizeFeedURL(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid URL"})
+		return
 	}
 
 	feedType := req.FeedType
@@ -520,8 +525,11 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url required"})
 		return
 	}
-	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-		req.URL = "https://" + req.URL
+	var err error
+	req.URL, err = normalizeFeedURL(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid URL"})
+		return
 	}
 	if err := validatePublicURL(req.URL); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -618,6 +626,24 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 	})
 }
 
+// normalizeFeedURL preserves the existing no-scheme convenience while treating
+// HTTP schemes case-insensitively and emitting a canonical lowercase scheme.
+func normalizeFeedURL(rawURL string) (string, error) {
+	value := strings.TrimSpace(rawURL)
+	if value == "" {
+		return "", fmt.Errorf("empty URL")
+	}
+	if !strings.HasPrefix(strings.ToLower(value), "http://") && !strings.HasPrefix(strings.ToLower(value), "https://") {
+		value = "https://" + value
+	}
+	u, err := url.Parse(value)
+	if err != nil {
+		return "", err
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	return u.String(), nil
+}
+
 // validatePublicURL blocks SSRF by rejecting non-HTTP(S) schemes and private/loopback IPs.
 func validatePublicURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
@@ -626,6 +652,9 @@ func validatePublicURL(rawURL string) error {
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("only http/https URLs are supported")
+	}
+	if u.User != nil {
+		return fmt.Errorf("URL credentials are not allowed")
 	}
 	host := u.Hostname()
 	if host == "" {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { login, api } from '../api/client'
+import { authSearch, parseAuthIntent, postAuthURL } from '../utils/authIntent'
 
 interface LoginPageProps {
   onLogin: (user: any) => void
@@ -8,6 +9,8 @@ interface LoginPageProps {
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const intent = parseAuthIntent(location.search)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   // Default ON — most users will want this; the "log in once per device for
@@ -34,7 +37,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     try {
       const data = await login(username, password, remember)
       onLogin(data.user)
-      navigate('/articles', { replace: true })
+      navigate(postAuthURL(intent), { replace: true })
     } catch {
       setError('用户名或密码错误')
     } finally {
@@ -87,7 +90,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           {submitting ? '登录中...' : '登录'}
         </button>
         <div style={{ textAlign: 'center', marginTop: 12 }}>
-          <Link to="/register">
+          <Link to={`/register${authSearch(intent)}`}>
             <button type="button" className="secondary">使用邀请码注册</button>
           </Link>
         </div>
