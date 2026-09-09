@@ -55,7 +55,7 @@ describe('X share post composer', () => {
   })
 
   it('keeps composed graphemes whole when Intl.Segmenter is unavailable', () => {
-    expect(fallbackGraphemes('e\u0301 👍🏽 👨‍👩‍👧‍👦 🇨🇳')).toEqual([
+    expect(fallbackGraphemes('e\u0301 👍🏽 👨‍👩‍👧‍👦 🇨🇳 가')).toEqual([
       'e\u0301',
       ' ',
       '👍🏽',
@@ -63,6 +63,8 @@ describe('X share post composer', () => {
       '👨‍👩‍👧‍👦',
       ' ',
       '🇨🇳',
+      ' ',
+      '가',
     ])
   })
 
