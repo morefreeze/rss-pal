@@ -53,6 +53,7 @@ Expected: FAIL because the 304 branch still uses `RecordSuccess` and `ExploreReg
 **Files:**
 - Modify: `backend/internal/explore/registry.go`
 - Modify: `backend/internal/repository/explore_registry.go`
+- Create: `backend/migrations/040_explore_provider_materialized_at.sql`
 
 - [ ] **Step 1: Extend the store contract and route 304 responses**
 
@@ -66,12 +67,14 @@ In `syncOne`, call a not-modified helper for `fetched.NotModified`; keep the exi
 
 - [ ] **Step 2: Persist provider success and observation freshness atomically**
 
-Implement `ExploreRegistryRepository.RecordNotModified` with `txOrBegin`. Lock the provider row and capture its previous `last_success_at`, update the provider success fields, then refresh only observations written during that previous successful synchronization. Use the refreshed source IDs to advance `recommended_feeds.last_observed_at` in the same statement:
+Add `explore_registry_providers.last_materialized_at`. Backfill it from each provider's maximum persisted observation timestamp so stale installations whose old worker advanced only `last_success_at` can recover on the first post-upgrade 304. Record every successful 200 timestamp in this field, including empty responses.
+
+Implement `ExploreRegistryRepository.RecordNotModified` with `txOrBegin`. Lock the provider row and capture its previous `last_materialized_at`, update the provider success and materialized fields, then refresh only observations written during that materialized generation. Use the refreshed source IDs to advance `recommended_feeds.last_observed_at` in the same statement:
 
 ```sql
 WITH refreshed AS (
   UPDATE explore_source_observations ...
-  WHERE provider_id=$1 AND last_seen_at=previous_success_at
+  WHERE provider_id=$1 AND last_seen_at=previous_materialized_at
   RETURNING source_id
 )
 UPDATE recommended_feeds

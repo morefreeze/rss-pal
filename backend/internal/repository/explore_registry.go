@@ -329,7 +329,7 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 }
 
 func (r *ExploreRegistryRepository) RecordSuccess(providerID int, syncedAt time.Time, etag, lastModified string) error {
-	result, err := r.db.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
+	result, err := r.db.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, last_materialized_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
 	return expectProviderUpdate(result, err, providerID)
 }
 
@@ -339,20 +339,20 @@ func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt t
 		return err
 	}
 	defer rollback()
-	var previousSuccessAt sql.NullTime
-	if err := q.QueryRow(`SELECT last_success_at FROM explore_registry_providers WHERE id=$1 FOR UPDATE`, providerID).Scan(&previousSuccessAt); err != nil {
+	var previousMaterializedAt sql.NullTime
+	if err := q.QueryRow(`SELECT last_materialized_at FROM explore_registry_providers WHERE id=$1 FOR UPDATE`, providerID).Scan(&previousMaterializedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("explore registry provider %d not found", providerID)
 		}
 		return err
 	}
-	result, err := q.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
+	result, err := q.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, last_materialized_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
 	if err := expectProviderUpdate(result, err, providerID); err != nil {
 		return err
 	}
-	var previousSuccess any
-	if previousSuccessAt.Valid {
-		previousSuccess = previousSuccessAt.Time
+	var previousMaterialized any
+	if previousMaterializedAt.Valid {
+		previousMaterialized = previousMaterializedAt.Time
 	}
 	if _, err := q.Exec(`
 		WITH refreshed AS (
@@ -364,7 +364,7 @@ func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt t
 		)
 		UPDATE recommended_feeds AS source
 		SET last_observed_at=GREATEST(source.last_observed_at,$2)
-		WHERE source.id IN (SELECT source_id FROM refreshed)`, providerID, syncedAt, previousSuccess); err != nil {
+		WHERE source.id IN (SELECT source_id FROM refreshed)`, providerID, syncedAt, previousMaterialized); err != nil {
 		return err
 	}
 	return commit()

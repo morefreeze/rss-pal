@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
 
@@ -19,7 +20,7 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 	defer cleanup()
 
 	for table, want := range map[string][]string{
-		"explore_registry_providers":  {"id", "provider_key", "provider_kind", "endpoint", "topic", "sync_interval_minutes", "enabled", "etag", "last_modified", "last_sync_at", "last_success_at", "consecutive_failures", "last_error", "created_at", "updated_at"},
+		"explore_registry_providers":  {"id", "provider_key", "provider_kind", "endpoint", "topic", "sync_interval_minutes", "enabled", "etag", "last_modified", "last_sync_at", "last_success_at", "last_materialized_at", "consecutive_failures", "last_error", "created_at", "updated_at"},
 		"explore_source_observations": {"id", "provider_id", "source_id", "external_key", "provider_tags", "first_seen_at", "last_seen_at", "occurrence_count"},
 		"explore_fetch_runs":          {"id", "window_at", "status", "claimed_count", "started_at", "completed_at", "worker_id", "error_message", "created_at"},
 		"explore_fetch_queue":         {"id", "source_id", "task_type", "status", "priority", "not_before", "attempts", "run_id", "lease_owner", "lease_token", "lease_expires_at", "last_error", "created_at", "updated_at", "completed_at"},
@@ -455,6 +456,59 @@ func TestMigration038_FeedURLIsOwnerScoped(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO feeds (url, title) VALUES ('https://same.example/feed', 'duplicate shared')`); err == nil {
 		t.Fatal("shared feeds accepted duplicate URL")
+	}
+}
+
+func TestMigration040_BackfillsProviderMaterializedGeneration(t *testing.T) {
+	db, cleanup := testdb.NewThroughMigration(t, "039_article_shares.sql")
+	defer cleanup()
+	observedAt := time.Date(2026, 9, 7, 9, 0, 0, 0, time.UTC)
+	lastSuccessAt := observedAt.Add(48 * time.Hour)
+	var providerID, sourceID int
+	if err := db.QueryRow(`
+		INSERT INTO explore_registry_providers
+			(provider_key,provider_kind,endpoint,last_sync_at,last_success_at)
+		VALUES ('legacy-304','opml','https://registry.example/legacy',$1,$1)
+		RETURNING id`, lastSuccessAt).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`
+		INSERT INTO recommended_feeds
+			(url,title,category,language,normalized_url,last_observed_at)
+		VALUES ('https://legacy.example/feed','Legacy','test','en','https://legacy.example/feed',$1)
+		RETURNING id`, observedAt).Scan(&sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO explore_source_observations
+			(provider_id,source_id,external_key,last_seen_at)
+		VALUES ($1,$2,'legacy',$3)`, providerID, sourceID, observedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := testdb.ExecuteMigrationFile(db, "040_explore_provider_materialized_at.sql"); err != nil {
+		t.Fatalf("apply real 040: %v", err)
+	}
+	var materializedAt time.Time
+	if err := db.QueryRow(`SELECT last_materialized_at FROM explore_registry_providers WHERE id=$1`, providerID).Scan(&materializedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !materializedAt.Equal(observedAt) {
+		t.Fatalf("materialized generation=%s want=%s", materializedAt, observedAt)
+	}
+	recoveredAt := lastSuccessAt.Add(time.Hour)
+	if err := repository.NewExploreRegistryRepository(db).RecordNotModified(providerID, recoveredAt, `"legacy-etag"`, "Thu"); err != nil {
+		t.Fatal(err)
+	}
+	var lastSeenAt, lastObservedAt time.Time
+	if err := db.QueryRow(`
+		SELECT observation.last_seen_at,source.last_observed_at
+		FROM explore_source_observations observation
+		JOIN recommended_feeds source ON source.id=observation.source_id
+		WHERE observation.provider_id=$1 AND observation.source_id=$2`, providerID, sourceID).Scan(&lastSeenAt, &lastObservedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !lastSeenAt.Equal(recoveredAt) || !lastObservedAt.Equal(recoveredAt) {
+		t.Fatalf("legacy generation did not recover: last_seen=%s last_observed=%s want=%s", lastSeenAt, lastObservedAt, recoveredAt)
 	}
 }
 
