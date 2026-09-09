@@ -29,6 +29,7 @@ type RegistryStore interface {
 	LoadDueProviders(now time.Time) ([]RegistryProvider, error)
 	UpsertCandidate(providerID int, candidate Candidate, observedAt time.Time) (sourceID int, err error)
 	RecordSuccess(providerID int, syncedAt time.Time, etag, lastModified string) error
+	RecordNotModified(providerID int, syncedAt time.Time, etag, lastModified string) error
 	RecordFailure(providerID int, syncedAt time.Time, cause error) error
 }
 
@@ -102,7 +103,7 @@ func (r Registry) syncOne(ctx context.Context, now time.Time, provider RegistryP
 	}
 	if fetched.NotModified {
 		result.NotModified = true
-		result.Err = r.recordSuccess(provider, now, fetched)
+		result.Err = r.recordNotModified(provider, now, fetched)
 		return result
 	}
 	candidates, err := adapter.Parse(Provider{ID: provider.ID, Key: provider.Key, Kind: provider.Kind, Endpoint: provider.Endpoint, Topic: provider.Topic}, fetched.Body)
@@ -136,6 +137,14 @@ func (r Registry) recordFailure(providerID int, now time.Time, cause error) erro
 
 func (r Registry) recordSuccess(provider RegistryProvider, now time.Time, fetched ProviderFetchResult) error {
 	err := r.Store.RecordSuccess(provider.ID, now, firstNonEmpty(fetched.ETag, provider.ETag), firstNonEmpty(fetched.LastModified, provider.LastModified))
+	if err == nil {
+		return nil
+	}
+	return errors.Join(err, r.recordFailure(provider.ID, now, err))
+}
+
+func (r Registry) recordNotModified(provider RegistryProvider, now time.Time, fetched ProviderFetchResult) error {
+	err := r.Store.RecordNotModified(provider.ID, now, firstNonEmpty(fetched.ETag, provider.ETag), firstNonEmpty(fetched.LastModified, provider.LastModified))
 	if err == nil {
 		return nil
 	}

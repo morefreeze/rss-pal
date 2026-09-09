@@ -333,6 +333,25 @@ func (r *ExploreRegistryRepository) RecordSuccess(providerID int, syncedAt time.
 	return expectProviderUpdate(result, err, providerID)
 }
 
+func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt time.Time, etag, lastModified string) error {
+	q, commit, rollback, err := txOrBegin(r.db)
+	if err != nil {
+		return err
+	}
+	defer rollback()
+	result, err := q.Exec(`UPDATE explore_registry_providers SET etag=NULLIF($3,''), last_modified=NULLIF($4,''), last_sync_at=$2, last_success_at=$2, consecutive_failures=0, last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, etag, lastModified)
+	if err := expectProviderUpdate(result, err, providerID); err != nil {
+		return err
+	}
+	if _, err := q.Exec(`
+		UPDATE explore_source_observations
+		SET last_seen_at=GREATEST(last_seen_at,$2)
+		WHERE provider_id=$1`, providerID, syncedAt); err != nil {
+		return err
+	}
+	return commit()
+}
+
 func (r *ExploreRegistryRepository) RecordFailure(providerID int, syncedAt time.Time, cause error) error {
 	result, err := r.db.Exec(`UPDATE explore_registry_providers SET last_sync_at=$2, consecutive_failures=consecutive_failures+1, last_error=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$1`, providerID, syncedAt, ClipExploreError(cause))
 	return expectProviderUpdate(result, err, providerID)

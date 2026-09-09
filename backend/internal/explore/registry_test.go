@@ -46,7 +46,7 @@ func TestRegistrySyncDueDoesNotEnqueueOn304(t *testing.T) {
 	if err != nil || len(results) != 1 || !results[0].NotModified {
 		t.Fatalf("results=%#v err=%v", results, err)
 	}
-	if len(queue.items) != 0 || len(store.upserts) != 0 || len(store.successes) != 1 {
+	if len(queue.items) != 0 || len(store.upserts) != 0 || len(store.successes) != 0 || len(store.notModified) != 1 {
 		t.Fatalf("store=%#v queue=%#v", store, queue)
 	}
 }
@@ -55,6 +55,7 @@ type registryStoreStub struct {
 	providers           []RegistryProvider
 	upserts             []Candidate
 	successes, failures []int
+	notModified         []int
 	successETags        []string
 	successErr          error
 	failureErr          error
@@ -69,6 +70,11 @@ func (s *registryStoreStub) UpsertCandidate(_ int, candidate Candidate, _ time.T
 }
 func (s *registryStoreStub) RecordSuccess(id int, _ time.Time, etag, _ string) error {
 	s.successes = append(s.successes, id)
+	s.successETags = append(s.successETags, etag)
+	return s.successErr
+}
+func (s *registryStoreStub) RecordNotModified(id int, _ time.Time, etag, _ string) error {
+	s.notModified = append(s.notModified, id)
 	s.successETags = append(s.successETags, etag)
 	return s.successErr
 }

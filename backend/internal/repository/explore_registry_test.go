@@ -226,6 +226,83 @@ func TestExploreRegistryDueBackoffAndSuccessState(t *testing.T) {
 	}
 }
 
+func TestExploreRegistryRecordNotModifiedRefreshesProviderObservations(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	if _, err := db.Exec(`UPDATE explore_registry_providers SET enabled=false`); err != nil {
+		t.Fatal(err)
+	}
+	var providerID, otherProviderID int
+	if err := db.QueryRow(`
+		INSERT INTO explore_registry_providers
+			(provider_key,provider_kind,endpoint,consecutive_failures,last_error)
+		VALUES ('unchanged-opml','opml','https://registry.example/unchanged',3,'temporary failure')
+		RETURNING id`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`
+		INSERT INTO explore_registry_providers (provider_key,provider_kind,endpoint)
+		VALUES ('other-opml','opml','https://registry.example/other')
+		RETURNING id`).Scan(&otherProviderID); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewExploreRegistryRepository(db)
+	observedAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	syncedAt := observedAt.Add(24 * time.Hour)
+	firstSourceID, err := repo.UpsertCandidate(providerID, explore.Candidate{
+		ExternalKey: "unchanged", FeedURL: "https://unchanged.example/feed",
+		Title: "Unchanged", Topic: "test", OccurrenceCount: 7,
+	}, observedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSourceID, err := repo.UpsertCandidate(otherProviderID, explore.Candidate{
+		ExternalKey: "other", FeedURL: "https://other.example/feed",
+		Title: "Other", Topic: "test", OccurrenceCount: 5,
+	}, observedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.RecordNotModified(providerID, syncedAt, `"new-etag"`, "Thu"); err != nil {
+		t.Fatal(err)
+	}
+
+	var etag, modified string
+	var lastSyncAt, lastSuccessAt time.Time
+	var failures int
+	var lastError *string
+	if err := db.QueryRow(`
+		SELECT etag,last_modified,last_sync_at,last_success_at,consecutive_failures,last_error
+		FROM explore_registry_providers WHERE id=$1`, providerID).Scan(
+		&etag, &modified, &lastSyncAt, &lastSuccessAt, &failures, &lastError,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if etag != `"new-etag"` || modified != "Thu" || !lastSyncAt.Equal(syncedAt) || !lastSuccessAt.Equal(syncedAt) || failures != 0 || lastError != nil {
+		t.Fatalf("provider etag=%q modified=%q sync=%s success=%s failures=%d error=%v", etag, modified, lastSyncAt, lastSuccessAt, failures, lastError)
+	}
+	var refreshedAt time.Time
+	var occurrences int
+	if err := db.QueryRow(`
+		SELECT last_seen_at,occurrence_count FROM explore_source_observations
+		WHERE provider_id=$1 AND source_id=$2`, providerID, firstSourceID).Scan(&refreshedAt, &occurrences); err != nil {
+		t.Fatal(err)
+	}
+	if !refreshedAt.Equal(syncedAt) || occurrences != 7 {
+		t.Fatalf("refreshed observation last_seen=%s occurrences=%d", refreshedAt, occurrences)
+	}
+	var otherLastSeenAt time.Time
+	if err := db.QueryRow(`
+		SELECT last_seen_at FROM explore_source_observations
+		WHERE provider_id=$1 AND source_id=$2`, otherProviderID, otherSourceID).Scan(&otherLastSeenAt); err != nil {
+		t.Fatal(err)
+	}
+	if !otherLastSeenAt.Equal(observedAt) {
+		t.Fatalf("other provider observation changed to %s", otherLastSeenAt)
+	}
+}
+
 func TestExploreRegistryQueueAdapterEnqueuesValidation(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
