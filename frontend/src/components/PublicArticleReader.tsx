@@ -4,6 +4,7 @@ import SummaryMarkdown from './SummaryMarkdown'
 import VideoEmbed from './VideoEmbed'
 import { parseStoredEmbedURL } from './parseVideoPlaceholder'
 import { authSearch, parseAuthIntent, safePublicSourceURL } from '../utils/authIntent'
+import { buildXIntentURL, buildXPostText } from '../utils/xShare'
 
 export { safePublicSourceURL } from '../utils/authIntent'
 
@@ -133,6 +134,11 @@ function subscribeHref(source: string | null): string {
   return intent.kind === 'subscribe' ? `/login${authSearch(intent)}` : '/login?intent=subscribe'
 }
 
+function currentPublicShareURL(): string | null {
+  if (typeof window === 'undefined' || !window.location.pathname.startsWith('/share/')) return null
+  return `${window.location.origin}${window.location.pathname}`
+}
+
 function PublicMedia({ article, sourceURL }: Props & { sourceURL: string | null }) {
   if (!article.media_url) return null
   const mediaURL = safePublicMediaURL(article.media_url)
@@ -165,6 +171,15 @@ function PublicMedia({ article, sourceURL }: Props & { sourceURL: string | null 
 export default function PublicArticleReader({ article }: Props) {
   const published = formatDate(article.published_at)
   const sourceURL = safePublicSourceURL(article.url)
+  const shareURL = currentPublicShareURL()
+  const xIntentURL = shareURL
+    ? buildXIntentURL(buildXPostText({
+      title: article.title,
+      summaryBrief: article.summary_brief,
+      summaryDetailed: article.summary_detailed,
+      shareURL,
+    }))
+    : null
   return (
     <main className="public-reader">
       <header className="public-reader-brand">
@@ -209,6 +224,12 @@ export default function PublicArticleReader({ article }: Props) {
               </a>
             )
             : <span className="text-muted">原文链接不可用</span>}
+          {xIntentURL && (
+            <a className="public-reader-x-cta" href={xIntentURL} target="_blank" rel="noopener noreferrer">
+              <span aria-hidden="true">𝕏</span>
+              <span>分享到 X</span>
+            </a>
+          )}
         </section>
       </article>
 

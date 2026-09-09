@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SharePage from '../src/pages/SharePage'
+import { xWeightedLength } from '../src/utils/xShare'
 
 const axiosMock = vi.hoisted(() => ({ get: vi.fn() }))
 const privateAPIMocks = vi.hoisted(() => ({
@@ -65,6 +66,7 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  window.history.replaceState({}, '', '/')
   axiosMock.get.mockReset()
   Object.values(privateAPIMocks).forEach(mock => mock.mockReset())
 })
@@ -107,6 +109,33 @@ describe('SharePage public reader', () => {
       '/login?intent=subscribe&source=https%3A%2F%2Fsource.example%2Fpost%3Ffrom%3Dshare',
     )
     expect(axiosMock.get).toHaveBeenCalledWith('/api/share/token%2Fwith%20spaces', { signal: expect.any(AbortSignal) })
+  })
+
+  it('opens X with a ready canonical public-share post', async () => {
+    window.history.replaceState({}, '', '/share/v1_token?utm_source=bad#article-section-001')
+    axiosMock.get.mockResolvedValue({
+      data: sharedSnapshot({
+        summary_brief: '**Brief summary** with [context](https://private.example/feed)',
+        feed_url: 'https://feed.example/rss?token=feed-secret',
+      }),
+    })
+    renderSharePage('/share/v1_token?utm_source=bad#article-section-001')
+
+    const shareToX = await screen.findByRole('link', { name: '分享到 X' })
+    expect(shareToX.getAttribute('target')).toBe('_blank')
+    expect(shareToX.getAttribute('rel')).toBe('noopener noreferrer')
+
+    const intent = new URL(shareToX.getAttribute('href')!)
+    expect(intent.origin + intent.pathname).toBe('https://x.com/intent/post')
+    const post = intent.searchParams.get('text')!
+    expect(post).toContain('Shared title')
+    expect(post).toContain('Brief summary with context')
+    expect(post).toContain(`${window.location.origin}/share/v1_token`)
+    expect(post).not.toContain('utm_source')
+    expect(post).not.toContain('article-section')
+    expect(post).not.toContain('private.example')
+    expect(post).not.toContain('feed-secret')
+    expect(xWeightedLength(post)).toBeLessThanOrEqual(280)
   })
 
   it('builds authentication CTAs only from the public article URL and ignores private extra fields', async () => {
