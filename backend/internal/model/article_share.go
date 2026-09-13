@@ -23,6 +23,7 @@ type ArticleShareSnapshot struct {
 
 type ArticleShare struct {
 	PublicID          string
+	ShortCode         *string
 	ArticleID         int
 	CreatedBy         int
 	SnapshotVersion   int
