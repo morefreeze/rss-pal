@@ -128,7 +128,11 @@ func main() {
 		youtubeRelayService,
 	)
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(
+		api.RedactedAccessLogger(gin.DefaultWriter),
+		api.RedactedRecovery(gin.DefaultErrorWriter),
+	)
 	// Compress JSON/text responses for clients that opt in. Defensive
 	// when the API is reached directly (no nginx); skip already-compressed
 	// content types and the streaming summary endpoint that controls its
