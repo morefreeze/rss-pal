@@ -77,6 +77,18 @@ function MediaIndicator({ article, onPlay }: { article: MediaIndicatorArticle; o
   )
 }
 
+// Home-screen launches can create new sessions; keep sorting across launches.
+function readSortPreference(key: string, legacyKey?: string): string | null {
+  try {
+    const value = localStorage.getItem(key)
+    if (value !== null) return value
+  } catch {}
+  try {
+    return sessionStorage.getItem(key)
+      ?? (legacyKey ? sessionStorage.getItem(legacyKey) : null)
+  } catch { return null }
+}
+
 // SearchArticleRow renders a single article card in the search-results panel.
 function SearchArticleRow({
   article,
@@ -330,15 +342,19 @@ export default function ArticleListPage() {
     try { return sessionStorage.getItem('savedOnly') === 'true' } catch { return false }
   })
   const [sortField, setSortField] = useState<ArticleSort>(() => {
-    try {
-      const v = sessionStorage.getItem('articlesSortField')
-        ?? sessionStorage.getItem('articlesSort') // legacy fallback
-      return v === 'captured' ? 'captured' : 'published'
-    } catch { return 'published' }
+    const v = readSortPreference('articlesSortField', 'articlesSort')
+    return v === 'captured' ? 'captured' : 'published'
   })
   const [sortDir, setSortDir] = useState<ArticleOrder>(() => {
-    try { return sessionStorage.getItem('articlesSortDir') === 'asc' ? 'asc' : 'desc' } catch { return 'desc' }
+    return readSortPreference('articlesSortDir') === 'asc' ? 'asc' : 'desc'
   })
+  // Persist both values on mount (migrating old sessions) and after changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem('articlesSortField', sortField)
+      localStorage.setItem('articlesSortDir', sortDir)
+    } catch {}
+  }, [sortField, sortDir])
   const [showBriefing, setShowBriefing] = useState(() => {
     try { return localStorage.getItem('showBriefing') === 'true' } catch { return false }
   })
@@ -825,10 +841,8 @@ export default function ArticleListPage() {
               if (field === sortField) {
                 const next: ArticleOrder = sortDir === 'desc' ? 'asc' : 'desc'
                 setSortDir(next)
-                try { sessionStorage.setItem('articlesSortDir', next) } catch {}
               } else {
                 setSortField(field)
-                try { sessionStorage.setItem('articlesSortField', field) } catch {}
               }
             }
             const arrow = sortDir === 'asc' ? '↑' : '↓'

@@ -196,6 +196,63 @@ describe('ArticleListPage automatic pagination', () => {
     await Promise.resolve()
   }
 
+  it.each([
+    ['published', 'desc'], ['published', 'asc'],
+    ['captured', 'desc'], ['captured', 'asc'],
+  ])('keeps %s %s sorting after a fresh app session', async (sort, order) => {
+    apiMocks.getArticles.mockResolvedValue([])
+    const mount = () => render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    const first = mount()
+    await screen.findByRole('button', { name: /发布\s*↓/ })
+    if (sort === 'captured') fireEvent.click(screen.getByRole('button', { name: '抓取' }))
+    if (order === 'asc') fireEvent.click(screen.getByRole('button', { name: sort === 'captured' ? /抓取\s*↓/ : /发布\s*↓/ }))
+    first.unmount()
+    sessionStorage.clear()
+    apiMocks.getArticles.mockClear()
+    mount()
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalled())
+    expect(apiMocks.getArticles.mock.calls[0][0]).toEqual(expect.objectContaining({ sort, order }))
+  })
+
+  it.each(['articlesSortField', 'articlesSort'])('migrates legacy %s sorting to persistent storage', async (key) => {
+    sessionStorage.setItem(key, 'captured')
+    sessionStorage.setItem('articlesSortDir', 'asc')
+    apiMocks.getArticles.mockResolvedValue([])
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    await screen.findByRole('button', { name: /抓取\s*↑/ })
+    expect(localStorage.getItem('articlesSortField')).toBe('captured')
+    expect(localStorage.getItem('articlesSortDir')).toBe('asc')
+  })
+
+  it('prefers persistent sorting over stale session preferences', async () => {
+    localStorage.setItem('articlesSortField', 'captured')
+    localStorage.setItem('articlesSortDir', 'asc')
+    sessionStorage.setItem('articlesSortField', 'published')
+    sessionStorage.setItem('articlesSortDir', 'desc')
+    apiMocks.getArticles.mockResolvedValue([])
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    await screen.findByRole('button', { name: /抓取\s*↑/ })
+    expect(apiMocks.getArticles.mock.calls[0][0]).toEqual(expect.objectContaining({ sort: 'captured', order: 'asc' }))
+  })
+
+  it('uses safe defaults for invalid persistent sorting', async () => {
+    localStorage.setItem('articlesSortField', 'invalid')
+    localStorage.setItem('articlesSortDir', 'invalid')
+    apiMocks.getArticles.mockResolvedValue([])
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalled())
+    expect(apiMocks.getArticles.mock.calls[0][0]).toEqual(expect.objectContaining({ sort: 'published', order: 'desc' }))
+  })
+
+  it('keeps sorting usable when browser storage is unavailable', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+    apiMocks.getArticles.mockResolvedValue([])
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: '抓取' }))
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'captured', order: 'desc' })))
+  })
+
   it('replaces recommendations with a collapsed daily briefing panel', async () => {
     apiMocks.getArticles.mockResolvedValue([])
     apiMocks.getDailyDigest.mockResolvedValue({
