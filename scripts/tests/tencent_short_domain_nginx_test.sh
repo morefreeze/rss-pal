@@ -5,6 +5,14 @@ ROOT_DIR=$(cd "$(dirname "$0")/../.." && pwd)
 BOOTSTRAP_CONFIG="$ROOT_DIR/deploy/nginx/r-morefreeze-bootstrap.conf"
 FINAL_CONFIG="$ROOT_DIR/deploy/nginx/rss-pal-tencent.conf"
 DEPLOY_WRAPPER="$ROOT_DIR/deploy/tencent/rss-pal-deploy-from-actions"
+NGINX_TEST_DIR=""
+WRAPPER_TEST_DIR=""
+
+cleanup_test_dirs() {
+  [ -z "$NGINX_TEST_DIR" ] || rm -rf "$NGINX_TEST_DIR"
+  [ -z "$WRAPPER_TEST_DIR" ] || rm -rf "$WRAPPER_TEST_DIR"
+}
+trap cleanup_test_dirs EXIT
 
 fail() {
   echo "FAIL: $*" >&2
@@ -45,6 +53,84 @@ server_block() {
     current == wanted { print }
     current > wanted { exit }
   ' "$file"
+}
+
+verify_nginx_templates() {
+  local bootstrap_config=$1
+  local final_config=$2
+  local invalid_quantifier_seen=0
+
+  command -v nginx >/dev/null || fail 'nginx is required to parse the host templates'
+  command -v openssl >/dev/null || fail 'openssl is required to generate temporary nginx test certificates'
+
+  NGINX_TEST_DIR=$(mktemp -d)
+  if ! openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=localhost \
+    -keyout "$NGINX_TEST_DIR/key.pem" -out "$NGINX_TEST_DIR/cert.pem" -days 1 \
+    >"$NGINX_TEST_DIR/openssl-cert.log" 2>&1; then
+    sed 's/^/openssl: /' "$NGINX_TEST_DIR/openssl-cert.log" >&2
+    fail 'could not generate the temporary nginx test certificate'
+  fi
+  if ! openssl dhparam -dsaparam -out "$NGINX_TEST_DIR/dhparam.pem" 2048 \
+    >"$NGINX_TEST_DIR/openssl-dhparam.log" 2>&1; then
+    sed 's/^/openssl: /' "$NGINX_TEST_DIR/openssl-dhparam.log" >&2
+    fail 'could not generate temporary nginx DH parameters'
+  fi
+  : >"$NGINX_TEST_DIR/options.conf"
+
+  sed \
+    -e "s#/etc/letsencrypt/live/rss.morefreeze.top/fullchain.pem#$NGINX_TEST_DIR/cert.pem#" \
+    -e "s#/etc/letsencrypt/live/rss.morefreeze.top/privkey.pem#$NGINX_TEST_DIR/key.pem#" \
+    -e "s#/etc/letsencrypt/live/r.morefreeze.top/fullchain.pem#$NGINX_TEST_DIR/cert.pem#" \
+    -e "s#/etc/letsencrypt/live/r.morefreeze.top/privkey.pem#$NGINX_TEST_DIR/key.pem#" \
+    -e "s#/etc/letsencrypt/options-ssl-nginx.conf#$NGINX_TEST_DIR/options.conf#" \
+    -e "s#/etc/letsencrypt/ssl-dhparams.pem#$NGINX_TEST_DIR/dhparam.pem#" \
+    "$final_config" >"$NGINX_TEST_DIR/final-site.conf"
+
+  printf '%s\n' \
+    "pid $NGINX_TEST_DIR/bootstrap.pid;" \
+    "error_log $NGINX_TEST_DIR/bootstrap-error.log;" \
+    'events {}' \
+    'http {' \
+    '    access_log off;' \
+    "    include $bootstrap_config;" \
+    '}' \
+    >"$NGINX_TEST_DIR/bootstrap-main.conf"
+  printf '%s\n' \
+    "pid $NGINX_TEST_DIR/final.pid;" \
+    "error_log $NGINX_TEST_DIR/final-error.log;" \
+    'events {}' \
+    'http {' \
+    '    access_log off;' \
+    "    include $NGINX_TEST_DIR/final-site.conf;" \
+    '}' \
+    >"$NGINX_TEST_DIR/final-main.conf"
+
+  if ! nginx -t -p "$NGINX_TEST_DIR/" -c "$NGINX_TEST_DIR/bootstrap-main.conf" \
+    >"$NGINX_TEST_DIR/bootstrap-nginx.log" 2>&1; then
+    sed 's/^/nginx bootstrap: /' "$NGINX_TEST_DIR/bootstrap-nginx.log" >&2
+    fail 'nginx rejected the bootstrap host template'
+  fi
+  if ! nginx -t -p "$NGINX_TEST_DIR/" -c "$NGINX_TEST_DIR/final-main.conf" \
+    >"$NGINX_TEST_DIR/final-nginx.log" 2>&1; then
+    sed 's/^/nginx final: /' "$NGINX_TEST_DIR/final-nginx.log" >&2
+    fail 'nginx rejected the final host template'
+  fi
+
+  while IFS= read -r line; do
+    if [ "$line" = '    location ~ "^/[A-Za-z0-9]{12}$" {' ]; then
+      printf '%s\n' '    location ~ ^/[A-Za-z0-9]{12}$ {'
+      invalid_quantifier_seen=1
+    else
+      printf '%s\n' "$line"
+    fi
+  done <"$NGINX_TEST_DIR/final-site.conf" >"$NGINX_TEST_DIR/invalid-site.conf"
+  [ "$invalid_quantifier_seen" -eq 1 ] || fail 'could not build the unquoted-regex nginx negative control'
+  sed "s#final-site.conf#invalid-site.conf#" \
+    "$NGINX_TEST_DIR/final-main.conf" >"$NGINX_TEST_DIR/invalid-main.conf"
+  if nginx -t -p "$NGINX_TEST_DIR/" -c "$NGINX_TEST_DIR/invalid-main.conf" \
+    >"$NGINX_TEST_DIR/invalid-nginx.log" 2>&1; then
+    fail 'nginx parser did not reject an unquoted {12} location regex'
+  fi
 }
 
 for required_file in "$BOOTSTRAP_CONFIG" "$FINAL_CONFIG" "$DEPLOY_WRAPPER"; do
@@ -124,6 +210,8 @@ assert_count 8 'proxy_set_header X-Real-IP $remote_addr;' "$FINAL_CONFIG" 'every
 assert_count 8 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' "$FINAL_CONFIG" 'every proxy location must forward X-Forwarded-For'
 assert_count 8 'proxy_set_header X-Forwarded-Proto $scheme;' "$FINAL_CONFIG" 'every proxy location must forward X-Forwarded-Proto'
 
+verify_nginx_templates "$BOOTSTRAP_CONFIG" "$FINAL_CONFIG"
+
 # The root-owned Actions entrypoint must fetch and run the branch deployment script directly as ubuntu.
 [ -x "$DEPLOY_WRAPPER" ] || fail 'Actions deployment wrapper must be executable'
 assert_contains "$DEPLOY_WRAPPER" 'flock -n 9' 'deployment wrapper must prevent concurrent runs'
@@ -140,10 +228,6 @@ fi
 # Exercise an equivalent wrapper run against a temporary local repository. The
 # fetched probe resolves the project root from $0 exactly like auto_deploy.sh.
 WRAPPER_TEST_DIR=$(mktemp -d)
-cleanup_wrapper_test() {
-  rm -rf "$WRAPPER_TEST_DIR"
-}
-trap cleanup_wrapper_test EXIT
 
 mkdir -p "$WRAPPER_TEST_DIR/source/scripts" "$WRAPPER_TEST_DIR/bin"
 printf '%s\n' \
