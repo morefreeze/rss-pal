@@ -109,6 +109,9 @@ func TestShareRepositoryCreateListRevokeAndSnapshotImmutability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if first.ShortCode != nil {
+		t.Fatalf("legacy Create short code=%q, want nil", *first.ShortCode)
+	}
 	secondExpiry := now.Add(time.Hour)
 	second, err := f.repo.Create(f.article, f.userA, "22222222222222222222222222222222", &secondExpiry, now)
 	if err != nil || first.PublicID == second.PublicID {
@@ -119,7 +122,7 @@ func TestShareRepositoryCreateListRevokeAndSnapshotImmutability(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := f.repo.GetActiveByPublicID(first.PublicID, now)
-	if err != nil || got == nil || got.Snapshot.Title != "Original" || got.Snapshot.Content != "Body mentions feed_id and editor_note as ordinary text" {
+	if err != nil || got == nil || got.ShortCode != nil || got.Snapshot.Title != "Original" || got.Snapshot.Content != "Body mentions feed_id and editor_note as ordinary text" {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 
@@ -133,9 +136,14 @@ func TestShareRepositoryCreateListRevokeAndSnapshotImmutability(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
+	for _, row := range rows {
+		if row.ShortCode != nil {
+			t.Fatalf("legacy list row short code=%q, want nil", *row.ShortCode)
+		}
+	}
 
 	revoked, err := f.repo.Revoke(first.PublicID, f.article.ID, f.userA, now)
-	if err != nil || revoked == nil || revoked.RevokedAt == nil || !revoked.RevokedAt.Equal(now) {
+	if err != nil || revoked == nil || revoked.ShortCode != nil || revoked.RevokedAt == nil || !revoked.RevokedAt.Equal(now) {
 		t.Fatalf("revoked=%+v err=%v", revoked, err)
 	}
 	revokedAgain, err := f.repo.Revoke(first.PublicID, f.article.ID, f.userA, now.Add(time.Minute))
@@ -145,6 +153,90 @@ func TestShareRepositoryCreateListRevokeAndSnapshotImmutability(t *testing.T) {
 	got, err = f.repo.GetActiveByPublicID(first.PublicID, now)
 	if err != nil || got != nil {
 		t.Fatalf("revoked got=%+v err=%v", got, err)
+	}
+}
+
+func TestShareRepositoryCreateWithShortCodeConflictsDoNotAbortTransaction(t *testing.T) {
+	f := newShareRepoFixture(t)
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	snapshot := SnapshotFromArticle(f.article, now)
+
+	tx, err := f.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	repo := &ShareRepository{db: tx}
+
+	first, err := repo.CreateWithShortCode(
+		f.article.ID, f.userA,
+		"55555555555555555555555555555555", "Aa0000000000",
+		snapshot, nil, now,
+	)
+	if err != nil || first == nil || first.ShortCode == nil || *first.ShortCode != "Aa0000000000" {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+
+	duplicateShortCode, err := repo.CreateWithShortCode(
+		f.article.ID, f.userA,
+		"66666666666666666666666666666666", "Aa0000000000",
+		snapshot, nil, now,
+	)
+	if err != nil || duplicateShortCode != nil {
+		t.Fatalf("duplicate short code=%+v err=%v, want nil, nil", duplicateShortCode, err)
+	}
+
+	duplicatePublicID, err := repo.CreateWithShortCode(
+		f.article.ID, f.userA,
+		"55555555555555555555555555555555", "Bb0000000000",
+		snapshot, nil, now,
+	)
+	if err != nil || duplicatePublicID != nil {
+		t.Fatalf("duplicate public ID=%+v err=%v, want nil, nil", duplicatePublicID, err)
+	}
+
+	got, err := repo.GetActiveByShortCode("Aa0000000000", now)
+	if err != nil || got == nil || got.PublicID != first.PublicID || !reflect.DeepEqual(got.Snapshot, snapshot) {
+		t.Fatalf("lookup=%+v err=%v", got, err)
+	}
+	var count int
+	if err := tx.QueryRow(`SELECT count(*) FROM article_shares`).Scan(&count); err != nil {
+		t.Fatalf("transaction aborted after conflict: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("share count=%d, want 1", count)
+	}
+}
+
+func TestShareRepositoryGetActiveByShortCodeExpirationAndRevocation(t *testing.T) {
+	f := newShareRepoFixture(t)
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(time.Hour)
+	row, err := f.repo.CreateWithShortCode(
+		f.article.ID, f.userA,
+		"77777777777777777777777777777777", "Cc0000000000",
+		SnapshotFromArticle(f.article, now), &expiresAt, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := f.repo.GetActiveByShortCode("Cc0000000000", expiresAt.Add(-time.Nanosecond))
+	if err != nil || got == nil || got.PublicID != row.PublicID {
+		t.Fatalf("active got=%+v err=%v", got, err)
+	}
+	got, err = f.repo.GetActiveByShortCode("Cc0000000000", expiresAt)
+	if err != nil || got != nil {
+		t.Fatalf("exact expiry boundary got=%+v err=%v, want nil, nil", got, err)
+	}
+
+	revoked, err := f.repo.Revoke(row.PublicID, f.article.ID, f.userA, now)
+	if err != nil || revoked == nil || revoked.ShortCode == nil || *revoked.ShortCode != "Cc0000000000" {
+		t.Fatalf("revoked=%+v err=%v", revoked, err)
+	}
+	got, err = f.repo.GetActiveByShortCode("Cc0000000000", now)
+	if err != nil || got != nil {
+		t.Fatalf("revoked lookup got=%+v err=%v, want nil, nil", got, err)
 	}
 }
 
@@ -186,7 +278,7 @@ func TestShareRepositoryExpirationAndLegacyDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err = f.repo.GetActiveByLegacyDigest(digest, now)
-	if err != nil || got == nil {
+	if err != nil || got == nil || got.ShortCode != nil {
 		t.Fatalf("legacy got=%+v err=%v", got, err)
 	}
 	got, err = f.repo.GetActiveByLegacyDigest(digest, legacyExpiry)

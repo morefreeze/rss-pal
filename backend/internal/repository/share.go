@@ -14,6 +14,9 @@ type ShareRepository struct {
 	db Querier
 }
 
+const articleShareColumns = `public_id, short_code, article_id, created_by, snapshot_version, snapshot,
+	       expires_at, revoked_at, legacy_token_digest, created_at`
+
 func NewShareRepository(db *sql.DB) *ShareRepository {
 	return &ShareRepository{db: db}
 }
@@ -58,20 +61,33 @@ func (r *ShareRepository) Create(article *model.Article, createdBy int, publicID
 	}
 	return scanArticleShare(r.db.QueryRow(`
 		INSERT INTO article_shares (
-			public_id, article_id, created_by, snapshot_version, snapshot, expires_at, created_at
-		) VALUES ($1, $2, $3, 1, $4, $5, $6)
-		RETURNING public_id, article_id, created_by, snapshot_version, snapshot,
-		          expires_at, revoked_at, legacy_token_digest, created_at`,
+			public_id, short_code, article_id, created_by, snapshot_version, snapshot, expires_at, created_at
+		) VALUES ($1, NULL, $2, $3, 1, $4, $5, $6)
+		RETURNING `+articleShareColumns,
 		publicID, article.ID, createdBy, snapshotJSON, expiresAt, now,
 	))
+}
+
+func (r *ShareRepository) CreateWithShortCode(articleID, createdBy int, publicID, shortCode string, snapshot model.ArticleShareSnapshot, expiresAt *time.Time, now time.Time) (*model.ArticleShare, error) {
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	return nilOnNoRows(scanArticleShare(r.db.QueryRow(`
+		INSERT INTO article_shares (
+			public_id, short_code, article_id, created_by, snapshot_version, snapshot, expires_at, created_at
+		) VALUES ($1, $2, $3, $4, 1, $5, $6, $7)
+		ON CONFLICT DO NOTHING
+		RETURNING `+articleShareColumns,
+		publicID, shortCode, articleID, createdBy, snapshotJSON, expiresAt, now,
+	)))
 }
 
 // List returns all shares for the article and owner, including expired and
 // revoked rows so the management UI can display their lifecycle state.
 func (r *ShareRepository) List(articleID, createdBy int, _ time.Time) ([]model.ArticleShare, error) {
 	rows, err := r.db.Query(`
-		SELECT public_id, article_id, created_by, snapshot_version, snapshot,
-		       expires_at, revoked_at, legacy_token_digest, created_at
+		SELECT `+articleShareColumns+`
 		  FROM article_shares
 		 WHERE article_id = $1 AND created_by = $2
 		 ORDER BY created_at DESC, public_id DESC`, articleID, createdBy)
@@ -99,26 +115,32 @@ func (r *ShareRepository) Revoke(publicID string, articleID, createdBy int, now 
 		UPDATE article_shares
 		   SET revoked_at = COALESCE(revoked_at, $4)
 		 WHERE public_id = $1 AND article_id = $2 AND created_by = $3
-		RETURNING public_id, article_id, created_by, snapshot_version, snapshot,
-		          expires_at, revoked_at, legacy_token_digest, created_at`,
+		RETURNING `+articleShareColumns,
 		publicID, articleID, createdBy, now,
 	)))
 }
 
 func (r *ShareRepository) GetActiveByPublicID(publicID string, now time.Time) (*model.ArticleShare, error) {
 	return nilOnNoRows(scanArticleShare(r.db.QueryRow(`
-		SELECT public_id, article_id, created_by, snapshot_version, snapshot,
-		       expires_at, revoked_at, legacy_token_digest, created_at
+		SELECT `+articleShareColumns+`
 		  FROM article_shares
 		 WHERE public_id = $1
 		   AND revoked_at IS NULL
 		   AND (expires_at IS NULL OR expires_at > $2)`, publicID, now)))
 }
 
+func (r *ShareRepository) GetActiveByShortCode(shortCode string, now time.Time) (*model.ArticleShare, error) {
+	return nilOnNoRows(scanArticleShare(r.db.QueryRow(`
+		SELECT `+articleShareColumns+`
+		  FROM article_shares
+		 WHERE short_code = $1
+		   AND revoked_at IS NULL
+		   AND (expires_at IS NULL OR expires_at > $2)`, shortCode, now)))
+}
+
 func (r *ShareRepository) GetActiveByLegacyDigest(digest string, now time.Time) (*model.ArticleShare, error) {
 	return nilOnNoRows(scanArticleShare(r.db.QueryRow(`
-		SELECT public_id, article_id, created_by, snapshot_version, snapshot,
-		       expires_at, revoked_at, legacy_token_digest, created_at
+		SELECT `+articleShareColumns+`
 		  FROM article_shares
 		 WHERE legacy_token_digest = $1
 		   AND revoked_at IS NULL
@@ -133,9 +155,10 @@ func scanArticleShare(scanner shareScanner) (*model.ArticleShare, error) {
 	var share model.ArticleShare
 	var snapshotJSON []byte
 	var expiresAt, revokedAt sql.NullTime
-	var legacyTokenDigest sql.NullString
+	var shortCode, legacyTokenDigest sql.NullString
 	if err := scanner.Scan(
 		&share.PublicID,
+		&shortCode,
 		&share.ArticleID,
 		&share.CreatedBy,
 		&share.SnapshotVersion,
@@ -155,6 +178,9 @@ func scanArticleShare(scanner shareScanner) (*model.ArticleShare, error) {
 	}
 	if revokedAt.Valid {
 		share.RevokedAt = &revokedAt.Time
+	}
+	if shortCode.Valid {
+		share.ShortCode = &shortCode.String
 	}
 	if legacyTokenDigest.Valid {
 		share.LegacyTokenDigest = &legacyTokenDigest.String
