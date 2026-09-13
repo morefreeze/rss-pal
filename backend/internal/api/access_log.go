@@ -27,7 +27,7 @@ func RedactedAccessLogger(output io.Writer) gin.HandlerFunc {
 			time.Now().UTC().Format(time.RFC3339Nano),
 			c.Writer.Status(),
 			time.Since(start),
-			c.ClientIP(),
+			c.RemoteIP(),
 			c.Request.Method,
 			path,
 		)

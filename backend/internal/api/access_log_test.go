@@ -68,6 +68,42 @@ func TestRedactedAccessLoggerHidesUnmatchedPath(t *testing.T) {
 	}
 }
 
+func TestRedactedAccessLoggerIgnoresForwardedIPHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, test := range []struct {
+		name   string
+		header string
+		forged string
+	}{
+		{name: "X-Forwarded-For", header: "X-Forwarded-For", forged: "198.51.100.88"},
+		{name: "X-Real-IP", header: "X-Real-IP", forged: "198.51.100.89"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			router := gin.New()
+			router.Use(RedactedAccessLogger(&logs))
+			router.GET("/api/health", func(c *gin.Context) {
+				c.Status(http.StatusNoContent)
+			})
+
+			request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+			request.RemoteAddr = "203.0.113.7:4321"
+			request.Header.Set(test.header, test.forged)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+
+			got := logs.String()
+			if !strings.Contains(got, "client_ip=203.0.113.7") {
+				t.Errorf("log %q does not contain RemoteAddr IP", got)
+			}
+			if strings.Contains(got, test.forged) {
+				t.Errorf("log %q contains forged %s value", got, test.header)
+			}
+		})
+	}
+}
+
 func TestRedactedRecoveryDoesNotLogRecoveredValue(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
