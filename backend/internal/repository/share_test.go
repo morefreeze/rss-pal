@@ -221,7 +221,7 @@ func TestShareRepositoryGetActiveByShortCodeExpirationAndRevocation(t *testing.T
 		t.Fatal(err)
 	}
 
-	got, err := f.repo.GetActiveByShortCode("Cc0000000000", expiresAt.Add(-time.Nanosecond))
+	got, err := f.repo.GetActiveByShortCode("Cc0000000000", expiresAt.Add(-time.Microsecond))
 	if err != nil || got == nil || got.PublicID != row.PublicID {
 		t.Fatalf("active got=%+v err=%v", got, err)
 	}
