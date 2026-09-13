@@ -21,8 +21,8 @@ assert_selection() {
     echo "FAIL: DEPLOY_ALL=$DEPLOY_ALL, want $expected_all for $changed_files" >&2
     exit 1
   }
-  [ "${DEPLOY_SERVICES[*]}" = "$expected_services" ] || {
-    echo "FAIL: services=${DEPLOY_SERVICES[*]}, want $expected_services for $changed_files" >&2
+  [ "${DEPLOY_SERVICES[*]:-}" = "$expected_services" ] || {
+    echo "FAIL: services=${DEPLOY_SERVICES[*]:-}, want $expected_services for $changed_files" >&2
     exit 1
   }
 }
@@ -41,20 +41,28 @@ compose_mock() {
 COMPOSE=compose_mock
 COMPOSE_FILES=(-f docker-compose.yml)
 
+assert_call_order() {
+  local previous_line=0 expected line
+  for expected in "$@"; do
+    line=$(printf '%s' "$compose_calls" | grep -nFx -- "$expected" | cut -d: -f1)
+    [ -n "$line" ] || {
+      echo "FAIL: missing compose call '$expected': $compose_calls" >&2
+      exit 1
+    }
+    [ "$line" -gt "$previous_line" ] || {
+      echo "FAIL: compose call '$expected' was out of order: $compose_calls" >&2
+      exit 1
+    }
+    previous_line=$line
+  done
+}
+
 select_deploy_services $'backend/internal/rss/content.go\nfrontend/src/App.tsx'
 deploy_runtime_services
-[[ "$compose_calls" == *"-f docker-compose.yml build api worker frontend"* ]] || {
-  echo "FAIL: selected services were not passed to compose build: $compose_calls" >&2
-  exit 1
-}
-[[ "$compose_calls" == *"-f docker-compose.yml up -d api worker"* ]] || {
-  echo "FAIL: backend services did not retain their dependency-aware compose up: $compose_calls" >&2
-  exit 1
-}
-[[ "$compose_calls" == *"-f docker-compose.yml up -d --no-deps frontend"* ]] || {
-  echo "FAIL: frontend was not restarted independently: $compose_calls" >&2
-  exit 1
-}
+assert_call_order \
+  '-f docker-compose.yml build api worker frontend' \
+  '-f docker-compose.yml up -d --no-deps frontend' \
+  '-f docker-compose.yml up -d api worker'
 [[ "$compose_calls" != *"status-monitor"* ]] || {
   echo "FAIL: unchanged status-monitor leaked into scoped deploy: $compose_calls" >&2
   exit 1
@@ -71,8 +79,8 @@ deploy_runtime_services
 compose_calls=""
 select_deploy_services 'docker-compose.yml'
 deploy_runtime_services
-[ "$compose_calls" = $'-f docker-compose.yml up -d --build\n' ] || {
-  echo "FAIL: compose changes must retain full deployment: $compose_calls" >&2
+[ "$compose_calls" = $'-f docker-compose.yml build\n-f docker-compose.yml up -d --no-deps frontend\n-f docker-compose.yml up -d\n' ] || {
+  echo "FAIL: compose changes must build first, replace frontend independently, then start all services: $compose_calls" >&2
   exit 1
 }
 

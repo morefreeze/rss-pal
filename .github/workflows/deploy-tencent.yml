@@ -27,8 +27,11 @@ jobs:
       - name: Deploy from Tencent host
         run: sudo /usr/local/sbin/rss-pal-deploy-from-actions
 
-      - name: Verify local API health
-        run: curl --noproxy '*' -fsS http://127.0.0.1:8080/api/health
+      - name: Verify valid short-share shape
+        run: test "$(curl --noproxy '*' --resolve r.morefreeze.top:443:192.144.171.125 -sS -o /dev/null -w '%{http_code}' https://r.morefreeze.top/Aa0000000000)" = "200"
 
-      - name: Verify Tencent public API health
-        run: curl --noproxy '*' --resolve rss.morefreeze.top:443:192.144.171.125 -fsS https://rss.morefreeze.top/api/health
+      - name: Verify authenticated route is closed on short host
+        run: test "$(curl --noproxy '*' --resolve r.morefreeze.top:443:192.144.171.125 -sS -o /dev/null -w '%{http_code}' https://r.morefreeze.top/login)" = "404"
+
+      - name: Verify invalid short API returns not found
+        run: test "$(curl --noproxy '*' --resolve r.morefreeze.top:443:192.144.171.125 -sS -o /dev/null -w '%{http_code}' https://r.morefreeze.top/api/s/invalid)" = "404"

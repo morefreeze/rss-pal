@@ -43,7 +43,7 @@ docker compose up -d
 - 鼠标悬停或触摸点击小时格可查看该小时的状态、可用率、检测次数、延迟与最近错误。
 - Worker 使用独立心跳：启动时立即上报，之后每 60 秒上报一次。心跳恰好 3 分钟未更新仍视为健康；仅超过 3 分钟没有心跳才标记为故障。该心跳独立于抓取或其他长耗时工作，因此长时间抓取不会让 Worker 误报故障。
 - Worker 内部健康检查 `/api/internal/health/worker` 仅供 Docker 网络中的 status-monitor 使用，Nginx 对外精确拦截并返回 404，不会被通用 `/api` 代理暴露。
-- `docker compose up` 会自动运行一次 `status-migrate`：它在 PostgreSQL 健康后依次执行幂等的 `037_service_heartbeats.sql`、`038_subscription_explore.sql` 和 `039_article_shares.sql`，并且 API 与 Worker 只会在迁移成功后启动；迁移失败会阻止它们启动。
+- `docker compose up` 会自动运行一次 `status-migrate`：它在 PostgreSQL 健康后依次执行幂等的 `037_service_heartbeats.sql`、`038_subscription_explore.sql`、`039_article_shares.sql`、`040_explore_provider_materialized_at.sql` 和 `041_article_share_short_codes.sql`，并且 API 与 Worker 只会在迁移成功后启动；迁移失败会阻止它们启动。
 - 两个部署辅助脚本会确认 `status-migrate` 的退出码为 `0` 后移除该一次性容器，避免把正常的 `Exited (0)` 计为运行时故障。手动执行 Compose 时可能会看到 `status-migrate` 为 `Exited (0)`；只有通过 `docker inspect` 确认退出码为 `0` 才表示迁移成功。
 
 首次从不含 re-exec guard 的旧版 `auto_deploy.sh`（pre-guard）升级时，已启动的旧 Bash 进程不能自动读取合并后的新脚本。请在仓库根目录安全地 fetch 后，将远端最新脚本导出到 `scripts/` 下未跟踪的临时文件并执行一次；后续自动更新由 guard 处理：
@@ -107,6 +107,7 @@ npm run dev   # 开发模式，代理到 :8080
 | `AUTH_PASSWORD` | `admin` | 管理员初始密码 |
 | `JWT_SECRET` | — | JWT 签名密钥（**生产环境必须设置**） |
 | `SHARE_SECRET` | — | 分享链接签名密钥；必须至少 32 bytes，并与 `JWT_SECRET` 独立设置 |
+| `SHORT_SHARE_ORIGIN` | `https://r.morefreeze.top` | 永久短分享链接的公开来源；生产值不要带尾斜杠 |
 
 ## 云服务器部署（生产环境）
 
@@ -296,6 +297,8 @@ rss-pal/
 ### 公开文章分享的安全契约
 
 分享链接使用独立于 JWT 的 `SHARE_SECRET` 签名，服务启动时会拒绝短于 32 bytes 的值。公开接口只返回创建分享时固化的 allowlist 快照字段；之后原文章变化不会改变既有分享。无效、未知、篡改、过期和已撤销 token 均返回相同的 404。历史 8 位字母数字 token 仅按 SHA-256 摘要查找，迁移 039 为它们保留迁移日起 30 天的兼容期，不保存或比较明文 token。
+
+`https://r.morefreeze.top/<12 位 Base62 code>` 是公开 bearer surface：任何持有链接的人都能读取对应快照，因此短码必须像 bearer token 一样避免泄露。短域只开放短分享读取、图片代理和页面静态资源，不是第二个认证应用；登录、文章列表、状态页及其他主站路由都返回 404。永久短码由迁移 041 建表并约束唯一性，API 通过 `SHORT_SHARE_ORIGIN` 生成无尾斜杠的规范链接。
 
 远程音视频只保存 URL/类型等快照元数据，不归档远程媒体字节。本地 PDF 图片会被改写为 `/api/share/:token/assets/:asset`，每次读取都重新校验分享仍为 active，并返回 `Cache-Control: no-store`。公开快照与图片分别按客户端 IP 限制为每分钟 60 和 240 次。
 

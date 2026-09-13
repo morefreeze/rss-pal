@@ -53,6 +53,14 @@ EOF_CHANGED_FILES
 }
 
 configure_outbound_proxy() {
+  if [ "${RSS_PAL_DEPLOY_DIRECT:-0}" = "1" ]; then
+    unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
+    export no_proxy='*'
+    export NO_PROXY='*'
+    log "Using direct network for deployment (RSS_PAL_DEPLOY_DIRECT=1)"
+    return
+  fi
+
   if [ -n "${https_proxy:-${HTTPS_PROXY:-}}" ]; then
     log "Using existing outbound proxy settings"
     return
@@ -93,6 +101,26 @@ wait_for_outbound_proxy() {
   return 1
 }
 
+refresh_outbound_proxy() {
+  if [ "${RSS_PAL_DEPLOY_DIRECT:-0}" = "1" ]; then
+    log "Direct deployment mode; skipping rss-pal-oci-egress.service refresh"
+    return
+  fi
+
+  # The systemd service can hold a stale forward (listener alive, TCP channel
+  # dead) after network flaps, so refresh it before an ordinary proxied deploy.
+  if systemctl cat rss-pal-oci-egress.service >/dev/null 2>&1; then
+    if sudo -n systemctl restart rss-pal-oci-egress.service 2>/dev/null; then
+      log "Restarted rss-pal-oci-egress.service (fresh egress tunnel)"
+      if ! wait_for_outbound_proxy; then
+        return 1
+      fi
+    else
+      log "WARN: could not restart rss-pal-oci-egress.service (passwordless sudo unavailable?)"
+    fi
+  fi
+}
+
 configure_outbound_proxy
 
 legacy_compose_supported() {
@@ -124,18 +152,8 @@ fi
 
 log "=== Auto deploy started (compose=$COMPOSE) ==="
 
-# Refresh the OCI egress tunnel if the unit exists. The systemd service can
-# hold a stale forward (listener alive, TCP channel dead) after network flaps;
-# all overseas feed fetches then fail with EOF until the tunnel is restarted.
-if systemctl cat rss-pal-oci-egress.service >/dev/null 2>&1; then
-  if sudo -n systemctl restart rss-pal-oci-egress.service 2>/dev/null; then
-    log "Restarted rss-pal-oci-egress.service (fresh egress tunnel)"
-    if ! wait_for_outbound_proxy; then
-      exit 1
-    fi
-  else
-    log "WARN: could not restart rss-pal-oci-egress.service (passwordless sudo unavailable?)"
-  fi
+if ! refresh_outbound_proxy; then
+  exit 1
 fi
 
 configure_compose_files() {
@@ -200,13 +218,28 @@ check_runtime_services() {
 deploy_runtime_services() {
   local service
   local independent_services=()
+  local deploy_frontend=false
 
   if [ "$DEPLOY_ALL" = "true" ]; then
-    $COMPOSE "${COMPOSE_FILES[@]}" up -d --build || return
+    $COMPOSE "${COMPOSE_FILES[@]}" build || return
+    $COMPOSE "${COMPOSE_FILES[@]}" up -d --no-deps frontend || return
+    $COMPOSE "${COMPOSE_FILES[@]}" up -d || return
     return
   fi
 
   $COMPOSE "${COMPOSE_FILES[@]}" build "${DEPLOY_SERVICES[@]}" || return
+
+  for service in "${DEPLOY_SERVICES[@]}"; do
+    if [ "$service" = "frontend" ]; then
+      deploy_frontend=true
+      break
+    fi
+  done
+  if [ "$deploy_frontend" = "true" ]; then
+    # Replace the frontend before dependency-aware backend startup so the old
+    # frontend never observes an already-upgraded API contract.
+    $COMPOSE "${COMPOSE_FILES[@]}" up -d --no-deps frontend || return
+  fi
 
   if [ "$DEPLOY_BACKEND" = "true" ]; then
     # api/worker intentionally bring up their dependencies so the one-shot
@@ -216,14 +249,12 @@ deploy_runtime_services() {
 
   for service in "${DEPLOY_SERVICES[@]}"; do
     case "$service" in
-      api|worker) ;;
+      api|worker|frontend) ;;
       *) independent_services+=("$service") ;;
     esac
   done
   if [ "${#independent_services[@]}" -gt 0 ]; then
-    # frontend depends on api in Compose, but a frontend-only deployment must
-    # not recreate api/status-migrate. These services are already running and
-    # are validated by check_runtime_services below.
+    # Independent services must not recreate unchanged dependency chains.
     $COMPOSE "${COMPOSE_FILES[@]}" up -d --no-deps "${independent_services[@]}" || return
   fi
 }
