@@ -88,7 +88,13 @@ SHORT_TLS=$(server_block 4 "$FINAL_CONFIG")
 
 [[ "$SHORT_HTTP" == *'listen 80;'* && "$SHORT_HTTP" == *'server_name r.morefreeze.top;'* ]] || fail 'third server must be short-host HTTP'
 [[ "$SHORT_HTTP" == *'access_log off;'* ]] || fail 'short-host HTTP must not log bearer-bearing redirect URLs'
-[[ "$SHORT_HTTP" == *'return 301 https://$host$request_uri;'* ]] || fail 'short-host HTTP must redirect to TLS'
+[[ "$SHORT_HTTP" == *'location ^~ /.well-known/acme-challenge/ {'* && "$SHORT_HTTP" == *'root /var/www/html;'* ]] || fail 'short-host HTTP must serve ACME renewal challenges from the webroot'
+[[ "$SHORT_HTTP" == *'location / {'* && "$SHORT_HTTP" == *'return 301 https://$host$request_uri;'* ]] || fail 'all non-ACME short-host HTTP paths must redirect to TLS'
+short_http_location_count=$(printf '%s\n' "$SHORT_HTTP" | grep -c '^[[:space:]]*location ')
+[ "$short_http_location_count" -eq 2 ] || fail "short-host HTTP must contain only ACME and redirect locations (got $short_http_location_count)"
+if printf '%s\n' "$SHORT_HTTP" | grep -Fqx '    return 301 https://$host$request_uri;'; then
+  fail 'short-host HTTP must not redirect ACME challenges at server scope'
+fi
 [[ "$SHORT_HTTP" != *'proxy_pass'* ]] || fail 'short-host HTTP must not proxy'
 
 [[ "$SHORT_TLS" == *'listen 443 ssl http2;'* && "$SHORT_TLS" == *'server_name r.morefreeze.top;'* ]] || fail 'fourth server must be short-host TLS'
