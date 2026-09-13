@@ -1,8 +1,11 @@
 package config
 
 import (
+	"errors"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -88,7 +91,8 @@ type ExploreConfig struct {
 }
 
 type ShareConfig struct {
-	Secret string
+	Secret      string
+	ShortOrigin string
 }
 
 func Load() *Config {
@@ -140,9 +144,20 @@ func Load() *Config {
 			FetchConcurrency: getEnvIntBounded("EXPLORE_FETCH_CONCURRENCY", 5, 1, 5),
 		},
 		Share: ShareConfig{
-			Secret: getEnv("SHARE_SECRET", ""),
+			Secret:      getEnv("SHARE_SECRET", ""),
+			ShortOrigin: getEnv("SHORT_SHARE_ORIGIN", ""),
 		},
 	}
+}
+
+func ValidateShortShareOrigin(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.Hostname() == "" ||
+		u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil ||
+		u.Opaque != "" || u.ForceQuery || strings.Contains(raw, "#") {
+		return "", errors.New("SHORT_SHARE_ORIGIN must be an HTTPS origin without path, query, fragment, or credentials")
+	}
+	return raw, nil
 }
 
 func getEnv(key, defaultValue string) string {
