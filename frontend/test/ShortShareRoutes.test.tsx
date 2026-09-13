@@ -74,7 +74,9 @@ describe('short-share hostname routing', () => {
     expect(privateAPIMocks.getMe).not.toHaveBeenCalled()
 
     const useRSSPal = screen.getByRole('link', { name: '使用 RSS Pal' })
-    expect(useRSSPal.getAttribute('href')).toBe('https://rss.morefreeze.top/login?intent=use')
+    expect(useRSSPal.getAttribute('href')).toBe(
+      'https://rss.morefreeze.top/login?intent=use&return_to=%2Farticles',
+    )
     const shareToX = screen.getByRole('link', { name: '分享到 X' })
     const post = new URL(shareToX.getAttribute('href')!).searchParams.get('text')
     expect(post).toContain('https://r.morefreeze.top/Aa0000000000')
@@ -87,6 +89,9 @@ describe('short-share hostname routing', () => {
     `/${'A'.repeat(11)}`,
     `/${'A'.repeat(13)}`,
     '/Aa00000_0000',
+    '/Aa0000000000/',
+    '/Aa0000000000//',
+    '/Aa0000000000//extra',
     '/Aa0000000000/extra',
     '/share/Aa0000000000',
     '/login',
@@ -129,5 +134,22 @@ describe('short-share hostname routing', () => {
     expect(axiosMock.get).toHaveBeenCalledWith('/api/s/Bb1111111111', {
       signal: expect.any(AbortSignal),
     })
+  })
+
+  it.each([
+    '/Aa0000000000/',
+    '/Aa0000000000//',
+    '/Aa0000000000//extra',
+  ])('rejects a non-exact raw pathname under MemoryRouter: %s', async path => {
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot() })
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <ShortShareRoutes />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('分享链接无效或已过期')).toBeTruthy()
+    expect(axiosMock.get).not.toHaveBeenCalled()
+    expect(privateAPIMocks.getMe).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { isLoggedIn, getMe, getUser } from './api/client'
 import { clearPrivateSessionState } from './api/privateSession'
@@ -39,10 +39,16 @@ const invalidShareElement = (
   <div className="public-reader-state card">分享链接无效或已过期</div>
 )
 
+function ExactShortShareRoute() {
+  const { pathname } = useLocation()
+  if (!/^\/[0-9A-Za-z]{12}$/.test(pathname)) return invalidShareElement
+  return <SharePage kind="short" />
+}
+
 export function ShortShareRoutes() {
   return (
     <Routes>
-      <Route path="/:shortCode" element={<SharePage kind="short" />} />
+      <Route path="/:shortCode" element={<ExactShortShareRoute />} />
       <Route path="*" element={invalidShareElement} />
     </Routes>
   )

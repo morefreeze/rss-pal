@@ -137,7 +137,7 @@ describe('SharePage public reader', () => {
 
     await screen.findByRole('link', { name: '使用 RSS Pal' })
     expect(screen.getByRole('link', { name: '使用 RSS Pal' }).getAttribute('href')).toBe(
-      'https://rss.morefreeze.top/login?intent=use',
+      'https://rss.morefreeze.top/login?intent=use&return_to=%2Farticles',
     )
     expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
       'https://rss.morefreeze.top/login?intent=subscribe&source=https%3A%2F%2Fsource.example%2Fpost%3Ffrom%3Dshare',

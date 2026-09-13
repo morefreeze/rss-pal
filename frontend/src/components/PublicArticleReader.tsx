@@ -144,6 +144,11 @@ function subscribeHref(source: string | null): string {
     : `${MAIN_SITE_ORIGIN}/login?intent=subscribe`
 }
 
+function useRSSPalHref(): string {
+  const intent = { kind: 'use', returnTo: '/articles' } as const
+  return `${MAIN_SITE_ORIGIN}/login${authSearch(intent)}&return_to=${encodeURIComponent(intent.returnTo)}`
+}
+
 function PublicMedia({ article, sourceURL }: ArticleProps & { sourceURL: string | null }) {
   if (!article.media_url) return null
   const mediaURL = safePublicMediaURL(article.media_url)
@@ -236,7 +241,7 @@ export default function PublicArticleReader({ article, shareURL }: Props) {
       <footer className="public-reader-footer">
         <span className="text-muted">由 RSS Pal 提供</span>
         <div className="public-reader-ctas">
-          <a href={`${MAIN_SITE_ORIGIN}/login${authSearch({ kind: 'use', returnTo: '/articles' })}`}>使用 RSS Pal</a>
+          <a href={useRSSPalHref()}>使用 RSS Pal</a>
           <a href={subscribeHref(sourceURL)}>订阅原始来源</a>
         </div>
       </footer>
