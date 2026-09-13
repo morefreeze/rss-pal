@@ -29,6 +29,25 @@ export interface User {
   is_admin: boolean
 }
 
+export const SHORT_SHARE_HOSTNAME = 'r.morefreeze.top'
+
+export function isShortShareHostname(hostname: string): boolean {
+  return hostname.toLowerCase().replace(/\.$/, '') === SHORT_SHARE_HOSTNAME
+}
+
+const invalidShareElement = (
+  <div className="public-reader-state card">分享链接无效或已过期</div>
+)
+
+export function ShortShareRoutes() {
+  return (
+    <Routes>
+      <Route path="/:shortCode" element={<SharePage kind="short" />} />
+      <Route path="*" element={invalidShareElement} />
+    </Routes>
+  )
+}
+
 function RequireAuth({ user, onLogout }: { user: User | null; onLogout: () => void }) {
   const loggedIn = isLoggedIn()
   // Mounted here rather than on the article list alone: the costliest case is
@@ -83,7 +102,7 @@ export function AppRoutes({
   )
 }
 
-function App() {
+export function MainSiteApp() {
   // Hydrate from the locally cached user so a flaky network on boot doesn't
   // log the user out — the JWT in localStorage is still valid, and the 401
   // path is already handled by the response interceptor in api/client.
@@ -111,6 +130,18 @@ function App() {
       <AppRoutes user={user} onLogin={setUser} onLogout={handleLogout} />
     </BrowserRouter>
   )
+}
+
+function App() {
+  if (isShortShareHostname(window.location.hostname)) {
+    return (
+      <BrowserRouter>
+        <ShortShareRoutes />
+      </BrowserRouter>
+    )
+  }
+
+  return <MainSiteApp />
 }
 
 export default App

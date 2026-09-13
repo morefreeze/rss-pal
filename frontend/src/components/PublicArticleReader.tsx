@@ -25,7 +25,15 @@ export interface SharedArticleSnapshot {
   snapshotted_at: string
 }
 
-type Props = { article: SharedArticleSnapshot }
+type ArticleProps = {
+  article: SharedArticleSnapshot
+}
+
+type Props = ArticleProps & {
+  shareURL: string
+}
+
+const MAIN_SITE_ORIGIN = 'https://rss.morefreeze.top'
 
 function formatDate(value?: string | null): string {
   if (!value) return ''
@@ -129,17 +137,14 @@ function normalizedVideoType(mediaType?: string): string {
 }
 
 function subscribeHref(source: string | null): string {
-  if (!source) return '/login?intent=subscribe'
+  if (!source) return `${MAIN_SITE_ORIGIN}/login?intent=subscribe`
   const intent = parseAuthIntent(`?intent=subscribe&source=${encodeURIComponent(source)}`)
-  return intent.kind === 'subscribe' ? `/login${authSearch(intent)}` : '/login?intent=subscribe'
+  return intent.kind === 'subscribe'
+    ? `${MAIN_SITE_ORIGIN}/login${authSearch(intent)}`
+    : `${MAIN_SITE_ORIGIN}/login?intent=subscribe`
 }
 
-function currentPublicShareURL(): string | null {
-  if (typeof window === 'undefined' || !window.location.pathname.startsWith('/share/')) return null
-  return `${window.location.origin}${window.location.pathname}`
-}
-
-function PublicMedia({ article, sourceURL }: Props & { sourceURL: string | null }) {
+function PublicMedia({ article, sourceURL }: ArticleProps & { sourceURL: string | null }) {
   if (!article.media_url) return null
   const mediaURL = safePublicMediaURL(article.media_url)
   const mediaType = normalizedVideoType(article.media_type)
@@ -168,18 +173,15 @@ function PublicMedia({ article, sourceURL }: Props & { sourceURL: string | null 
   )
 }
 
-export default function PublicArticleReader({ article }: Props) {
+export default function PublicArticleReader({ article, shareURL }: Props) {
   const published = formatDate(article.published_at)
   const sourceURL = safePublicSourceURL(article.url)
-  const shareURL = currentPublicShareURL()
-  const xIntentURL = shareURL
-    ? buildXIntentURL(buildXPostText({
-      title: article.title,
-      summaryBrief: article.summary_brief,
-      summaryDetailed: article.summary_detailed,
-      shareURL,
-    }))
-    : null
+  const xIntentURL = buildXIntentURL(buildXPostText({
+    title: article.title,
+    summaryBrief: article.summary_brief,
+    summaryDetailed: article.summary_detailed,
+    shareURL,
+  }))
   return (
     <main className="public-reader">
       <header className="public-reader-brand">
@@ -224,19 +226,17 @@ export default function PublicArticleReader({ article }: Props) {
               </a>
             )
             : <span className="text-muted">原文链接不可用</span>}
-          {xIntentURL && (
-            <a className="public-reader-x-cta" href={xIntentURL} target="_blank" rel="noopener noreferrer">
-              <span aria-hidden="true">𝕏</span>
-              <span>分享到 X</span>
-            </a>
-          )}
+          <a className="public-reader-x-cta" href={xIntentURL} target="_blank" rel="noopener noreferrer">
+            <span aria-hidden="true">𝕏</span>
+            <span>分享到 X</span>
+          </a>
         </section>
       </article>
 
       <footer className="public-reader-footer">
         <span className="text-muted">由 RSS Pal 提供</span>
         <div className="public-reader-ctas">
-          <a href={`/login${authSearch({ kind: 'use', returnTo: '/articles' })}`}>使用 RSS Pal</a>
+          <a href={`${MAIN_SITE_ORIGIN}/login${authSearch({ kind: 'use', returnTo: '/articles' })}`}>使用 RSS Pal</a>
           <a href={subscribeHref(sourceURL)}>订阅原始来源</a>
         </div>
       </footer>

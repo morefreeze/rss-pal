@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import axios from 'axios'
 import PublicArticleReader, { type SharedArticleSnapshot } from '../components/PublicArticleReader'
 
@@ -68,8 +68,16 @@ function releaseShareHead(id: symbol) {
   managedReferrerMeta = null
 }
 
-export default function SharePage() {
-  const { token } = useParams<{ token: string }>()
+type SharePageProps = {
+  kind?: 'long' | 'short'
+}
+
+const SHORT_CODE_RE = /^[0-9A-Za-z]{12}$/
+
+export default function SharePage({ kind = 'long' }: SharePageProps) {
+  const { token, shortCode } = useParams<{ token: string; shortCode: string }>()
+  const location = useLocation()
+  const shareID = kind === 'short' ? shortCode : token
   const [article, setArticle] = useState<SharedArticleSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<LoadError>(null)
@@ -93,7 +101,7 @@ export default function SharePage() {
     setError(null)
     setShareHeadTitle(headOwnerRef.current, 'RSS Pal')
 
-    if (!token) {
+    if (!shareID || (kind === 'short' && !SHORT_CODE_RE.test(shareID))) {
       setLoading(false)
       setError('unavailable')
       return () => {
@@ -102,7 +110,10 @@ export default function SharePage() {
       }
     }
 
-    axios.get<SharedArticleSnapshot>(`/api/share/${encodeURIComponent(token)}`, { signal: controller.signal })
+    const endpoint = kind === 'short'
+      ? `/api/s/${shareID}`
+      : `/api/share/${encodeURIComponent(shareID)}`
+    axios.get<SharedArticleSnapshot>(endpoint, { signal: controller.signal })
       .then(response => {
         if (!current || controller.signal.aborted) return
         setArticle(response.data)
@@ -122,7 +133,7 @@ export default function SharePage() {
       current = false
       controller.abort()
     }
-  }, [attempt, token])
+  }, [attempt, kind, shareID])
 
   if (loading) {
     return <div className="public-reader-state card" aria-live="polite">加载中...</div>
@@ -141,5 +152,10 @@ export default function SharePage() {
     )
   }
 
-  return <PublicArticleReader article={article} />
+  return (
+    <PublicArticleReader
+      article={article}
+      shareURL={`${window.location.origin}${location.pathname}`}
+    />
+  )
 }

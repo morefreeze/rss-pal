@@ -17,16 +17,35 @@ describe('MarkdownArticle article anchors', () => {
     const token = 'v1_00000000000000000000000000000001_kVCen8vHGjySlZF_mC5N22Bs13LHqfgxBbnHY7Botcg'
     const valid = `/api/share/${token}/assets/3.jpeg`
     const legacy = '/api/share/aB3dE6gH/assets/9.png'
-    const invalid = '/api/share/v1_0123456789abcdef_signature/assets/3.jpeg'
+    const short = '/api/s/Aa0000000000/assets/7.jpg'
+    const invalid = [
+      '/api/share/v1_0123456789abcdef_signature/assets/3.jpeg',
+      `/api/s/${'A'.repeat(11)}/assets/1.png`,
+      `/api/s/${'A'.repeat(13)}/assets/1.png`,
+      '/api/s/Aa00000_0000/assets/1.png',
+      '/api/s/Aa0000000000/extra/assets/1.png',
+      'https://images.example/path/api/s/Aa0000000000/assets/1.png',
+    ]
     const { container } = render(
-      <MarkdownArticle source={`![shared](${valid})\n\n![legacy](${legacy})\n\n![invalid](${invalid})`} readOnly />,
+      <MarkdownArticle
+        source={[
+          `![shared](${valid})`,
+          `![legacy](${legacy})`,
+          `![short](${short})`,
+          ...invalid.map((url, index) => `![invalid-${index}](${url})`),
+        ].join('\n\n')}
+        readOnly
+      />,
     )
 
     expect(container.querySelector('img[alt="shared"]')?.getAttribute('src')).toBe(valid)
     expect(container.querySelector('img[alt="legacy"]')?.getAttribute('src')).toBe(legacy)
-    expect(container.querySelector('img[alt="invalid"]')?.getAttribute('src')).toBe(
-      `/api/proxy/image?url=${encodeURIComponent(invalid)}`,
-    )
+    expect(container.querySelector('img[alt="short"]')?.getAttribute('src')).toBe(short)
+    invalid.forEach((url, index) => {
+      expect(container.querySelector(`img[alt="invalid-${index}"]`)?.getAttribute('src')).toBe(
+        `/api/proxy/image?url=${encodeURIComponent(url)}`,
+      )
+    })
   })
 
   it('keeps authenticated interaction by default but disables it in read-only mode', () => {

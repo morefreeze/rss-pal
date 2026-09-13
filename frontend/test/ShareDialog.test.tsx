@@ -122,20 +122,25 @@ describe('ShareDialog', () => {
     expect(screen.queryByText('stale')).toBeNull()
   })
 
-  it('creates a permanent link, absolutizes it, copies it, and keeps the dialog open', async () => {
-    const created = activeShare('new-id', '/share/signed')
+  it('creates a permanent short-domain link, copies it unchanged, and keeps it for the owner X intent', async () => {
+    const shortURL = 'https://r.morefreeze.top/Aa0000000000'
+    const created = activeShare('new-id', shortURL)
     apiMocks.createArticleShare.mockResolvedValue(created)
     const user = userEvent.setup()
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     renderShareDialog()
 
     await user.click(await screen.findByRole('button', { name: '创建新链接' }))
     expect(apiMocks.createArticleShare).toHaveBeenCalledWith(42, null)
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(
-      new URL('/share/signed', window.location.origin).toString(),
-    ))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(shortURL))
     expect(screen.getByText('new-id')).toBeTruthy()
     expect(screen.getByRole('dialog')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '分享到 X' }))
+
+    const intent = new URL(String(open.mock.calls[0][0]))
+    expect(intent.searchParams.get('url')).toBe(shortURL)
+    open.mockRestore()
   })
 
   it('creates 7-day and 30-day links with future ISO expiries', async () => {

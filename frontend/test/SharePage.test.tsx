@@ -43,12 +43,20 @@ function NavigateToFresh() {
   )
 }
 
-function renderSharePage(path = '/share/v1_token', withNavigator = false, strict = false) {
+function renderSharePage(
+  path = '/share/v1_token',
+  withNavigator = false,
+  strict = false,
+  kind: 'long' | 'short' = 'long',
+) {
   const tree = (
     <MemoryRouter initialEntries={[path]}>
       {withNavigator && <NavigateToFresh />}
       <Routes>
-        <Route path="/share/:token" element={<SharePage />} />
+        <Route
+          path={kind === 'short' ? '/:shortCode' : '/share/:token'}
+          element={<SharePage kind={kind} />}
+        />
       </Routes>
     </MemoryRouter>
   )
@@ -104,9 +112,11 @@ describe('SharePage public reader', () => {
     renderSharePage('/share/token%2Fwith%20spaces')
 
     await screen.findByRole('link', { name: '使用 RSS Pal' })
-    expect(screen.getByRole('link', { name: '使用 RSS Pal' }).getAttribute('href')).toBe('/login?intent=use')
+    expect(screen.getByRole('link', { name: '使用 RSS Pal' }).getAttribute('href')).toBe(
+      'https://rss.morefreeze.top/login?intent=use',
+    )
     expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
-      '/login?intent=subscribe&source=https%3A%2F%2Fsource.example%2Fpost%3Ffrom%3Dshare',
+      'https://rss.morefreeze.top/login?intent=subscribe&source=https%3A%2F%2Fsource.example%2Fpost%3Ffrom%3Dshare',
     )
     expect(axiosMock.get).toHaveBeenCalledWith('/api/share/token%2Fwith%20spaces', { signal: expect.any(AbortSignal) })
   })
@@ -152,7 +162,7 @@ describe('SharePage public reader', () => {
 
     expect((await screen.findByRole('link', { name: '阅读原文' })).getAttribute('href')).toBe(articleURL)
     expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
-      `/login?intent=subscribe&source=${encodeURIComponent(articleURL)}`,
+      `https://rss.morefreeze.top/login?intent=subscribe&source=${encodeURIComponent(articleURL)}`,
     )
     expect(container.textContent).not.toContain(feedURL)
     expect(container.textContent).not.toContain('editor-note-secret')
@@ -186,7 +196,7 @@ describe('SharePage public reader', () => {
     expect(screen.queryByRole('link', { name: '阅读原文' })).toBeNull()
     expect(screen.queryByRole('link', { name: '前往原网站播放' })).toBeNull()
     expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
-      '/login?intent=subscribe',
+      'https://rss.morefreeze.top/login?intent=subscribe',
     )
   })
 
@@ -198,7 +208,7 @@ describe('SharePage public reader', () => {
       'HTTPS://source.example/post',
     )
     expect(screen.getByRole('link', { name: '订阅原始来源' }).getAttribute('href')).toBe(
-      `/login?intent=subscribe&source=${encodeURIComponent('HTTPS://source.example/post')}`,
+      `https://rss.morefreeze.top/login?intent=subscribe&source=${encodeURIComponent('HTTPS://source.example/post')}`,
     )
   })
 
@@ -207,14 +217,14 @@ describe('SharePage public reader', () => {
     renderSharePage()
 
     const subscribe = await screen.findByRole('link', { name: '订阅原始来源' })
-    expect(subscribe.getAttribute('href')).toBe('/login?intent=subscribe')
+    expect(subscribe.getAttribute('href')).toBe('https://rss.morefreeze.top/login?intent=subscribe')
   })
 
   it('limits the encoded subscription source and does not double-encode a normal source', async () => {
     axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ url: `https://source.example/${'中'.repeat(2000)}` }) })
     const oversized = renderSharePage()
     expect((await screen.findByRole('link', { name: '订阅原始来源' })).getAttribute('href')).toBe(
-      '/login?intent=subscribe',
+      'https://rss.morefreeze.top/login?intent=subscribe',
     )
     oversized.unmount()
 
@@ -222,7 +232,7 @@ describe('SharePage public reader', () => {
     renderSharePage()
     const normal = await screen.findByRole('link', { name: '订阅原始来源' })
     expect(normal.getAttribute('href')).toBe(
-      `/login?intent=subscribe&source=${encodeURIComponent('https://source.example/文章?q=阅读')}`,
+      `https://rss.morefreeze.top/login?intent=subscribe&source=${encodeURIComponent('https://source.example/文章?q=阅读')}`,
     )
     expect(normal.getAttribute('href')).not.toContain('%25E6')
   })
@@ -353,6 +363,31 @@ describe('SharePage public reader', () => {
     expect(privateAPIMocks.recordReadDuration).not.toHaveBeenCalled()
     expect(privateAPIMocks.getArticleTags).not.toHaveBeenCalled()
     expect(privateAPIMocks.recordExploreArticleEvent).not.toHaveBeenCalled()
+  })
+
+  it('loads one exact short code from the short API and keeps the short URL for X', async () => {
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot() })
+    renderSharePage('/Aa0000000000?utm_source=bad#article-section-001', false, false, 'short')
+
+    const shareToX = await screen.findByRole('link', { name: '分享到 X' })
+    expect(axiosMock.get).toHaveBeenCalledWith('/api/s/Aa0000000000', {
+      signal: expect.any(AbortSignal),
+    })
+    const post = new URL(shareToX.getAttribute('href')!).searchParams.get('text')!
+    expect(post).toContain(`${window.location.origin}/Aa0000000000`)
+    expect(post).not.toContain('utm_source')
+    expect(post).not.toContain('article-section')
+  })
+
+  it.each([
+    'A'.repeat(11),
+    'A'.repeat(13),
+    'Aa00000_0000',
+  ])('rejects an invalid short code before making a request: %s', async shortCode => {
+    renderSharePage(`/${shortCode}`, false, false, 'short')
+
+    expect(await screen.findByText('分享链接无效或已过期')).toBeTruthy()
+    expect(axiosMock.get).not.toHaveBeenCalled()
   })
 
   it('shows the exact unavailable message without retry for a 404', async () => {
