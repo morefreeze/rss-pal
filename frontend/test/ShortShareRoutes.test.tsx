@@ -89,6 +89,9 @@ describe('short-share hostname routing', () => {
     '/Aa00000_0000',
     '/Aa0000000000/extra',
     '/share/Aa0000000000',
+    '/login',
+    '/articles',
+    '/api/health',
   ])('rejects every short-domain path outside one exact 12-character code: %s', async path => {
     window.history.replaceState({}, '', path)
     axiosMock.get.mockResolvedValue({ data: sharedSnapshot() })

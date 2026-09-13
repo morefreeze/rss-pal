@@ -33,12 +33,36 @@ function sharedSnapshot(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function NavigateToFresh() {
+type ShareKind = 'long' | 'short'
+
+const LIFECYCLE_CASES: Array<{
+  kind: ShareKind
+  initial: string
+  first: string
+  second: string
+}> = [
+  {
+    kind: 'long',
+    initial: '/share/stale_token',
+    first: '/share/first',
+    second: '/share/second',
+  },
+  {
+    kind: 'short',
+    initial: '/Aa0000000000',
+    first: '/Dd3333333333',
+    second: '/Ee4444444444',
+  },
+]
+
+function NavigateToFresh({ kind }: { kind: ShareKind }) {
   const navigate = useNavigate()
+  const freshPath = kind === 'short' ? '/Bb1111111111' : '/share/fresh_token'
+  const missingPath = kind === 'short' ? '/Cc2222222222' : '/share/missing_token'
   return (
     <>
-      <button onClick={() => navigate('/share/fresh_token')}>next token</button>
-      <button onClick={() => navigate('/share/missing_token')}>missing token</button>
+      <button onClick={() => navigate(freshPath)}>next token</button>
+      <button onClick={() => navigate(missingPath)}>missing token</button>
     </>
   )
 }
@@ -47,11 +71,11 @@ function renderSharePage(
   path = '/share/v1_token',
   withNavigator = false,
   strict = false,
-  kind: 'long' | 'short' = 'long',
+  kind: ShareKind = 'long',
 ) {
   const tree = (
     <MemoryRouter initialEntries={[path]}>
-      {withNavigator && <NavigateToFresh />}
+      {withNavigator && <NavigateToFresh kind={kind} />}
       <Routes>
         <Route
           path={kind === 'short' ? '/:shortCode' : '/share/:token'}
@@ -390,35 +414,35 @@ describe('SharePage public reader', () => {
     expect(axiosMock.get).not.toHaveBeenCalled()
   })
 
-  it('shows the exact unavailable message without retry for a 404', async () => {
+  it.each(LIFECYCLE_CASES)('shows the exact unavailable message without retry for a $kind 404', async ({ kind, initial }) => {
     axiosMock.get.mockRejectedValue({ response: { status: 404 } })
-    renderSharePage('/share/missing')
+    renderSharePage(initial, false, false, kind)
 
     expect(await screen.findByText('分享链接无效或已过期')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
   })
 
-  it.each([
-    new Error('network'),
-    { response: { status: 500 } },
-  ])('offers retry after a retryable failure and can recover', async error => {
+  it.each(LIFECYCLE_CASES.flatMap(({ kind, initial }) => [
+    { kind, initial, failure: 'network', error: new Error('network') },
+    { kind, initial, failure: '500', error: { response: { status: 500 } } },
+  ]))('offers retry after a $kind $failure failure and can recover', async ({ kind, initial, error }) => {
     axiosMock.get
       .mockRejectedValueOnce(error)
       .mockResolvedValueOnce({ data: sharedSnapshot() })
-    renderSharePage()
+    renderSharePage(initial, false, false, kind)
 
     fireEvent.click(await screen.findByRole('button', { name: '重试' }))
     expect(await screen.findByRole('heading', { name: 'Shared title' })).toBeTruthy()
     expect(axiosMock.get).toHaveBeenCalledTimes(2)
   })
 
-  it('does not let a stale token response replace the newer snapshot', async () => {
+  it.each(LIFECYCLE_CASES)('does not let a stale $kind response replace the newer snapshot', async ({ kind, initial }) => {
     const stale = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
     const fresh = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
     axiosMock.get
       .mockReturnValueOnce(stale.promise)
       .mockReturnValueOnce(fresh.promise)
-    renderSharePage('/share/stale_token', true)
+    renderSharePage(initial, true, false, kind)
 
     fireEvent.click(screen.getByRole('button', { name: 'next token' }))
     fresh.resolve({ data: sharedSnapshot({ title: 'Fresh title' }) })
@@ -430,13 +454,13 @@ describe('SharePage public reader', () => {
     expect(screen.getByRole('heading', { name: 'Fresh title' })).toBeTruthy()
   })
 
-  it('aborts an obsolete request without showing retry state', async () => {
+  it.each(LIFECYCLE_CASES)('aborts an obsolete $kind request without showing retry state', async ({ kind, initial }) => {
     const obsolete = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
     const fresh = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
     axiosMock.get
       .mockReturnValueOnce(obsolete.promise)
       .mockReturnValueOnce(fresh.promise)
-    renderSharePage('/share/obsolete_token', true)
+    renderSharePage(initial, true, false, kind)
     const obsoleteSignal = axiosMock.get.mock.calls[0]?.[1]?.signal as AbortSignal | undefined
 
     fireEvent.click(screen.getByRole('button', { name: 'next token' }))
@@ -449,7 +473,7 @@ describe('SharePage public reader', () => {
     expect(await screen.findByRole('heading', { name: 'Fresh after cancel' })).toBeTruthy()
   })
 
-  it('uses a reentrant head lease across two mounted share pages and restores every original meta', async () => {
+  it.each(LIFECYCLE_CASES)('uses a reentrant head lease across two mounted $kind share pages and restores every original meta', async ({ kind, first: firstPath, second: secondPath }) => {
     document.title = 'Original title'
     const firstMeta = document.createElement('meta')
     firstMeta.name = 'referrer'
@@ -461,8 +485,8 @@ describe('SharePage public reader', () => {
       .mockResolvedValueOnce({ data: sharedSnapshot({ title: 'First owner' }) })
       .mockResolvedValueOnce({ data: sharedSnapshot({ title: 'Second owner' }) })
 
-    const first = renderSharePage('/share/first')
-    const second = renderSharePage('/share/second')
+    const first = renderSharePage(firstPath, false, false, kind)
+    const second = renderSharePage(secondPath, false, false, kind)
     await waitFor(() => expect(document.title).toBe('Second owner - RSS Pal'))
     expect(firstMeta.content).toBe('no-referrer')
     expect(secondMeta.content).toBe('no-referrer')
@@ -478,11 +502,11 @@ describe('SharePage public reader', () => {
     expect(secondMeta.hasAttribute('content')).toBe(false)
   })
 
-  it('resets a loaded article title when navigation starts and keeps it generic after 404', async () => {
+  it.each(LIFECYCLE_CASES)('resets a loaded $kind article title when navigation starts and keeps it generic after 404', async ({ kind, initial }) => {
     axiosMock.get
       .mockResolvedValueOnce({ data: sharedSnapshot({ title: 'Previous article' }) })
       .mockRejectedValueOnce({ response: { status: 404 } })
-    renderSharePage('/share/previous', true)
+    renderSharePage(initial, true, false, kind)
     await waitFor(() => expect(document.title).toBe('Previous article - RSS Pal'))
 
     fireEvent.click(screen.getByRole('button', { name: 'missing token' }))
@@ -491,11 +515,11 @@ describe('SharePage public reader', () => {
     expect(document.title).toBe('RSS Pal')
   })
 
-  it('keeps the head lease balanced and aborts pending work under StrictMode', async () => {
+  it.each(LIFECYCLE_CASES)('keeps the $kind head lease balanced and aborts pending work under StrictMode', async ({ kind, initial }) => {
     document.title = 'Strict baseline'
     const pending = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
     axiosMock.get.mockReturnValue(pending.promise)
-    const view = renderSharePage('/share/strict', false, true)
+    const view = renderSharePage(initial, false, true, kind)
     const calls = axiosMock.get.mock.calls
     const activeSignal = calls[calls.length - 1]?.[1]?.signal as AbortSignal | undefined
 
@@ -525,7 +549,7 @@ describe('SharePage public reader', () => {
     expect(container.querySelector('audio[src^="file:"],video[src^="file:"],iframe[src^="file:"]')).toBeNull()
   })
 
-  it('installs no-referrer metadata and restores an existing value plus the document title', async () => {
+  it.each(LIFECYCLE_CASES)('installs $kind no-referrer metadata and restores an existing value plus the document title', async ({ kind, initial }) => {
     const meta = document.createElement('meta')
     meta.name = 'referrer'
     meta.content = 'origin'
@@ -533,7 +557,7 @@ describe('SharePage public reader', () => {
     document.title = 'Before share'
     axiosMock.get.mockResolvedValue({ data: sharedSnapshot() })
 
-    const view = renderSharePage()
+    const view = renderSharePage(initial, false, false, kind)
     await waitFor(() => expect(document.title).toBe('Shared title - RSS Pal'))
     expect(meta.content).toBe('no-referrer')
 
@@ -543,12 +567,12 @@ describe('SharePage public reader', () => {
     expect(meta.content).toBe('origin')
   })
 
-  it('removes a created referrer element and ignores a late response after unmount', async () => {
+  it.each(LIFECYCLE_CASES)('removes a created $kind referrer element and ignores a late response after unmount', async ({ kind, initial }) => {
     const response = deferred<{ data: ReturnType<typeof sharedSnapshot> }>()
     axiosMock.get.mockReturnValue(response.promise)
     document.title = 'Before late response'
 
-    const view = renderSharePage()
+    const view = renderSharePage(initial, false, false, kind)
     expect(document.querySelector('meta[name="referrer"]')?.getAttribute('content')).toBe('no-referrer')
     view.unmount()
     expect(document.querySelector('meta[name="referrer"]')).toBeNull()
