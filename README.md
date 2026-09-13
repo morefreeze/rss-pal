@@ -107,7 +107,7 @@ npm run dev   # 开发模式，代理到 :8080
 | `AUTH_PASSWORD` | `admin` | 管理员初始密码 |
 | `JWT_SECRET` | — | JWT 签名密钥（**生产环境必须设置**） |
 | `SHARE_SECRET` | — | 分享链接签名密钥；必须至少 32 bytes，并与 `JWT_SECRET` 独立设置 |
-| `SHORT_SHARE_ORIGIN` | `https://r.morefreeze.top` | 永久短分享链接的公开来源；生产值不要带尾斜杠 |
+| `SHORT_SHARE_ORIGIN` | —（必填） | 永久短分享链接的公开来源；示例：`https://r.morefreeze.top`，生产值不要带尾斜杠 |
 
 ## 云服务器部署（生产环境）
 

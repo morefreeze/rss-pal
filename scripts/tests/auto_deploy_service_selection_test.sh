@@ -114,4 +114,57 @@ configure_compose_files
 }
 cd "$ORIGINAL_DIR"
 
+COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+WORKFLOW_FILE="$ROOT_DIR/.github/workflows/deploy-tencent.yml"
+README_FILE="$ROOT_DIR/README.md"
+
+status_migrate_block=$(sed -n '/^  status-migrate:$/,/^  api:$/p' "$COMPOSE_FILE")
+[[ "$status_migrate_block" == *'/migrations/041_article_share_short_codes.sql'* ]] || {
+  echo "FAIL: status-migrate does not execute migration 041" >&2
+  exit 1
+}
+
+required_short_origin='SHORT_SHARE_ORIGIN: ${SHORT_SHARE_ORIGIN:?SHORT_SHARE_ORIGIN required in .env}'
+short_origin_count=$(grep -Fc -- "$required_short_origin" "$COMPOSE_FILE" || true)
+[ "$short_origin_count" -eq 1 ] || {
+  echo "FAIL: required SHORT_SHARE_ORIGIN must appear exactly once, got $short_origin_count" >&2
+  exit 1
+}
+all_short_origin_count=$(grep -Ec '^[[:space:]]+SHORT_SHARE_ORIGIN:' "$COMPOSE_FILE" || true)
+[ "$all_short_origin_count" -eq 1 ] || {
+  echo "FAIL: SHORT_SHARE_ORIGIN must be injected only once, got $all_short_origin_count" >&2
+  exit 1
+}
+api_block=$(sed -n '/^  api:$/,/^  worker:$/p' "$COMPOSE_FILE")
+[[ "$api_block" == *"$required_short_origin"* ]] || {
+  echo "FAIL: required SHORT_SHARE_ORIGIN is not scoped to the API service" >&2
+  exit 1
+}
+
+short_curl_count=0
+while IFS= read -r short_curl; do
+  [ -z "$short_curl" ] && continue
+  short_curl_count=$((short_curl_count + 1))
+  [[ "$short_curl" == *"curl --noproxy '*'"* ]] || {
+    echo "FAIL: short-domain curl is not explicitly direct: $short_curl" >&2
+    exit 1
+  }
+done <<EOF_SHORT_CURLS
+$(grep -F -- '--resolve r.morefreeze.top:443:192.144.171.125' "$WORKFLOW_FILE" || true)
+EOF_SHORT_CURLS
+[ "$short_curl_count" -eq 3 ] || {
+  echo "FAIL: expected three short-domain curl gates, got $short_curl_count" >&2
+  exit 1
+}
+
+short_origin_readme_row=$(grep -F -- '| `SHORT_SHARE_ORIGIN` |' "$README_FILE" || true)
+[[ "$short_origin_readme_row" == *'| —（必填） |'* ]] || {
+  echo "FAIL: README must mark SHORT_SHARE_ORIGIN required without a default" >&2
+  exit 1
+}
+[[ "$short_origin_readme_row" == *'示例：`https://r.morefreeze.top`'* ]] || {
+  echo "FAIL: README must show r.morefreeze.top as an example value" >&2
+  exit 1
+}
+
 echo "PASS: deploy service selection is scoped by changed paths"
