@@ -74,6 +74,7 @@ SHORT_HTTP=$(server_block 3 "$FINAL_CONFIG")
 SHORT_TLS=$(server_block 4 "$FINAL_CONFIG")
 
 [[ "$MAIN_HTTP" == *'listen 80;'* && "$MAIN_HTTP" == *'server_name rss.morefreeze.top;'* ]] || fail 'first server must be primary-host HTTP'
+[[ "$MAIN_HTTP" == *'access_log off;'* ]] || fail 'primary-host HTTP must not log bearer-bearing redirect URLs'
 [[ "$MAIN_HTTP" == *'return 301 https://$host$request_uri;'* ]] || fail 'primary-host HTTP must redirect to TLS'
 [[ "$MAIN_HTTP" != *'proxy_pass'* ]] || fail 'primary-host HTTP must not proxy'
 
@@ -86,6 +87,7 @@ SHORT_TLS=$(server_block 4 "$FINAL_CONFIG")
 [[ "$MAIN_TLS" == *'ssl_certificate_key /etc/letsencrypt/live/rss.morefreeze.top/privkey.pem;'* ]] || fail 'primary-host TLS must use its existing private key'
 
 [[ "$SHORT_HTTP" == *'listen 80;'* && "$SHORT_HTTP" == *'server_name r.morefreeze.top;'* ]] || fail 'third server must be short-host HTTP'
+[[ "$SHORT_HTTP" == *'access_log off;'* ]] || fail 'short-host HTTP must not log bearer-bearing redirect URLs'
 [[ "$SHORT_HTTP" == *'return 301 https://$host$request_uri;'* ]] || fail 'short-host HTTP must redirect to TLS'
 [[ "$SHORT_HTTP" != *'proxy_pass'* ]] || fail 'short-host HTTP must not proxy'
 
@@ -127,6 +129,64 @@ assert_count 2 "$DIRECT_ENV" "$DEPLOY_WRAPPER" 'bootstrap fetch and fetched scri
 assert_contains "$DEPLOY_WRAPPER" "NO_PROXY='*' RSS_PAL_DEPLOY_DIRECT=1 bash -lc" 'fetched deployment script must explicitly select direct mode'
 if grep -Eq '(https?|socks[0-9a-z]*)://[^[:space:]'"'"']+' "$DEPLOY_WRAPPER"; then
   fail 'deployment wrapper must not define any proxy URL'
+fi
+
+# Exercise an equivalent wrapper run against a temporary local repository. The
+# fetched probe resolves the project root from $0 exactly like auto_deploy.sh.
+WRAPPER_TEST_DIR=$(mktemp -d)
+cleanup_wrapper_test() {
+  rm -rf "$WRAPPER_TEST_DIR"
+}
+trap cleanup_wrapper_test EXIT
+
+mkdir -p "$WRAPPER_TEST_DIR/source/scripts" "$WRAPPER_TEST_DIR/bin"
+printf '%s\n' \
+  '#!/bin/bash' \
+  'set -euo pipefail' \
+  'PROJECT_DIR=$(cd "$(dirname "$0")/.." && pwd)' \
+  'printf "%s\n" "$PROJECT_DIR" > "$PROBE_OUTPUT"' \
+  >"$WRAPPER_TEST_DIR/source/scripts/auto_deploy.sh"
+git init -q --initial-branch=master "$WRAPPER_TEST_DIR/source"
+git -C "$WRAPPER_TEST_DIR/source" add scripts/auto_deploy.sh
+git -C "$WRAPPER_TEST_DIR/source" -c user.name='RSS Pal Test' -c user.email='test@rss-pal.invalid' commit -qm probe
+git clone -q --bare "$WRAPPER_TEST_DIR/source" "$WRAPPER_TEST_DIR/remote.git"
+git clone -q "$WRAPPER_TEST_DIR/remote.git" "$WRAPPER_TEST_DIR/repo"
+
+printf '%s\n' \
+  '#!/bin/bash' \
+  'set -euo pipefail' \
+  '[ "$1" = "-H" ] && shift' \
+  '[ "$1" = "-u" ] && shift 2' \
+  'exec "$@"' \
+  >"$WRAPPER_TEST_DIR/bin/sudo"
+chmod +x "$WRAPPER_TEST_DIR/bin/sudo"
+printf '%s\n' '#!/bin/bash' 'exit 0' >"$WRAPPER_TEST_DIR/bin/flock"
+chmod +x "$WRAPPER_TEST_DIR/bin/flock"
+printf '%s\n' \
+  '#!/bin/bash' \
+  'if [ "${1:-}" = "-lc" ]; then' \
+  '  shift' \
+  '  exec /bin/bash --noprofile --norc -c "$@"' \
+  'fi' \
+  'exec /bin/bash "$@"' \
+  >"$WRAPPER_TEST_DIR/bin/bash"
+chmod +x "$WRAPPER_TEST_DIR/bin/bash"
+
+sed \
+  -e "s#^LOCK_FILE=.*#LOCK_FILE=$WRAPPER_TEST_DIR/deploy.lock#" \
+  -e "s#^REPO_DIR=.*#REPO_DIR=$WRAPPER_TEST_DIR/repo#" \
+  "$DEPLOY_WRAPPER" >"$WRAPPER_TEST_DIR/wrapper"
+chmod +x "$WRAPPER_TEST_DIR/wrapper"
+export PROBE_OUTPUT="$WRAPPER_TEST_DIR/project-dir"
+if ! PATH="$WRAPPER_TEST_DIR/bin:$PATH" /bin/bash "$WRAPPER_TEST_DIR/wrapper" >"$WRAPPER_TEST_DIR/run.log" 2>&1; then
+  sed 's/^/wrapper: /' "$WRAPPER_TEST_DIR/run.log" >&2
+  fail 'equivalent deployment wrapper run failed'
+fi
+
+[ -f "$PROBE_OUTPUT" ] || fail 'fetched auto_deploy.sh probe did not run'
+[ "$(<"$PROBE_OUTPUT")" = "$WRAPPER_TEST_DIR/repo" ] || fail 'fetched auto_deploy.sh must resolve its repository as PROJECT_DIR'
+if compgen -G "$WRAPPER_TEST_DIR/repo/scripts/.auto_deploy.actions*" >/dev/null; then
+  fail 'deployment wrapper must clean up its fetched script from the repository scripts directory'
 fi
 
 echo 'PASS: Tencent bootstrap, final short-domain ingress, and direct Actions wrapper match the contract'

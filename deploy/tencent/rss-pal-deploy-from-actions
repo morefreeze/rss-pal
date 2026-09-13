@@ -3,7 +3,7 @@ set -euo pipefail
 
 LOCK_FILE=/var/lock/rss-pal-deploy-from-actions.lock
 REPO_DIR=/opt/rss-pal
-DEPLOY_SCRIPT=$(mktemp /tmp/rss-pal-auto-deploy.XXXXXX)
+DEPLOY_SCRIPT="$REPO_DIR/scripts/.auto_deploy.actions.$$"
 
 cleanup() {
   rm -f "$DEPLOY_SCRIPT"
@@ -16,7 +16,6 @@ if ! flock -n 9; then
   exit 0
 fi
 
-sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' bash -lc "cd '$REPO_DIR' && git fetch origin master && git show origin/master:scripts/auto_deploy.sh" >"$DEPLOY_SCRIPT"
-chmod 0755 "$DEPLOY_SCRIPT"
+sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' bash -lc 'cd "$1" && git fetch origin master && umask 077 && git show origin/master:scripts/auto_deploy.sh > "$2"' _ "$REPO_DIR" "$DEPLOY_SCRIPT"
 
 sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' RSS_PAL_DEPLOY_DIRECT=1 bash -lc 'bash "$1"' _ "$DEPLOY_SCRIPT"
