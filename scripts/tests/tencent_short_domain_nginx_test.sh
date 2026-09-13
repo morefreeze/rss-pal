@@ -5,12 +5,15 @@ ROOT_DIR=$(cd "$(dirname "$0")/../.." && pwd)
 BOOTSTRAP_CONFIG="$ROOT_DIR/deploy/nginx/r-morefreeze-bootstrap.conf"
 FINAL_CONFIG="$ROOT_DIR/deploy/nginx/rss-pal-tencent.conf"
 DEPLOY_WRAPPER="$ROOT_DIR/deploy/tencent/rss-pal-deploy-from-actions"
+RENEWAL_HOOK="$ROOT_DIR/deploy/letsencrypt/renewal-hooks/deploy/rss-pal-nginx-reload"
 NGINX_TEST_DIR=""
 WRAPPER_TEST_DIR=""
+HOOK_TEST_DIR=""
 
 cleanup_test_dirs() {
   [ -z "$NGINX_TEST_DIR" ] || rm -rf "$NGINX_TEST_DIR"
   [ -z "$WRAPPER_TEST_DIR" ] || rm -rf "$WRAPPER_TEST_DIR"
+  [ -z "$HOOK_TEST_DIR" ] || rm -rf "$HOOK_TEST_DIR"
 }
 trap cleanup_test_dirs EXIT
 
@@ -133,7 +136,7 @@ verify_nginx_templates() {
   fi
 }
 
-for required_file in "$BOOTSTRAP_CONFIG" "$FINAL_CONFIG" "$DEPLOY_WRAPPER"; do
+for required_file in "$BOOTSTRAP_CONFIG" "$FINAL_CONFIG" "$DEPLOY_WRAPPER" "$RENEWAL_HOOK"; do
   [ -f "$required_file" ] || fail "missing ${required_file#"$ROOT_DIR"/}"
 done
 
@@ -152,19 +155,24 @@ assert_not_contains "$BOOTSTRAP_CONFIG" 'listen 443' 'bootstrap must not enable 
 assert_not_contains "$BOOTSTRAP_CONFIG" 'ssl_certificate' 'bootstrap must not reference a certificate'
 assert_not_contains "$BOOTSTRAP_CONFIG" 'rss.morefreeze.top' 'bootstrap must not claim the primary hostname'
 
-# Final ingress consists of HTTP redirect and TLS servers for each hostname.
-assert_count 4 'server {' "$FINAL_CONFIG" 'final ingress must contain exactly four servers'
-MAIN_HTTP=$(server_block 1 "$FINAL_CONFIG")
-MAIN_TLS=$(server_block 2 "$FINAL_CONFIG")
-SHORT_HTTP=$(server_block 3 "$FINAL_CONFIG")
-SHORT_TLS=$(server_block 4 "$FINAL_CONFIG")
+# Final ingress rejects unknown HTTP hosts before the named redirect and TLS servers.
+assert_count 5 'server {' "$FINAL_CONFIG" 'final ingress must contain exactly five servers'
+DEFAULT_HTTP=$(server_block 1 "$FINAL_CONFIG")
+MAIN_HTTP=$(server_block 2 "$FINAL_CONFIG")
+MAIN_TLS=$(server_block 3 "$FINAL_CONFIG")
+SHORT_HTTP=$(server_block 4 "$FINAL_CONFIG")
+SHORT_TLS=$(server_block 5 "$FINAL_CONFIG")
 
-[[ "$MAIN_HTTP" == *'listen 80;'* && "$MAIN_HTTP" == *'server_name rss.morefreeze.top;'* ]] || fail 'first server must be primary-host HTTP'
+[[ "$DEFAULT_HTTP" == *'listen 80 default_server;'* && "$DEFAULT_HTTP" == *'server_name _;'* ]] || fail 'first server must reject unknown HTTP hosts by default'
+[[ "$DEFAULT_HTTP" == *'access_log off;'* && "$DEFAULT_HTTP" == *'return 444;'* ]] || fail 'default HTTP server must silently reject unknown hosts'
+[[ "$DEFAULT_HTTP" != *'proxy_pass'* && "$DEFAULT_HTTP" != *'location '* ]] || fail 'default HTTP server must expose no application surface'
+
+[[ "$MAIN_HTTP" == *'listen 80;'* && "$MAIN_HTTP" == *'server_name rss.morefreeze.top;'* ]] || fail 'second server must be primary-host HTTP'
 [[ "$MAIN_HTTP" == *'access_log off;'* ]] || fail 'primary-host HTTP must not log bearer-bearing redirect URLs'
-[[ "$MAIN_HTTP" == *'return 301 https://$host$request_uri;'* ]] || fail 'primary-host HTTP must redirect to TLS'
+[[ "$MAIN_HTTP" == *'return 301 https://rss.morefreeze.top$request_uri;'* ]] || fail 'primary-host HTTP must redirect to its fixed TLS hostname'
 [[ "$MAIN_HTTP" != *'proxy_pass'* ]] || fail 'primary-host HTTP must not proxy'
 
-[[ "$MAIN_TLS" == *'listen 443 ssl http2;'* && "$MAIN_TLS" == *'server_name rss.morefreeze.top;'* ]] || fail 'second server must be primary-host TLS'
+[[ "$MAIN_TLS" == *'listen 443 ssl http2;'* && "$MAIN_TLS" == *'server_name rss.morefreeze.top;'* ]] || fail 'third server must be primary-host TLS'
 [[ "$MAIN_TLS" == *'access_log off;'* ]] || fail 'primary-host TLS must disable access logging'
 [[ "$MAIN_TLS" == *'client_max_body_size 5M;'* ]] || fail 'primary-host TLS must preserve the 5M request limit'
 [[ "$MAIN_TLS" == *'proxy_read_timeout 60s;'* ]] || fail 'primary-host TLS must preserve the proxy timeout'
@@ -172,18 +180,19 @@ SHORT_TLS=$(server_block 4 "$FINAL_CONFIG")
 [[ "$MAIN_TLS" == *'ssl_certificate /etc/letsencrypt/live/rss.morefreeze.top/fullchain.pem;'* ]] || fail 'primary-host TLS must use its existing full chain'
 [[ "$MAIN_TLS" == *'ssl_certificate_key /etc/letsencrypt/live/rss.morefreeze.top/privkey.pem;'* ]] || fail 'primary-host TLS must use its existing private key'
 
-[[ "$SHORT_HTTP" == *'listen 80;'* && "$SHORT_HTTP" == *'server_name r.morefreeze.top;'* ]] || fail 'third server must be short-host HTTP'
+[[ "$SHORT_HTTP" == *'listen 80;'* && "$SHORT_HTTP" == *'server_name r.morefreeze.top;'* ]] || fail 'fourth server must be short-host HTTP'
 [[ "$SHORT_HTTP" == *'access_log off;'* ]] || fail 'short-host HTTP must not log bearer-bearing redirect URLs'
 [[ "$SHORT_HTTP" == *'location ^~ /.well-known/acme-challenge/ {'* && "$SHORT_HTTP" == *'root /var/www/html;'* ]] || fail 'short-host HTTP must serve ACME renewal challenges from the webroot'
-[[ "$SHORT_HTTP" == *'location / {'* && "$SHORT_HTTP" == *'return 301 https://$host$request_uri;'* ]] || fail 'all non-ACME short-host HTTP paths must redirect to TLS'
+[[ "$SHORT_HTTP" == *'location / {'* && "$SHORT_HTTP" == *'return 301 https://r.morefreeze.top$request_uri;'* ]] || fail 'all non-ACME short-host HTTP paths must redirect to its fixed TLS hostname'
 short_http_location_count=$(printf '%s\n' "$SHORT_HTTP" | grep -c '^[[:space:]]*location ')
 [ "$short_http_location_count" -eq 2 ] || fail "short-host HTTP must contain only ACME and redirect locations (got $short_http_location_count)"
-if printf '%s\n' "$SHORT_HTTP" | grep -Fqx '    return 301 https://$host$request_uri;'; then
+if printf '%s\n' "$SHORT_HTTP" | grep -Fqx '    return 301 https://r.morefreeze.top$request_uri;'; then
   fail 'short-host HTTP must not redirect ACME challenges at server scope'
 fi
 [[ "$SHORT_HTTP" != *'proxy_pass'* ]] || fail 'short-host HTTP must not proxy'
+assert_not_contains "$FINAL_CONFIG" 'https://$host$request_uri' 'HTTP redirects must never trust an arbitrary Host header'
 
-[[ "$SHORT_TLS" == *'listen 443 ssl http2;'* && "$SHORT_TLS" == *'server_name r.morefreeze.top;'* ]] || fail 'fourth server must be short-host TLS'
+[[ "$SHORT_TLS" == *'listen 443 ssl http2;'* && "$SHORT_TLS" == *'server_name r.morefreeze.top;'* ]] || fail 'fifth server must be short-host TLS'
 [[ "$SHORT_TLS" == *'access_log off;'* ]] || fail 'short-host TLS must disable access logging'
 [[ "$SHORT_TLS" == *'ssl_certificate /etc/letsencrypt/live/r.morefreeze.top/fullchain.pem;'* ]] || fail 'short-host TLS must use its own full chain'
 [[ "$SHORT_TLS" == *'ssl_certificate_key /etc/letsencrypt/live/r.morefreeze.top/privkey.pem;'* ]] || fail 'short-host TLS must use its own private key'
@@ -211,6 +220,45 @@ assert_count 8 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' "$
 assert_count 8 'proxy_set_header X-Forwarded-Proto $scheme;' "$FINAL_CONFIG" 'every proxy location must forward X-Forwarded-Proto'
 
 verify_nginx_templates "$BOOTSTRAP_CONFIG" "$FINAL_CONFIG"
+
+# Certbot must never reload an invalid Nginx configuration.
+[ -x "$RENEWAL_HOOK" ] || fail 'Certbot Nginx renewal hook must be executable'
+assert_contains "$RENEWAL_HOOK" '#!/usr/bin/env bash' 'renewal hook must use bash'
+assert_contains "$RENEWAL_HOOK" 'set -euo pipefail' 'renewal hook must fail closed'
+assert_count 1 '/usr/sbin/nginx -t' "$RENEWAL_HOOK" 'renewal hook must test Nginx exactly once'
+assert_count 1 '/bin/systemctl reload nginx' "$RENEWAL_HOOK" 'renewal hook must reload Nginx exactly once'
+
+HOOK_TEST_DIR=$(mktemp -d)
+mkdir -p "$HOOK_TEST_DIR/bin"
+printf '%s\n' \
+  '#!/bin/bash' \
+  'printf "%s\n" "$*" > "$NGINX_CALL_LOG"' \
+  'exit "${NGINX_TEST_EXIT:-0}"' \
+  >"$HOOK_TEST_DIR/bin/nginx"
+printf '%s\n' \
+  '#!/bin/bash' \
+  'printf "%s\n" "$*" >> "$SYSTEMCTL_CALL_LOG"' \
+  >"$HOOK_TEST_DIR/bin/systemctl"
+chmod +x "$HOOK_TEST_DIR/bin/nginx" "$HOOK_TEST_DIR/bin/systemctl"
+sed \
+  -e "s#/usr/sbin/nginx#$HOOK_TEST_DIR/bin/nginx#" \
+  -e "s#/bin/systemctl#$HOOK_TEST_DIR/bin/systemctl#" \
+  "$RENEWAL_HOOK" >"$HOOK_TEST_DIR/hook"
+chmod +x "$HOOK_TEST_DIR/hook"
+
+hook_status=0
+NGINX_TEST_EXIT=1 NGINX_CALL_LOG="$HOOK_TEST_DIR/nginx-fail.calls" \
+  SYSTEMCTL_CALL_LOG="$HOOK_TEST_DIR/systemctl-fail.calls" \
+  "$HOOK_TEST_DIR/hook" >"$HOOK_TEST_DIR/hook-fail.out" 2>"$HOOK_TEST_DIR/hook-fail.err" || hook_status=$?
+[ "$hook_status" -ne 0 ] || fail 'renewal hook must fail when nginx -t fails'
+[ "$(<"$HOOK_TEST_DIR/nginx-fail.calls")" = '-t' ] || fail 'renewal hook must invoke nginx with only -t'
+[ ! -s "$HOOK_TEST_DIR/systemctl-fail.calls" ] || fail 'renewal hook must not reload after nginx -t fails'
+
+NGINX_TEST_EXIT=0 NGINX_CALL_LOG="$HOOK_TEST_DIR/nginx-success.calls" \
+  SYSTEMCTL_CALL_LOG="$HOOK_TEST_DIR/systemctl-success.calls" \
+  "$HOOK_TEST_DIR/hook"
+[ "$(<"$HOOK_TEST_DIR/nginx-success.calls")" = '-t' ] || fail 'successful renewal hook must run nginx -t first'
+[ "$(<"$HOOK_TEST_DIR/systemctl-success.calls")" = 'reload nginx' ] || fail 'renewal hook must reload Nginx after a successful test'
 
 # The root-owned Actions entrypoint must fetch and run the branch deployment script directly as ubuntu.
 [ -x "$DEPLOY_WRAPPER" ] || fail 'Actions deployment wrapper must be executable'
@@ -245,12 +293,17 @@ git clone -q "$WRAPPER_TEST_DIR/remote.git" "$WRAPPER_TEST_DIR/repo"
 printf '%s\n' \
   '#!/bin/bash' \
   'set -euo pipefail' \
+  '[ -z "${SUDO_CALL_LOG:-}" ] || printf "%s\n" "$*" >> "$SUDO_CALL_LOG"' \
   '[ "$1" = "-H" ] && shift' \
   '[ "$1" = "-u" ] && shift 2' \
   'exec "$@"' \
   >"$WRAPPER_TEST_DIR/bin/sudo"
 chmod +x "$WRAPPER_TEST_DIR/bin/sudo"
-printf '%s\n' '#!/bin/bash' 'exit 0' >"$WRAPPER_TEST_DIR/bin/flock"
+printf '%s\n' \
+  '#!/bin/bash' \
+  '[ "${FLOCK_SHOULD_FAIL:-0}" = "1" ] && exit 1' \
+  'exit 0' \
+  >"$WRAPPER_TEST_DIR/bin/flock"
 chmod +x "$WRAPPER_TEST_DIR/bin/flock"
 printf '%s\n' \
   '#!/bin/bash' \
@@ -278,5 +331,15 @@ fi
 if compgen -G "$WRAPPER_TEST_DIR/repo/scripts/.auto_deploy.actions*" >/dev/null; then
   fail 'deployment wrapper must clean up its fetched script from the repository scripts directory'
 fi
+
+rm -f "$PROBE_OUTPUT" "$WRAPPER_TEST_DIR/sudo-calls"
+lock_status=0
+FLOCK_SHOULD_FAIL=1 SUDO_CALL_LOG="$WRAPPER_TEST_DIR/sudo-calls" \
+  PATH="$WRAPPER_TEST_DIR/bin:$PATH" /bin/bash "$WRAPPER_TEST_DIR/wrapper" \
+  >"$WRAPPER_TEST_DIR/lock.out" 2>"$WRAPPER_TEST_DIR/lock.err" || lock_status=$?
+[ "$lock_status" -ne 0 ] || fail 'lock contention must fail the deployment instead of reporting success'
+grep -Fq 'Another RSS Pal deployment is already running' "$WRAPPER_TEST_DIR/lock.err" || fail 'lock contention must report a clear error on stderr'
+[ ! -s "$WRAPPER_TEST_DIR/sudo-calls" ] || fail 'lock contention must not fetch or execute deployment code'
+[ ! -e "$PROBE_OUTPUT" ] || fail 'lock contention must not execute the fetched deployment script'
 
 echo 'PASS: Tencent bootstrap, final short-domain ingress, and direct Actions wrapper match the contract'

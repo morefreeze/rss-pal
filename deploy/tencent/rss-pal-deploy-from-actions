@@ -12,8 +12,8 @@ trap cleanup EXIT
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  echo "Another RSS Pal deployment is already running"
-  exit 0
+  echo "Another RSS Pal deployment is already running" >&2
+  exit 1
 fi
 
 sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' bash -lc 'cd "$1" && git fetch origin master && umask 077 && git show origin/master:scripts/auto_deploy.sh > "$2"' _ "$REPO_DIR" "$DEPLOY_SCRIPT"
