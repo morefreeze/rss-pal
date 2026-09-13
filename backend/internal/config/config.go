@@ -154,10 +154,24 @@ func ValidateShortShareOrigin(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Hostname() == "" ||
 		u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil ||
-		u.Opaque != "" || u.ForceQuery || strings.Contains(raw, "#") {
+		u.Opaque != "" || u.ForceQuery || strings.Contains(raw, "#") || !hasValidOriginPort(u) {
 		return "", errors.New("SHORT_SHARE_ORIGIN must be an HTTPS origin without path, query, fragment, or credentials")
 	}
 	return raw, nil
+}
+
+func hasValidOriginPort(u *url.URL) bool {
+	port := u.Port()
+	if port == "" {
+		return !strings.HasSuffix(u.Host, ":")
+	}
+	for i := 0; i < len(port); i++ {
+		if port[i] < '0' || port[i] > '9' {
+			return false
+		}
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
 }
 
 func getEnv(key, defaultValue string) string {

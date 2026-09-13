@@ -46,6 +46,8 @@ func TestValidateShortShareOriginRejectsNonOrigins(t *testing.T) {
 		{name: "query", raw: "https://short.example.test?source=rss"},
 		{name: "force query", raw: "https://short.example.test?"},
 		{name: "fragment", raw: "https://short.example.test#share"},
+		{name: "port out of range", raw: "https://short.example.test:65536"},
+		{name: "port overflows integer", raw: "https://short.example.test:9999999999999999999999999999999999999999"},
 	}
 
 	for _, tt := range tests {
