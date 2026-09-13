@@ -27,6 +27,8 @@ cp .env.example .env
 # 编辑 .env，填入 AI API 密钥和管理员密码
 ```
 
+`SHORT_SHARE_ORIGIN` 必须配置为通过 HTTPS 路由到当前实例的实际短域（例如 `https://r.morefreeze.top`），且不能带尾斜杠。不要在本地直接照抄未指向本实例的生产示例，否则本地数据库生成的短码无法在生产短域解析。
+
 2. 启动：
 
 ```bash

@@ -119,8 +119,10 @@ WORKFLOW_FILE="$ROOT_DIR/.github/workflows/deploy-tencent.yml"
 README_FILE="$ROOT_DIR/README.md"
 
 status_migrate_block=$(sed -n '/^  status-migrate:$/,/^  api:$/p' "$COMPOSE_FILE")
-[[ "$status_migrate_block" == *'/migrations/041_article_share_short_codes.sql'* ]] || {
-  echo "FAIL: status-migrate does not execute migration 041" >&2
+migration_command=$(printf '%s\n' "$status_migrate_block" | sed -n 's/^    command: \["sh", "-ec", "\(.*\)"\]$/\1/p')
+expected_migration_command='psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql'
+[ "$migration_command" = "$expected_migration_command" ] || {
+  echo "FAIL: status-migrate must execute ordered 037-041 psql steps joined only by &&" >&2
   exit 1
 }
 
@@ -164,6 +166,15 @@ short_origin_readme_row=$(grep -F -- '| `SHORT_SHARE_ORIGIN` |' "$README_FILE" |
 }
 [[ "$short_origin_readme_row" == *'示例：`https://r.morefreeze.top`'* ]] || {
   echo "FAIL: README must show r.morefreeze.top as an example value" >&2
+  exit 1
+}
+quick_start_section=$(sed -n '/### 使用 Docker Compose（推荐）/,/^2\. 启动：/p' "$README_FILE")
+[[ "$quick_start_section" == *'`SHORT_SHARE_ORIGIN` 必须配置为通过 HTTPS 路由到当前实例的实际短域'* ]] || {
+  echo "FAIL: README quick start must require an HTTPS short domain routed to this instance" >&2
+  exit 1
+}
+[[ "$quick_start_section" == *'本地数据库生成的短码无法在生产短域解析'* ]] || {
+  echo "FAIL: README quick start must explain the local/production short-code boundary" >&2
   exit 1
 }
 

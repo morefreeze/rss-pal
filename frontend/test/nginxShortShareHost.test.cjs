@@ -1,4 +1,4 @@
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs')
+const { mkdirSync, mkdtempSync, readFileSync, rmSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { spawnSync } = require('node:child_process')
@@ -34,24 +34,74 @@ for (const expected of [
   'ssl_certificate /etc/nginx/certs/localhost+2.pem;',
   'ssl_certificate_key /etc/nginx/certs/localhost+2-key.pem;',
   'access_log off;',
-  'location ^~ /api/s/',
-  'location = /api/proxy/image',
-  'location ^~ /assets/',
-  'location = /favicon.svg',
-  'location = /favicon-32.png',
-  'location = /apple-touch-icon.png',
-  'location ~ "^/[0-9A-Za-z]{12}$"',
-  'location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$',
-  'try_files /index.html =404;',
-  'add_header Cache-Control "no-store" always;',
-  'add_header Referrer-Policy "no-referrer" always;',
-  'add_header X-Content-Type-Options "nosniff" always;',
-  'location /',
-  'return 404;',
 ]) {
   if (!shortBlock.includes(expected)) {
     throw new Error(`short-share server should include: ${expected}`)
   }
+}
+
+function locationFor(directive) {
+  const marker = `    ${directive} {`
+  const start = shortBlock.indexOf(marker)
+  if (start < 0) {
+    throw new Error(`short-share server should define: ${directive}`)
+  }
+  const next = shortBlock.indexOf('\n    location ', start + marker.length)
+  return shortBlock.slice(start, next < 0 ? shortBlock.length : next)
+}
+
+const shortAPILocation = locationFor('location ^~ /api/s/')
+const imageProxyLocation = locationFor('location = /api/proxy/image')
+for (const [name, block] of [
+  ['/api/s/', shortAPILocation],
+  ['/api/proxy/image', imageProxyLocation],
+]) {
+  if (!block.includes('set $upstream_api http://api:8080;') || !block.includes('proxy_pass $upstream_api;')) {
+    throw new Error(`${name} should proxy to api:8080 inside its own location`)
+  }
+  if ([...block.matchAll(/^\s*proxy_pass\s+/gm)].length !== 1) {
+    throw new Error(`${name} should own exactly one proxy_pass`)
+  }
+}
+
+const rootCodeLocation = locationFor('location ~ "^/[0-9A-Za-z]{12}$"')
+for (const expected of [
+  'try_files /index.html =404;',
+  'add_header Cache-Control "no-store" always;',
+  'add_header Referrer-Policy "no-referrer" always;',
+  'add_header X-Content-Type-Options "nosniff" always;',
+]) {
+  if (!rootCodeLocation.includes(expected)) {
+    throw new Error(`short-code root location should include: ${expected}`)
+  }
+}
+
+const catchAllLocation = locationFor('location /')
+if (!catchAllLocation.includes('return 404;')) {
+  throw new Error('short-share catch-all location should return 404 inside its own block')
+}
+
+const assetLocation = locationFor('location ^~ /assets/')
+for (const expected of ['try_files $uri =404;', 'add_header Cache-Control "public, immutable";']) {
+  if (!assetLocation.includes(expected)) {
+    throw new Error(`/assets/ location should include: ${expected}`)
+  }
+}
+const faviconLocations = [
+  locationFor('location = /favicon.svg'),
+  locationFor('location = /favicon-32.png'),
+  locationFor('location = /apple-touch-icon.png'),
+]
+if (faviconLocations.some(block => !block.includes('try_files $uri =404;'))) {
+  throw new Error('each short-share favicon location should serve only its exact existing file')
+}
+const staticDenyLocation = locationFor('location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$')
+if (!staticDenyLocation.includes('return 404;')) {
+  throw new Error('short-share static-extension fallback should return 404 inside its own block')
+}
+const staticLocations = [assetLocation, ...faviconLocations, rootCodeLocation, staticDenyLocation]
+if (staticLocations.some(block => block.includes('proxy_pass'))) {
+  throw new Error('short-share static locations must never proxy requests')
 }
 
 if (/location\s+(?:\^~\s+)?\/api(?:\s|\{)/.test(shortBlock)) {
@@ -79,31 +129,27 @@ if (shortAPIIndex < 0 || staticExtensionIndex < 0 || shortAPIIndex > staticExten
 }
 
 const parserDir = mkdtempSync(join(tmpdir(), 'rss-pal-nginx-test-'))
-const parserConfig = join(parserDir, 'nginx.conf')
-const parserPrefix = `${parserDir}/`
-const parserServers = nginx
-  .replace(/^\s*http2 on;\s*$/gm, '')
-  .replace(/^\s*ssl_certificate(?:_key)?\s+[^;]+;\s*$/gm, '')
-  .replaceAll('listen 443 ssl;', 'listen 8443;')
-writeFileSync(parserConfig, [
-  'pid /tmp/rss-pal-nginx-test.pid;',
-  'error_log stderr;',
-  'events {}',
-  'http {',
-  parserServers,
-  '}',
-].join('\n'))
+const certDir = join(parserDir, 'certs')
+mkdirSync(certDir)
 
 try {
-  let parsed = spawnSync('nginx', ['-t', '-e', 'stderr', '-p', parserPrefix, '-c', parserConfig], { encoding: 'utf8' })
-  if (parsed.error?.code === 'ENOENT' || (parsed.status !== 0 && parsed.stderr?.includes('sysctlbyname('))) {
-    parsed = spawnSync('docker', [
-      'run', '--rm',
-      '-v', `${parserConfig}:/etc/nginx/nginx.conf:ro`,
-      'nginx:alpine',
-      'nginx', '-t', '-c', '/etc/nginx/nginx.conf',
-    ], { encoding: 'utf8' })
+  const certificate = spawnSync('openssl', [
+    'req', '-x509', '-nodes', '-newkey', 'rsa:2048',
+    '-keyout', join(certDir, 'localhost+2-key.pem'),
+    '-out', join(certDir, 'localhost+2.pem'),
+    '-subj', '/CN=localhost',
+    '-days', '1',
+  ], { encoding: 'utf8' })
+  if (certificate.status !== 0) {
+    throw new Error(`could not generate temporary nginx test certificate:\n${certificate.stderr || certificate.stdout || certificate.error}`)
   }
+
+  const parsed = spawnSync('docker', [
+    'run', '--rm', '--entrypoint', 'nginx',
+    '-v', `${resolve('nginx.conf')}:/etc/nginx/conf.d/default.conf:ro`,
+    '-v', `${certDir}:/etc/nginx/certs:ro`,
+    'nginx:alpine', '-t',
+  ], { encoding: 'utf8' })
   if (parsed.status !== 0) {
     throw new Error(`real nginx parser rejected the deployment config:\n${parsed.stderr || parsed.stdout || parsed.error}`)
   }
