@@ -8,6 +8,22 @@ import (
 
 const rewriteTestToken = "v1_0123456789abcdef0123456789abcdef_signature"
 
+func TestShortShareAssetRewriteDoesNotInjectCodeIntoExternalURL(t *testing.T) {
+	const articleID = 42
+	const shortCode = "Ab12Cd34Ef56"
+	local := "/api/articles/42/images/0.png"
+	attack := "https://attacker.example/collect?target=" + local
+	input := `<img src="` + local + `"><img src="` + attack + `">![attack](` + attack + `)`
+
+	got := rewriteShareAssets(input, "/api/s/"+shortCode+"/assets/", articleID)
+	if !strings.Contains(got, `/api/s/`+shortCode+`/assets/0.png`) {
+		t.Fatalf("local asset was not rewritten: %s", got)
+	}
+	if strings.Count(got, attack) != 2 {
+		t.Fatalf("external attack URL was rewritten: %s", got)
+	}
+}
+
 func TestShareAssetRewriteContinuesAfterUnclosedInlineCode(t *testing.T) {
 	const articleID = 42
 	local := "/api/articles/42/images/3.png"
@@ -18,7 +34,7 @@ func TestShareAssetRewriteContinuesAfterUnclosedInlineCode(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			input := prefix + "![markdown](" + local + ") <img src=\"" + local + "\">"
-			got := rewriteShareAssets(input, rewriteTestToken, articleID)
+			got := rewriteShareAssets(input, "/api/share/"+rewriteTestToken+"/assets/", articleID)
 			if strings.Count(got, wantAsset) != 2 {
 				t.Fatalf("rewritten assets=%d want=2: %s", strings.Count(got, wantAsset), got)
 			}
@@ -30,7 +46,7 @@ func TestShareAssetRewriteMalformedInputStaysLinearAndDoesNotInjectToken(t *test
 	input := strings.Repeat("<img ", 20_000) + strings.Repeat("![", 20_000)
 	done := make(chan string, 1)
 	go func() {
-		done <- rewriteShareAssets(input, rewriteTestToken, 42)
+		done <- rewriteShareAssets(input, "/api/share/"+rewriteTestToken+"/assets/", 42)
 	}()
 	select {
 	case got := <-done:

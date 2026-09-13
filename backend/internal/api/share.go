@@ -21,11 +21,21 @@ import (
 )
 
 type ShareHandler struct {
-	shares   *repository.ShareRepository
-	articles *repository.ArticleRepository
-	signer   *sharetoken.Signer
-	now      func() time.Time
-	images   *ArticleImageHandler
+	shares       *repository.ShareRepository
+	articles     *repository.ArticleRepository
+	signer       *sharetoken.Signer
+	now          func() time.Time
+	shortOrigin  string
+	newPublicID  func() (string, error)
+	newShortCode func() (string, error)
+	images       *ArticleImageHandler
+}
+
+type ShareHandlerOptions struct {
+	Now          func() time.Time
+	ShortOrigin  string
+	NewPublicID  func() (string, error)
+	NewShortCode func() (string, error)
 }
 
 func NewShareHandler(
@@ -33,12 +43,31 @@ func NewShareHandler(
 	articles *repository.ArticleRepository,
 	signer *sharetoken.Signer,
 	images *ArticleImageHandler,
-	now func() time.Time,
+	options *ShareHandlerOptions,
 ) *ShareHandler {
-	if now == nil {
-		now = time.Now
+	resolved := ShareHandlerOptions{}
+	if options != nil {
+		resolved = *options
 	}
-	return &ShareHandler{shares: shares, articles: articles, signer: signer, now: now, images: images}
+	if resolved.Now == nil {
+		resolved.Now = time.Now
+	}
+	if resolved.NewPublicID == nil {
+		resolved.NewPublicID = sharetoken.NewPublicID
+	}
+	if resolved.NewShortCode == nil {
+		resolved.NewShortCode = sharetoken.NewShortCode
+	}
+	return &ShareHandler{
+		shares:       shares,
+		articles:     articles,
+		signer:       signer,
+		now:          resolved.Now,
+		shortOrigin:  resolved.ShortOrigin,
+		newPublicID:  resolved.NewPublicID,
+		newShortCode: resolved.NewShortCode,
+		images:       images,
+	}
 }
 
 type shareManagementResponse struct {
@@ -59,7 +88,7 @@ func (h *ShareHandler) GetPublic(c *gin.Context) {
 	}
 
 	snapshot := row.Snapshot
-	snapshot.Content = rewriteShareAssets(snapshot.Content, c.Param("token"), row.ArticleID)
+	snapshot.Content = rewriteShareAssets(snapshot.Content, "/api/share/"+url.PathEscape(c.Param("token"))+"/assets/", row.ArticleID)
 	c.JSON(http.StatusOK, snapshot)
 }
 
@@ -76,6 +105,49 @@ func (h *ShareHandler) GetAsset(c *gin.Context) {
 		return
 	}
 	h.images.serve(c, row.ArticleID, c.Param("asset"), "no-store")
+}
+
+func (h *ShareHandler) GetShortPublic(c *gin.Context) {
+	setPublicShareHeaders(c)
+	row, ok := h.resolveActiveShort(c, c.Param("short_code"))
+	if !ok {
+		return
+	}
+
+	snapshot := row.Snapshot
+	snapshot.Content = rewriteShareAssets(snapshot.Content, "/api/s/"+c.Param("short_code")+"/assets/", row.ArticleID)
+	c.JSON(http.StatusOK, snapshot)
+}
+
+func (h *ShareHandler) GetShortAsset(c *gin.Context) {
+	setPublicShareHeaders(c)
+	row, ok := h.resolveActiveShort(c, c.Param("short_code"))
+	if !ok {
+		return
+	}
+	if h.images == nil {
+		log.Printf("short share asset failed: image handler unavailable")
+		shareUnavailable(c)
+		return
+	}
+	h.images.serve(c, row.ArticleID, c.Param("asset"), "no-store")
+}
+
+func (h *ShareHandler) resolveActiveShort(c *gin.Context, shortCode string) (*model.ArticleShare, bool) {
+	if !sharetoken.IsValidShortCode(shortCode) {
+		shareUnavailable(c)
+		return nil, false
+	}
+	row, err := h.shares.GetActiveByShortCode(shortCode, h.now())
+	if err != nil {
+		shareInternalError(c, "short public resolve", err)
+		return nil, false
+	}
+	if row == nil {
+		shareUnavailable(c)
+		return nil, false
+	}
+	return row, true
 }
 
 func (h *ShareHandler) resolveActive(token string) (*model.ArticleShare, bool) {
@@ -101,12 +173,11 @@ var (
 	htmlTagPattern             = regexp.MustCompile(`(?i)<[a-z][^<>]*>`)
 )
 
-func rewriteShareAssets(content, token string, articleID int) string {
+func rewriteShareAssets(content, assetPrefix string, articleID int) string {
 	// Deliberately avoid substring replacement: putting a signed share URL into
 	// an attacker-controlled external URL would disclose the token when loaded.
 	// Only image destinations/attributes are inspected, and localShareAsset
 	// requires their complete value to name this share's article.
-	assetPrefix := "/api/share/" + url.PathEscape(token) + "/assets/"
 	return rewriteOutsideFencedCode(content, articleID, assetPrefix)
 }
 
@@ -420,17 +491,30 @@ func (h *ShareHandler) Create(c *gin.Context) {
 		return
 	}
 
-	publicID, err := sharetoken.NewPublicID()
-	if err != nil {
-		shareInternalError(c, "generate public ID", err)
+	snapshot := repository.SnapshotFromArticle(article, now)
+	for attempt := 0; attempt < 5; attempt++ {
+		publicID, err := h.newPublicID()
+		if err != nil {
+			shareInternalError(c, "generate public ID", err)
+			return
+		}
+		shortCode, err := h.newShortCode()
+		if err != nil {
+			shareInternalError(c, "generate short code", err)
+			return
+		}
+		row, err := h.shares.WithCtx(c).CreateWithShortCode(article.ID, userID, publicID, shortCode, snapshot, expiresAt, now)
+		if err != nil {
+			shareInternalError(c, "create", err)
+			return
+		}
+		if row == nil {
+			continue
+		}
+		c.JSON(http.StatusCreated, h.managementResponse(row, now))
 		return
 	}
-	row, err := h.shares.WithCtx(c).Create(article, userID, publicID, expiresAt, now)
-	if err != nil {
-		shareInternalError(c, "create", err)
-		return
-	}
-	c.JSON(http.StatusCreated, h.managementResponse(row, now))
+	shareInternalError(c, "create", errors.New("share ID collision retry limit exceeded"))
 }
 
 func (h *ShareHandler) List(c *gin.Context) {
@@ -503,9 +587,13 @@ func (h *ShareHandler) managementResponse(row *model.ArticleShare, now time.Time
 	} else if row.ExpiresAt != nil && !row.ExpiresAt.After(now) {
 		status = "expired"
 	}
+	shareURL := "/share/" + h.signer.Sign(row.PublicID)
+	if row.ShortCode != nil {
+		shareURL = h.shortOrigin + "/" + *row.ShortCode
+	}
 	return shareManagementResponse{
 		ID:        row.PublicID,
-		URL:       "/share/" + h.signer.Sign(row.PublicID),
+		URL:       shareURL,
 		CreatedAt: row.CreatedAt,
 		ExpiresAt: row.ExpiresAt,
 		Status:    status,

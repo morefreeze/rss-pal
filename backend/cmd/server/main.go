@@ -22,6 +22,11 @@ import (
 
 func main() {
 	cfg := config.Load()
+	shortShareOrigin, err := config.ValidateShortShareOrigin(cfg.Share.ShortOrigin)
+	if err != nil {
+		log.Fatalf("invalid SHORT_SHARE_ORIGIN: %v", err)
+	}
+	cfg.Share.ShortOrigin = shortShareOrigin
 
 	db, err := repository.NewDB(&cfg.Database)
 	if err != nil {
@@ -91,7 +96,10 @@ func main() {
 	contentHandler := api.NewContentHandler(articleRepo, feedRepo, rssFetcher)
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
-	shareHandler := api.NewShareHandler(shareRepo, articleRepo, shareSigner, pdfImgHandler, time.Now)
+	shareHandler := api.NewShareHandler(shareRepo, articleRepo, shareSigner, pdfImgHandler, &api.ShareHandlerOptions{
+		Now:         time.Now,
+		ShortOrigin: cfg.Share.ShortOrigin,
+	})
 	userInterestsRepo := repository.NewUserInterestRepository(db)
 	interestsHandler := api.NewInterestsHandler(prefRepo, articleRepo, templateRepo, userInterestsRepo, summarizer, cfg)
 	exploreRepo := repository.NewExploreRepository(db)
@@ -200,6 +208,8 @@ func main() {
 	sharePageLimit, shareAssetLimit := api.NewPublicShareRateLimiters(time.Now)
 	router.GET("/api/share/:token", sharePageLimit, shareHandler.GetPublic)
 	router.GET("/api/share/:token/assets/:asset", shareAssetLimit, shareHandler.GetAsset)
+	router.GET("/api/s/:short_code", sharePageLimit, shareHandler.GetShortPublic)
+	router.GET("/api/s/:short_code/assets/:asset", shareAssetLimit, shareHandler.GetShortAsset)
 
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT).
 	// PublicTokenMiddleware resolves the owning user from the bearer
