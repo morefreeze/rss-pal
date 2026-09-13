@@ -1,10 +1,11 @@
+// @vitest-environment-options { "url": "https://r.morefreeze.top/" }
 import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SharePage from '../src/pages/SharePage'
-import { xWeightedLength } from '../src/utils/xShare'
+import { X_MAX_WEIGHT, xWeightedLength } from '../src/utils/xShare'
 
 const axiosMock = vi.hoisted(() => ({ get: vi.fn() }))
 const privateAPIMocks = vi.hoisted(() => ({
@@ -169,7 +170,7 @@ describe('SharePage public reader', () => {
     expect(post).not.toContain('article-section')
     expect(post).not.toContain('private.example')
     expect(post).not.toContain('feed-secret')
-    expect(xWeightedLength(post)).toBeLessThanOrEqual(280)
+    expect(xWeightedLength(post)).toBeLessThanOrEqual(X_MAX_WEIGHT)
   })
 
   it('builds authentication CTAs only from the public article URL and ignores private extra fields', async () => {
@@ -389,18 +390,30 @@ describe('SharePage public reader', () => {
     expect(privateAPIMocks.recordExploreArticleEvent).not.toHaveBeenCalled()
   })
 
-  it('loads one exact short code from the short API and keeps the short URL for X', async () => {
-    axiosMock.get.mockResolvedValue({ data: sharedSnapshot() })
+  it('opens a ready 140-weight X post from one exact short share URL', async () => {
+    axiosMock.get.mockResolvedValue({
+      data: sharedSnapshot({
+        title: '中文标题',
+        summary_brief: `这是一个超长中文摘要前缀${'摘要内容'.repeat(100)}`,
+      }),
+    })
     renderSharePage('/Aa0000000000?utm_source=bad#article-section-001', false, false, 'short')
 
     const shareToX = await screen.findByRole('link', { name: '分享到 X' })
     expect(axiosMock.get).toHaveBeenCalledWith('/api/s/Aa0000000000', {
       signal: expect.any(AbortSignal),
     })
-    const post = new URL(shareToX.getAttribute('href')!).searchParams.get('text')!
-    expect(post).toContain(`${window.location.origin}/Aa0000000000`)
+    expect(fireEvent.click(shareToX)).toBe(true)
+    const intent = new URL(shareToX.getAttribute('href')!)
+    expect(intent.origin + intent.pathname).toBe('https://x.com/intent/post')
+    const post = intent.searchParams.get('text')!
+    expect(post).toContain('中文标题')
+    expect(post).toContain('这是一个超长中文摘要前缀')
+    expect(post).toContain('https://r.morefreeze.top/Aa0000000000')
+    expect(post.endsWith('https://r.morefreeze.top/Aa0000000000')).toBe(true)
     expect(post).not.toContain('utm_source')
     expect(post).not.toContain('article-section')
+    expect(xWeightedLength(post)).toBeLessThanOrEqual(X_MAX_WEIGHT)
   })
 
   it.each([

@@ -1,6 +1,6 @@
 import Graphemer from 'graphemer'
 
-export const X_MAX_WEIGHT = 280
+export const X_MAX_WEIGHT = 140
 export const X_URL_WEIGHT = 23
 
 const URL_PATTERN = /https?:\/\/[^\s]+/giu

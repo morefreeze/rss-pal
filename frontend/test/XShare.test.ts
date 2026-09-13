@@ -5,10 +5,15 @@ import {
   buildXPostText,
   fallbackGraphemes,
   plainSocialText,
+  X_MAX_WEIGHT,
   xWeightedLength,
 } from '../src/utils/xShare'
 
 describe('X share post composer', () => {
+  it('caps composed posts at the product limit of 140 weighted characters', () => {
+    expect(X_MAX_WEIGHT).toBe(140)
+  })
+
   it('uses X weights for ASCII, CJK, emoji, and URLs', () => {
     expect(xWeightedLength('ab中😀 https://rss.example/share/token')).toBe(1 + 1 + 2 + 2 + 1 + 23)
   })
@@ -37,7 +42,7 @@ describe('X share post composer', () => {
 
     expect(text).toContain('很长的总结')
     expect(text).toContain('…')
-    expect(xWeightedLength(text)).toBeLessThanOrEqual(280)
+    expect(xWeightedLength(text)).toBeLessThanOrEqual(X_MAX_WEIGHT)
     expect(text.endsWith('https://rss.example/share/token')).toBe(true)
   })
 
@@ -50,7 +55,7 @@ describe('X share post composer', () => {
 
     expect(text).not.toContain('�')
     expect(text).not.toMatch(/[\u200d\ufe0f]…/u)
-    expect(xWeightedLength(text)).toBeLessThanOrEqual(280)
+    expect(xWeightedLength(text)).toBeLessThanOrEqual(X_MAX_WEIGHT)
     expect(text.endsWith('https://rss.example/share/token')).toBe(true)
   })
 
@@ -77,6 +82,19 @@ describe('X share post composer', () => {
       title: 'Title',
       shareURL: 'https://rss.example/share/token',
     })).toBe('Title\n\nhttps://rss.example/share/token')
+  })
+
+  it('maximizes a long Chinese summary while preserving the short share URL', () => {
+    const text = buildXPostText({
+      title: '中文标题',
+      summaryBrief: `这是一个超长中文摘要前缀${'摘要内容'.repeat(100)}`,
+      shareURL: 'https://r.morefreeze.top/Aa0000000000',
+    })
+
+    expect(text).toContain('中文标题')
+    expect(text).toContain('这是一个超长中文摘要前缀')
+    expect(text.endsWith('https://r.morefreeze.top/Aa0000000000')).toBe(true)
+    expect(xWeightedLength(text)).toBeLessThanOrEqual(X_MAX_WEIGHT)
   })
 
   it('encodes the complete post into an X intent URL', () => {
