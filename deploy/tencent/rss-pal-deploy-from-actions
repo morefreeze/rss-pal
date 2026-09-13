@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LOCK_FILE=/var/lock/rss-pal-deploy-from-actions.lock
+REPO_DIR=/opt/rss-pal
+DEPLOY_SCRIPT=$(mktemp /tmp/rss-pal-auto-deploy.XXXXXX)
+
+cleanup() {
+  rm -f "$DEPLOY_SCRIPT"
+}
+trap cleanup EXIT
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "Another RSS Pal deployment is already running"
+  exit 0
+fi
+
+sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' bash -lc "cd '$REPO_DIR' && git fetch origin master && git show origin/master:scripts/auto_deploy.sh" >"$DEPLOY_SCRIPT"
+chmod 0755 "$DEPLOY_SCRIPT"
+
+sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' RSS_PAL_DEPLOY_DIRECT=1 bash -lc 'bash "$1"' _ "$DEPLOY_SCRIPT"
