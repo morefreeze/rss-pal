@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -447,6 +448,11 @@ func TestCreateShareRetriesShortCodeCollisionWithOneSnapshot(t *testing.T) {
 }
 
 func TestCreateShareStopsAfterFiveCollisions(t *testing.T) {
+	var logs bytes.Buffer
+	originalLogWriter := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(originalLogWriter) })
+
 	publicCalls := 0
 	shortCalls := 0
 	f := newShareAPIFixtureWithOptions(t, api.ShareHandlerOptions{
@@ -467,6 +473,12 @@ func TestCreateShareStopsAfterFiveCollisions(t *testing.T) {
 	}
 	if publicCalls != 5 || shortCalls != 5 {
 		t.Fatalf("generator calls public=%d short=%d, want 5 each", publicCalls, shortCalls)
+	}
+	if !strings.Contains(logs.String(), "share identifier collision retry limit exceeded") {
+		t.Fatalf("collision exhaustion log=%q, want identifier-neutral message", logs.String())
+	}
+	if strings.Contains(logs.String(), "share ID collision retry limit exceeded") {
+		t.Fatalf("collision exhaustion log misidentifies the conflicting key: %q", logs.String())
 	}
 	var count int
 	if err := f.privDB.QueryRow(`SELECT count(*) FROM article_shares`).Scan(&count); err != nil || count != 1 {

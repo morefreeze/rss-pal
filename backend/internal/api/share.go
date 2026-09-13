@@ -514,7 +514,7 @@ func (h *ShareHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusCreated, h.managementResponse(row, now))
 		return
 	}
-	shareInternalError(c, "create", errors.New("share ID collision retry limit exceeded"))
+	shareInternalError(c, "create", errors.New("share identifier collision retry limit exceeded"))
 }
 
 func (h *ShareHandler) List(c *gin.Context) {
