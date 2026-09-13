@@ -85,16 +85,38 @@ describe('X share post composer', () => {
   })
 
   it('maximizes a long Chinese summary while preserving the short share URL', () => {
+    const summaryBrief = `这是一个超长中文摘要前缀${'摘要内容'.repeat(100)}`
+    const shareURL = 'https://r.morefreeze.top/Aa0000000000'
     const text = buildXPostText({
       title: '中文标题',
-      summaryBrief: `这是一个超长中文摘要前缀${'摘要内容'.repeat(100)}`,
-      shareURL: 'https://r.morefreeze.top/Aa0000000000',
+      summaryBrief,
+      shareURL,
     })
 
     expect(text).toContain('中文标题')
     expect(text).toContain('这是一个超长中文摘要前缀')
-    expect(text.endsWith('https://r.morefreeze.top/Aa0000000000')).toBe(true)
+    expect(text.endsWith(shareURL)).toBe(true)
     expect(xWeightedLength(text)).toBeLessThanOrEqual(X_MAX_WEIGHT)
+
+    const postWithoutURL = text.slice(0, -`\n\n${shareURL}`.length)
+    const [renderedTitle, renderedSummary] = postWithoutURL.split('\n\n')
+    const renderedSummaryGraphemes = fallbackGraphemes(renderedSummary)
+    expect(renderedSummaryGraphemes.at(-1)).toBe('…')
+
+    const consumedSummaryGraphemes = renderedSummaryGraphemes.slice(0, -1)
+    const sourceSummaryGraphemes = fallbackGraphemes(plainSocialText(summaryBrief))
+    expect(consumedSummaryGraphemes).toEqual(
+      sourceSummaryGraphemes.slice(0, consumedSummaryGraphemes.length),
+    )
+    const nextSummaryGrapheme = sourceSummaryGraphemes[consumedSummaryGraphemes.length]
+    expect(nextSummaryGrapheme).toBeDefined()
+
+    const oneMoreGrapheme = `${renderedTitle}\n\n${[
+      ...consumedSummaryGraphemes,
+      nextSummaryGrapheme,
+      '…',
+    ].join('')}\n\n${shareURL}`
+    expect(xWeightedLength(oneMoreGrapheme)).toBeGreaterThan(X_MAX_WEIGHT)
   })
 
   it('encodes the complete post into an X intent URL', () => {
