@@ -98,7 +98,7 @@ verify_unknown_tls_runtime() {
   sed \
     -e "s#listen 80 default_server;#listen 127.0.0.1:$http_port default_server;#" \
     -e "s#listen 80;#listen 127.0.0.1:$http_port;#g" \
-    -e "s#listen 443 ssl default_server;#listen 127.0.0.1:$https_port ssl default_server;#" \
+    -e "s#listen 443 ssl http2 default_server;#listen 127.0.0.1:$https_port ssl http2 default_server;#" \
     -e "s#listen 443 ssl http2;#listen 127.0.0.1:$https_port ssl http2;#g" \
     -e "s#http://127.0.0.1:8082#http://127.0.0.1:$upstream_port#g" \
     "$final_site_config" >"$NGINX_TEST_DIR/runtime-site.conf"
@@ -225,6 +225,10 @@ verify_nginx_templates() {
     sed 's/^/nginx final: /' "$NGINX_TEST_DIR/final-nginx.log" >&2
     fail 'nginx rejected the final host template'
   fi
+  if grep -Fq '[warn]' "$NGINX_TEST_DIR/final-nginx.log"; then
+    sed 's/^/nginx final: /' "$NGINX_TEST_DIR/final-nginx.log" >&2
+    fail 'final host template must pass nginx -t without warnings'
+  fi
 
   while IFS= read -r line; do
     if [ "$line" = '    location ~ "^/[A-Za-z0-9]{12}$" {' ]; then
@@ -277,7 +281,7 @@ SHORT_TLS=$(server_block 6 "$FINAL_CONFIG")
 [[ "$DEFAULT_HTTP" == *'access_log off;'* && "$DEFAULT_HTTP" == *'return 444;'* ]] || fail 'default HTTP server must silently reject unknown hosts'
 [[ "$DEFAULT_HTTP" != *'proxy_pass'* && "$DEFAULT_HTTP" != *'location '* ]] || fail 'default HTTP server must expose no application surface'
 
-[[ "$DEFAULT_TLS" == *'listen 443 ssl default_server;'* && "$DEFAULT_TLS" == *'server_name _;'* ]] || fail 'second server must reject unknown TLS hosts by default'
+[[ "$DEFAULT_TLS" == *'listen 443 ssl http2 default_server;'* && "$DEFAULT_TLS" == *'server_name _;'* ]] || fail 'second server must reject unknown TLS hosts by default'
 [[ "$DEFAULT_TLS" == *'access_log off;'* && "$DEFAULT_TLS" == *'ssl_reject_handshake on;'* ]] || fail 'default TLS server must reject the handshake without logging'
 [[ "$DEFAULT_TLS" != *'proxy_pass'* && "$DEFAULT_TLS" != *'location '* ]] || fail 'default TLS server must expose no application surface'
 
