@@ -164,17 +164,17 @@ short_origin_readme_row=$(grep -F -- '| `SHORT_SHARE_ORIGIN` |' "$README_FILE" |
   echo "FAIL: README must mark SHORT_SHARE_ORIGIN required without a default" >&2
   exit 1
 }
-[[ "$short_origin_readme_row" == *'示例：`https://r.morefreeze.top`'* ]] || {
-  echo "FAIL: README must show r.morefreeze.top as an example value" >&2
+[[ "$short_origin_readme_row" == *'只支持精确值 `https://r.morefreeze.top`'* ]] || {
+  echo "FAIL: README must document r.morefreeze.top as the only supported short origin" >&2
   exit 1
 }
 quick_start_section=$(sed -n '/### 使用 Docker Compose（推荐）/,/^2\. 启动：/p' "$README_FILE")
-[[ "$quick_start_section" == *'`SHORT_SHARE_ORIGIN` 必须配置为通过 HTTPS 路由到当前实例的实际短域'* ]] || {
-  echo "FAIL: README quick start must require an HTTPS short domain routed to this instance" >&2
+[[ "$quick_start_section" == *'`SHORT_SHARE_ORIGIN` 只支持精确值 `https://r.morefreeze.top`'* ]] || {
+  echo "FAIL: README quick start must require the exact production short origin" >&2
   exit 1
 }
-[[ "$quick_start_section" == *'本地数据库生成的短码无法在生产短域解析'* ]] || {
-  echo "FAIL: README quick start must explain the local/production short-code boundary" >&2
+[[ "$quick_start_section" == *'必须通过 hosts、DNS 或反向代理把这个精确域名路由到本地实例'* ]] || {
+  echo "FAIL: README quick start must explain exact-host routing for local E2E" >&2
   exit 1
 }
 

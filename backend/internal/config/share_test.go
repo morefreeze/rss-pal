@@ -4,50 +4,46 @@ import "testing"
 
 func TestLoadShareSecret(t *testing.T) {
 	t.Setenv("SHARE_SECRET", "share-secret-for-test")
-	t.Setenv("SHORT_SHARE_ORIGIN", "https://short.example.test")
+	t.Setenv("SHORT_SHARE_ORIGIN", "https://r.morefreeze.top")
 
 	cfg := Load()
 	if got := cfg.Share.Secret; got != "share-secret-for-test" {
 		t.Fatalf("Load().Share.Secret = %q, want %q", got, "share-secret-for-test")
 	}
-	if got := cfg.Share.ShortOrigin; got != "https://short.example.test" {
-		t.Fatalf("Load().Share.ShortOrigin = %q, want %q", got, "https://short.example.test")
+	if got := cfg.Share.ShortOrigin; got != "https://r.morefreeze.top" {
+		t.Fatalf("Load().Share.ShortOrigin = %q, want %q", got, "https://r.morefreeze.top")
 	}
 }
 
-func TestValidateShortShareOriginAcceptsHTTPSOrigins(t *testing.T) {
-	for _, raw := range []string{
-		"https://r.morefreeze.top",
-		"https://short.example.test:8443",
-	} {
-		t.Run(raw, func(t *testing.T) {
-			got, err := ValidateShortShareOrigin(raw)
-			if err != nil {
-				t.Fatalf("ValidateShortShareOrigin(%q) error = %v", raw, err)
-			}
-			if got != raw {
-				t.Fatalf("ValidateShortShareOrigin(%q) = %q, want unchanged origin", raw, got)
-			}
-		})
+func TestValidateShortShareOriginAcceptsExactProductionOrigin(t *testing.T) {
+	const raw = "https://r.morefreeze.top"
+	got, err := ValidateShortShareOrigin(raw)
+	if err != nil {
+		t.Fatalf("ValidateShortShareOrigin(%q) error = %v", raw, err)
+	}
+	if got != raw {
+		t.Fatalf("ValidateShortShareOrigin(%q) = %q, want unchanged origin", raw, got)
 	}
 }
 
-func TestValidateShortShareOriginRejectsNonOrigins(t *testing.T) {
-	const wantErr = "SHORT_SHARE_ORIGIN must be an HTTPS origin without path, query, fragment, or credentials"
+func TestValidateShortShareOriginRejectsAnythingExceptExactProductionOrigin(t *testing.T) {
+	const wantErr = "SHORT_SHARE_ORIGIN must be exactly https://r.morefreeze.top"
 	tests := []struct {
 		name string
 		raw  string
 	}{
 		{name: "empty", raw: ""},
-		{name: "http", raw: "http://short.example.test"},
-		{name: "trailing slash", raw: "https://short.example.test/"},
-		{name: "path", raw: "https://short.example.test/share"},
-		{name: "credentials", raw: "https://user:pass@short.example.test"},
-		{name: "query", raw: "https://short.example.test?source=rss"},
-		{name: "force query", raw: "https://short.example.test?"},
-		{name: "fragment", raw: "https://short.example.test#share"},
-		{name: "port out of range", raw: "https://short.example.test:65536"},
-		{name: "port overflows integer", raw: "https://short.example.test:9999999999999999999999999999999999999999"},
+		{name: "http", raw: "http://r.morefreeze.top"},
+		{name: "custom HTTPS origin", raw: "https://short.example.test"},
+		{name: "explicit port", raw: "https://r.morefreeze.top:443"},
+		{name: "hostname casing", raw: "https://R.morefreeze.top"},
+		{name: "trailing dot", raw: "https://r.morefreeze.top."},
+		{name: "trailing slash", raw: "https://r.morefreeze.top/"},
+		{name: "path", raw: "https://r.morefreeze.top/share"},
+		{name: "credentials", raw: "https://user:pass@r.morefreeze.top"},
+		{name: "query", raw: "https://r.morefreeze.top?source=rss"},
+		{name: "force query", raw: "https://r.morefreeze.top?"},
+		{name: "fragment", raw: "https://r.morefreeze.top#share"},
 	}
 
 	for _, tt := range tests {

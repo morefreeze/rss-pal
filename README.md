@@ -27,7 +27,7 @@ cp .env.example .env
 # 编辑 .env，填入 AI API 密钥和管理员密码
 ```
 
-`SHORT_SHARE_ORIGIN` 必须配置为通过 HTTPS 路由到当前实例的实际短域（例如 `https://r.morefreeze.top`），且不能带尾斜杠。不要在本地直接照抄未指向本实例的生产示例，否则本地数据库生成的短码无法在生产短域解析。
+`SHORT_SHARE_ORIGIN` 只支持精确值 `https://r.morefreeze.top`，不接受其他主机、端口、大小写、尾点或尾斜杠变体。本地端到端验证短链时，必须通过 hosts、DNS 或反向代理把这个精确域名路由到本地实例；不能用另一个测试域名替代，否则验证结果与实际短域路由不一致。
 
 2. 启动：
 
@@ -109,7 +109,7 @@ npm run dev   # 开发模式，代理到 :8080
 | `AUTH_PASSWORD` | `admin` | 管理员初始密码 |
 | `JWT_SECRET` | — | JWT 签名密钥（**生产环境必须设置**） |
 | `SHARE_SECRET` | — | 分享链接签名密钥；必须至少 32 bytes，并与 `JWT_SECRET` 独立设置 |
-| `SHORT_SHARE_ORIGIN` | —（必填） | 永久短分享链接的公开来源；示例：`https://r.morefreeze.top`，生产值不要带尾斜杠 |
+| `SHORT_SHARE_ORIGIN` | —（必填） | 永久短分享链接的固定公开来源；只支持精确值 `https://r.morefreeze.top` |
 
 ## 云服务器部署（生产环境）
 

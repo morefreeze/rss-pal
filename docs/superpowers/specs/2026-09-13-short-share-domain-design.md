@@ -154,12 +154,10 @@ SHORT_SHARE_ORIGIN=https://r.morefreeze.top
 
 启动时必须满足：
 
-- 配置非空。
-- scheme 为 `https`。
-- 只包含 origin，不包含 path、query、fragment 或用户凭据。
-- host 必须存在。
+- 配置必须精确等于 `https://r.morefreeze.top`。
+- 不接受其他主机、显式端口、大小写、尾点、尾斜杠、path、query、fragment 或用户凭据变体。
 
-生产配置无效时服务拒绝启动，避免生成不可用或指向错误站点的短链。测试和本地开发应显式提供 HTTPS 测试 origin，例如 `https://short.example.test`；不为生产配置提供静默回退。
+配置无效时服务拒绝启动，避免生成不可用或指向错误站点的短链。本地端到端测试必须通过 hosts、DNS 或反向代理将精确域名 `r.morefreeze.top` 路由到本地实例；不允许用测试 origin 替代，也不为配置提供静默回退。
 
 ## 8. 独立短域名路由
 

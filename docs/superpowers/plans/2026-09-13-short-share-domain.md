@@ -240,18 +240,17 @@ func TestNewShortCodeShape(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Write strict origin tests**
+- [ ] **Step 2: Write fixed production-origin tests**
 
-Extend `share_test.go` so only a path-free HTTPS origin is accepted:
+Extend `share_test.go` so only the exact production origin is accepted:
 
 ```go
 func TestValidateShortShareOrigin(t *testing.T) {
-	for _, valid := range []string{"https://r.morefreeze.top", "https://short.example.test:8443"} {
-		if got, err := ValidateShortShareOrigin(valid); err != nil || got != valid {
-			t.Errorf("ValidateShortShareOrigin(%q)=%q,%v", valid, got, err)
-		}
+	const valid = "https://r.morefreeze.top"
+	if got, err := ValidateShortShareOrigin(valid); err != nil || got != valid {
+		t.Errorf("ValidateShortShareOrigin(%q)=%q,%v", valid, got, err)
 	}
-	for _, invalid := range []string{"", "http://r.morefreeze.top", "https://r.morefreeze.top/", "https://r.morefreeze.top/a", "https://u:p@r.morefreeze.top", "https://r.morefreeze.top?q=1", "https://r.morefreeze.top#x"} {
+	for _, invalid := range []string{"", "http://r.morefreeze.top", "https://short.example.test", "https://r.morefreeze.top:443", "https://R.morefreeze.top", "https://r.morefreeze.top.", "https://r.morefreeze.top/", "https://r.morefreeze.top/a", "https://u:p@r.morefreeze.top", "https://r.morefreeze.top?q=1", "https://r.morefreeze.top#x"} {
 		if _, err := ValidateShortShareOrigin(invalid); err == nil {
 			t.Errorf("ValidateShortShareOrigin(%q) succeeded", invalid)
 		}
@@ -317,23 +316,20 @@ Extend `ShareConfig` with `ShortOrigin string`, load `SHORT_SHARE_ORIGIN` withou
 
 ```go
 func ValidateShortShareOrigin(raw string) (string, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.Hostname() == "" ||
-		parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" ||
-		parsed.RawFragment != "" || parsed.ForceQuery || parsed.Opaque != "" {
-		return "", errors.New("SHORT_SHARE_ORIGIN must be an HTTPS origin without path, query, fragment, or credentials")
+	if raw != shortShareOrigin {
+		return "", errors.New("SHORT_SHARE_ORIGIN must be exactly https://r.morefreeze.top")
 	}
-	return parsed.String(), nil
+	return shortShareOrigin, nil
 }
 ```
 
-Add the necessary `errors` and `net/url` imports. Extend `TestLoadShareSecret` with:
+Define `const shortShareOrigin = "https://r.morefreeze.top"` and add the necessary `errors` import. Extend `TestLoadShareSecret` with:
 
 ```go
-t.Setenv("SHORT_SHARE_ORIGIN", "https://short.example.test")
+t.Setenv("SHORT_SHARE_ORIGIN", "https://r.morefreeze.top")
 cfg := Load()
 if cfg.Share.Secret != "share-secret-for-test" { t.Fatalf("secret=%q", cfg.Share.Secret) }
-if cfg.Share.ShortOrigin != "https://short.example.test" { t.Fatalf("origin=%q", cfg.Share.ShortOrigin) }
+if cfg.Share.ShortOrigin != "https://r.morefreeze.top" { t.Fatalf("origin=%q", cfg.Share.ShortOrigin) }
 ```
 
 - [ ] **Step 6: Verify generator and configuration packages**
@@ -1110,14 +1106,14 @@ Update `auto_deploy_service_selection_test.sh` to compare the captured command l
 npm run test:legacy
 npm run build
 cd ..
-SHORT_SHARE_ORIGIN=https://short.example.test DB_PASSWORD=test AUTH_PASSWORD=test JWT_SECRET=test SHARE_SECRET=0123456789abcdef0123456789abcdef docker compose config >/tmp/rss-pal-short-share-compose.yml
-rg -n '041_article_share_short_codes|SHORT_SHARE_ORIGIN: https://short.example.test' /tmp/rss-pal-short-share-compose.yml
+SHORT_SHARE_ORIGIN=https://r.morefreeze.top DB_PASSWORD=test AUTH_PASSWORD=test JWT_SECRET=test SHARE_SECRET=0123456789abcdef0123456789abcdef docker compose config >/tmp/rss-pal-short-share-compose.yml
+rg -n '041_article_share_short_codes|SHORT_SHARE_ORIGIN: https://r.morefreeze.top' /tmp/rss-pal-short-share-compose.yml
 bash scripts/tests/auto_deploy_service_selection_test.sh
 bash scripts/tests/auto_deploy_proxy_ready_test.sh
 bash scripts/tests/auto_deploy_direct_network_test.sh
 ```
 
-Expected: legacy tests and build PASS; rendered Compose contains migration 041 and the explicit test origin; direct mode never probes a proxy; normal scraping-proxy readiness tests remain unchanged.
+Expected: legacy tests and build PASS; rendered Compose contains migration 041 and the exact production short origin; direct mode never probes a proxy; normal scraping-proxy readiness tests remain unchanged.
 
 - [ ] **Step 8: Commit the container deployment contract**
 
