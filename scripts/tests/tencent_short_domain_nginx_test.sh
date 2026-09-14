@@ -421,6 +421,15 @@ printf '%s\n' \
 chmod +x "$WRAPPER_TEST_DIR/bin/flock"
 printf '%s\n' \
   '#!/bin/bash' \
+  'if [ "${1:-}" = "is-active" ] && [ "${2:-}" = "--quiet" ] && [ "${3:-}" = "mihomo.service" ]; then' \
+  '  [ "${MIHOMO_ACTIVE:-0}" = "1" ]' \
+  '  exit' \
+  'fi' \
+  'exit 1' \
+  >"$WRAPPER_TEST_DIR/bin/systemctl"
+chmod +x "$WRAPPER_TEST_DIR/bin/systemctl"
+printf '%s\n' \
+  '#!/bin/bash' \
   'if [ "${1:-}" = "-lc" ]; then' \
   '  shift' \
   '  exec /bin/bash --noprofile --norc -c "$@"' \
@@ -455,5 +464,14 @@ FLOCK_SHOULD_FAIL=1 SUDO_CALL_LOG="$WRAPPER_TEST_DIR/sudo-calls" \
 grep -Fq 'Another RSS Pal deployment is already running' "$WRAPPER_TEST_DIR/lock.err" || fail 'lock contention must report a clear error on stderr'
 [ ! -s "$WRAPPER_TEST_DIR/sudo-calls" ] || fail 'lock contention must not fetch or execute deployment code'
 [ ! -e "$PROBE_OUTPUT" ] || fail 'lock contention must not execute the fetched deployment script'
+
+rm -f "$WRAPPER_TEST_DIR/sudo-calls"
+mihomo_status=0
+MIHOMO_ACTIVE=1 SUDO_CALL_LOG="$WRAPPER_TEST_DIR/sudo-calls" \
+  PATH="$WRAPPER_TEST_DIR/bin:$PATH" /bin/bash "$WRAPPER_TEST_DIR/wrapper" \
+  >"$WRAPPER_TEST_DIR/mihomo.out" 2>"$WRAPPER_TEST_DIR/mihomo.err" || mihomo_status=$?
+[ "$mihomo_status" -ne 0 ] || fail 'an active Mihomo transparent proxy must block an Actions deployment'
+grep -Fq 'Mihomo transparent proxy is active; refusing non-direct deployment' "$WRAPPER_TEST_DIR/mihomo.err" || fail 'active Mihomo must report a clear direct-network error'
+[ ! -s "$WRAPPER_TEST_DIR/sudo-calls" ] || fail 'active Mihomo must block deployment before fetching or executing code'
 
 echo 'PASS: Tencent bootstrap, final short-domain ingress, and direct Actions wrapper match the contract'

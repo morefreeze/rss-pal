@@ -16,6 +16,11 @@ if ! flock -n 9; then
   exit 1
 fi
 
+if systemctl is-active --quiet mihomo.service; then
+  echo "Mihomo transparent proxy is active; refusing non-direct deployment" >&2
+  exit 1
+fi
+
 sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' bash -lc 'cd "$1" && git fetch origin master && umask 077 && git show origin/master:scripts/auto_deploy.sh > "$2"' _ "$REPO_DIR" "$DEPLOY_SCRIPT"
 
 sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' RSS_PAL_DEPLOY_DIRECT=1 bash -lc 'bash "$1"' _ "$DEPLOY_SCRIPT"
