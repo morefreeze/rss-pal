@@ -9,8 +9,18 @@ RENEWAL_HOOK="$ROOT_DIR/deploy/letsencrypt/renewal-hooks/deploy/rss-pal-nginx-re
 NGINX_TEST_DIR=""
 WRAPPER_TEST_DIR=""
 HOOK_TEST_DIR=""
+NGINX_RUNTIME_PID=""
+UPSTREAM_PID=""
 
 cleanup_test_dirs() {
+  if [ -n "$NGINX_RUNTIME_PID" ]; then
+    kill "$NGINX_RUNTIME_PID" 2>/dev/null || true
+    wait "$NGINX_RUNTIME_PID" 2>/dev/null || true
+  fi
+  if [ -n "$UPSTREAM_PID" ]; then
+    kill "$UPSTREAM_PID" 2>/dev/null || true
+    wait "$UPSTREAM_PID" 2>/dev/null || true
+  fi
   [ -z "$NGINX_TEST_DIR" ] || rm -rf "$NGINX_TEST_DIR"
   [ -z "$WRAPPER_TEST_DIR" ] || rm -rf "$WRAPPER_TEST_DIR"
   [ -z "$HOOK_TEST_DIR" ] || rm -rf "$HOOK_TEST_DIR"
@@ -56,6 +66,103 @@ server_block() {
     current == wanted { print }
     current > wanted { exit }
   ' "$file"
+}
+
+allocate_test_port() {
+  python3 -c 'import socket; sock = socket.socket(); sock.bind(("127.0.0.1", 0)); print(sock.getsockname()[1]); sock.close()'
+}
+
+verify_unknown_tls_runtime() {
+  local final_site_config=$1
+  local http_port
+  local https_port
+  local upstream_port
+  local upstream_ready=0
+  local nginx_ready=0
+  local unknown_status=0
+  local unknown_code
+  local attempt
+
+  command -v python3 >/dev/null || fail 'python3 is required for the temporary upstream server'
+  command -v curl >/dev/null || fail 'curl is required for the TLS runtime probe'
+  http_port=$(allocate_test_port)
+  https_port=$(allocate_test_port)
+  while [ "$https_port" = "$http_port" ]; do
+    https_port=$(allocate_test_port)
+  done
+  upstream_port=$(allocate_test_port)
+  while [ "$upstream_port" = "$http_port" ] || [ "$upstream_port" = "$https_port" ]; do
+    upstream_port=$(allocate_test_port)
+  done
+
+  sed \
+    -e "s#listen 80 default_server;#listen 127.0.0.1:$http_port default_server;#" \
+    -e "s#listen 80;#listen 127.0.0.1:$http_port;#g" \
+    -e "s#listen 443 ssl default_server;#listen 127.0.0.1:$https_port ssl default_server;#" \
+    -e "s#listen 443 ssl http2;#listen 127.0.0.1:$https_port ssl http2;#g" \
+    -e "s#http://127.0.0.1:8082#http://127.0.0.1:$upstream_port#g" \
+    "$final_site_config" >"$NGINX_TEST_DIR/runtime-site.conf"
+  printf '%s\n' \
+    'daemon off;' \
+    'master_process off;' \
+    "pid $NGINX_TEST_DIR/runtime.pid;" \
+    "error_log $NGINX_TEST_DIR/runtime-error.log;" \
+    'events {}' \
+    'http {' \
+    '    access_log off;' \
+    "    include $NGINX_TEST_DIR/runtime-site.conf;" \
+    '}' \
+    >"$NGINX_TEST_DIR/runtime-main.conf"
+
+  python3 -m http.server "$upstream_port" --bind 127.0.0.1 \
+    >"$NGINX_TEST_DIR/upstream.out" 2>"$NGINX_TEST_DIR/upstream.log" &
+  UPSTREAM_PID=$!
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    if curl --noproxy '*' --connect-timeout 1 --max-time 2 -sS \
+      "http://127.0.0.1:$upstream_port/ready" >/dev/null 2>&1; then
+      upstream_ready=1
+      break
+    fi
+    sleep 0.1
+  done
+  [ "$upstream_ready" -eq 1 ] || fail 'temporary upstream did not start'
+
+  nginx -p "$NGINX_TEST_DIR/" -c "$NGINX_TEST_DIR/runtime-main.conf" \
+    >"$NGINX_TEST_DIR/runtime-nginx.log" 2>&1 &
+  NGINX_RUNTIME_PID=$!
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    if curl --noproxy '*' --connect-timeout 1 --max-time 2 -k -sS -o /dev/null \
+      --resolve "rss.morefreeze.top:$https_port:127.0.0.1" \
+      "https://rss.morefreeze.top:$https_port/runtime-ready"; then
+      nginx_ready=1
+      break
+    fi
+    if ! kill -0 "$NGINX_RUNTIME_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  if [ "$nginx_ready" -ne 1 ]; then
+    sed 's/^/nginx runtime: /' "$NGINX_TEST_DIR/runtime-nginx.log" >&2
+    fail 'temporary Nginx did not proxy the named main TLS host'
+  fi
+
+  : >"$NGINX_TEST_DIR/upstream.log"
+  unknown_code=$(curl --noproxy '*' --connect-timeout 1 --max-time 2 -k -sS -o /dev/null -w '%{http_code}' \
+    --resolve "unknown.invalid:$https_port:127.0.0.1" \
+    "https://unknown.invalid:$https_port/must-not-proxy" \
+    2>"$NGINX_TEST_DIR/unknown-tls.err") || unknown_status=$?
+  [ "$unknown_status" -ne 0 ] || fail 'unknown TLS SNI must fail its handshake'
+  [ "$unknown_code" = '000' ] || fail "unknown TLS SNI returned HTTP $unknown_code instead of rejecting its handshake"
+  sleep 0.1
+  [ ! -s "$NGINX_TEST_DIR/upstream.log" ] || fail 'unknown TLS SNI reached the main application upstream'
+
+  kill "$NGINX_RUNTIME_PID"
+  wait "$NGINX_RUNTIME_PID" 2>/dev/null || true
+  NGINX_RUNTIME_PID=""
+  kill "$UPSTREAM_PID"
+  wait "$UPSTREAM_PID" 2>/dev/null || true
+  UPSTREAM_PID=""
 }
 
 verify_nginx_templates() {
@@ -134,6 +241,8 @@ verify_nginx_templates() {
     >"$NGINX_TEST_DIR/invalid-nginx.log" 2>&1; then
     fail 'nginx parser did not reject an unquoted {12} location regex'
   fi
+
+  verify_unknown_tls_runtime "$NGINX_TEST_DIR/final-site.conf"
 }
 
 for required_file in "$BOOTSTRAP_CONFIG" "$FINAL_CONFIG" "$DEPLOY_WRAPPER" "$RENEWAL_HOOK"; do
@@ -155,24 +264,29 @@ assert_not_contains "$BOOTSTRAP_CONFIG" 'listen 443' 'bootstrap must not enable 
 assert_not_contains "$BOOTSTRAP_CONFIG" 'ssl_certificate' 'bootstrap must not reference a certificate'
 assert_not_contains "$BOOTSTRAP_CONFIG" 'rss.morefreeze.top' 'bootstrap must not claim the primary hostname'
 
-# Final ingress rejects unknown HTTP hosts before the named redirect and TLS servers.
-assert_count 5 'server {' "$FINAL_CONFIG" 'final ingress must contain exactly five servers'
+# Final ingress rejects unknown HTTP and TLS hosts before the named servers.
+assert_count 6 'server {' "$FINAL_CONFIG" 'final ingress must contain exactly six servers'
 DEFAULT_HTTP=$(server_block 1 "$FINAL_CONFIG")
-MAIN_HTTP=$(server_block 2 "$FINAL_CONFIG")
-MAIN_TLS=$(server_block 3 "$FINAL_CONFIG")
-SHORT_HTTP=$(server_block 4 "$FINAL_CONFIG")
-SHORT_TLS=$(server_block 5 "$FINAL_CONFIG")
+DEFAULT_TLS=$(server_block 2 "$FINAL_CONFIG")
+MAIN_HTTP=$(server_block 3 "$FINAL_CONFIG")
+MAIN_TLS=$(server_block 4 "$FINAL_CONFIG")
+SHORT_HTTP=$(server_block 5 "$FINAL_CONFIG")
+SHORT_TLS=$(server_block 6 "$FINAL_CONFIG")
 
 [[ "$DEFAULT_HTTP" == *'listen 80 default_server;'* && "$DEFAULT_HTTP" == *'server_name _;'* ]] || fail 'first server must reject unknown HTTP hosts by default'
 [[ "$DEFAULT_HTTP" == *'access_log off;'* && "$DEFAULT_HTTP" == *'return 444;'* ]] || fail 'default HTTP server must silently reject unknown hosts'
 [[ "$DEFAULT_HTTP" != *'proxy_pass'* && "$DEFAULT_HTTP" != *'location '* ]] || fail 'default HTTP server must expose no application surface'
 
-[[ "$MAIN_HTTP" == *'listen 80;'* && "$MAIN_HTTP" == *'server_name rss.morefreeze.top;'* ]] || fail 'second server must be primary-host HTTP'
+[[ "$DEFAULT_TLS" == *'listen 443 ssl default_server;'* && "$DEFAULT_TLS" == *'server_name _;'* ]] || fail 'second server must reject unknown TLS hosts by default'
+[[ "$DEFAULT_TLS" == *'access_log off;'* && "$DEFAULT_TLS" == *'ssl_reject_handshake on;'* ]] || fail 'default TLS server must reject the handshake without logging'
+[[ "$DEFAULT_TLS" != *'proxy_pass'* && "$DEFAULT_TLS" != *'location '* ]] || fail 'default TLS server must expose no application surface'
+
+[[ "$MAIN_HTTP" == *'listen 80;'* && "$MAIN_HTTP" == *'server_name rss.morefreeze.top;'* ]] || fail 'third server must be primary-host HTTP'
 [[ "$MAIN_HTTP" == *'access_log off;'* ]] || fail 'primary-host HTTP must not log bearer-bearing redirect URLs'
 [[ "$MAIN_HTTP" == *'return 301 https://rss.morefreeze.top$request_uri;'* ]] || fail 'primary-host HTTP must redirect to its fixed TLS hostname'
 [[ "$MAIN_HTTP" != *'proxy_pass'* ]] || fail 'primary-host HTTP must not proxy'
 
-[[ "$MAIN_TLS" == *'listen 443 ssl http2;'* && "$MAIN_TLS" == *'server_name rss.morefreeze.top;'* ]] || fail 'third server must be primary-host TLS'
+[[ "$MAIN_TLS" == *'listen 443 ssl http2;'* && "$MAIN_TLS" == *'server_name rss.morefreeze.top;'* ]] || fail 'fourth server must be primary-host TLS'
 [[ "$MAIN_TLS" == *'access_log off;'* ]] || fail 'primary-host TLS must disable access logging'
 [[ "$MAIN_TLS" == *'client_max_body_size 5M;'* ]] || fail 'primary-host TLS must preserve the 5M request limit'
 [[ "$MAIN_TLS" == *'proxy_read_timeout 60s;'* ]] || fail 'primary-host TLS must preserve the proxy timeout'
@@ -180,7 +294,7 @@ SHORT_TLS=$(server_block 5 "$FINAL_CONFIG")
 [[ "$MAIN_TLS" == *'ssl_certificate /etc/letsencrypt/live/rss.morefreeze.top/fullchain.pem;'* ]] || fail 'primary-host TLS must use its existing full chain'
 [[ "$MAIN_TLS" == *'ssl_certificate_key /etc/letsencrypt/live/rss.morefreeze.top/privkey.pem;'* ]] || fail 'primary-host TLS must use its existing private key'
 
-[[ "$SHORT_HTTP" == *'listen 80;'* && "$SHORT_HTTP" == *'server_name r.morefreeze.top;'* ]] || fail 'fourth server must be short-host HTTP'
+[[ "$SHORT_HTTP" == *'listen 80;'* && "$SHORT_HTTP" == *'server_name r.morefreeze.top;'* ]] || fail 'fifth server must be short-host HTTP'
 [[ "$SHORT_HTTP" == *'access_log off;'* ]] || fail 'short-host HTTP must not log bearer-bearing redirect URLs'
 [[ "$SHORT_HTTP" == *'location ^~ /.well-known/acme-challenge/ {'* && "$SHORT_HTTP" == *'root /var/www/html;'* ]] || fail 'short-host HTTP must serve ACME renewal challenges from the webroot'
 [[ "$SHORT_HTTP" == *'location / {'* && "$SHORT_HTTP" == *'return 301 https://r.morefreeze.top$request_uri;'* ]] || fail 'all non-ACME short-host HTTP paths must redirect to its fixed TLS hostname'
@@ -192,7 +306,7 @@ fi
 [[ "$SHORT_HTTP" != *'proxy_pass'* ]] || fail 'short-host HTTP must not proxy'
 assert_not_contains "$FINAL_CONFIG" 'https://$host$request_uri' 'HTTP redirects must never trust an arbitrary Host header'
 
-[[ "$SHORT_TLS" == *'listen 443 ssl http2;'* && "$SHORT_TLS" == *'server_name r.morefreeze.top;'* ]] || fail 'fifth server must be short-host TLS'
+[[ "$SHORT_TLS" == *'listen 443 ssl http2;'* && "$SHORT_TLS" == *'server_name r.morefreeze.top;'* ]] || fail 'sixth server must be short-host TLS'
 [[ "$SHORT_TLS" == *'access_log off;'* ]] || fail 'short-host TLS must disable access logging'
 [[ "$SHORT_TLS" == *'ssl_certificate /etc/letsencrypt/live/r.morefreeze.top/fullchain.pem;'* ]] || fail 'short-host TLS must use its own full chain'
 [[ "$SHORT_TLS" == *'ssl_certificate_key /etc/letsencrypt/live/r.morefreeze.top/privkey.pem;'* ]] || fail 'short-host TLS must use its own private key'
