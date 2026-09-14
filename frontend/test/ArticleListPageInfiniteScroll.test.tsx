@@ -253,6 +253,87 @@ describe('ArticleListPage automatic pagination', () => {
     await waitFor(() => expect(apiMocks.getArticles).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'captured', order: 'desc' })))
   })
 
+  it.each(['仅未读', '已保存'])('remembers %s and its mutually exclusive checkbox across launches', async (label) => {
+    apiMocks.getArticles.mockResolvedValue([])
+    const mount = () => render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    const first = mount()
+    const other = label === '仅未读' ? '已保存' : '仅未读'
+    fireEvent.click(screen.getByLabelText(other))
+    fireEvent.click(screen.getByLabelText(label))
+    first.unmount()
+    sessionStorage.clear()
+    apiMocks.getArticles.mockClear()
+    const second = mount()
+    expect((screen.getByLabelText(label) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText(other) as HTMLInputElement).checked).toBe(false)
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalled())
+    expect(apiMocks.getArticles.mock.calls[0][0]).toEqual(expect.objectContaining({
+      unread: label === '仅未读' ? true : undefined,
+      saved: label === '已保存' ? true : undefined,
+    }))
+    fireEvent.click(screen.getByLabelText(label))
+    second.unmount()
+    sessionStorage.clear()
+    mount()
+    expect((screen.getByLabelText(label) as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('remembers topic grouping across launches', async () => {
+    apiMocks.getArticles.mockResolvedValue([])
+    apiMocks.getGroupedArticles.mockResolvedValue({ groups: [], unclassified: { articles: [], total_count: 0 } })
+    const first = render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: /分组/ }))
+    await waitFor(() => expect(apiMocks.getGroupedArticles).toHaveBeenCalled())
+    first.unmount()
+    sessionStorage.clear()
+    apiMocks.getGroupedArticles.mockClear()
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.getGroupedArticles).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: /分组/ }).title).toBe('回到列表视图')
+  })
+
+  it.each([
+    ['Tech', { kind: 'tag', id: 7 }, { tag_id: 7 }],
+    ['无 tag', { kind: 'untagged' }, { untagged: true }],
+  ])('remembers the %s category across launches', async (label, selection, params) => {
+    localStorage.setItem('tagSidebarOpen', 'true')
+    apiMocks.getTagSidebar.mockResolvedValue({ total_count: 5, untagged_count: 2, tags: [{ id: 7, name: 'Tech', article_count: 3 }] })
+    apiMocks.getArticles.mockResolvedValue([])
+    const first = render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(label) }))
+    first.unmount()
+    sessionStorage.clear()
+    apiMocks.getArticles.mockClear()
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalled())
+    expect(apiMocks.getArticles.mock.calls[0][0]).toEqual(expect.objectContaining(params))
+    expect(JSON.parse(localStorage.getItem('articleTagFilter')!)).toEqual(selection)
+  })
+
+  it('migrates session filters and normalizes conflicting grouping and category', async () => {
+    sessionStorage.setItem('unreadOnly', 'true')
+    sessionStorage.setItem('savedOnly', 'false')
+    sessionStorage.setItem('articlesGrouped', 'true')
+    sessionStorage.setItem('articleTagFilter', JSON.stringify({ kind: 'tag', id: 7 }))
+    apiMocks.getArticles.mockResolvedValue([])
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalled())
+    expect(apiMocks.getArticles.mock.calls[0][0]).toEqual(expect.objectContaining({ unread: true, tag_id: 7 }))
+    expect(localStorage.getItem('unreadOnly')).toBe('true')
+    expect(localStorage.getItem('savedOnly')).toBe('false')
+    expect(localStorage.getItem('articlesGrouped')).toBe('false')
+    expect(JSON.parse(localStorage.getItem('articleTagFilter')!)).toEqual({ kind: 'tag', id: 7 })
+  })
+
+  it.each(['null', '{invalid', '{"kind":"tag","id":-1}', '{"kind":"unknown"}'])('ignores invalid category %s', async (raw) => {
+    localStorage.setItem('articleTagFilter', raw)
+    apiMocks.getArticles.mockResolvedValue([])
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalled())
+    expect(apiMocks.getArticles.mock.calls[0][0]).toEqual(expect.objectContaining({ tag_id: undefined, untagged: undefined }))
+    expect(JSON.parse(localStorage.getItem('articleTagFilter')!)).toEqual({ kind: 'all' })
+  })
+
   it('replaces recommendations with a collapsed daily briefing panel', async () => {
     apiMocks.getArticles.mockResolvedValue([])
     apiMocks.getDailyDigest.mockResolvedValue({

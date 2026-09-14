@@ -77,8 +77,8 @@ function MediaIndicator({ article, onPlay }: { article: MediaIndicatorArticle; o
   )
 }
 
-// Home-screen launches can create new sessions; keep sorting across launches.
-function readSortPreference(key: string, legacyKey?: string): string | null {
+// Home-screen launches can create new sessions; keep list preferences across launches.
+function readListPreference(key: string, legacyKey?: string): string | null {
   try {
     const value = localStorage.getItem(key)
     if (value !== null) return value
@@ -87,6 +87,17 @@ function readSortPreference(key: string, legacyKey?: string): string | null {
     return sessionStorage.getItem(key)
       ?? (legacyKey ? sessionStorage.getItem(legacyKey) : null)
   } catch { return null }
+}
+
+function readTagFilter(): TagFilter {
+  try {
+    const value = JSON.parse(readListPreference('articleTagFilter') || 'null')
+    if (value?.kind === 'all' || value?.kind === 'untagged') return { kind: value.kind }
+    if (value?.kind === 'tag' && Number.isSafeInteger(value.id) && value.id > 0) {
+      return { kind: 'tag', id: value.id }
+    }
+  } catch {}
+  return { kind: 'all' }
 }
 
 // SearchArticleRow renders a single article card in the search-results panel.
@@ -335,18 +346,18 @@ export default function ArticleListPage() {
   })()
   const [unreadOnly, setUnreadOnly] = useState(() => {
     if (savedRedirect) return false
-    try { return sessionStorage.getItem('unreadOnly') === 'true' } catch { return false }
+    return readListPreference('unreadOnly') === 'true'
   })
   const [savedOnly, setSavedOnly] = useState(() => {
     if (savedRedirect) return true
-    try { return sessionStorage.getItem('savedOnly') === 'true' } catch { return false }
+    return readListPreference('savedOnly') === 'true'
   })
   const [sortField, setSortField] = useState<ArticleSort>(() => {
-    const v = readSortPreference('articlesSortField', 'articlesSort')
+    const v = readListPreference('articlesSortField', 'articlesSort')
     return v === 'captured' ? 'captured' : 'published'
   })
   const [sortDir, setSortDir] = useState<ArticleOrder>(() => {
-    return readSortPreference('articlesSortDir') === 'asc' ? 'asc' : 'desc'
+    return readListPreference('articlesSortDir') === 'asc' ? 'asc' : 'desc'
   })
   // Persist both values on mount (migrating old sessions) and after changes.
   useEffect(() => {
@@ -359,7 +370,7 @@ export default function ArticleListPage() {
     try { return localStorage.getItem('showBriefing') === 'true' } catch { return false }
   })
   const [grouped, setGrouped] = useState(() => {
-    try { return sessionStorage.getItem('articlesGrouped') === 'true' } catch { return false }
+    return readListPreference('articlesGrouped') === 'true' && readTagFilter().kind === 'all'
   })
   const [groupedData, setGroupedData] = useState<GroupedArticles | null>(null)
   const [groupedLoading, setGroupedLoading] = useState(false)
@@ -380,12 +391,16 @@ export default function ArticleListPage() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     try { return localStorage.getItem('tagSidebarOpen') === 'true' } catch { return false }
   })
-  const [tagFilter, setTagFilter] = useState<TagFilter>(() => {
+  const [tagFilter, setTagFilter] = useState<TagFilter>(readTagFilter)
+  // Save state together so automatically unticked filters cannot return later.
+  useEffect(() => {
     try {
-      const raw = sessionStorage.getItem('articleTagFilter')
-      return raw ? JSON.parse(raw) as TagFilter : { kind: 'all' }
-    } catch { return { kind: 'all' } }
-  })
+      localStorage.setItem('unreadOnly', String(unreadOnly))
+      localStorage.setItem('savedOnly', String(savedOnly))
+      localStorage.setItem('articlesGrouped', String(grouped))
+      localStorage.setItem('articleTagFilter', JSON.stringify(tagFilter))
+    } catch {}
+  }, [unreadOnly, savedOnly, grouped, tagFilter])
   const [tagSidebarData, setTagSidebarData] = useState<TagSidebarData | null>(null)
   const [focusedIdx, setFocusedIdx] = useState<number>(-1)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -452,7 +467,6 @@ export default function ArticleListPage() {
   const selectTag = (sel: TagFilter) => {
     if (sel.kind !== 'all' && grouped) setGrouped(false)
     setTagFilter(sel)
-    try { sessionStorage.setItem('articleTagFilter', JSON.stringify(sel)) } catch {}
   }
 
   useEffect(() => {
@@ -878,7 +892,6 @@ export default function ArticleListPage() {
               onClick={() => {
                 const next = !grouped
                 setGrouped(next)
-                try { sessionStorage.setItem('articlesGrouped', String(next)) } catch {}
               }}
               title={grouped ? '回到列表视图' : '按主题分组查看'}
             >
@@ -893,7 +906,6 @@ export default function ArticleListPage() {
                 onChange={e => {
                   setUnreadOnly(e.target.checked)
                   if (e.target.checked) setSavedOnly(false)
-                  try { sessionStorage.setItem('unreadOnly', String(e.target.checked)) } catch {}
                 }}
                 disabled={!!searchQuery}
               />
@@ -908,7 +920,6 @@ export default function ArticleListPage() {
                 onChange={e => {
                   setSavedOnly(e.target.checked)
                   if (e.target.checked) setUnreadOnly(false)
-                  try { sessionStorage.setItem('savedOnly', String(e.target.checked)) } catch {}
                 }}
                 disabled={!!searchQuery}
               />
