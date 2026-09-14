@@ -91,17 +91,23 @@ export function buildXPostText(input: XPostInput): string {
   const rawSummary = plainSocialText(input.summaryBrief ?? '')
     || plainSocialText(input.summaryDetailed ?? '')
 
-  const titleBudget = Math.max(0, X_MAX_WEIGHT - X_URL_WEIGHT - 2)
-  const title = truncateXText(rawTitle, titleBudget)
-
   if (rawSummary) {
-    const summaryBudget = X_MAX_WEIGHT - xWeightedLength(title) - X_URL_WEIGHT - 4
+    const contentBudget = Math.max(0, X_MAX_WEIGHT - X_URL_WEIGHT - 4)
+    const firstSummaryGrapheme = graphemes(rawSummary)[0]
+    const minimumSummaryBudget = Math.min(
+      plainWeightedLength(rawSummary),
+      graphemeWeight(firstSummaryGrapheme) + graphemeWeight('…'),
+    )
+    const title = truncateXText(rawTitle, Math.max(0, contentBudget - minimumSummaryBudget))
+    const summaryBudget = contentBudget - xWeightedLength(title)
     if (summaryBudget > 0) {
       const summary = truncateXText(rawSummary, summaryBudget)
       if (summary) return `${title}\n\n${summary}\n\n${shareURL}`
     }
   }
 
+  const titleBudget = Math.max(0, X_MAX_WEIGHT - X_URL_WEIGHT - 2)
+  const title = truncateXText(rawTitle, titleBudget)
   return `${title}\n\n${shareURL}`
 }
 

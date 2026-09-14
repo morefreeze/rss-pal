@@ -5,7 +5,9 @@ import {
   buildXPostText,
   fallbackGraphemes,
   plainSocialText,
+  truncateXText,
   X_MAX_WEIGHT,
+  X_URL_WEIGHT,
   xWeightedLength,
 } from '../src/utils/xShare'
 
@@ -59,6 +61,41 @@ describe('X share post composer', () => {
     expect(text.endsWith('https://rss.example/share/token')).toBe(true)
   })
 
+  it('keeps a maximal complete summary grapheme after an extreme title', () => {
+    const summaryBrief = `👨‍👩‍👧‍👦中文摘要${'内容'.repeat(100)}`
+    const shareURL = 'https://r.morefreeze.top/Aa0000000000'
+    const text = buildXPostText({
+      title: '超长标题'.repeat(100),
+      summaryBrief,
+      shareURL,
+    })
+
+    expect(text.endsWith(shareURL)).toBe(true)
+    expect(xWeightedLength(text)).toBeLessThanOrEqual(X_MAX_WEIGHT)
+
+    const postWithoutURL = text.slice(0, -`\n\n${shareURL}`.length)
+    const [renderedTitle, renderedSummary] = postWithoutURL.split('\n\n')
+    expect(renderedSummary).toBeDefined()
+
+    const renderedSummaryGraphemes = fallbackGraphemes(renderedSummary)
+    const sourceSummaryGraphemes = fallbackGraphemes(plainSocialText(summaryBrief))
+    expect(renderedSummaryGraphemes).toEqual([sourceSummaryGraphemes[0], '…'])
+
+    const consumedSummaryGraphemes = renderedSummaryGraphemes.slice(0, -1)
+    expect(consumedSummaryGraphemes).toEqual(
+      sourceSummaryGraphemes.slice(0, consumedSummaryGraphemes.length),
+    )
+    const nextSummaryGrapheme = sourceSummaryGraphemes[consumedSummaryGraphemes.length]
+    expect(nextSummaryGrapheme).toBeDefined()
+
+    const oneMoreGrapheme = `${renderedTitle}\n\n${[
+      ...consumedSummaryGraphemes,
+      nextSummaryGrapheme,
+      '…',
+    ].join('')}\n\n${shareURL}`
+    expect(xWeightedLength(oneMoreGrapheme)).toBeGreaterThan(X_MAX_WEIGHT)
+  })
+
   it('keeps composed graphemes whole when Intl.Segmenter is unavailable', () => {
     expect(fallbackGraphemes('e\u0301 👍🏽 👨‍👩‍👧‍👦 🇨🇳 가')).toEqual([
       'e\u0301',
@@ -82,6 +119,15 @@ describe('X share post composer', () => {
       title: 'Title',
       shareURL: 'https://rss.example/share/token',
     })).toBe('Title\n\nhttps://rss.example/share/token')
+  })
+
+  it('keeps the original title-only budget when no summary is available', () => {
+    const title = '超长标题'.repeat(100)
+    const shareURL = 'https://r.morefreeze.top/Aa0000000000'
+
+    expect(buildXPostText({ title, shareURL })).toBe(
+      `${truncateXText(title, X_MAX_WEIGHT - X_URL_WEIGHT - 2)}\n\n${shareURL}`,
+    )
   })
 
   it('maximizes a long Chinese summary while preserving the short share URL', () => {
