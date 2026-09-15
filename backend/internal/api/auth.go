@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/config"
@@ -13,13 +15,15 @@ import (
 )
 
 type AuthHandler struct {
-	cfg          *config.Config
-	userRepo     *repository.UserRepository
-	refreshRepo  *repository.RefreshTokenRepository
+	registrationVerifier RegistrationVerifier
+	registrationBudget   *AuthAbuseGuard
+	cfg                  *config.Config
+	userRepo             *repository.UserRepository
+	refreshRepo          *repository.RefreshTokenRepository
 }
 
 func NewAuthHandler(cfg *config.Config, userRepo *repository.UserRepository, refreshRepo *repository.RefreshTokenRepository) *AuthHandler {
-	return &AuthHandler{cfg: cfg, userRepo: userRepo, refreshRepo: refreshRepo}
+	return &AuthHandler{cfg: cfg, userRepo: userRepo, refreshRepo: refreshRepo, registrationVerifier: NewTurnstileVerifier(cfg.Auth.TurnstileSecret, cfg.Auth.TurnstileHostnames)}
 }
 
 type Claims struct {
@@ -69,19 +73,13 @@ func (h *AuthHandler) InitAdmin(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userRepo.WithCtx(c).CreateAdmin("admin", h.cfg.Auth.Password)
+	_, err = h.userRepo.WithCtx(c).CreateAdmin("admin", h.cfg.Auth.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	token, err := h.generateToken(user)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"token": token, "user": user})
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -188,13 +186,32 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req model.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "注册信息无效，请检查用户名、密码和邀请码"})
 		return
 	}
 
+	if len(req.Password) > 72 {
+		c.JSON(400, gin.H{"error": "密码不能超过 72 字节"})
+		return
+	}
+	if h.registrationVerifier == nil {
+		c.JSON(503, gin.H{"error": "注册验证暂时不可用，请稍后重试"})
+		return
+	}
+	if err := h.registrationVerifier.Verify(c.Request.Context(), req.TurnstileResponse, c.ClientIP()); err != nil {
+		if errors.Is(err, ErrVerificationUnavailable) {
+			c.JSON(503, gin.H{"error": "注册验证暂时不可用，请稍后重试"})
+		} else {
+			c.JSON(403, gin.H{"error": "请重新完成人机验证"})
+		}
+		return
+	}
+	if h.registrationBudget != nil && !h.registrationBudget.AdmitRegistration(c) {
+		return
+	}
 	user, err := h.userRepo.WithCtx(c).Register(req.Username, req.Password, req.Code)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "注册信息无效，请检查用户名、密码和邀请码"})
 		return
 	}
 
@@ -380,3 +397,12 @@ func getIntParam(c *gin.Context, param string) (int, bool) {
 	}
 	return id, true
 }
+
+// RegistrationConfig exposes only the public sitekey; absent configuration keeps registration closed.
+func (h *AuthHandler) RegistrationConfig(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	available := h.cfg.Auth.TurnstileSiteKey != "" && h.cfg.Auth.TurnstileSecret != "" && len(h.cfg.Auth.TurnstileHostnames) > 0
+	c.JSON(200, gin.H{"available": available, "site_key": strings.TrimSpace(h.cfg.Auth.TurnstileSiteKey)})
+}
+
+func (h *AuthHandler) SetRegistrationBudget(guard *AuthAbuseGuard) { h.registrationBudget = guard }

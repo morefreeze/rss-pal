@@ -3,12 +3,12 @@ package model
 import "time"
 
 type User struct {
-	ID                 int       `json:"id"`
-	Username           string    `json:"username"`
-	PasswordHash       string    `json:"-"`
-	IsAdmin            bool      `json:"is_admin"`
-	CreatedAt          time.Time `json:"created_at"`
-	SharedVisibleFrom  time.Time `json:"shared_visible_from"`
+	ID                int       `json:"id"`
+	Username          string    `json:"username"`
+	PasswordHash      string    `json:"-"`
+	IsAdmin           bool      `json:"is_admin"`
+	CreatedAt         time.Time `json:"created_at"`
+	SharedVisibleFrom time.Time `json:"shared_visible_from"`
 }
 
 type InviteCode struct {
@@ -21,13 +21,14 @@ type InviteCode struct {
 }
 
 type RegisterRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required,min=6"`
-	Code     string `json:"code" binding:"required"`
+	Username          string `json:"username" binding:"required,max=64"`
+	Password          string `json:"password" binding:"required,min=6"`
+	Code              string `json:"code" binding:"required,max=32"`
+	TurnstileResponse string `json:"cf-turnstile-response" binding:"max=2048"`
 }
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username" binding:"required,max=64"`
 	Password string `json:"password" binding:"required"`
 	// Remember asks the server to issue a long-lived refresh token so the
 	// client can re-mint access JWTs without re-prompting the user.

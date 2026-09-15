@@ -3,6 +3,8 @@ import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { login, api } from '../api/client'
 import { authSearch, parseAuthIntent, postAuthURL } from '../utils/authIntent'
 
+import { authErrorMessage } from '../utils/authError'
+
 interface LoginPageProps {
   onLogin: (user: any) => void
 }
@@ -38,8 +40,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       const data = await login(username, password, remember)
       onLogin(data.user)
       navigate(postAuthURL(intent), { replace: true })
-    } catch {
-      setError('用户名或密码错误')
+    } catch (err) {
+      setError(authErrorMessage(err, '用户名或密码错误'))
     } finally {
       setSubmitting(false)
     }
@@ -82,7 +84,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         </label>
         {firstRun && (
           <div className="text-sm mb-2" style={{ color: '#2e7d32', background: '#f1f8e9', padding: '8px', borderRadius: 4 }}>
-            首次使用，已自动创建管理员账号。用户名：admin，密码为 AUTH_PASSWORD（默认 admin）
+            首次使用，已自动创建管理员账号。用户名：admin，请使用管理员配置的密码登录
           </div>
         )}
         {error && <div className="text-sm mb-2" style={{ color: 'red' }}>{error}</div>}

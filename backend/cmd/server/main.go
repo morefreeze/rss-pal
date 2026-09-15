@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -156,7 +157,7 @@ func main() {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-New-Token")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-New-Token, Retry-After")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -172,13 +173,28 @@ func main() {
 	router.GET("/api/internal/health/worker", systemHealthHandler.Worker)
 
 	// Public routes
-	router.POST("/api/auth/init", authHandler.InitAdmin)
-	router.POST("/api/auth/login", authHandler.Login)
-	router.POST("/api/auth/register", authHandler.Register)
+	authBudgetRepo := repository.NewAuthRateLimitRepository(db)
+	authGuard := api.NewAuthAbuseGuard(authBudgetRepo, cfg.JWT.Secret)
+	authHandler.SetRegistrationBudget(authGuard)
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if err := authBudgetRepo.Prune(ctx); err != nil {
+				log.Print("auth budget cleanup failed")
+			}
+			cancel()
+		}
+	}()
+	router.GET("/api/auth/registration-config", authHandler.RegistrationConfig)
+	router.POST("/api/auth/init", authGuard.Middleware("init"), authHandler.InitAdmin)
+	router.POST("/api/auth/login", authGuard.Middleware("login"), authHandler.Login)
+	router.POST("/api/auth/register", authGuard.Middleware("register"), authHandler.Register)
 	// refresh / logout are also public (no JWT yet on refresh; logout is best-
 	// effort and shouldn't 401 if the access JWT is already expired).
-	router.POST("/api/auth/refresh", authHandler.Refresh)
-	router.POST("/api/auth/logout", authHandler.Logout)
+	router.POST("/api/auth/refresh", authGuard.Middleware("refresh"), authHandler.Refresh)
+	router.POST("/api/auth/logout", authGuard.Middleware("logout"), authHandler.Logout)
 
 	// Public image proxy (no auth — <img> tags can't reliably carry auth headers).
 	router.GET("/api/proxy/image", api.NewImageProxy().Handle)

@@ -30,14 +30,16 @@ async function tryRefreshAccessToken(): Promise<string | null> {
     try {
       // Bypass the JWT interceptor (no token, plain axios call) — refresh
       // never carries the (expired) Authorization header.
-      const res = await axios.post<{ token: string }>('/api/auth/refresh', { refresh_token: refresh })
+      const res = await axios.post<{ token: string }>('/api/auth/refresh', { refresh_token: refresh }, { timeout: 10000 })
       if (res.data?.token) {
         localStorage.setItem('token', res.data.token)
         return res.data.token
       }
-      return null
-    } catch {
-      return null
+      throw new Error('认证服务响应无效，请稍后重试')
+    } catch (err) {
+      // Only a definitive invalid-credential response ends a remembered session.
+      if ((err as AxiosError).response?.status === 401) return null
+      throw err
     } finally {
       refreshInFlight = null
     }
@@ -124,11 +126,7 @@ api.interceptors.response.use(
 
 // Auth
 export const initAdmin = (password: string) =>
-  api.post('/auth/init', { password }).then(res => {
-    localStorage.setItem('token', res.data.token)
-    localStorage.setItem('user', JSON.stringify(res.data.user))
-    return res.data
-  })
+  api.post('/auth/init', { password }).then(res => res.data)
 
 export const login = (username: string, password: string, remember = false) =>
   api.post('/auth/login', { username, password, remember }).then(res => {
@@ -147,8 +145,11 @@ export const login = (username: string, password: string, remember = false) =>
     return res.data
   })
 
-export const register = (username: string, password: string, code: string) =>
-  api.post('/auth/register', { username, password, code }).then(res => {
+export const getRegistrationConfig = () =>
+  api.get<{available: boolean; site_key: string}>('/auth/registration-config').then(res => res.data)
+
+export const register = (username: string, password: string, code: string, proof: string) =>
+  api.post('/auth/register', { username, password, code, 'cf-turnstile-response': proof }).then(res => {
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('user', JSON.stringify(res.data.user))
     return res.data

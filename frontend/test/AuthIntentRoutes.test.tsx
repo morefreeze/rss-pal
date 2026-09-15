@@ -1,5 +1,5 @@
 import { StrictMode } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -11,6 +11,8 @@ import { authSearch, parseAuthIntent, postAuthURL } from '../src/utils/authInten
 const apiMocks = vi.hoisted(() => ({
   login: vi.fn(),
   register: vi.fn(),
+  getRegistrationConfig: vi.fn(),
+  widget: vi.fn(),
   api: { post: vi.fn() },
   getFeeds: vi.fn(),
   addFeed: vi.fn(),
@@ -62,7 +64,9 @@ function submitLogin() {
   fireEvent.click(screen.getByRole('button', { name: '登录' }))
 }
 
-function submitRegistration() {
+async function submitRegistration() {
+  await waitFor(() => expect(apiMocks.widget).toHaveBeenCalled())
+  await act(async () => apiMocks.widget.mock.calls.at(-1)![1].callback('proof'))
   fireEvent.change(screen.getByPlaceholderText('邀请码'), { target: { value: 'invite-42' } })
   fireEvent.change(screen.getByPlaceholderText('用户名'), { target: { value: 'new-reader' } })
   fireEvent.change(screen.getByPlaceholderText('密码（至少 6 位）'), { target: { value: 'secret-password' } })
@@ -84,6 +88,8 @@ function renderFeeds(path: string, strict = false) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  apiMocks.getRegistrationConfig.mockResolvedValue({available:true,site_key:'site-key'})
+  window.turnstile = { render: apiMocks.widget.mockReturnValue('widget'), remove: vi.fn() }
   apiMocks.api.post.mockRejectedValue(new Error('already initialized'))
   apiMocks.login.mockResolvedValue({ user: { id: 1, username: 'reader' } })
   apiMocks.register.mockResolvedValue({ user: { id: 2, username: 'new-reader' } })
@@ -122,10 +128,10 @@ describe('authentication intents', () => {
     expect(screen.getByPlaceholderText('邀请码')).toBeTruthy()
     expect(screen.getByRole('link', { name: '已有账号？登录' }).getAttribute('href')).toBe(`/login${search}`)
 
-    submitRegistration()
+    await submitRegistration()
     await screen.findByText('feeds destination')
     expect(screen.getByTestId('location').textContent).toBe(`/feeds?add=1&source=${encodeURIComponent(source)}`)
-    expect(apiMocks.register).toHaveBeenCalledWith('new-reader', 'secret-password', 'invite-42')
+    expect(apiMocks.register).toHaveBeenCalledWith('new-reader', 'secret-password', 'invite-42', 'proof')
     expect(onLogin).toHaveBeenCalledWith({ id: 2, username: 'new-reader' })
   })
 
@@ -152,7 +158,7 @@ describe('authentication intents', () => {
     apiMocks.register.mockRejectedValue({ response: { data: { error: '邀请码无效' } } })
     const source = 'https://source.example/feed'
     renderAuth(`/register?intent=subscribe&source=${encodeURIComponent(source)}`)
-    submitRegistration()
+    await submitRegistration()
     expect(await screen.findByText('邀请码无效')).toBeTruthy()
     expect(screen.getByTestId('location').textContent).toBe(`/register?intent=subscribe&source=${encodeURIComponent(source)}`)
     expect((screen.getByPlaceholderText('邀请码') as HTMLInputElement).value).toBe('invite-42')

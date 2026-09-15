@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -71,7 +72,10 @@ type VisionConfig struct {
 }
 
 type AuthConfig struct {
-	Password string
+	TurnstileSiteKey   string
+	TurnstileSecret    string
+	TurnstileHostnames []string
+	Password           string
 }
 
 type JWTConfig struct {
@@ -128,7 +132,10 @@ func Load() *Config {
 			},
 		},
 		Auth: AuthConfig{
-			Password: getEnv("AUTH_PASSWORD", "admin"),
+			Password:           getEnv("AUTH_PASSWORD", "admin"),
+			TurnstileSiteKey:   getEnv("TURNSTILE_SITE_KEY", ""),
+			TurnstileSecret:    getEnv("TURNSTILE_SECRET", ""),
+			TurnstileHostnames: strings.FieldsFunc(getEnv("TURNSTILE_HOSTNAMES", ""), func(r rune) bool { return r == ',' || r == ' ' }),
 		},
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "rss-pal-default-secret-change-me"),

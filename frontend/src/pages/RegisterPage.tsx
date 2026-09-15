@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
-import { register } from '../api/client'
+import { getRegistrationConfig, register } from '../api/client'
 import { authSearch, parseAuthIntent, postAuthURL } from '../utils/authIntent'
+
+import RegistrationChallenge from '../components/RegistrationChallenge'
+import { authErrorMessage } from '../utils/authError'
 
 interface RegisterPageProps {
   onLogin: (user: any) => void
@@ -16,6 +19,18 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [siteKey, setSiteKey] = useState('')
+  const [proof, setProof] = useState('')
+  const [challengeAttempt, setChallengeAttempt] = useState(0)
+  useEffect(() => {
+    let disposed = false
+    getRegistrationConfig().then(config => {
+      if (disposed) return
+      if (config.available && config.site_key) setSiteKey(config.site_key)
+      else setError('注册验证暂时不可用，请稍后重试')
+    }).catch(() => { if (!disposed) setError('注册验证暂时不可用，请稍后重试') })
+    return () => { disposed = true }
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -26,15 +41,18 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
       return
     }
 
+    if (!siteKey || !proof || submitting) return
     setSubmitting(true)
 
     try {
-      const data = await register(username, password, code)
+      const data = await register(username, password, code, proof)
       onLogin(data.user)
       navigate(postAuthURL(intent), { replace: true })
     } catch (err: any) {
-      setError(err?.response?.data?.error || '注册失败')
+      setError(authErrorMessage(err, '注册失败'))
     } finally {
+      setProof('')
+      setChallengeAttempt(value => value + 1)
       setSubmitting(false)
     }
   }
@@ -73,8 +91,9 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
             disabled={submitting}
           />
         </div>
+        {siteKey && <RegistrationChallenge key={challengeAttempt} siteKey={siteKey} onVerify={setProof} />}
         {error && <div className="text-sm mb-2" style={{ color: 'red' }}>{error}</div>}
-        <button type="submit" style={{ width: '100%' }} disabled={submitting}>
+        <button type="submit" style={{ width: '100%' }} disabled={submitting || !siteKey || !proof}>
           {submitting ? '注册中...' : '注册'}
         </button>
         <div style={{ textAlign: 'center', marginTop: 12 }}>

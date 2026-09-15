@@ -37,7 +37,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql"]
+    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql"]
 
   api:
     restart: unless-stopped
@@ -67,6 +67,9 @@ services:
       AI_VISION_CACHE_DIR: ${AI_VISION_CACHE_DIR:-/backups/ai_summary_cache}
       AI_VISION_CACHE_TTL_HOURS: ${AI_VISION_CACHE_TTL_HOURS:-24}
       AUTH_PASSWORD: ${AUTH_PASSWORD:?AUTH_PASSWORD required in .env}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-rss.morefreeze.top}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required in .env}
       SHARE_SECRET: ${SHARE_SECRET:?SHARE_SECRET required in .env}
       SHORT_SHARE_ORIGIN: ${SHORT_SHARE_ORIGIN:?SHORT_SHARE_ORIGIN required in .env}

@@ -1,9 +1,10 @@
 package repository
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
@@ -123,7 +124,7 @@ func (r *UserRepository) Register(username, password string, code string) (*mode
 	var codeID int
 	var usedBy *int
 	err = tx.QueryRow(
-		`SELECT id, used_by FROM invite_codes WHERE code = $1 AND (expires_at IS NULL OR expires_at > NOW())`,
+		`SELECT id, used_by FROM invite_codes WHERE code = $1 AND (expires_at IS NULL OR expires_at > NOW()) FOR UPDATE`,
 		code,
 	).Scan(&codeID, &usedBy)
 	if err == sql.ErrNoRows {
@@ -174,7 +175,10 @@ func (r *UserRepository) Register(username, password string, code string) (*mode
 }
 
 func (r *UserRepository) CreateInviteCode(createdBy int, expiresInHours int) (*model.InviteCode, error) {
-	code := generateCode(8)
+	code, err := generateCode(8)
+	if err != nil {
+		return nil, err
+	}
 	var expiresAt *time.Time
 	if expiresInHours > 0 {
 		t := time.Now().Add(time.Duration(expiresInHours) * time.Hour)
@@ -182,7 +186,7 @@ func (r *UserRepository) CreateInviteCode(createdBy int, expiresInHours int) (*m
 	}
 
 	ic := &model.InviteCode{CreatedBy: createdBy, ExpiresAt: expiresAt}
-	err := r.db.QueryRow(
+	err = r.db.QueryRow(
 		`INSERT INTO invite_codes (code, created_by, expires_at) VALUES ($1, $2, $3) RETURNING id, created_at`,
 		code, createdBy, expiresAt,
 	).Scan(&ic.ID, &ic.CreatedAt)
@@ -299,11 +303,15 @@ func (r *UserRepository) ListAll() ([]model.User, error) {
 	return out, nil
 }
 
-func generateCode(length int) string {
+func generateCode(length int) (string, error) {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	b := make([]byte, length)
 	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = chars[n.Int64()]
 	}
-	return "RSS-" + string(b)
+	return "RSS-" + string(b), nil
 }
