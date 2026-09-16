@@ -30,7 +30,7 @@ var mdConverter = htmltomd.NewConverter(
 	htmltomd.WithPlugins(
 		base.NewBasePlugin(),
 		commonmark.NewCommonmarkPlugin(),
-		table.NewTablePlugin(),
+		table.NewTablePlugin(table.WithSpanCellBehavior(table.SpanBehaviorMirror)),
 	),
 )
 
@@ -388,6 +388,10 @@ func flattenImageAltBlankLines(md string) string {
 // Falls back to the selection's plain text if conversion fails (which should
 // not happen under normal use but keeps the pipeline robust).
 func ExtractMarkdown(selection *goquery.Selection) string {
+	// GFM cells cannot contain line breaks. The table plugin otherwise drops
+	// the entire table when publishers use <br> in a header or data cell.
+	// Normalize only table breaks; paragraph breaks elsewhere stay intact.
+	selection.Find("th br, td br").ReplaceWithHtml(" ")
 	// Pre-conversion: rewrite recognized video iframes to placeholder paragraphs
 	// so the html-to-markdown converter doesn't drop them.
 	RewriteVideoIframes(selection)
