@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/lib/pq"
 )
 
 type AuthHandler struct {
@@ -249,6 +251,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == "23505" && pgErr.Constraint == "users_username_key" {
+				c.JSON(http.StatusConflict, gin.H{"error": "用户名已被占用，请更换用户名"})
+				return
+			}
+			// Never log PostgreSQL Detail or the request: they may contain credentials.
+			log.Printf("registration database failure: sqlstate=%s constraint=%s", pgErr.Code, pgErr.Constraint)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "注册服务暂时不可用，请稍后重试"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "注册信息无效，请检查用户名、密码和邀请码"})
 		return
 	}
