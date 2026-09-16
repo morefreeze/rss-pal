@@ -429,9 +429,6 @@ func getUserID(c *gin.Context) int {
 }
 
 func getOwnerID(c *gin.Context) *int {
-	if c.GetBool("isAdmin") {
-		return nil // admin creates shared feeds
-	}
 	id := c.GetInt("userID")
 	return &id
 }

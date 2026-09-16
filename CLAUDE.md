@@ -122,6 +122,12 @@ Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`,
 - Active share links are reusable registration invitations. Authentication links preserve `share=s:<short_code>` or `share=t:<token>` through login/register; registration accepts exactly one of `code` and `share_ref`, verifies proof and admission budgets, verifies token signatures, and checks active share status under a transaction lock. New accounts are ordinary users with no inherited owner privileges.
 - Public-reader authentication links use normalized `intent=use` or `intent=subscribe&source=...`; no caller-controlled `next` is honored. After login/registration, a safe subscription source is prefilled and previewed exactly once but never auto-subscribed.
 
+## Feed visibility
+
+- All interactive feed creation defaults to the authenticated user's `owner_id`, including administrators, OPML import, and one-off link sets. Administrator status must not implicitly publish a feed.
+- Existing `owner_id IS NULL` feeds are explicitly shared public sources. Keep personal subscriptions private; recommendation catalogs remain public separately from personal subscription ownership.
+- The feed management page labels private/shared visibility explicitly. Public article-share snapshots are independent of feed ownership.
+
 ## Multi-tenant rules (RLS)
 
 Per-user tables have Postgres Row-Level Security enabled (migration 033). The HTTP middleware `api.RLSTxMiddleware` opens a transaction per JWT-authenticated request and sets `app.user_id` via `set_config(..., true)` so policies filter rows automatically. Bookmarklet and extension token endpoints use `api.PublicTokenMiddleware` to derive an owner before accessing RLS-protected data. The worker sets `app.bypass_rls=true` on its pool DSN (via `repository.NewBypassDB`) so cross-user batch work isn't blocked.
