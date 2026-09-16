@@ -385,7 +385,7 @@ assert_contains "$DEPLOY_WRAPPER" 'trap cleanup EXIT' 'deployment wrapper must a
 assert_contains "$DEPLOY_WRAPPER" 'git fetch origin master' 'deployment wrapper must refresh origin/master'
 assert_contains "$DEPLOY_WRAPPER" 'git show origin/master:scripts/auto_deploy.sh' 'deployment wrapper must fetch the deployment script from origin/master'
 DIRECT_ENV="sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*'"
-assert_count 2 "$DIRECT_ENV" "$DEPLOY_WRAPPER" 'bootstrap fetch and fetched script must each receive the direct-network environment'
+assert_count 4 "$DIRECT_ENV" "$DEPLOY_WRAPPER" 'both artifact and legacy paths must receive the direct-network environment'
 assert_contains "$DEPLOY_WRAPPER" "NO_PROXY='*' RSS_PAL_DEPLOY_DIRECT=1 bash -lc" 'fetched deployment script must explicitly select direct mode'
 if grep -Eq '(https?|socks[0-9a-z]*)://[^[:space:]'"'"']+' "$DEPLOY_WRAPPER"; then
   fail 'deployment wrapper must not define any proxy URL'

@@ -14,7 +14,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  package:
+    if: github.repository == 'morefreeze/rss-pal' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Package exact deployment commit
+        run: |
+          git branch -f deploy "$GITHUB_SHA"
+          git bundle create release.bundle refs/heads/deploy
+          git bundle verify release.bundle
+          sha256sum release.bundle > release.bundle.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tencent-source-${{ github.sha }}
+          path: |
+            release.bundle
+            release.bundle.sha256
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
   deploy:
+    needs: package
     if: github.repository == 'morefreeze/rss-pal' && github.ref == 'refs/heads/master'
     runs-on:
       - self-hosted
@@ -24,8 +50,21 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tencent-source-${{ github.sha }}
+          path: ${{ runner.temp }}/rss-pal-${{ github.run_id }}-${{ github.run_attempt }}
+
       - name: Deploy from Tencent host
-        run: sudo /usr/local/sbin/rss-pal-deploy-from-actions
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/rss-pal-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          cd "$RELEASE_DIR"
+          sha256sum -c release.bundle.sha256
+          sudo /usr/local/sbin/rss-pal-deploy-from-actions "$RELEASE_DIR/release.bundle" "$GITHUB_SHA"
+
+      - name: Verify deployed revision
+        run: test "$(git -c safe.directory=/opt/rss-pal -C /opt/rss-pal rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Verify local API health
         run: curl --noproxy '*' -fsS http://127.0.0.1:8080/api/health
@@ -41,3 +80,9 @@ jobs:
 
       - name: Verify invalid short API returns not found
         run: test "$(curl --noproxy '*' --resolve r.morefreeze.top:443:192.144.171.125 -sS -o /dev/null -w '%{http_code}' https://r.morefreeze.top/api/s/invalid)" = "404"
+
+      - name: Remove downloaded source bundle
+        if: always()
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/rss-pal-${{ github.run_id }}-${{ github.run_attempt }}
+        run: rm -rf -- "$RELEASE_DIR"

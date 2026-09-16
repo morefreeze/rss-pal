@@ -21,6 +21,27 @@ if systemctl is-active --quiet mihomo.service; then
   exit 1
 fi
 
+if [ "$#" -ne 0 ]; then
+  if [ "$#" -ne 2 ] || [[ ! "$2" =~ ^[0-9a-f]{40}$ ]] || [[ "$1" != /* ]] || [ ! -f "$1" ]; then
+    echo "Usage: $0 [absolute-bundle-path expected-commit]" >&2
+    exit 1
+  fi
+  # Actions delivers a full Git bundle through artifact storage. Keep all
+  # repository operations and supplied deployment code under ubuntu, not root.
+  sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' bash -lc '
+    set -euo pipefail
+    cd "$1"
+    git bundle verify "$3"
+    git fetch --no-tags "$3" refs/heads/deploy
+    test "$(git rev-parse FETCH_HEAD)" = "$4"
+    git merge-base --is-ancestor HEAD "$4"
+    umask 077
+    git show "$4:scripts/auto_deploy.sh" > "$2"
+  ' _ "$REPO_DIR" "$DEPLOY_SCRIPT" "$1" "$2"
+  sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' RSS_PAL_DEPLOY_DIRECT=1 AUTO_DEPLOY_TARGET_COMMIT="$2" bash -lc 'bash "$1"' _ "$DEPLOY_SCRIPT"
+  exit 0
+fi
+
 sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' bash -lc 'cd "$1" && git fetch origin master && umask 077 && git show origin/master:scripts/auto_deploy.sh > "$2"' _ "$REPO_DIR" "$DEPLOY_SCRIPT"
 
 sudo -H -u ubuntu env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY no_proxy='*' NO_PROXY='*' RSS_PAL_DEPLOY_DIRECT=1 bash -lc 'bash "$1"' _ "$DEPLOY_SCRIPT"

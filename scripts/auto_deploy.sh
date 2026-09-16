@@ -287,9 +287,18 @@ else
   PREV_COMMIT=$(git rev-parse HEAD)
   log "Current commit: $PREV_COMMIT"
 
-  git fetch origin master
-  BEHIND=$(git rev-list HEAD..origin/master --count 2>/dev/null || echo "0")
-  CHANGED_FILES=$(git diff --name-only HEAD..origin/master 2>/dev/null || true)
+  TARGET_COMMIT="${AUTO_DEPLOY_TARGET_COMMIT:-}"
+  if [ -n "$TARGET_COMMIT" ]; then
+    [[ "$TARGET_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { log "ERROR: invalid deployment commit"; exit 1; }
+    git cat-file -e "$TARGET_COMMIT^{commit}"
+    log "Using verified Actions bundle commit: $TARGET_COMMIT (no network fetch)"
+  else
+    git fetch origin master
+    TARGET_COMMIT=$(git rev-parse origin/master)
+  fi
+  git merge-base --is-ancestor HEAD "$TARGET_COMMIT" || { log "ERROR: deployment would rewind or diverge from HEAD"; exit 1; }
+  BEHIND=$(git rev-list "HEAD..$TARGET_COMMIT" --count)
+  CHANGED_FILES=$(git diff --name-only "HEAD..$TARGET_COMMIT")
 
   if [ "$BEHIND" = "0" ]; then
     log "Already up to date, nothing to do."
@@ -297,7 +306,7 @@ else
   fi
 
   log "Behind by $BEHIND commits, pulling..."
-  git merge --no-edit origin/master
+  git merge --ff-only "$TARGET_COMMIT"
 
   if printf '%s\n' "$CHANGED_FILES" | grep -Fxq 'scripts/auto_deploy.sh' && [ "$AUTO_DEPLOY_REEXEC" != "1" ]; then
     log "auto_deploy.sh changed; starting the merged script once"
