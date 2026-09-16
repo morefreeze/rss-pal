@@ -9,5 +9,5 @@
 - [x] 更新 backend/internal/explore/subscribe.go、repository用户可见查询及必要RLS；新增044迁移保留admin历史数据与ID，处理冲突fail closed。只改影响该契约的旧测试。
 - [x] 主任务更新 frontend订阅页面文案/空状态；真实行为回归验证推荐点击新建本人订阅。
 - [x] Compose status-migrate 接入044，部署选择脚本同步；规格审查→质量审查。
-- [ ] 使用本机 PostgreSQL 完整 `go test -p 1 ./...`、前端check/build及迁移升级回归，通过后合并推送并部署腾讯。
-- [ ] 生产核对admin订阅/状态保持、普通用户0订阅且推荐可见、源码版本/资产/健康；更新文档。
+- [x] 使用本机 PostgreSQL 完整后端回归（旧共享画像预期更新后 worker 全包补跑通过，其余包通过）、前端check/build及迁移升级回归；合并推送并部署腾讯。
+- [x] 生产核对admin订阅/状态保持、普通用户0订阅且推荐可见、源码版本/资产/健康；更新文档。验收证据见 `docs/operations/public-registration-todo.md`。
