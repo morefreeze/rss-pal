@@ -17,6 +17,7 @@ var ErrUnavailable = errors.New("任务额度检查暂时不可用，请稍后�
 type Policy struct {
 	Daily, GlobalDaily, Concurrent, GlobalConcurrent int
 	Lease                                            time.Duration
+	AdminDaily                                       int // Zero uses Daily; never derived from caller-supplied admin claims.
 }
 type Store struct {
 	db       *sql.DB
@@ -79,7 +80,17 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 		s.denied(owner, bucket, "global_daily", &reset)
 		return nil, ErrExceeded
 	}
-	if owner > 0 && cost > p.Daily-userUsed {
+	daily := p.Daily
+	if owner > 0 && p.AdminDaily > 0 {
+		var admin bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND is_admin=true)`, owner).Scan(&admin); err != nil {
+			return nil, ErrUnavailable
+		}
+		if admin {
+			daily = p.AdminDaily
+		}
+	}
+	if owner > 0 && cost > daily-userUsed {
 		s.denied(owner, bucket, "user_daily", &reset)
 		return nil, ErrExceeded
 	}

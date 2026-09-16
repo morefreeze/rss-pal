@@ -201,11 +201,13 @@ type exploreClaimCandidate struct {
 	score        int64
 }
 
+// Retries age from their latest eligibility time so repeated failures cannot
+// retain weeks of priority over never-attempted tasks.
 func lockExploreCandidates(tx *sql.Tx, limit int) ([]exploreClaimCandidate, error) {
 	all := make([]exploreClaimCandidate, 0, limit*2)
 	queries := []struct{ kind, sql string }{
-		{ExploreQueueKindSource, `SELECT id,priority,created_at,priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-created_at))/3600)::BIGINT FROM explore_fetch_queue WHERE status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP ORDER BY priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-created_at))/3600)::BIGINT DESC,priority DESC,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1`},
-		{ExploreQueueKindRelated, `SELECT id,priority,created_at,priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-created_at))/3600)::BIGINT FROM explore_related_tasks WHERE status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP ORDER BY priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-created_at))/3600)::BIGINT DESC,priority DESC,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1`},
+		{ExploreQueueKindSource, `SELECT id,priority,created_at,priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT FROM explore_fetch_queue WHERE status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP ORDER BY priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT DESC,priority DESC,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1`},
+		{ExploreQueueKindRelated, `SELECT id,priority,created_at,priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT FROM explore_related_tasks WHERE status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP ORDER BY priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT DESC,priority DESC,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1`},
 	}
 	for _, query := range queries {
 		rows, err := tx.Query(query.sql, limit)
@@ -277,11 +279,13 @@ func (r *ExploreQueueRepository) Complete(taskID, runID int, leaseToken string) 
 	return expectExploreLeaseTransition(result, err, taskID)
 }
 
+// Persistent failures back off up to seven days without discarding the task.
+// Clamp the exponent before power() to avoid overflow for historical attempts.
 func (r *ExploreQueueRepository) Retry(taskID, runID int, leaseToken string, cause error) error {
 	result, err := r.db.Exec(`
 		UPDATE explore_fetch_queue
 		SET status = 'pending', attempts = attempts + 1,
-		    not_before = CURRENT_TIMESTAMP + (LEAST(3600, 60 * power(2, attempts)) * INTERVAL '1 second'),
+		    not_before = CURRENT_TIMESTAMP + (LEAST(604800, 60 * power(2, LEAST(attempts, 14))) * INTERVAL '1 second'),
 		    run_id = NULL, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, last_error = $4, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_token = $3 AND lease_expires_at > CURRENT_TIMESTAMP
 	`, taskID, runID, leaseToken, clipExploreError(cause))
@@ -303,7 +307,7 @@ func (r *ExploreQueueRepository) CompleteRelated(taskID, runID int, leaseToken s
 }
 
 func (r *ExploreQueueRepository) RetryRelated(taskID, runID int, leaseToken string, cause error) error {
-	result, err := r.db.Exec(`UPDATE explore_related_tasks SET status='pending',attempts=attempts+1,not_before=CURRENT_TIMESTAMP+(LEAST(3600,60*power(2,attempts))*INTERVAL '1 second'),run_id=NULL,lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,last_error=$4,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND run_id=$2 AND status='leased' AND lease_token=$3 AND lease_expires_at>CURRENT_TIMESTAMP`, taskID, runID, leaseToken, clipExploreError(cause))
+	result, err := r.db.Exec(`UPDATE explore_related_tasks SET status='pending',attempts=attempts+1,not_before=CURRENT_TIMESTAMP+(LEAST(604800,60*power(2,LEAST(attempts,14)))*INTERVAL '1 second'),run_id=NULL,lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,last_error=$4,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND run_id=$2 AND status='leased' AND lease_token=$3 AND lease_expires_at>CURRENT_TIMESTAMP`, taskID, runID, leaseToken, clipExploreError(cause))
 	return expectExploreLeaseTransition(result, err, taskID)
 }
 

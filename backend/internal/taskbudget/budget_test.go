@@ -152,3 +152,56 @@ func TestMonitoringDenialReasonsAndKnownReset(t *testing.T) {
 		})
 	}
 }
+
+func TestAdministratorBackgroundDailyQuota(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	if _, err := db.Exec(`INSERT INTO users(id,username,password_hash,is_admin) VALUES(201,'quota-admin','unused',true),(202,'quota-user','unused',false)`); err != nil {
+		t.Fatal(err)
+	}
+	policies, err := taskbudget.LoadPolicies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := taskbudget.New(db)
+	p := policies["background_fetch"]
+	for _, tc := range []struct {
+		owner, cost int
+		allowed     bool
+	}{
+		{201, 1999, true}, {201, 1, true}, {201, 1, false},
+		{202, 500, true}, {202, 1, false},
+		{0, 2500, true}, {201, 1, false},
+	} {
+		release, err := store.Acquire(context.Background(), tc.owner, "background_fetch", tc.cost, p)
+		if tc.allowed {
+			if err != nil {
+				t.Fatalf("owner=%d cost=%d: %v", tc.owner, tc.cost, err)
+			}
+			release()
+		} else if !errors.Is(err, taskbudget.ErrExceeded) {
+			t.Fatalf("unexpected admission: owner=%d err=%v", tc.owner, err)
+		}
+	}
+	// A former administrator must immediately return to the ordinary daily limit.
+	if _, err := db.Exec(`DELETE FROM task_budget_daily; UPDATE users SET is_admin=false WHERE id=201`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Acquire(context.Background(), 201, "background_fetch", 501, p); !errors.Is(err, taskbudget.ErrExceeded) {
+		t.Fatalf("revoked administrator: %v", err)
+	}
+}
+
+func TestAdministratorBackgroundQuotaConfiguration(t *testing.T) {
+	t.Setenv("TASK_BACKGROUND_FETCH_ADMIN_DAILY", "2500")
+	policies, err := taskbudget.LoadPolicies()
+	if err != nil || policies["background_fetch"].AdminDaily != 2500 {
+		t.Fatalf("policies=%+v err=%v", policies, err)
+	}
+	for _, value := range []string{"0", "-1", "invalid", "1000001"} {
+		t.Setenv("TASK_BACKGROUND_FETCH_ADMIN_DAILY", value)
+		if _, err := taskbudget.LoadPolicies(); err == nil {
+			t.Fatalf("accepted invalid admin quota %q", value)
+		}
+	}
+}

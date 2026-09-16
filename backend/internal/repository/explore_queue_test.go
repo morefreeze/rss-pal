@@ -487,7 +487,7 @@ func TestExploreQueueRetryUsesDatabaseClockAndBackoff(t *testing.T) {
 			window = window.Add(time.Minute)
 		}
 	}
-	if _, err := db.Exec(`UPDATE explore_fetch_queue SET attempts=20, not_before=CURRENT_TIMESTAMP WHERE source_id=$1`, sourceID); err != nil {
+	if _, err := db.Exec(`UPDATE explore_fetch_queue SET attempts=2000, not_before=CURRENT_TIMESTAMP WHERE source_id=$1`, sourceID); err != nil {
 		t.Fatal(err)
 	}
 	_, tasks, err := repo.ClaimRun(window.Add(time.Minute), "worker", time.Hour, 1)
@@ -498,7 +498,7 @@ func TestExploreQueueRetryUsesDatabaseClockAndBackoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seconds int
-	if err := db.QueryRow(`SELECT round(EXTRACT(EPOCH FROM (not_before-updated_at)))::int FROM explore_fetch_queue WHERE id=$1`, tasks[0].ID).Scan(&seconds); err != nil || seconds != 3600 {
+	if err := db.QueryRow(`SELECT round(EXTRACT(EPOCH FROM (not_before-updated_at)))::int FROM explore_fetch_queue WHERE id=$1`, tasks[0].ID).Scan(&seconds); err != nil || seconds != 604800 {
 		t.Fatalf("cap seconds=%d err=%v", seconds, err)
 	}
 }
@@ -597,4 +597,55 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestExploreRetryDoesNotKeepHistoricalAgePriority(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	old := insertExploreSource(t, db, 801)
+	fresh := insertExploreSource(t, db, 802)
+	for _, id := range []int{old, fresh} {
+		if _, err := repo.Enqueue(id, repository.ExploreTaskValidateSource, repository.ExplorePriorityRefresh); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE explore_fetch_queue SET created_at=NOW()-INTERVAL '30 days',attempts=92,not_before=NOW()-INTERVAL '1 minute' WHERE source_id=$1`, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE explore_fetch_queue SET created_at=NOW()-INTERVAL '1 day',not_before=NOW()-INTERVAL '1 day' WHERE source_id=$1`, fresh); err != nil {
+		t.Fatal(err)
+	}
+	_, tasks, err := repo.ClaimRun(time.Now(), "fairness", time.Hour, 1)
+	if err != nil || len(tasks) != 1 || tasks[0].SourceID != fresh {
+		t.Fatalf("retries starve fresh work: tasks=%+v err=%v", tasks, err)
+	}
+}
+
+func TestExploreRelatedRetryBackoffAndLeaseFencing(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	if _, err := db.Exec(`INSERT INTO explore_related_tasks(provider_id,canonical_seed_url,attempts) SELECT id,'https://retry.example',2000 FROM explore_registry_providers WHERE provider_key='related-sites'`); err != nil {
+		t.Fatal(err)
+	}
+	run, tasks, err := repo.ClaimRun(time.Now(), "retry", time.Hour, 1)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("tasks=%+v err=%v", tasks, err)
+	}
+	task := tasks[0]
+	if err := repo.RetryRelated(task.ID, run.ID, "stale", errors.New("temporary")); !errors.Is(err, repository.ErrLeaseLost) {
+		t.Fatalf("stale lease: %v", err)
+	}
+	if err := repo.RetryRelated(task.ID, run.ID, *task.LeaseToken, errors.New("temporary")); err != nil {
+		t.Fatal(err)
+	}
+	var seconds, attempts int
+	var status string
+	if err := db.QueryRow(`SELECT status,attempts,round(extract(epoch from (not_before-updated_at)))::int FROM explore_related_tasks WHERE id=$1`, task.ID).Scan(&status, &attempts, &seconds); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" || attempts != 2001 || seconds != 604800 {
+		t.Fatalf("status=%s attempts=%d seconds=%d", status, attempts, seconds)
+	}
 }

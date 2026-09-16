@@ -26,7 +26,18 @@ func LoadPolicies() (Policies, error) {
 				limits[i] = v
 			}
 		}
-		out[key] = Policy{limits[0], limits[1], limits[2], limits[3], 15 * time.Minute}
+		out[key] = Policy{Daily: limits[0], GlobalDaily: limits[1], Concurrent: limits[2], GlobalConcurrent: limits[3], Lease: 15 * time.Minute}
 	}
+	adminDaily := 2000
+	if raw := os.Getenv("TASK_BACKGROUND_FETCH_ADMIN_DAILY"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > 1000000 {
+			return nil, EnvError("TASK_BACKGROUND_FETCH_ADMIN_DAILY")
+		}
+		adminDaily = v
+	}
+	p := out["background_fetch"]
+	p.AdminDaily = adminDaily
+	out["background_fetch"] = p
 	return out, nil
 }
