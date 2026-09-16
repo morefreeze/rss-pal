@@ -35,6 +35,7 @@ vi.mock('../src/pages/LoginPage', () => ({ default: () => <div>main-site login</
 function sharedSnapshot() {
   return {
     title: 'Short-domain article',
+    registration_allowed: true,
     url: 'https://source.example/post',
     summary_brief: 'Short summary',
     content: 'Public body',
@@ -75,13 +76,21 @@ describe('short-share hostname routing', () => {
 
     const useRSSPal = screen.getByRole('link', { name: '使用 RSS Pal' })
     expect(useRSSPal.getAttribute('href')).toBe(
-      'https://rss.morefreeze.top/login?intent=use&return_to=%2Farticles',
+      'https://rss.morefreeze.top/login?intent=use&share=s%3AAa0000000000&return_to=%2Farticles',
     )
     const shareToX = screen.getByRole('link', { name: '分享到 X' })
     const post = new URL(shareToX.getAttribute('href')!).searchParams.get('text')
     expect(post).toContain('https://r.morefreeze.top/Aa0000000000')
     expect(post).not.toContain('utm_source')
     expect(post).not.toContain('section')
+  })
+
+  it.each([false, undefined])('does not offer share registration without explicit server eligibility: %s', async allowed => {
+    window.history.replaceState({}, '', '/Aa0000000000')
+    axiosMock.get.mockResolvedValue({data:{...sharedSnapshot(),registration_allowed:allowed}})
+    render(<App />)
+    await screen.findByRole('heading',{name:'Short-domain article'})
+    expect(new URL(screen.getByRole('link',{name:'使用 RSS Pal'}).getAttribute('href')!).searchParams.has('share')).toBe(false)
   })
 
   it.each([

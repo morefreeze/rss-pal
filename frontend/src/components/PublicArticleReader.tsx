@@ -9,6 +9,7 @@ import { buildXIntentURL, buildXPostText } from '../utils/xShare'
 export { safePublicSourceURL } from '../utils/authIntent'
 
 export interface SharedArticleSnapshot {
+  registration_allowed?: boolean
   title: string
   url: string
   feed_title?: string
@@ -31,6 +32,7 @@ type ArticleProps = {
 
 type Props = ArticleProps & {
   shareURL: string
+  shareRef?: string
 }
 
 const MAIN_SITE_ORIGIN = 'https://rss.morefreeze.top'
@@ -136,16 +138,18 @@ function normalizedVideoType(mediaType?: string): string {
   return mediaType ?? ''
 }
 
-function subscribeHref(source: string | null): string {
-  if (!source) return `${MAIN_SITE_ORIGIN}/login?intent=subscribe`
+function subscribeHref(source: string | null, shareRef?: string): string {
+  const fallbackSearch = authSearch({kind: 'use', returnTo: '/articles', shareRef}).replace('?intent=use', '?intent=subscribe')
+  const fallback = `${MAIN_SITE_ORIGIN}/login${fallbackSearch}`
+  if (!source) return fallback
   const intent = parseAuthIntent(`?intent=subscribe&source=${encodeURIComponent(source)}`)
   return intent.kind === 'subscribe'
-    ? `${MAIN_SITE_ORIGIN}/login${authSearch(intent)}`
-    : `${MAIN_SITE_ORIGIN}/login?intent=subscribe`
+    ? `${MAIN_SITE_ORIGIN}/login${authSearch({...intent, shareRef})}`
+    : fallback
 }
 
-function useRSSPalHref(): string {
-  const intent = { kind: 'use', returnTo: '/articles' } as const
+function useRSSPalHref(shareRef?: string): string {
+  const intent = { kind: 'use', returnTo: '/articles', shareRef } as const
   return `${MAIN_SITE_ORIGIN}/login${authSearch(intent)}&return_to=${encodeURIComponent(intent.returnTo)}`
 }
 
@@ -178,7 +182,7 @@ function PublicMedia({ article, sourceURL }: ArticleProps & { sourceURL: string 
   )
 }
 
-export default function PublicArticleReader({ article, shareURL }: Props) {
+export default function PublicArticleReader({ article, shareURL, shareRef }: Props) {
   const published = formatDate(article.published_at)
   const sourceURL = safePublicSourceURL(article.url)
   const xIntentURL = buildXIntentURL(buildXPostText({
@@ -241,8 +245,8 @@ export default function PublicArticleReader({ article, shareURL }: Props) {
       <footer className="public-reader-footer">
         <span className="text-muted">由 RSS Pal 提供</span>
         <div className="public-reader-ctas">
-          <a href={useRSSPalHref()}>使用 RSS Pal</a>
-          <a href={subscribeHref(sourceURL)}>订阅原始来源</a>
+          <a href={useRSSPalHref(shareRef)}>使用 RSS Pal</a>
+          <a href={subscribeHref(sourceURL, shareRef)}>订阅原始来源</a>
         </div>
       </footer>
     </main>

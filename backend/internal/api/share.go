@@ -15,27 +15,30 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/registrationpolicy"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/sharetoken"
 	"github.com/gin-gonic/gin"
 )
 
 type ShareHandler struct {
-	shares       *repository.ShareRepository
-	articles     *repository.ArticleRepository
-	signer       *sharetoken.Signer
-	now          func() time.Time
-	shortOrigin  string
-	newPublicID  func() (string, error)
-	newShortCode func() (string, error)
-	images       *ArticleImageHandler
+	registrationPolicy registrationpolicy.Policy
+	shares             *repository.ShareRepository
+	articles           *repository.ArticleRepository
+	signer             *sharetoken.Signer
+	now                func() time.Time
+	shortOrigin        string
+	newPublicID        func() (string, error)
+	newShortCode       func() (string, error)
+	images             *ArticleImageHandler
 }
 
 type ShareHandlerOptions struct {
-	Now          func() time.Time
-	ShortOrigin  string
-	NewPublicID  func() (string, error)
-	NewShortCode func() (string, error)
+	RegistrationPolicy registrationpolicy.Policy
+	Now                func() time.Time
+	ShortOrigin        string
+	NewPublicID        func() (string, error)
+	NewShortCode       func() (string, error)
 }
 
 func NewShareHandler(
@@ -59,14 +62,15 @@ func NewShareHandler(
 		resolved.NewShortCode = sharetoken.NewShortCode
 	}
 	return &ShareHandler{
-		shares:       shares,
-		articles:     articles,
-		signer:       signer,
-		now:          resolved.Now,
-		shortOrigin:  resolved.ShortOrigin,
-		newPublicID:  resolved.NewPublicID,
-		newShortCode: resolved.NewShortCode,
-		images:       images,
+		registrationPolicy: resolved.RegistrationPolicy,
+		shares:             shares,
+		articles:           articles,
+		signer:             signer,
+		now:                resolved.Now,
+		shortOrigin:        resolved.ShortOrigin,
+		newPublicID:        resolved.NewPublicID,
+		newShortCode:       resolved.NewShortCode,
+		images:             images,
 	}
 }
 
@@ -89,7 +93,10 @@ func (h *ShareHandler) GetPublic(c *gin.Context) {
 
 	snapshot := row.Snapshot
 	snapshot.Content = rewriteShareAssets(snapshot.Content, "/api/share/"+url.PathEscape(c.Param("token"))+"/assets/", row.ArticleID)
-	c.JSON(http.StatusOK, snapshot)
+	c.JSON(http.StatusOK, struct {
+		model.ArticleShareSnapshot
+		RegistrationAllowed bool `json:"registration_allowed"`
+	}{snapshot, h.registrationPolicy.Allows(row.CreatedBy)})
 }
 
 func (h *ShareHandler) GetAsset(c *gin.Context) {
@@ -116,7 +123,10 @@ func (h *ShareHandler) GetShortPublic(c *gin.Context) {
 
 	snapshot := row.Snapshot
 	snapshot.Content = rewriteShareAssets(snapshot.Content, "/api/s/"+c.Param("short_code")+"/assets/", row.ArticleID)
-	c.JSON(http.StatusOK, snapshot)
+	c.JSON(http.StatusOK, struct {
+		model.ArticleShareSnapshot
+		RegistrationAllowed bool `json:"registration_allowed"`
+	}{snapshot, h.registrationPolicy.Allows(row.CreatedBy)})
 }
 
 func (h *ShareHandler) GetShortAsset(c *gin.Context) {

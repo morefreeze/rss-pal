@@ -2,19 +2,23 @@
 
 ## Behavior
 
-Registration requires BOTH an unused, unexpired invitation and a fresh Cloudflare Turnstile proof. Sharing links still carry post-auth navigation intent only; they are not invitations. Public/bootstrap initialization never returns an administrator JWT: administrators sign in with their configured password.
+Registration requires a fresh server-verified Tencent Captcha 2.0 proof and either an unused, unexpired invitation code or an active article-share invitation from an allowed owner. A share link may admit multiple independent ordinary accounts; it never grants the new account access to the sharing owner’s private data. The server validates signed/legacy tokens or short codes and checks current expiry/revocation under a share-row lock in the same transaction as account creation. Public/bootstrap initialization never returns an administrator JWT: administrators sign in with their configured password.
 
-Turnstile uses `signup` and an exact server-configured hostname allowlist. Missing configuration, unavailable Siteverify, invalid hostname/action, forged or replayed proof all reject registration before invitation consumption. Registration POSTs are never automatically replayed; the widget is replaced after each attempt. An unavailable challenge blocks registration, not ordinary login/reading.
+Tencent uses the official `DescribeCaptchaResult` API (`CaptchaType=9`), with success only when `CaptchaCode=1`. Missing configuration, unavailable API, forged/replayed or disaster-recovery tickets reject registration. The frontend dynamically loads `TJCaptcha.js` and opens verification after a validated registration form submit. Cancel/failure permits retry with a new challenge; no registration POST is automatically replayed. An unavailable challenge blocks registration, not ordinary login/reading.
 
 ## Configuration
 
 Set in the production environment/secret store, never commit secrets:
 
-- `TURNSTILE_SITE_KEY`: public sitekey for the RSS Pal registration widget.
-- `TURNSTILE_SECRET`: server-only verification secret.
-- `TURNSTILE_HOSTNAMES`: exact frontend hostname, `rss.morefreeze.top` in production. Do not allow localhost, wildcards or caller-supplied Host headers.
+- `AUTH_CAPTCHA_PROVIDER=tencent`; explicit `turnstile` remains available for operator rollback, never automatic fallback.
+- `TENCENT_CAPTCHA_APP_ID`: public Web captcha instance ID.
+- `TENCENT_CAPTCHA_APP_SECRET`: server-only instance secret.
+- `TENCENT_CAPTCHA_SECRET_ID` and `TENCENT_CAPTCHA_SECRET_KEY`: server-only cloud API credentials restricted to captcha verification. Configure the instance for `rss.morefreeze.top`, signup use, normal verification; do not enable fail-open disaster tickets.
+- `SHARE_REGISTRATION_MODE=selected_owners`: default; admits only owners in `SHARE_REGISTRATION_OWNER_IDS`, e.g. `1` for the verified current production admin. Uses immutable user IDs, not username or administrator flag. An empty/malformed list fails closed.
+- Future `SHARE_REGISTRATION_MODE=all` admits all active shares; `disabled` disables only share invitation signup. Ordinary invitation codes remain available in either mode. Unknown modes deny share signup.
+- Turnstile rollback only: `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET`, `TURNSTILE_HOSTNAMES` (exact main hostname).
 
-The frontend obtains the public key from `/api/auth/registration-config` at runtime. No frontend rebuild is needed when rotating only the widget keypair, but restart/recreate API to reload its environment.
+The frontend obtains only availability, provider and public instance/site key from `/api/auth/registration-config`. Restart/recreate API after environment changes. Public share responses add `registration_allowed`, without disclosing owners. Signup always independently checks the locked share row, so query-string edits cannot override policy. Existing eligible links work without recreation. Revocation/expiry blocks future signup; already-created independent accounts remain.
 
 Compose applies migration 042 before API startup. It creates shared pre-auth budgets without user-scoped RLS; HMAC keys use JWT_SECRET and do not persist raw IPs, usernames, passwords or refresh tokens. All application instances must share the same database and JWT secret. Rotating JWT_SECRET resets budget identities as well as invalidating access tokens.
 
@@ -40,4 +44,4 @@ Auth request bodies are capped at 16 KiB. In-flight limits: login 8, refresh 8, 
 
 - Keep API bound to loopback as in Compose and restrict access to controlled proxies. Gin uses the rightmost untrusted address in X-Forwarded-For; never overwrite this with arbitrary caller headers or expose a trusted-private hop to untrusted clients.
 - Do not clear budgets or rotate JWT_SECRET to diagnose an ordinary 429; respect Retry-After. Shared NAT addresses may need observed-data-driven threshold changes.
-- A total user-count cap and a share-link enrollment policy are separate product decisions. Turnstile and rate limiting reduce abuse and bound admission; they cannot guarantee that every human-assisted signup is legitimate.
+- A total user-count cap is a separate product decision. Active share links are reusable enrollment invitations; revoking a share closes that enrollment source. Captcha verification and rate limiting reduce abuse and bound admission; they cannot guarantee that every human-assisted signup is legitimate.

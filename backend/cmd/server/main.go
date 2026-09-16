@@ -10,6 +10,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/config"
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
+	"github.com/bytedance/rss-pal/internal/registrationpolicy"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
@@ -98,8 +99,9 @@ func main() {
 	statsHandler := api.NewStatsHandler(statsRepo)
 	settingsHandler := api.NewSettingsHandler(cfg, templateRepo, userRepo)
 	shareHandler := api.NewShareHandler(shareRepo, articleRepo, shareSigner, pdfImgHandler, &api.ShareHandlerOptions{
-		Now:         time.Now,
-		ShortOrigin: cfg.Share.ShortOrigin,
+		Now:                time.Now,
+		ShortOrigin:        cfg.Share.ShortOrigin,
+		RegistrationPolicy: registrationpolicy.Parse(cfg.Auth.ShareRegistrationMode, cfg.Auth.ShareRegistrationOwners),
 	})
 	userInterestsRepo := repository.NewUserInterestRepository(db)
 	interestsHandler := api.NewInterestsHandler(prefRepo, articleRepo, templateRepo, userInterestsRepo, summarizer, cfg)

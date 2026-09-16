@@ -1,6 +1,7 @@
-export type AuthIntent =
+export type AuthIntent = (
   | { kind: 'use'; returnTo: '/articles' }
   | { kind: 'subscribe'; returnTo: '/feeds'; source: string }
+) & { shareRef?: string }
 
 const USE_INTENT: AuthIntent = { kind: 'use', returnTo: '/articles' }
 const MAX_URL_LENGTH = 2048
@@ -71,7 +72,7 @@ function subscribePostAuthURL(source: string): string {
   return `/feeds?add=1&source=${encodeURIComponent(source)}`
 }
 
-export function parseAuthIntent(search: string): AuthIntent {
+function parseNavigationIntent(search: string): AuthIntent {
   // URLSearchParams deliberately tolerates broken percent escapes. Authentication
   // intent parsing must fail closed instead, so malformed input cannot be
   // normalized into a different fetch target.
@@ -93,9 +94,25 @@ export function parseAuthIntent(search: string): AuthIntent {
   return { kind: 'subscribe', returnTo: '/feeds', source }
 }
 
+// Shape validation here is only for navigation; the server verifies signature
+// and current share status before authorizing registration.
+export function validShareRef(value?: string): string | undefined {
+  if (!value || value.length > 256) return undefined
+  return /^(s:[A-Za-z0-9]{12}|t:(?:[A-Za-z0-9]{8}|v1_[a-fA-F0-9]{32}_[A-Za-z0-9_-]{43}))$/.test(value) ? value : undefined
+}
+
+export function parseAuthIntent(search: string): AuthIntent {
+  const intent = parseNavigationIntent(search)
+  try { decodeURIComponent(search.replace(/\+/g, ' ')) } catch { return intent }
+  const refs = new URLSearchParams(search).getAll('share')
+  const shareRef = refs.length === 1 ? validShareRef(refs[0]) : undefined
+  return shareRef ? { ...intent, shareRef } : intent
+}
+
 export function authSearch(intent: AuthIntent): string {
-  if (intent.kind === 'use') return '?intent=use'
-  return `?intent=subscribe&source=${encodeURIComponent(intent.source)}`
+  const base = intent.kind === 'use' ? '?intent=use' : `?intent=subscribe&source=${encodeURIComponent(intent.source)}`
+  const shareRef = validShareRef(intent.shareRef)
+  return shareRef ? `${base}&share=${encodeURIComponent(shareRef)}` : base
 }
 
 export function postAuthURL(intent: AuthIntent): string {

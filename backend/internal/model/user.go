@@ -21,9 +21,11 @@ type InviteCode struct {
 }
 
 type RegisterRequest struct {
+	ShareRef          string `json:"share_ref" binding:"max=256"`
 	Username          string `json:"username" binding:"required,max=64"`
 	Password          string `json:"password" binding:"required,min=6"`
-	Code              string `json:"code" binding:"required,max=32"`
+	Code              string `json:"code" binding:"max=32"`
+	CaptchaResponse   string `json:"captcha_response" binding:"max=2048"`
 	TurnstileResponse string `json:"cf-turnstile-response" binding:"max=2048"`
 }
 

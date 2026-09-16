@@ -93,7 +93,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         </button>
         <div style={{ textAlign: 'center', marginTop: 12 }}>
           <Link to={`/register${authSearch(intent)}`}>
-            <button type="button" className="secondary">使用邀请码注册</button>
+            <button type="button" className="secondary">{intent.shareRef ? '通过分享邀请注册' : '使用邀请码注册'}</button>
           </Link>
         </div>
       </form>

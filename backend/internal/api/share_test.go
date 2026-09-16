@@ -584,7 +584,7 @@ func TestPublicShareReturnsImmutableSnapshotAndRewritesOnlyExactAssets(t *testin
 		switch key {
 		case "title", "url", "feed_title", "published_at", "word_count", "reading_minutes",
 			"summary_brief", "summary_detailed", "content", "media_url", "media_type",
-			"media_duration_seconds", "image_dimensions", "snapshotted_at":
+			"media_duration_seconds", "image_dimensions", "snapshotted_at", "registration_allowed":
 		default:
 			t.Fatalf("public response exposed forbidden key %q: %s", key, w.Body.String())
 		}

@@ -107,7 +107,7 @@ Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`,
 - Article content has a 50,000 char limit when scraped.
 - Recommended articles are scored from `user_preferences` signals (like=5, dislike=-10, save=3, read_duration/60) over the last 30 days.
 - Reading progress uses scroll position (0.0–1.0 float) with upsert on `article_id` unique.
-- Auth is JWT-based (HS256). First run creates admin via `/api/auth/init`. Other users register via invite codes (`/api/auth/register`).
+- Auth is JWT-based (HS256). First run creates admin via `/api/auth/init`. Other users register via invite codes or policy-eligible active article-share invitations, always with server-verified captcha (Tencent Captcha 2.0 by default) (`/api/auth/register`).
 - Feeds support two types: `rss` (standard RSS/Atom) and `html` (scrapes arbitrary web pages for article links).
 - Articles can be classified by AI into categories defined in `model.ValidCategories`.
 - Link sets: feeds with `expand_links=true` have the worker extract linked articles as child articles (`parent_article_id`).
@@ -119,6 +119,7 @@ Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`,
 - Public routes are `GET /api/share/:token` for the immutable allowlisted snapshot and `GET /api/share/:token/assets/:asset` for token-protected local PDF assets. All invalid, unknown, tampered, expired, revoked, and database-failure cases use the same public 404. Both responses are `no-store`; page and asset limits are independently 60/minute/IP and 240/minute/IP.
 - `SHARE_SECRET` signs versioned tokens, must be at least 32 bytes, and is deliberately independent from `JWT_SECRET`. Legacy compatibility accepts only exactly eight ASCII alphanumeric characters, hashes them with SHA-256 for lookup, and migration 039 grants migrated links a 30-day grace period.
 - Snapshots never expose ownership, feed URL, reader state, editor notes, processing errors, or manual tags. Remote media bytes are not archived; only their safe snapshot metadata is retained. Local PDF image references are rewritten to the token-protected asset route.
+- Active share links are reusable registration invitations. Authentication links preserve `share=s:<short_code>` or `share=t:<token>` through login/register; registration accepts exactly one of `code` and `share_ref`, verifies proof and admission budgets, verifies token signatures, and checks active share status under a transaction lock. New accounts are ordinary users with no inherited owner privileges.
 - Public-reader authentication links use normalized `intent=use` or `intent=subscribe&source=...`; no caller-controlled `next` is honored. After login/registration, a safe subscription source is prefilled and previewed exactly once but never auto-subscribed.
 
 ## Multi-tenant rules (RLS)

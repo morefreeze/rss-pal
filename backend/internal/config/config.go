@@ -72,10 +72,17 @@ type VisionConfig struct {
 }
 
 type AuthConfig struct {
-	TurnstileSiteKey   string
-	TurnstileSecret    string
-	TurnstileHostnames []string
-	Password           string
+	CaptchaProvider         string
+	TencentCaptchaAppID     string
+	TencentCaptchaAppSecret string
+	TencentSecretID         string
+	TencentSecretKey        string
+	ShareRegistrationMode   string
+	ShareRegistrationOwners string
+	TurnstileSiteKey        string
+	TurnstileSecret         string
+	TurnstileHostnames      []string
+	Password                string
 }
 
 type JWTConfig struct {
@@ -132,10 +139,17 @@ func Load() *Config {
 			},
 		},
 		Auth: AuthConfig{
-			Password:           getEnv("AUTH_PASSWORD", "admin"),
-			TurnstileSiteKey:   getEnv("TURNSTILE_SITE_KEY", ""),
-			TurnstileSecret:    getEnv("TURNSTILE_SECRET", ""),
-			TurnstileHostnames: strings.FieldsFunc(getEnv("TURNSTILE_HOSTNAMES", ""), func(r rune) bool { return r == ',' || r == ' ' }),
+			CaptchaProvider:         getEnv("AUTH_CAPTCHA_PROVIDER", "tencent"),
+			TencentCaptchaAppID:     getEnv("TENCENT_CAPTCHA_APP_ID", ""),
+			TencentCaptchaAppSecret: getEnv("TENCENT_CAPTCHA_APP_SECRET", ""),
+			TencentSecretID:         getEnv("TENCENT_CAPTCHA_SECRET_ID", ""),
+			TencentSecretKey:        getEnv("TENCENT_CAPTCHA_SECRET_KEY", ""),
+			ShareRegistrationMode:   getEnv("SHARE_REGISTRATION_MODE", "selected_owners"),
+			ShareRegistrationOwners: getEnv("SHARE_REGISTRATION_OWNER_IDS", ""),
+			Password:                getEnv("AUTH_PASSWORD", "admin"),
+			TurnstileSiteKey:        getEnv("TURNSTILE_SITE_KEY", ""),
+			TurnstileSecret:         getEnv("TURNSTILE_SECRET", ""),
+			TurnstileHostnames:      strings.FieldsFunc(getEnv("TURNSTILE_HOSTNAMES", ""), func(r rune) bool { return r == ',' || r == ' ' }),
 		},
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "rss-pal-default-secret-change-me"),

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/registrationpolicy"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
@@ -23,7 +25,18 @@ type AuthHandler struct {
 }
 
 func NewAuthHandler(cfg *config.Config, userRepo *repository.UserRepository, refreshRepo *repository.RefreshTokenRepository) *AuthHandler {
-	return &AuthHandler{cfg: cfg, userRepo: userRepo, refreshRepo: refreshRepo, registrationVerifier: NewTurnstileVerifier(cfg.Auth.TurnstileSecret, cfg.Auth.TurnstileHostnames)}
+	var verifier RegistrationVerifier
+	switch cfg.Auth.CaptchaProvider {
+	case "tencent":
+		appID, err := strconv.ParseUint(cfg.Auth.TencentCaptchaAppID, 10, 64)
+		if err != nil {
+			appID = 0
+		}
+		verifier = NewTencentCaptchaVerifier(appID, cfg.Auth.TencentCaptchaAppSecret, cfg.Auth.TencentSecretID, cfg.Auth.TencentSecretKey)
+	case "turnstile", "":
+		verifier = NewTurnstileVerifier(cfg.Auth.TurnstileSecret, cfg.Auth.TurnstileHostnames)
+	}
+	return &AuthHandler{cfg: cfg, userRepo: userRepo, refreshRepo: refreshRepo, registrationVerifier: verifier}
 }
 
 type Claims struct {
@@ -190,6 +203,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	if (req.Code == "") == (req.ShareRef == "") {
+		c.JSON(400, gin.H{"error": "请提供邀请码或有效分享邀请"})
+		return
+	}
 	if len(req.Password) > 72 {
 		c.JSON(400, gin.H{"error": "密码不能超过 72 字节"})
 		return
@@ -198,7 +215,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.JSON(503, gin.H{"error": "注册验证暂时不可用，请稍后重试"})
 		return
 	}
-	if err := h.registrationVerifier.Verify(c.Request.Context(), req.TurnstileResponse, c.ClientIP()); err != nil {
+	proof := req.CaptchaResponse
+	if proof == "" && h.cfg.Auth.CaptchaProvider != "tencent" {
+		proof = req.TurnstileResponse
+	}
+	if err := h.registrationVerifier.Verify(c.Request.Context(), proof, c.ClientIP()); err != nil {
 		if errors.Is(err, ErrVerificationUnavailable) {
 			c.JSON(503, gin.H{"error": "注册验证暂时不可用，请稍后重试"})
 		} else {
@@ -209,7 +230,24 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if h.registrationBudget != nil && !h.registrationBudget.AdmitRegistration(c) {
 		return
 	}
-	user, err := h.userRepo.WithCtx(c).Register(req.Username, req.Password, req.Code)
+	var user *model.User
+	var err error
+	if req.ShareRef != "" {
+		source, sourceErr := h.registrationShareSource(req.ShareRef)
+		if sourceErr != nil {
+			err = sourceErr
+		} else {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+			defer cancel()
+			user, err = h.userRepo.WithCtx(c).RegisterFromShare(ctx, req.Username, req.Password, source, registrationpolicy.Parse(h.cfg.Auth.ShareRegistrationMode, h.cfg.Auth.ShareRegistrationOwners))
+		}
+	} else {
+		user, err = h.userRepo.WithCtx(c).Register(req.Username, req.Password, req.Code)
+	}
+	if errors.Is(err, repository.ErrInvalidRegistrationShare) {
+		c.JSON(400, gin.H{"error": "分享邀请无效或已过期，请重新打开有效分享链接或使用邀请码"})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "注册信息无效，请检查用户名、密码和邀请码"})
 		return
@@ -398,11 +436,24 @@ func getIntParam(c *gin.Context, param string) (int, bool) {
 	return id, true
 }
 
-// RegistrationConfig exposes only the public sitekey; absent configuration keeps registration closed.
+// RegistrationConfig exposes public provider configuration only.
 func (h *AuthHandler) RegistrationConfig(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	available := h.cfg.Auth.TurnstileSiteKey != "" && h.cfg.Auth.TurnstileSecret != "" && len(h.cfg.Auth.TurnstileHostnames) > 0
-	c.JSON(200, gin.H{"available": available, "site_key": strings.TrimSpace(h.cfg.Auth.TurnstileSiteKey)})
+	provider := h.cfg.Auth.CaptchaProvider
+	if provider == "" {
+		provider = "turnstile"
+	}
+	available, siteKey := false, ""
+	switch provider {
+	case "tencent":
+		appID, err := strconv.ParseUint(h.cfg.Auth.TencentCaptchaAppID, 10, 64)
+		available = err == nil && appID > 0 && strings.TrimSpace(h.cfg.Auth.TencentCaptchaAppSecret) != "" && strings.TrimSpace(h.cfg.Auth.TencentSecretID) != "" && strings.TrimSpace(h.cfg.Auth.TencentSecretKey) != ""
+		siteKey = h.cfg.Auth.TencentCaptchaAppID
+	case "turnstile":
+		available = h.cfg.Auth.TurnstileSiteKey != "" && h.cfg.Auth.TurnstileSecret != "" && len(h.cfg.Auth.TurnstileHostnames) > 0
+		siteKey = h.cfg.Auth.TurnstileSiteKey
+	}
+	c.JSON(200, gin.H{"available": available, "provider": provider, "site_key": strings.TrimSpace(siteKey)})
 }
 
 func (h *AuthHandler) SetRegistrationBudget(guard *AuthAbuseGuard) { h.registrationBudget = guard }

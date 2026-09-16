@@ -146,10 +146,10 @@ export const login = (username: string, password: string, remember = false) =>
   })
 
 export const getRegistrationConfig = () =>
-  api.get<{available: boolean; site_key: string}>('/auth/registration-config').then(res => res.data)
+  api.get<{available: boolean; site_key: string; provider: 'tencent' | 'turnstile'}>('/auth/registration-config').then(res => res.data)
 
-export const register = (username: string, password: string, code: string, proof: string) =>
-  api.post('/auth/register', { username, password, code, 'cf-turnstile-response': proof }).then(res => {
+export const register = (username: string, password: string, code: string, proof: string, shareRef?: string) =>
+  api.post('/auth/register', { username, password, ...(shareRef ? {share_ref: shareRef} : {code}), captcha_response: proof }).then(res => {
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('user', JSON.stringify(res.data.user))
     return res.data

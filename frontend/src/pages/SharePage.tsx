@@ -155,6 +155,7 @@ export default function SharePage({ kind = 'long' }: SharePageProps) {
   return (
     <PublicArticleReader
       article={article}
+      shareRef={article.registration_allowed === true ? `${kind === 'short' ? 's' : 't'}:${shareID}` : undefined}
       shareURL={`${window.location.origin}${location.pathname}`}
     />
   )
