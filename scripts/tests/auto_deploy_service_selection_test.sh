@@ -120,7 +120,7 @@ README_FILE="$ROOT_DIR/README.md"
 
 status_migrate_block=$(sed -n '/^  status-migrate:$/,/^  api:$/p' "$COMPOSE_FILE")
 migration_command=$(printf '%s\n' "$status_migrate_block" | sed -n 's/^    command: \["sh", "-ec", "\(.*\)"\]$/\1/p')
-expected_migration_command='psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql && psql -v ON_ERROR_STOP=1 -f /migrations/043_task_budgets.sql'
+expected_migration_command='psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql && psql -v ON_ERROR_STOP=1 -f /migrations/043_task_budgets.sql && psql -v ON_ERROR_STOP=1 -f /migrations/044_user_subscriptions.sql'
 [ "$migration_command" = "$expected_migration_command" ] || {
   echo "FAIL: status-migrate must execute ordered 037-042 psql steps joined only by &&" >&2
   exit 1

@@ -332,3 +332,22 @@ describe('feed subscription intent', () => {
     clearTimer.mockRestore()
   })
 })
+
+describe('personal subscription onboarding', () => {
+  it('keeps a new account empty until a recommendation is explicitly subscribed', async () => {
+    localStorage.setItem('rsspal:popular-feeds:first-seen-at', '1')
+    renderFeeds('/feeds')
+    const showPopular = await screen.findByRole('button', { name: '查看热门推荐' })
+    expect(apiMocks.addFeed).not.toHaveBeenCalled()
+    fireEvent.click(showPopular)
+    fireEvent.click(screen.getByRole('button', { name: '宝玉的分享' }))
+    await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalled())
+    expect(apiMocks.addFeed).not.toHaveBeenCalled()
+    expect(screen.queryByText('共享 · 所有用户可见')).toBeNull()
+    apiMocks.addFeed.mockResolvedValue({ id: 123, url: 'https://source.example/feed' })
+    apiMocks.fetchFeedNow.mockResolvedValue({ feed_title: 'Preview feed', new_articles: 0 })
+    fireEvent.click(await screen.findByRole('button', { name: '确认订阅' }))
+    await waitFor(() => expect(apiMocks.addFeed).toHaveBeenCalledTimes(1))
+    expect(apiMocks.addFeed).toHaveBeenCalledWith('https://source.example/feed', 'rss')
+  })
+})

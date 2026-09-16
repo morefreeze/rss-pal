@@ -161,7 +161,7 @@ func (h *FeedHandler) Update(c *gin.Context) {
 		return
 	}
 
-	if !isAdmin(c) && (existing.OwnerID == nil || *existing.OwnerID != getUserID(c)) {
+	if existing.OwnerID == nil || *existing.OwnerID != getUserID(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -195,7 +195,7 @@ func (h *FeedHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if !isAdmin(c) && (feed.OwnerID == nil || *feed.OwnerID != getUserID(c)) {
+	if feed.OwnerID == nil || *feed.OwnerID != getUserID(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -225,7 +225,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 		return
 	}
 
-	if !isAdmin(c) && (feed.OwnerID == nil || *feed.OwnerID != getUserID(c)) {
+	if feed.OwnerID == nil || *feed.OwnerID != getUserID(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -438,7 +438,7 @@ func (h *FeedHandler) UpdateStatus(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
 		return
 	}
-	if !isAdmin(c) && (feed.OwnerID == nil || *feed.OwnerID != getUserID(c)) {
+	if feed.OwnerID == nil || *feed.OwnerID != getUserID(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -468,7 +468,7 @@ func (h *FeedHandler) UpdateWeight(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
 		return
 	}
-	if !isAdmin(c) && (feed.OwnerID == nil || *feed.OwnerID != getUserID(c)) {
+	if feed.OwnerID == nil || *feed.OwnerID != getUserID(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}

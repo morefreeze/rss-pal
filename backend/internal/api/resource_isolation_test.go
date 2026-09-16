@@ -32,7 +32,7 @@ func TestFeedMutationsRespectOwnership(t *testing.T) {
 			user, id int
 			admin    bool
 			want     int
-		}{{"owner", f.userA, f.privateFeedA, false, 204}, {"other", f.userB, f.privateFeedA, false, 404}, {"public", f.userB, publicID, false, 403}, {"admin_public", f.userB, publicID, true, 204}} {
+		}{{"owner", f.userA, f.privateFeedA, false, 204}, {"other", f.userB, f.privateFeedA, false, 404}, {"admin_other", f.userB, f.privateFeedA, true, 404}, {"unowned", f.userB, publicID, false, 404}, {"admin_unowned", f.userB, publicID, true, 404}} {
 			t.Run(operation.path+"/"+tc.name, func(t *testing.T) {
 				req := httptest.NewRequest("PATCH", "/feeds/"+itoa(tc.id)+"/"+operation.path, strings.NewReader(operation.body))
 				req.Header.Set("Content-Type", "application/json")
@@ -43,6 +43,30 @@ func TestFeedMutationsRespectOwnership(t *testing.T) {
 					t.Errorf("got %d want %d: %s", w.Code, tc.want, w.Body.String())
 				}
 			})
+		}
+	}
+}
+
+// Production may temporarily use a superuser connection; explicit HTTP
+// authorization must still isolate administrator subscriptions.
+func TestAdministratorCannotMutateAnotherSubscriptionWithBypassPool(t *testing.T) {
+	f, cleanup := newHTTPLeakFixture(t)
+	defer cleanup()
+	auth := api.NewAuthHandler(f.cfg, repository.NewUserRepository(f.privDB), nil)
+	h := api.NewFeedHandler(repository.NewFeedRepository(f.privDB), repository.NewArticleRepository(f.privDB), "")
+	r := gin.New()
+	r.Use(auth.AuthMiddleware())
+	r.PATCH("/feeds/:id/status", h.UpdateStatus)
+	r.PATCH("/feeds/:id/weight", h.UpdateWeight)
+	r.DELETE("/feeds/:id", h.Delete)
+	for _, tc := range []struct{ method, path, body string }{{"PATCH", "/status", `{"status":"paused"}`}, {"PATCH", "/weight", `{"priority_weight":2}`}, {"DELETE", "", ""}} {
+		req := httptest.NewRequest(tc.method, "/feeds/"+itoa(f.privateFeedA)+tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+signTestJWT(t, httpTestJWTSecret, f.userB, true))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != 403 {
+			t.Fatalf("%s %s got %d: %s", tc.method, tc.path, w.Code, w.Body.String())
 		}
 	}
 }

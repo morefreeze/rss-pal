@@ -109,7 +109,7 @@ func (r *ProgressRepository) MarkAllRead(userID int, feedID *int, unreadOnly, sa
 	args := []interface{}{userID}
 	argIdx := 2
 	joins := ""
-	conditions := []string{"(f.owner_id IS NULL OR f.owner_id = $1)"}
+	conditions := []string{"(f.owner_id = $1)"}
 
 	if feedID != nil {
 		conditions = append(conditions, fmt.Sprintf("a.feed_id = $%d", argIdx))

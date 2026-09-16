@@ -18,9 +18,7 @@ const exploreSubscriptionProfileSQL = `
 	           SELECT article.category
 	           FROM articles article
 	           WHERE article.feed_id=feed.id AND NULLIF(btrim(article.category),'') IS NOT NULL
-	             AND ((feed.owner_id=$1 AND COALESCE(article.published_at,article.fetched_at) >= $2)
-	               OR (feed.owner_id IS NULL AND article.published_at IS NOT NULL
-	                   AND article.published_at >= GREATEST($2,profile_user.shared_visible_from)))
+	             AND COALESCE(article.published_at,article.fetched_at) >= $2
 	           GROUP BY article.category
 	           ORDER BY COUNT(*) DESC,MAX(COALESCE(article.published_at,article.fetched_at)) DESC,article.category
 	           LIMIT 1
@@ -31,17 +29,14 @@ const exploreSubscriptionProfileSQL = `
 	               FROM articles article
 	               CROSS JOIN LATERAL unnest(COALESCE(article.tags,'{}')) tag
 	               WHERE article.feed_id=feed.id AND NULLIF(btrim(tag),'') IS NOT NULL
-	                 AND ((feed.owner_id=$1 AND COALESCE(article.published_at,article.fetched_at) >= $2)
-	                   OR (feed.owner_id IS NULL AND article.published_at IS NOT NULL
-	                       AND article.published_at >= GREATEST($2,profile_user.shared_visible_from)))
+	                 AND COALESCE(article.published_at,article.fetched_at) >= $2
 	               GROUP BY btrim(tag)
 	               ORDER BY COUNT(*) DESC,MAX(COALESCE(article.published_at,article.fetched_at)) DESC,btrim(tag)
 	               LIMIT 20
 	           ) ranked_tag
 	       )
 	FROM feeds feed
-	JOIN users profile_user ON profile_user.id=$1
-	WHERE feed.owner_id IS NULL OR feed.owner_id=$1
+		WHERE feed.owner_id=$1
 	ORDER BY feed.id`
 
 const exploreRecentArticleProfileSQL = `
@@ -50,16 +45,13 @@ const exploreRecentArticleProfileSQL = `
 	       LEFT(COALESCE(article.summary_brief,''),1000), COALESCE(article.published_at,article.fetched_at)
 	FROM articles article
 	JOIN feeds feed ON feed.id=article.feed_id
-	JOIN users profile_user ON profile_user.id=$1
-	WHERE (feed.owner_id=$1 AND COALESCE(article.published_at,article.fetched_at) >= $2)
-	   OR (feed.owner_id IS NULL AND article.published_at IS NOT NULL
-	       AND article.published_at >= GREATEST($2,profile_user.shared_visible_from))
+		WHERE feed.owner_id=$1 AND COALESCE(article.published_at,article.fetched_at) >= $2
 	ORDER BY COALESCE(article.published_at,article.fetched_at) DESC, article.id DESC LIMIT 200`
 
 // ExploreProfileSignalRepository loads the formal subscription and recent
 // article inputs shared by worker and request-time cold snapshot generation.
 // When transaction-bound, PostgreSQL RLS remains an additional visibility
-// boundary on top of the explicit worker-safe shared article floor.
+// boundary alongside the explicit owner filters used by worker queries.
 type ExploreProfileSignalRepository struct{ db Querier }
 
 func NewExploreProfileSignalRepository(db Querier) *ExploreProfileSignalRepository {

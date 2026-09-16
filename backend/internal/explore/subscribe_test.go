@@ -203,7 +203,7 @@ func TestSubscribeBatchCommitsAllOrRollsBackAll(t *testing.T) {
 	}
 }
 
-func TestSubscribeReusesSharedAndConcurrentCallsConverge(t *testing.T) {
+func TestSubscribeOwnsFeedAndConcurrentCallsConverge(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	db.SetMaxOpenConns(12)
@@ -215,7 +215,7 @@ func TestSubscribeReusesSharedAndConcurrentCallsConverge(t *testing.T) {
 		t.Fatal(err)
 	}
 	shared, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(userID, sharedSourceID)
-	if err != nil || shared.Created || shared.FeedID != sharedFeedID {
+	if err != nil || !shared.Created || shared.FeedID == sharedFeedID {
 		t.Fatalf("shared=%+v err=%v", shared, err)
 	}
 
@@ -300,7 +300,7 @@ func TestSubscribeSharedFeedNeverMutatesGlobalArticlesAcrossUsers(t *testing.T) 
 	}
 	for _, subscription := range []struct{ userID, sourceID int }{{userID, sourceID}, {otherUserID, sourceID}} {
 		result, err := NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(subscription.userID, subscription.sourceID)
-		if err != nil || result.Created || result.FeedID != sharedFeedID || result.CopiedArticles != 0 {
+		if err != nil || !result.Created || result.FeedID == sharedFeedID || result.CopiedArticles != 1 {
 			t.Fatalf("shared subscription=%+v err=%v", result, err)
 		}
 	}

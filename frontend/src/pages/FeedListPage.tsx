@@ -388,8 +388,8 @@ export default function FeedListPage() {
 
       <div className="card mb-2" aria-label="订阅可见范围">
         <strong>订阅可见范围</strong>
-        <p className="text-sm text-muted mt-1">新增和导入的订阅默认仅自己可见，管理员也一样。</p>
-        <p className="text-sm text-muted mt-1">标记为“共享”的公共订阅对所有用户可见；“热门推荐”是公开的订阅建议，点击预览不会自动订阅。</p>
+        <p className="text-sm text-muted mt-1">每个人的订阅独立管理，暂停、恢复和删除只影响自己，管理员也一样。</p>
+        <p className="text-sm text-muted mt-1">热门推荐对所有人开放，但不会自动加入订阅。点击预览后，需要确认订阅才会加入你的列表。</p>
       </div>
 
       {addSuccess && (
@@ -600,7 +600,14 @@ export default function FeedListPage() {
 
       {/* Existing feeds list */}
       {feeds.length === 0 ? (
-        <div className="card text-muted">暂无订阅，从上方添加你的第一个订阅源</div>
+        <div className="card">
+          <p className="text-muted">你还没有订阅。可以从热门推荐中选择，也可以在上方输入订阅地址。</p>
+          <button type="button" className="secondary mt-1" onClick={() => {
+            setPopularFeedsExpanded(true)
+            setFoldedGroups({})
+            document.getElementById('popular-feeds-groups')?.scrollIntoView?.({ block: 'nearest' })
+          }}>查看热门推荐</button>
+        </div>
       ) : (
         feeds.map(feed => (
           <div
@@ -628,7 +635,7 @@ export default function FeedListPage() {
                 </div>
                 <div className="text-muted text-sm">{feed.url}</div>
                 <div className="text-muted text-sm mt-1">
-                  {feed.owner_id ? '私有 · 仅自己可见' : '共享 · 所有用户可见'} · {feed.article_count} 篇
+                  个人订阅 · 仅自己可见 · {feed.article_count} 篇
                   {feed.unread_count > 0 && <span style={{ color: 'var(--accent)', fontWeight: 500 }}> · {feed.unread_count} 未读</span>}
                   {' '}· 上次抓取：{formatDate(feed.last_fetched_at)}
                 </div>

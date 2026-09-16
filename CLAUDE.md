@@ -97,7 +97,7 @@ Backend follows a layered pattern: `api/` (HTTP handlers) → `service/` (busine
 
 ## Database
 
-PostgreSQL 15. Incremental migrations currently run through `backend/migrations/039_article_shares.sql`. Migrations auto-run via Docker entrypoint (`/docker-entrypoint-initdb.d`) on first start only. For existing volumes, Compose's one-shot `status-migrate` applies migrations 037, 038, and 039 before API and Worker start.
+PostgreSQL 15. Incremental migrations currently run through `backend/migrations/044_user_subscriptions.sql`. Migrations auto-run via Docker entrypoint (`/docker-entrypoint-initdb.d`) on first start only. For existing volumes, Compose's one-shot `status-migrate` applies migrations 037 through 044 before API and Worker start.
 
 Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`, `interest_categories`, `reading_progress`, `playback_progress`, `article_events`, `user_insights`, `user_tags`, `article_user_tags`, `saved_articles`, `feed_health_metrics`, `weekly_digests`, `article_shares`, `ai_templates`, `link_set_candidates`, and the subscription Explore tables.
 
@@ -108,6 +108,7 @@ Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`,
 - Recommended articles are scored from `user_preferences` signals (like=5, dislike=-10, save=3, read_duration/60) over the last 30 days.
 - Reading progress uses scroll position (0.0–1.0 float) with upsert on `article_id` unique.
 - Auth is JWT-based (HS256). First run creates admin via `/api/auth/init`. Other users register via invite codes or policy-eligible active article-share invitations, always with server-verified captcha (Tencent Captcha 2.0 by default) (`/api/auth/register`).
+- Formal subscriptions always belong to one user. New users start with zero feeds; recommended sources and Explore previews do not count as subscriptions. Subscribe by owner+URL, never reuse another user or legacy NULL-owner feed. Migration 044 assigns historical NULL-owner feeds to admin 1 without changing IDs or states; public recommendations remain a separate catalog.
 - Feeds support two types: `rss` (standard RSS/Atom) and `html` (scrapes arbitrary web pages for article links).
 - Articles can be classified by AI into categories defined in `model.ValidCategories`.
 - Link sets: feeds with `expand_links=true` have the worker extract linked articles as child articles (`parent_article_id`).

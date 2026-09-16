@@ -120,8 +120,8 @@ func TestRLS_Feeds_ScopedByOwner(t *testing.T) {
 		if !seen[f.privateFeedA] {
 			t.Errorf("userA missing own privateFeedA (id=%d): seen=%v", f.privateFeedA, seen)
 		}
-		if !seen[f.sharedFeed] {
-			t.Errorf("userA missing shared feed (id=%d): seen=%v", f.sharedFeed, seen)
+		if seen[f.sharedFeed] {
+			t.Errorf("userA leaked unowned feed (id=%d): seen=%v", f.sharedFeed, seen)
 		}
 	})
 }
@@ -141,8 +141,8 @@ func TestRLS_Articles_ScopedByFeedOwner(t *testing.T) {
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM articles WHERE id = $1`, f.articleShared).Scan(&n); err != nil {
 			t.Fatalf("count articleShared: %v", err)
 		}
-		if n != 1 {
-			t.Errorf("userB cannot see shared article (count=%d)", n)
+		if n != 0 {
+			t.Errorf("userB leaked unowned article (count=%d)", n)
 		}
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM articles WHERE id = $1`, f.articleB).Scan(&n); err != nil {
 			t.Fatalf("count articleB: %v", err)

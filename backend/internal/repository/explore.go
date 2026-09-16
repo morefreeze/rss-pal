@@ -247,7 +247,7 @@ func readExploreInterests(db Querier, userID int) ([]string, error) {
 }
 
 func visibleFormalNormalizedURLs(db Querier, userID int) ([]string, error) {
-	rows, err := db.Query(`SELECT url FROM feeds WHERE owner_id IS NULL OR owner_id=$1 ORDER BY id`, userID)
+	rows, err := db.Query(`SELECT url FROM feeds WHERE owner_id=$1 ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}

@@ -126,7 +126,7 @@ func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 		FROM feeds f
 		LEFT JOIN articles a ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON rp.article_id = a.id AND rp.user_id = $1
-		WHERE f.owner_id IS NULL OR f.owner_id = $1
+		WHERE f.owner_id = $1
 		GROUP BY f.id
 		ORDER BY f.created_at DESC
 	`
@@ -180,9 +180,8 @@ func (r *FeedRepository) Create(feed *model.Feed) error {
 	return r.db.QueryRow(query, feed.URL, feed.Title, feed.FetchIntervalMin, feed.OwnerID, feedType, feed.ExpandLinks).Scan(&feed.ID, &feed.CreatedAt)
 }
 
-// GetOrCreateOwnerScoped reuses a visible shared feed before creating the
-// caller's owner+URL row. Its uniqueness path is independent from the clip
-// and provider-source identity indexes below.
+// GetOrCreateOwnerScoped reuses only the caller's owner+URL row. Its
+// uniqueness path is independent from the clip and provider-source indexes.
 func (r *FeedRepository) GetOrCreateOwnerScoped(ownerID int, url, title, feedType string) (*model.Feed, bool, error) {
 	return explorelogic.GetOrCreateOwnerScopedFeed(r.db, ownerID, url, title, feedType)
 }

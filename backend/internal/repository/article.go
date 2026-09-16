@@ -356,8 +356,8 @@ func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bo
 FROM articles
 JOIN feeds ON articles.feed_id = feeds.id` + joins
 
-	// Only return articles from feeds visible to this user (shared feeds or user's own feeds)
-	allFrags := append([]string{"(feeds.owner_id IS NULL OR feeds.owner_id = $1)"}, whereFrags...)
+	// Only return articles from this user's subscriptions.
+	allFrags := append([]string{"(feeds.owner_id = $1)"}, whereFrags...)
 
 	if len(allFrags) > 0 {
 		query += " WHERE " + allFrags[0]
@@ -383,7 +383,7 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
-		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
+		WHERE a.id = $1 AND (f.owner_id = $2)`
 	var a model.Article
 	var content, summaryBrief, summaryDetailed, feedTitle, mediaURL, mediaType, kind sql.NullString
 	var mediaDuration sql.NullInt64
@@ -449,7 +449,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
-		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)`
+		WHERE a.id = $1 AND (f.owner_id = $2)`
 	var a model.Article
 	var content, summaryBrief, summaryDetailed, feedTitle, feedType, mediaURL, mediaType, kind sql.NullString
 	var mediaDuration sql.NullInt64
@@ -579,15 +579,14 @@ func (r *ArticleRepository) Exists(feedID int, url string) (bool, error) {
 }
 
 // FindByOwnerAndURL returns the article matching exactURL within any feed
-// visible to ownerID — that is, feeds the user owns OR shared admin feeds
-// (owner_id IS NULL). Returns (nil, nil) if no match. Caller is responsible
+// owned by ownerID. Returns (nil, nil) if no match. Caller is responsible
 // for passing a normalized URL (see util.NormalizeURL).
 func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*model.Article, error) {
 	query := `
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
-		WHERE (f.owner_id IS NULL OR f.owner_id = $1) AND a.url = $2
+		WHERE (f.owner_id = $1) AND a.url = $2
 		ORDER BY a.fetched_at DESC
 		LIMIT 1
 	`
@@ -881,7 +880,7 @@ func (r *ArticleRepository) GetUnreadCount(userID int) (int, error) {
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
 		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $1
-		WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+		WHERE (f.owner_id = $1)
 		AND COALESCE(rp.is_completed, false) = false
 		AND ha.id IS NULL
 	`
@@ -899,7 +898,7 @@ func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Art
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $2
 		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $2
-		WHERE (f.owner_id IS NULL OR f.owner_id = $2)
+		WHERE (f.owner_id = $2)
 		  AND ha.id IS NULL
 		  AND (a.title ILIKE $1 OR a.url ILIKE $1 OR a.summary_brief ILIKE $1 OR a.content ILIKE $1 OR f.title ILIKE $1 OR f.url ILIKE $1)
 		ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(a.published_at, a.fetched_at), a.fetched_at - INTERVAL '7 days')) DESC,
@@ -947,7 +946,7 @@ func (r *ArticleRepository) searchByPinyin(query string, userID, remaining int, 
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
 		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $1
-		WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+		WHERE (f.owner_id = $1)
 		  AND ha.id IS NULL
 		ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(a.published_at, a.fetched_at), a.fetched_at - INTERVAL '7 days')) DESC,
 		         COALESCE(a.published_at, a.fetched_at) DESC
@@ -991,7 +990,7 @@ func (r *ArticleRepository) GetByIDsForUser(userID int, ids []int) ([]model.Arti
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
-		WHERE a.id = ANY($2) AND (f.owner_id IS NULL OR f.owner_id = $1)
+		WHERE a.id = ANY($2) AND (f.owner_id = $1)
 		ORDER BY array_position($2, a.id)
 	`
 	rows, err := r.db.Query(query, userID, int64s)
@@ -1027,7 +1026,7 @@ func (r *ArticleRepository) GetTopArticlesInRange(userID int, start, end time.Ti
 			WHERE user_id = $1
 			GROUP BY article_id
 		) p ON a.id = p.article_id
-		WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+		WHERE (f.owner_id = $1)
 		  AND a.published_at >= $2 AND a.published_at < $3
 		ORDER BY COALESCE(p.score, 0) DESC, a.published_at DESC
 		LIMIT $4
@@ -1067,7 +1066,7 @@ func (r *ArticleRepository) GetGroupedByCategory(userID int, feedID *int, unread
 	// fragment plus positional args we'll re-thread into each of the two
 	// queries below. $1 is always userID.
 	args := []interface{}{userID}
-	conditions := []string{"(f.owner_id IS NULL OR f.owner_id = $1)", "ha.id IS NULL"}
+	conditions := []string{"(f.owner_id = $1)", "ha.id IS NULL"}
 	joins := " LEFT JOIN hidden_articles ha ON ha.article_id = a.id AND ha.user_id = $1"
 	argIdx := 2
 	if feedID != nil {
@@ -1632,7 +1631,7 @@ func (r *ArticleRepository) queryLinkSetPrimary(userID, days, limit int) ([]mode
 		WHERE a.processing_state = 'ready'
 		  AND a.parent_article_id IS NOT NULL
 		  AND parent.fetched_at > NOW() - ($2 || ' days')::INTERVAL
-		  AND (f.owner_id IS NULL OR f.owner_id = $1)
+		  AND (f.owner_id = $1)
 		  AND COALESCE(rp.is_completed, false) = false
 		  AND ha.id IS NULL
 		ORDER BY COALESCE(p.pref_score, 0) + COALESCE(a.prerank_score, 0) DESC,
@@ -1668,7 +1667,7 @@ func (r *ArticleRepository) queryLinkSetFallback(userID, days, limit int, exclud
 		WHERE a.processing_state = 'ready'
 		  AND a.parent_article_id IS NOT NULL
 		  AND parent.fetched_at > NOW() - ($2 || ' days')::INTERVAL
-		  AND (f.owner_id IS NULL OR f.owner_id = $1)
+		  AND (f.owner_id = $1)
 		  AND ha.id IS NULL
 		  AND a.word_count >= 500
 		  AND a.summary_brief IS NOT NULL
@@ -1724,7 +1723,7 @@ LEFT JOIN (
     WHERE user_id = $1 AND created_at > NOW() - INTERVAL '30 days'
     GROUP BY article_id
 ) p ON a.id = p.article_id
-WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+WHERE (f.owner_id = $1)
   AND COALESCE(rp.is_completed, false) = false
 ORDER BY COALESCE(p.score, 0) DESC, a.published_at DESC NULLS LAST
 LIMIT $2
@@ -1751,7 +1750,7 @@ JOIN (
     WHERE user_id = $1 AND signal_type IN ('like','save','completed_listen')
     GROUP BY article_id
 ) p ON a.id = p.article_id
-WHERE (f.owner_id IS NULL OR f.owner_id = $1)
+WHERE (f.owner_id = $1)
   AND rp.is_completed = true
   AND rp.last_read_at BETWEEN NOW() - INTERVAL '180 days' AND NOW() - INTERVAL '30 days'
   AND p.score > 0
@@ -1979,10 +1978,6 @@ func (r *ArticleRepository) ResetPDFToProcessing(id int) error {
 // a feed whose owner is someone else — both yield (false, nil); only
 // driver-level failures return a non-nil error.
 //
-// Note: this is stricter than the list/detail queries elsewhere in
-// this file, which treat owner_id IS NULL feeds as world-readable.
-// PDF clip feeds are always per-user (owner_id NOT NULL) so this
-// stricter rule is correct for the image-serve endpoint.
 func (r *ArticleRepository) UserOwnsArticle(userID, articleID int) (bool, error) {
 	var owns bool
 	err := r.db.QueryRow(`

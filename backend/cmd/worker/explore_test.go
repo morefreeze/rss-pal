@@ -642,7 +642,7 @@ func TestExploreRankInputSQLRequiresFreshEnabledObservation(t *testing.T) {
 	}
 }
 
-func TestSQLExploreRankInputsSharedArticlesRespectEachUserVisibilityFloor(t *testing.T) {
+func TestSQLExploreRankInputsUseOnlyOwnedSubscriptionsAndRecentArticles(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -669,8 +669,10 @@ func TestSQLExploreRankInputsSharedArticlesRespectEachUserVisibilityFloor(t *tes
 			($1,'shared-recent','https://profile-shared.example/recent',$5,$6,'shared','shared',ARRAY['public']),
 			($1,'shared-undated','https://profile-shared.example/undated',NULL,$6,'undated','undated',ARRAY['hidden-undated']),
 			($2,'owned-a-undated','https://profile-a.example/undated',NULL,$6,'programming','go',ARRAY['backend']),
+			($2,'owned-a-before-legacy-floor','https://profile-a.example/before-floor',$4,$6,'programming','go',ARRAY['backend']),
+			($2,'owned-a-outside-window','https://profile-a.example/outside-window',$7,$7,'expired','expired',ARRAY['expired']),
 			($3,'owned-b-recent','https://profile-b.example/recent',$5,$6,'databases','postgres',ARRAY['storage'])`,
-		sharedFeed, ownedAFeed, ownedBFeed, now.Add(-20*24*time.Hour), now.Add(-2*24*time.Hour), now.Add(-24*time.Hour)); err != nil {
+		sharedFeed, ownedAFeed, ownedBFeed, now.Add(-20*24*time.Hour), now.Add(-2*24*time.Hour), now.Add(-24*time.Hour), now.Add(-31*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	inputs := &sqlExploreRankInputs{db: db}
@@ -682,10 +684,12 @@ func TestSQLExploreRankInputsSharedArticlesRespectEachUserVisibilityFloor(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRecentProfileTitles(t, profileA, []string{"owned-a-undated", "shared-recent"})
-	assertRecentProfileTitles(t, profileB, []string{"owned-b-recent", "shared-old", "shared-recent"})
+	assertRecentProfileTitles(t, profileA, []string{"owned-a-before-legacy-floor", "owned-a-undated"})
+	assertRecentProfileTitles(t, profileB, []string{"owned-b-recent"})
 	assertSubscriptionMetadata(t, profileA, "profile-a.example", "programming", "backend")
-	assertSubscriptionMetadata(t, profileA, "profile-shared.example", "shared", "public")
+	if len(profileA.Subscriptions) != 1 || len(profileB.Subscriptions) != 1 {
+		t.Fatalf("profiles inherited unowned or other-user subscriptions: A=%+v B=%+v", profileA.Subscriptions, profileB.Subscriptions)
+	}
 	assertSubscriptionMetadata(t, profileB, "profile-b.example", "databases", "storage")
 }
 

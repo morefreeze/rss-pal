@@ -110,7 +110,7 @@ SELECT
          AND a.feed_id = f.id) AS clicks_90d
 FROM feeds f
 WHERE f.status != 'archived'
-  AND (f.owner_id IS NULL OR f.owner_id = $1)
+  AND (f.owner_id = $1)
 ORDER BY f.id
 	`
 

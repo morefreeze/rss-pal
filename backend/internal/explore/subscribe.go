@@ -124,9 +124,8 @@ func (s *SubscribeService) Subscribe(userID int, sourceIDs []int) ([]SubscribeRe
 			return nil, err
 		}
 		copied := 0
-		// Shared feeds and their articles are global state. A user subscription
-		// only reuses that state; it must never use candidate-cache data to
-		// insert, refresh, or invalidate summaries on the shared feed.
+		// Copy public candidate cache only into an owned subscription. Never
+		// use a personal subscription action to mutate unowned source content.
 		if feed.OwnerID != nil {
 			copied, err = copyExploreArticles(tx, userID, source.ID, feed.ID)
 			if err != nil {
@@ -155,7 +154,7 @@ type promotableSource struct {
 }
 
 func visibleSubscribeNormalizedURLs(db Querier, userID int) ([]string, error) {
-	rows, err := db.Query(`SELECT url FROM feeds WHERE owner_id IS NULL OR owner_id=$1 ORDER BY id`, userID)
+	rows, err := db.Query(`SELECT url FROM feeds WHERE owner_id=$1 ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -333,8 +332,8 @@ func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) 
 	return copied, nil
 }
 
-// GetOrCreateOwnerScopedFeed reuses a visible shared feed first. Otherwise it
-// creates one feed per owner+URL and safely re-reads the winner of a race.
+// GetOrCreateOwnerScopedFeed creates one feed per owner+URL and safely
+// re-reads the winner of a race. Other owners never supply a subscription.
 func GetOrCreateOwnerScopedFeed(db Querier, ownerID int, url, title, feedType string) (*model.Feed, bool, error) {
 	url = strings.TrimSpace(url)
 	title = strings.TrimSpace(title)
@@ -347,19 +346,6 @@ func GetOrCreateOwnerScopedFeed(db Querier, ownerID int, url, title, feedType st
 	}
 	normalizedURL := util.NormalizeURL(url)
 	if _, err := db.Exec(`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, fmt.Sprintf("explore-subscribe:%d:%s", ownerID, normalizedURL)); err != nil {
-		return nil, false, err
-	}
-	if shared, err := scanOwnerScopedFeed(db.QueryRow(`
-		SELECT id,url,title,owner_id,feed_type,fetch_interval_minutes,is_active,status,created_at
-		FROM feeds WHERE owner_id IS NULL AND url=$1
-		ORDER BY id LIMIT 1 FOR SHARE`, url)); err == nil {
-		return shared, false, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, false, err
-	}
-	if shared, err := findNormalizedOwnerScopedFeed(db, 0, normalizedURL); err == nil {
-		return shared, false, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, err
 	}
 	if owned, err := findNormalizedOwnerScopedFeed(db, ownerID, normalizedURL); err == nil {
@@ -394,7 +380,7 @@ func GetOrCreateOwnerScopedFeed(db Querier, ownerID int, url, title, feedType st
 func findNormalizedOwnerScopedFeed(db Querier, ownerID int, normalizedURL string) (*model.Feed, error) {
 	rows, err := db.Query(`
 		SELECT id,url,title,owner_id,feed_type,fetch_interval_minutes,is_active,status,created_at
-		FROM feeds WHERE (($1=0 AND owner_id IS NULL) OR owner_id=$1) ORDER BY id FOR SHARE`, ownerID)
+		FROM feeds WHERE owner_id=$1 ORDER BY id FOR SHARE`, ownerID)
 	if err != nil {
 		return nil, err
 	}

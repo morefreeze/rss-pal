@@ -50,25 +50,25 @@ func (r *StatsRepository) GetStats(userID int) (*FeedStats, error) {
 	stats := &FeedStats{}
 
 	// Total feeds visible to user (shared + own)
-	r.db.QueryRow(`SELECT COUNT(*) FROM feeds WHERE owner_id IS NULL OR owner_id = $1`, userID).Scan(&stats.TotalFeeds)
+	r.db.QueryRow(`SELECT COUNT(*) FROM feeds WHERE owner_id = $1`, userID).Scan(&stats.TotalFeeds)
 
 	// Active feeds visible to user
-	r.db.QueryRow(`SELECT COUNT(*) FROM feeds WHERE is_active = true AND (owner_id IS NULL OR owner_id = $1)`, userID).Scan(&stats.ActiveFeeds)
+	r.db.QueryRow(`SELECT COUNT(*) FROM feeds WHERE is_active = true AND (owner_id = $1)`, userID).Scan(&stats.ActiveFeeds)
 
 	// Total articles from feeds visible to user
-	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE f.owner_id IS NULL OR f.owner_id = $1`, userID).Scan(&stats.TotalArticles)
+	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE f.owner_id = $1`, userID).Scan(&stats.TotalArticles)
 
 	// Today's articles from feeds visible to user
-	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE (f.owner_id IS NULL OR f.owner_id = $1) AND a.fetched_at > NOW() - INTERVAL '24 hours'`, userID).Scan(&stats.TodayArticles)
+	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE (f.owner_id = $1) AND a.fetched_at > NOW() - INTERVAL '24 hours'`, userID).Scan(&stats.TodayArticles)
 
 	// Articles with content (> 200 chars) from feeds visible to user
-	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE (f.owner_id IS NULL OR f.owner_id = $1) AND LENGTH(a.content) > 200`, userID).Scan(&stats.WithContent)
+	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE (f.owner_id = $1) AND LENGTH(a.content) > 200`, userID).Scan(&stats.WithContent)
 
 	// Articles without content from feeds visible to user
-	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE (f.owner_id IS NULL OR f.owner_id = $1) AND (LENGTH(a.content) <= 200 OR a.content IS NULL)`, userID).Scan(&stats.WithoutContent)
+	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE (f.owner_id = $1) AND (LENGTH(a.content) <= 200 OR a.content IS NULL)`, userID).Scan(&stats.WithoutContent)
 
 	// Articles with summary from feeds visible to user
-	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE (f.owner_id IS NULL OR f.owner_id = $1) AND a.summary_brief IS NOT NULL AND a.summary_brief != ''`, userID).Scan(&stats.WithSummary)
+	r.db.QueryRow(`SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id WHERE (f.owner_id = $1) AND a.summary_brief IS NOT NULL AND a.summary_brief != ''`, userID).Scan(&stats.WithSummary)
 
 	return stats, nil
 }
@@ -85,7 +85,7 @@ func (r *StatsRepository) GetFetchProgress(userID int) ([]FetchProgress, error) 
 			COALESCE(ROUND(100.0 * SUM(CASE WHEN a.summary_brief IS NOT NULL AND a.summary_brief != '' THEN 1 ELSE 0 END) / NULLIF(COUNT(a.id), 0)), 0) as summary_progress
 		FROM feeds f
 		LEFT JOIN articles a ON f.id = a.feed_id
-		WHERE f.is_active = true AND (f.owner_id IS NULL OR f.owner_id = $1)
+		WHERE f.is_active = true AND (f.owner_id = $1)
 		GROUP BY f.id, f.title, f.url, f.last_fetched_at
 		ORDER BY f.last_fetched_at DESC NULLS LAST
 	`

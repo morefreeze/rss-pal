@@ -178,7 +178,7 @@ func (r *UserTagRepository) GetTagsForSidebar(filter ArticleFilter) (*TagSidebar
 	// total + untagged counts — same filter, plus the feeds visibility
 	// guard that GetAll applies (so counts agree with what the list returns).
 	joins2, where2, args2, _ := buildArticleFilterSQL(filter, "articles", 1)
-	visibilityFrag := "(feeds.owner_id IS NULL OR feeds.owner_id = $1)"
+	visibilityFrag := "(feeds.owner_id = $1)"
 	totalQuery := `SELECT COUNT(*) FROM articles JOIN feeds ON articles.feed_id = feeds.id` + joins2
 	untaggedFrag := fmt.Sprintf(
 		`NOT EXISTS (SELECT 1 FROM article_user_tags aut WHERE aut.article_id = articles.id AND aut.user_id = $%d)`,
@@ -340,7 +340,7 @@ func (r *ArticleUserTagRepository) GetSourceForArticle(articleID, userID int) (m
 		SELECT f.id, f.title, COALESCE(f.feed_type, 'rss'), a.url
 		FROM articles a
 		JOIN feeds f ON f.id = a.feed_id
-		WHERE a.id = $1 AND (f.owner_id IS NULL OR f.owner_id = $2)
+		WHERE a.id = $1 AND (f.owner_id = $2)
 	`, articleID, userID).Scan(&feedID, &feedTitle, &feedType, &articleURL)
 	if err != nil {
 		return s, err
@@ -436,8 +436,7 @@ func (r *TagSuggestionRepository) WithCtx(c ctxkey.CtxGetter) *TagSuggestionRepo
 // or dismissed. Returns empty slice if articles.tags is null/empty.
 //
 // Tenancy guard: the inner SELECT joins feeds and requires the article to
-// belong to a feed owned by the user (or owner_id IS NULL for legacy/global
-// feeds). If the article is not visible to the user, the inner SELECT yields
+// belong to a feed owned by the user. If the article is not visible, the inner SELECT yields
 // no rows and unnest(COALESCE(..., ARRAY[]::TEXT[])) yields zero rows, so
 // the function returns []. This prevents probing other users' articles.
 func (r *TagSuggestionRepository) SuggestionsForArticle(articleID, userID int) ([]string, error) {
@@ -446,7 +445,7 @@ func (r *TagSuggestionRepository) SuggestionsForArticle(articleID, userID int) (
 		FROM unnest(COALESCE(
 			(SELECT a.tags FROM articles a
 			 JOIN feeds f ON f.id = a.feed_id
-			 WHERE a.id = $2 AND (f.owner_id IS NULL OR f.owner_id = $1)),
+			 WHERE a.id = $2 AND (f.owner_id = $1)),
 			ARRAY[]::TEXT[]
 		)) AS t
 		WHERE NOT EXISTS (

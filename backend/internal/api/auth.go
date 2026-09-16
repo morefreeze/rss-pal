@@ -401,10 +401,8 @@ func (h *AuthHandler) ListInviteCodes(c *gin.Context) {
 	c.JSON(http.StatusOK, codes)
 }
 
-// UpdateVisibilityFloor lets the caller move their own shared-content floor.
-// Body: {"days_back": N}. N must be >= 0. Larger N = more history. New users
-// default to 7. Owner-owned (private) feeds are unaffected — the floor only
-// gates shared (owner_id IS NULL) feeds.
+// UpdateVisibilityFloor retains the legacy preference API for older clients.
+// Personal subscriptions are owner-scoped and no longer use this cutoff.
 func (h *AuthHandler) UpdateVisibilityFloor(c *gin.Context) {
 	var req struct {
 		DaysBack int `json:"days_back" binding:"min=0"`

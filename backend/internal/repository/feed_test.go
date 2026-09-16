@@ -26,9 +26,32 @@ func TestOwnerScopedFeedSameOwnerIsIdempotentAndUsersStayIndependent(t *testing.
 	if err != nil || !created || other.ID == first.ID {
 		t.Fatalf("other=%+v created=%t first=%+v err=%v", other, created, first, err)
 	}
+	for _, status := range []string{"paused", "active", "archived"} {
+		if err := repo.UpdateStatus(first.ID, status); err != nil {
+			t.Fatal(err)
+		}
+		unchanged, err := repo.GetByID(other.ID)
+		if err != nil || unchanged.Status != "active" {
+			t.Fatalf("other subscriber changed: %+v %v", unchanged, err)
+		}
+	}
+	if err := repo.UpdateWeight(first.ID, 0.2); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err := repo.GetByID(other.ID)
+	if err != nil || unchanged.PriorityWeight != 1 {
+		t.Fatalf("other weight changed: %+v %v", unchanged, err)
+	}
+	if err := repo.Delete(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetByID(other.ID); err != nil {
+		t.Fatalf("delete removed other subscription: %v", err)
+	}
+
 }
 
-func TestOwnerScopedFeedReusesVisibleSharedFeed(t *testing.T) {
+func TestOwnerScopedFeedDoesNotReuseLegacySharedFeed(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	userID := seedOwnerScopedFeedUser(t, db, "owner-feed-shared")
@@ -37,11 +60,11 @@ func TestOwnerScopedFeedReusesVisibleSharedFeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	feed, created, err := NewFeedRepository(db).GetOrCreateOwnerScoped(userID, "https://shared.example/feed", "Candidate", "rss")
-	if err != nil || created || feed.ID != sharedID || feed.OwnerID != nil {
+	if err != nil || !created || feed.ID == sharedID || feed.OwnerID == nil || *feed.OwnerID != userID {
 		t.Fatalf("feed=%+v created=%t err=%v", feed, created, err)
 	}
 	var owned int
-	if err := db.QueryRow(`SELECT count(*) FROM feeds WHERE owner_id=$1 AND url='https://shared.example/feed'`, userID).Scan(&owned); err != nil || owned != 0 {
+	if err := db.QueryRow(`SELECT count(*) FROM feeds WHERE owner_id=$1 AND url='https://shared.example/feed'`, userID).Scan(&owned); err != nil || owned != 1 {
 		t.Fatalf("owned=%d err=%v", owned, err)
 	}
 }

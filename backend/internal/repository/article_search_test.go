@@ -10,19 +10,22 @@ import (
 func TestArticleSearchMatchesFeedMetadata(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
+	if _, err := db.Exec(`INSERT INTO users(id,username,password_hash) VALUES(1,'reader','x')`); err != nil {
+		t.Fatal(err)
+	}
 
 	var ruanFeedID int
 	if err := db.QueryRow(`
-		INSERT INTO feeds (url, title)
-		VALUES ('https://www.ruanyifeng.com/blog/atom.xml', '阮一峰的网络日志')
+		INSERT INTO feeds (url, title,owner_id)
+		VALUES ('https://www.ruanyifeng.com/blog/atom.xml', '阮一峰的网络日志',1)
 		RETURNING id
 	`).Scan(&ruanFeedID); err != nil {
 		t.Fatalf("insert ruan feed: %v", err)
 	}
 	var otherFeedID int
 	if err := db.QueryRow(`
-		INSERT INTO feeds (url, title)
-		VALUES ('https://example.com/feed.xml', '普通博客')
+		INSERT INTO feeds (url, title,owner_id)
+		VALUES ('https://example.com/feed.xml', '普通博客',1)
 		RETURNING id
 	`).Scan(&otherFeedID); err != nil {
 		t.Fatalf("insert other feed: %v", err)
@@ -60,19 +63,22 @@ func TestArticleSearchMatchesFeedMetadata(t *testing.T) {
 func TestArticleSearchMatchesChineseTitleByPinyin(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
+	if _, err := db.Exec(`INSERT INTO users(id,username,password_hash) VALUES(1,'reader','x')`); err != nil {
+		t.Fatal(err)
+	}
 
 	var feedID int
 	if err := db.QueryRow(`
-		INSERT INTO feeds (url, title)
-		VALUES ('https://weekly.example.com/feed.xml', '科技周刊')
+		INSERT INTO feeds (url, title,owner_id)
+		VALUES ('https://weekly.example.com/feed.xml', '科技周刊',1)
 		RETURNING id
 	`).Scan(&feedID); err != nil {
 		t.Fatalf("insert feed: %v", err)
 	}
 	var otherFeedID int
 	if err := db.QueryRow(`
-		INSERT INTO feeds (url, title)
-		VALUES ('https://kitchen.example.com/feed.xml', '厨房札记')
+		INSERT INTO feeds (url, title,owner_id)
+		VALUES ('https://kitchen.example.com/feed.xml', '厨房札记',1)
 		RETURNING id
 	`).Scan(&otherFeedID); err != nil {
 		t.Fatalf("insert other feed: %v", err)
