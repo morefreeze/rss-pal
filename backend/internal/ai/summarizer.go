@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"io"
 	"log"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 const DefaultModel = "glm-5.3"
 
 type Summarizer struct {
+	admission   Admission
 	apiKey      string
 	baseURL     string
 	model       string
@@ -35,6 +37,7 @@ func NewSummarizerWithModel(apiKey, baseURL, model string) *Summarizer {
 		model = DefaultModel
 	}
 	return &Summarizer{
+		admission:  currentAdmission(),
 		apiKey:     apiKey,
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		model:      model,
@@ -151,6 +154,9 @@ func (s *Summarizer) call(ctx context.Context, prompt string, maxTokens int) (st
 		if err == nil {
 			return result, nil
 		}
+		if taskbudget.IsDenied(err) {
+			return "", err
+		}
 		lastErr = err
 	}
 	return "", lastErr
@@ -165,7 +171,7 @@ func (s *Summarizer) doCall(ctx context.Context, body []byte, maxTokens int) (st
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
 
-	resp, err := s.httpClient.Do(httpReq)
+	resp, err := s.doAdmitted(httpReq)
 	if err != nil {
 		return "", err
 	}
@@ -216,7 +222,7 @@ func (s *Summarizer) callStream(ctx context.Context, prompt string, maxTokens in
 	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
 	httpReq.Header.Set("Accept", "text/event-stream")
 
-	resp, err := s.httpClient.Do(httpReq)
+	resp, err := s.doAdmitted(httpReq)
 	if err != nil {
 		return "", err
 	}
@@ -691,7 +697,7 @@ func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imageP
 	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
 	httpReq.Header.Set("Accept", "text/event-stream")
 
-	resp, err := s.httpClient.Do(httpReq)
+	resp, err := s.doAdmitted(httpReq)
 	if err != nil {
 		return "", err
 	}
@@ -847,6 +853,9 @@ func (s *Summarizer) callJSON(ctx context.Context, prompt string, maxTokens int)
 		result, err := s.doCall(ctx, body, maxTokens)
 		if err == nil {
 			return result, nil
+		}
+		if taskbudget.IsDenied(err) {
+			return "", err
 		}
 		lastErr = err
 	}

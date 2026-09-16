@@ -46,7 +46,11 @@ func runClassifyCycle(ctx context.Context, articleRepo *repository.ArticleReposi
 
 	for i := range candidates {
 		art := &candidates[i]
-		cCtx, cancel := context.WithTimeout(ctx, classifyTimeout)
+		ownerCtx, ownerErr := articleRepo.TaskContext(ctx, art.ID)
+		if ownerErr != nil {
+			continue
+		}
+		cCtx, cancel := context.WithTimeout(ownerCtx, classifyTimeout)
 		cls, err := summarizer.ClassifyArticle(cCtx, art.Title, art.Content, vocab)
 		cancel()
 		if err != nil {

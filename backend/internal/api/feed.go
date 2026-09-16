@@ -247,7 +247,11 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			bestEffort(c, "feed auto-title", func() error { return feedRepo.UpdateTitle(feed.ID, htmlFeed.Title) })
 		}
 		newCount := 0
+		attempts := 0
 		for _, item := range htmlFeed.Items {
+			if attempts >= 10 {
+				break
+			}
 			if item.Link == "" {
 				continue
 			}
@@ -255,6 +259,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			if exists {
 				continue
 			}
+			attempts++
 			content, _ := h.contentFetcher.FetchContent(c.Request.Context(), item.Link)
 			article := &model.Article{
 				FeedID:      feed.ID,
@@ -428,6 +433,15 @@ func (h *FeedHandler) UpdateStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
+	feed, err := h.repo.WithCtx(c).GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
+		return
+	}
+	if !isAdmin(c) && (feed.OwnerID == nil || *feed.OwnerID != getUserID(c)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
 	var req struct {
 		Status string `json:"status"`
 	}
@@ -447,6 +461,15 @@ func (h *FeedHandler) UpdateWeight(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	feed, err := h.repo.WithCtx(c).GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "feed not found"})
+		return
+	}
+	if !isAdmin(c) && (feed.OwnerID == nil || *feed.OwnerID != getUserID(c)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
 	var req struct {

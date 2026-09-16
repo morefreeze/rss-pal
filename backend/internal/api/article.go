@@ -425,6 +425,9 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 				c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt,
 			)
 			if err != nil {
+				if writeTaskBudgetError(c, err) {
+					return
+				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
@@ -448,6 +451,9 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	// Default summarization
 	brief, detailed, err = summarizerToUse.Summarize(c.Request.Context(), article)
 	if err != nil {
+		if writeTaskBudgetError(c, err) {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

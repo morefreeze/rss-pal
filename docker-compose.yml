@@ -1,5 +1,39 @@
 version: '3.8'
 
+x-task-budget-environment: &task-budget-environment
+  TASK_AI_DAILY: ${TASK_AI_DAILY:-50}
+  TASK_AI_GLOBAL_DAILY: ${TASK_AI_GLOBAL_DAILY:-1000}
+  TASK_AI_CONCURRENT: ${TASK_AI_CONCURRENT:-2}
+  TASK_AI_GLOBAL_CONCURRENT: ${TASK_AI_GLOBAL_CONCURRENT:-4}
+  TASK_INTERACTIVE_DAILY: ${TASK_INTERACTIVE_DAILY:-300}
+  TASK_INTERACTIVE_GLOBAL_DAILY: ${TASK_INTERACTIVE_GLOBAL_DAILY:-10000}
+  TASK_INTERACTIVE_CONCURRENT: ${TASK_INTERACTIVE_CONCURRENT:-2}
+  TASK_INTERACTIVE_GLOBAL_CONCURRENT: ${TASK_INTERACTIVE_GLOBAL_CONCURRENT:-20}
+  TASK_FETCH_DAILY: ${TASK_FETCH_DAILY:-100}
+  TASK_FETCH_GLOBAL_DAILY: ${TASK_FETCH_GLOBAL_DAILY:-5000}
+  TASK_FETCH_CONCURRENT: ${TASK_FETCH_CONCURRENT:-2}
+  TASK_FETCH_GLOBAL_CONCURRENT: ${TASK_FETCH_GLOBAL_CONCURRENT:-10}
+  TASK_CAPTURE_DAILY: ${TASK_CAPTURE_DAILY:-100}
+  TASK_CAPTURE_GLOBAL_DAILY: ${TASK_CAPTURE_GLOBAL_DAILY:-5000}
+  TASK_CAPTURE_CONCURRENT: ${TASK_CAPTURE_CONCURRENT:-2}
+  TASK_CAPTURE_GLOBAL_CONCURRENT: ${TASK_CAPTURE_GLOBAL_CONCURRENT:-10}
+  TASK_PDF_DAILY: ${TASK_PDF_DAILY:-10}
+  TASK_PDF_GLOBAL_DAILY: ${TASK_PDF_GLOBAL_DAILY:-300}
+  TASK_PDF_CONCURRENT: ${TASK_PDF_CONCURRENT:-1}
+  TASK_PDF_GLOBAL_CONCURRENT: ${TASK_PDF_GLOBAL_CONCURRENT:-3}
+  TASK_SUBSCRIBE_DAILY: ${TASK_SUBSCRIBE_DAILY:-30}
+  TASK_SUBSCRIBE_GLOBAL_DAILY: ${TASK_SUBSCRIBE_GLOBAL_DAILY:-1000}
+  TASK_SUBSCRIBE_CONCURRENT: ${TASK_SUBSCRIBE_CONCURRENT:-2}
+  TASK_SUBSCRIBE_GLOBAL_CONCURRENT: ${TASK_SUBSCRIBE_GLOBAL_CONCURRENT:-10}
+  TASK_BACKGROUND_FETCH_DAILY: ${TASK_BACKGROUND_FETCH_DAILY:-500}
+  TASK_BACKGROUND_FETCH_GLOBAL_DAILY: ${TASK_BACKGROUND_FETCH_GLOBAL_DAILY:-5000}
+  TASK_BACKGROUND_FETCH_CONCURRENT: ${TASK_BACKGROUND_FETCH_CONCURRENT:-2}
+  TASK_BACKGROUND_FETCH_GLOBAL_CONCURRENT: ${TASK_BACKGROUND_FETCH_GLOBAL_CONCURRENT:-5}
+  TASK_BACKGROUND_OCR_DAILY: ${TASK_BACKGROUND_OCR_DAILY:-10}
+  TASK_BACKGROUND_OCR_GLOBAL_DAILY: ${TASK_BACKGROUND_OCR_GLOBAL_DAILY:-100}
+  TASK_BACKGROUND_OCR_CONCURRENT: ${TASK_BACKGROUND_OCR_CONCURRENT:-1}
+  TASK_BACKGROUND_OCR_GLOBAL_CONCURRENT: ${TASK_BACKGROUND_OCR_GLOBAL_CONCURRENT:-2}
+
 services:
   postgres:
     restart: unless-stopped
@@ -37,7 +71,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql"]
+    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql && psql -v ON_ERROR_STOP=1 -f /migrations/043_task_budgets.sql"]
 
   api:
     restart: unless-stopped
@@ -46,6 +80,7 @@ services:
       dockerfile: Dockerfile
       network: host
     environment:
+      <<: *task-budget-environment
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER:-postgres}
@@ -110,6 +145,7 @@ services:
       dockerfile: Dockerfile.worker
       network: host
     environment:
+      <<: *task-budget-environment
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER:-postgres}

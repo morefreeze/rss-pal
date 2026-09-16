@@ -80,12 +80,22 @@ func (r *UserInterestRepository) MarkFailed(id int, errMsg string) error {
 	if len(errMsg) > 1000 {
 		errMsg = errMsg[:1000]
 	}
-	_, err := r.db.Exec(`
+	res, err := r.db.Exec(`
 		UPDATE user_insights
 		SET status = 'failed', error_msg = $2, generated_at = NOW()
 		WHERE id = $1 AND status = 'pending'
 	`, id, errMsg)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("no pending interest analysis with id=%d", id)
+	}
+	return nil
 }
 
 // GetLatest returns the most recent interest analysis for a user (any status), or nil.
@@ -143,14 +153,13 @@ func (r *UserInterestRepository) MarkDoneWithRecs(id int, content string, recs [
 	return nil
 }
 
-// CountManualSince counts only completed (status='done') manual generations
-// in the given window. Pending and failed do not consume quota.
+// CountManualSince counts all reserved manual attempts, including failures.
 func (r *UserInterestRepository) CountManualSince(userID int, window time.Duration) (int, error) {
 	var n int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*) FROM user_insights
-		WHERE user_id = $1 AND triggered_by = 'manual' AND status = 'done'
-		  AND generated_at > NOW() - make_interval(secs => $2)
+		WHERE user_id = $1 AND triggered_by = 'manual'
+		  AND requested_at > NOW() - make_interval(secs => $2)
 	`, userID, window.Seconds()).Scan(&n)
 	if err != nil {
 		return 0, err

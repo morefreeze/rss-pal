@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"log"
 	"os"
 	"time"
@@ -101,7 +102,7 @@ func generateDailyInterests(ctx context.Context, deps interestCronDeps) {
 			log.Printf("daily interest cron: user %d InsertPending: %v", u.ID, err)
 			continue
 		}
-		raw, err := deps.summarizer.GenerateUserInterestJSON(ctx, prompt)
+		raw, err := deps.summarizer.GenerateUserInterestJSON(taskbudget.WithOwner(ctx, u.ID), prompt)
 		if err != nil {
 			log.Printf("daily interest cron: user %d generate: %v", u.ID, err)
 			_ = deps.userInterestsRepo.MarkFailed(id, err.Error())

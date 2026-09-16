@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/pdfextract"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -23,6 +24,13 @@ const (
 	linkSetMinCandidates        = 3
 )
 
+// Keep network access injectable while both production fetch methods retain
+// their existing behavior.
+type linkSetContentFetcher interface {
+	FetchHTMLDocument(context.Context, string) (*goquery.Document, error)
+	FetchContentWithMetadata(context.Context, string) (rss.ContentResult, error)
+}
+
 // detectLinkSetCandidates inspects articles whose links_extendable is NULL
 // (not yet checked), fetches their raw HTML, runs ExtractCandidates, and
 // flips the flag: true if count >= linkSetMinCandidates, false otherwise.
@@ -31,7 +39,7 @@ const (
 func detectLinkSetCandidates(
 	ctx context.Context,
 	articleRepo *repository.ArticleRepository,
-	contentFetcher *rss.ContentFetcher,
+	contentFetcher linkSetContentFetcher,
 ) {
 	arts, err := articleRepo.FindArticlesNeedingLinkCheck(maxLinkSetParentsPerCycle)
 	if err != nil {
@@ -45,8 +53,21 @@ func detectLinkSetCandidates(
 
 	for _, a := range arts {
 		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		doc, err := contentFetcher.FetchHTMLDocument(fetchCtx, a.URL)
+		ownerCtx, err := articleRepo.TaskContext(fetchCtx, a.ID)
+		if err != nil {
+			cancel()
+			log.Printf("link_set: resolve owner %d: %v", a.ID, err)
+			continue
+		}
+		release, err := admitBackground(ownerCtx, "background_fetch")
+		if err != nil {
+			cancel()
+			// Admission is retryable; preserve unchecked flags.
+			continue
+		}
+		doc, err := contentFetcher.FetchHTMLDocument(ownerCtx, a.URL)
 		cancel()
+		release()
 		if err != nil || doc == nil {
 			log.Printf("link_set: %d fetch html: %v", a.ID, err)
 			// Mark as checked-no so we don't keep retrying.
@@ -95,7 +116,7 @@ func detectLinkSetCandidates(
 func detectLinkSetSuggestions(
 	ctx context.Context,
 	articleRepo *repository.ArticleRepository,
-	contentFetcher *rss.ContentFetcher,
+	contentFetcher linkSetContentFetcher,
 ) {
 	arts, err := articleRepo.FindArticlesNeedingSuggestionCheck(maxSuggestionChecksPerCycle)
 	if err != nil {
@@ -109,8 +130,21 @@ func detectLinkSetSuggestions(
 
 	for _, a := range arts {
 		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		doc, err := contentFetcher.FetchHTMLDocument(fetchCtx, a.URL)
+		ownerCtx, err := articleRepo.TaskContext(fetchCtx, a.ID)
+		if err != nil {
+			cancel()
+			log.Printf("link_set: resolve owner %d: %v", a.ID, err)
+			continue
+		}
+		release, err := admitBackground(ownerCtx, "background_fetch")
+		if err != nil {
+			cancel()
+			// Admission is retryable; preserve unchecked flags.
+			continue
+		}
+		doc, err := contentFetcher.FetchHTMLDocument(ownerCtx, a.URL)
 		cancel()
+		release()
 		if err != nil || doc == nil {
 			log.Printf("link_set suggest: %d fetch html: %v", a.ID, err)
 			if e := articleRepo.SetLinkSetSuggested(a.ID, false); e != nil {
@@ -156,7 +190,7 @@ func detectLinkSetSuggestions(
 func processQueuedChildren(
 	ctx context.Context,
 	articleRepo *repository.ArticleRepository,
-	contentFetcher *rss.ContentFetcher,
+	contentFetcher linkSetContentFetcher,
 	imageBaseDir string,
 ) {
 	children, err := articleRepo.GetProcessingChildren(maxLinkSetChildrenPerCycle)
@@ -178,11 +212,26 @@ func processQueuedChildren(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }()
 
 			cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
+			cctx, ownerErr := articleRepo.TaskContext(cctx, c.ID)
+			if ownerErr != nil {
+				log.Printf("link_set: resolve child owner %d: %v", c.ID, ownerErr)
+				return
+			}
+			release, budgetErr := admitBackground(cctx, "background_fetch")
+			if budgetErr != nil {
+				// Keep processing state and retry attempts untouched until admission.
+				return
+			}
+			defer release()
 
 			// PDF children: route through pdfextract instead of goquery.
 			// Same code path the bookmarklet PDF capture uses, minus the

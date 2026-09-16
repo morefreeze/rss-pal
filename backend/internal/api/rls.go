@@ -79,6 +79,8 @@ func RLSTxMiddleware(db *sql.DB) gin.HandlerFunc {
 		if err := tx.Commit(); err != nil {
 			log.Printf("CRITICAL: rls: tx.Commit failed after %d response: %v", c.Writer.Status(), err)
 			_ = c.Error(err)
+			return
 		}
+		runAfterCommit(c)
 	}
 }

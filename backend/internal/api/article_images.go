@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/bytedance/rss-pal/internal/pdfextract"
+	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
 )
 
@@ -38,8 +40,8 @@ func NewArticleImageHandler(baseDir string, access AccessCheck) *ArticleImageHan
 }
 
 // Serve responds to GET /api/articles/:id/images/:idx where :idx is
-// e.g. "3.png" or "0.jpg". Emits the file with a long-lived immutable
-// Cache-Control plus an ETag (first 16 hex chars of SHA-256), and honors
+// e.g. "3.png" or "0.jpg". Prevents shared/browser cache persistence,
+// emits an ETag (first 16 hex chars of SHA-256), and honors
 // If-None-Match with 304.
 //
 // The on-disk layout is resolved via pdfextract.ImagePath so writers
@@ -62,7 +64,7 @@ func (h *ArticleImageHandler) Serve(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	h.serve(c, articleID, idxStr, "public, max-age=31536000, immutable")
+	h.serve(c, articleID, idxStr, "private, no-store")
 }
 
 func (h *ArticleImageHandler) serve(c *gin.Context, articleID int, idxStr string, cacheControl string) {
@@ -114,4 +116,32 @@ func (h *ArticleImageHandler) serve(c *gin.Context, articleID int, idxStr string
 	}
 
 	c.Data(http.StatusOK, contentType, body)
+}
+
+// ArticleImageAccess checks article visibility in the authenticated request's
+// RLS transaction. The route must use AuthMiddleware and RLSTxMiddleware.
+func ArticleImageAccess(articles *repository.ArticleRepository) AccessCheck {
+	return func(c *gin.Context, articleID int) (bool, error) {
+		userID := getUserID(c)
+		if userID <= 0 {
+			return false, nil
+		}
+		_, err := articles.WithCtx(c).GetByID(articleID, userID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+}
+
+// ArticleImageCacheControl must precede authentication so rejected requests to
+// the formerly public image URL cannot be cached either.
+func ArticleImageCacheControl() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.FullPath() == "/api/articles/:id/images/:idx" {
+			c.Header("Cache-Control", "private, no-store")
+			c.Header("Vary", "Authorization")
+		}
+		c.Next()
+	}
 }

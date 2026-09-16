@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"log"
 	"net/http"
 	"strconv"
@@ -50,8 +51,16 @@ type interestQuota struct {
 
 func (h *InterestsHandler) computeQuota(c *gin.Context, userID int) (interestQuota, bool) {
 	interestsRepo := h.userInterestsRepo.WithCtx(c)
-	today, _ := interestsRepo.CountManualSince(userID, 24*time.Hour)
-	month, _ := interestsRepo.CountManualSince(userID, 30*24*time.Hour)
+	today, err := interestsRepo.CountManualSince(userID, 24*time.Hour)
+	if err != nil {
+		c.Set("interestQuotaUnavailable", true)
+		return interestQuota{}, false
+	}
+	month, err := interestsRepo.CountManualSince(userID, 30*24*time.Hour)
+	if err != nil {
+		c.Set("interestQuotaUnavailable", true)
+		return interestQuota{}, false
+	}
 	q := interestQuota{
 		RemainingToday: dailyManualLimit - today,
 		RemainingMonth: monthlyManualLimit - month,
@@ -87,6 +96,10 @@ func (h *InterestsHandler) latest(c *gin.Context, payloadKey string) {
 	userID := getUserID(c)
 	interest, _ := h.userInterestsRepo.WithCtx(c).GetLatest(userID)
 	quota, _ := h.computeQuota(c, userID)
+	if c.GetBool("interestQuotaUnavailable") {
+		c.JSON(503, gin.H{"error": "额度检查暂时不可用，请稍后重试"})
+		return
+	}
 	resp := newInterestLatestResponse(payloadKey, interest, quota)
 	if interest != nil && len(interest.Recommendations) > 0 {
 		ids := make([]int, 0)
@@ -151,6 +164,10 @@ func (h *InterestsHandler) Generate(c *gin.Context) {
 	userID := getUserID(c)
 
 	quota, ok := h.computeQuota(c, userID)
+	if c.GetBool("interestQuotaUnavailable") {
+		c.JSON(503, gin.H{"error": "额度检查暂时不可用，请稍后重试"})
+		return
+	}
 	if !ok {
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"error":           "quota_exceeded",
@@ -180,8 +197,12 @@ func (h *InterestsHandler) Generate(c *gin.Context) {
 	}
 
 	summarizer := h.chooseSummarizer(c, userID)
-	id, err := h.userInterestsRepo.WithCtx(c).InsertPending(userID, "manual", summarizer.Model())
+	id, err := h.userInterestsRepo.WithCtx(c).ReserveManual(c.Request.Context(), userID, summarizer.Model(), dailyManualLimit, monthlyManualLimit)
 	if err != nil {
+		if errors.Is(err, repository.ErrInterestQuota) {
+			c.JSON(429, gin.H{"error": "quota_exceeded"})
+			return
+		}
 		if errors.Is(err, repository.ErrPendingExists) {
 			c.JSON(http.StatusConflict, gin.H{
 				"error":           "already_pending",
@@ -190,13 +211,16 @@ func (h *InterestsHandler) Generate(c *gin.Context) {
 			})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Printf("interests: quota reservation user=%d: %v", userID, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "额度检查暂时不可用，请稍后重试"})
 		return
 	}
 
+	quota.RemainingToday = max(0, quota.RemainingToday-1)
+	quota.RemainingMonth = max(0, quota.RemainingMonth-1)
 	prompt := ai.BuildInterestPrompt(topics, tags, titles, candidates)
 
-	go h.runAsyncManual(id, userID, summarizer, prompt, candidates)
+	afterCommit(c, func() { go h.runAsyncManual(id, userID, summarizer, prompt, candidates) })
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"status":          "pending",
@@ -207,12 +231,14 @@ func (h *InterestsHandler) Generate(c *gin.Context) {
 }
 
 func (h *InterestsHandler) runAsyncManual(id, userID int, s *ai.Summarizer, prompt string, candidates []model.InterestCandidate) {
-	ctx, cancel := context.WithTimeout(context.Background(), asyncGenTimeout)
+	ctx, cancel := context.WithTimeout(taskbudget.WithOwner(context.Background(), userID), asyncGenTimeout)
 	defer cancel()
 	raw, err := s.GenerateUserInterestJSON(ctx, prompt)
 	if err != nil {
 		log.Printf("interests: async user=%d id=%d failed: %v", userID, id, err)
-		_ = h.userInterestsRepo.MarkFailed(id, err.Error())
+		if markErr := h.userInterestsRepo.MarkFailedForUser(id, userID, err.Error()); markErr != nil {
+			log.Printf("interests: async failure status write failed id=%d: %v", id, markErr)
+		}
 		return
 	}
 	idSet := make(map[int]bool, len(candidates))
@@ -223,7 +249,7 @@ func (h *InterestsHandler) runAsyncManual(id, userID int, s *ai.Summarizer, prom
 	if len(dropped) > 0 {
 		log.Printf("interests: user=%d id=%d dropped %d entries: %v", userID, id, len(dropped), dropped)
 	}
-	if err := h.userInterestsRepo.MarkDoneWithRecs(id, markdown, recs); err != nil {
+	if err := h.userInterestsRepo.MarkDoneForUser(id, userID, markdown, recs); err != nil {
 		log.Printf("interests: async user=%d id=%d MarkDoneWithRecs: %v", userID, id, err)
 		return
 	}

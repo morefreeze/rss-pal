@@ -15,6 +15,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
 	"github.com/bytedance/rss-pal/internal/sharetoken"
+	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/bytedance/rss-pal/internal/version"
 	"github.com/bytedance/rss-pal/internal/youtuberelay"
@@ -41,6 +42,14 @@ func main() {
 		log.Fatalf("Failed to connect to admin database: %v", err)
 	}
 	defer adminDB.Close()
+	policies, err := taskbudget.LoadPolicies()
+	if err != nil {
+		log.Fatal(err)
+	}
+	taskBudgets := taskbudget.New(adminDB)
+	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
+		return taskBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, policies["ai"])
+	})
 
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
@@ -85,7 +94,7 @@ func main() {
 	}
 
 	pdfImgHandler := api.NewArticleImageHandler(cfg.Backup.Dir,
-		func(c *gin.Context, articleID int) (bool, error) { return true, nil })
+		api.ArticleImageAccess(articleRepo))
 	authHandler := api.NewAuthHandler(cfg, userRepo, refreshTokenRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(adminDB, backupRunner, cfg)
@@ -213,20 +222,6 @@ func main() {
 	router.GET("/api/media/youtube/:ticket/:kind", youtubePlaybackHandler.Media)
 	router.HEAD("/api/media/youtube/:ticket/:kind", youtubePlaybackHandler.Media)
 
-	// PDF clip images. Public for the same <img>-tag-can't-carry-Authorization
-	// reason as /api/proxy/image. The URL itself is the access token:
-	// <articleID, idx> is hard to enumerate meaningfully, and the only thing
-	// behind the URL is an extracted figure raster (never source content,
-	// never DB rows). Acceptable trade-off for a personal single-user tool;
-	// signed-URL tokens would be the next step if multi-tenant.
-	//
-	// Task 4.2 note: this endpoint is INTENTIONALLY NOT wrapped in
-	// PublicTokenMiddleware because the handler reads from the file system,
-	// not the DB — no RLS surface area. If a future change makes it query
-	// articles/feeds, switch the closure to a resolver that opens the tx,
-	// sets app.bypass_rls LOCAL for the article→feed→owner_id chase, then
-	// returns the owner_id so the middleware can set app.user_id.
-	router.GET("/api/articles/:id/images/:idx", pdfImgHandler.Serve)
 	sharePageLimit, shareAssetLimit := api.NewPublicShareRateLimiters(time.Now)
 	router.GET("/api/share/:token", sharePageLimit, shareHandler.GetPublic)
 	router.GET("/api/share/:token/assets/:asset", shareAssetLimit, shareHandler.GetAsset)
@@ -239,15 +234,18 @@ func main() {
 	// every repository.WithCtx call inside the handler runs under RLS.
 	router.POST("/api/bookmarklet/capture",
 		api.PublicTokenMiddleware(db, bookmarkletHandler.ResolveOwner),
+		api.TaskBudgetMiddleware(taskBudgets, policies),
 		bookmarkletHandler.Capture)
 	// PDF capture variants share the same per-user bookmarklet token auth.
 	// capture-pdf takes multipart form-data with the PDF bytes from the
 	// browser; capture-pdf-url asks the server to fetch the PDF itself.
 	router.POST("/api/bookmarklet/capture-pdf",
 		api.PublicTokenMiddleware(db, bookmarkletHandler.ResolveOwner),
+		api.TaskBudgetMiddleware(taskBudgets, policies),
 		bookmarkletHandler.CapturePDF)
 	router.POST("/api/bookmarklet/capture-pdf-url",
 		api.PublicTokenMiddleware(db, bookmarkletHandler.ResolveOwner),
+		api.TaskBudgetMiddleware(taskBudgets, policies),
 		bookmarkletHandler.CapturePDFURL)
 
 	// Extension ingest uses the same per-user bookmarklet token as the
@@ -255,13 +253,18 @@ func main() {
 	// works for both ⭐ capture-html and ⚡ adapter-driven ingest.
 	router.POST("/api/extension/ingest",
 		api.PublicTokenMiddleware(db, extensionIngestHandler.ResolveOwner),
+		api.TaskBudgetMiddleware(taskBudgets, policies),
 		extensionIngestHandler.Ingest)
 
 	// Protected routes
 	apiGroup := router.Group("/api")
+	apiGroup.Use(api.ArticleImageCacheControl())
 	apiGroup.Use(authHandler.AuthMiddleware())
+	apiGroup.Use(api.TaskBudgetMiddleware(taskBudgets, policies))
 	apiGroup.Use(api.RLSTxMiddleware(db))
 	{
+		// Private PDF assets use JWT and the owning article RLS boundary.
+		apiGroup.GET("/articles/:id/images/:idx", pdfImgHandler.Serve)
 		// User
 		apiGroup.GET("/auth/me", authHandler.GetMe)
 		apiGroup.PUT("/auth/password", authHandler.ChangePassword)

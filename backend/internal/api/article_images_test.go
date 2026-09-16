@@ -48,7 +48,7 @@ func TestArticleImageHandler_200And304(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
-	if got := w.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+	if got := w.Header().Get("Cache-Control"); got != "private, no-store" {
 		t.Errorf("Cache-Control: got %q", got)
 	}
 	if ct := w.Header().Get("Content-Type"); ct != "image/png" {

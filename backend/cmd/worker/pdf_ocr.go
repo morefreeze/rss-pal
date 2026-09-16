@@ -93,7 +93,16 @@ func processPDFOCR(ctx context.Context, articleRepo *repository.ArticleRepositor
 // any leftover Phase-3A files with idx values not produced by this pass
 // are orphaned but harmless (the markdown never references them).
 func runOnePDFOCR(parentCtx context.Context, articleRepo *repository.ArticleRepository, cfg config.Config, a *model.Article) {
-	itemCtx, cancel := context.WithTimeout(parentCtx, pdfOCRItemTimeout)
+	ownerCtx, ownerErr := articleRepo.TaskContext(parentCtx, a.ID)
+	if ownerErr != nil {
+		return
+	}
+	release, budgetErr := admitBackground(ownerCtx, "background_ocr")
+	if budgetErr != nil {
+		return
+	}
+	defer release()
+	itemCtx, cancel := context.WithTimeout(ownerCtx, pdfOCRItemTimeout)
 	defer cancel()
 
 	// 1. file:// and other non-http(s) schemes — worker can't read the

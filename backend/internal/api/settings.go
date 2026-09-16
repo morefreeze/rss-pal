@@ -194,7 +194,7 @@ func (h *SettingsHandler) PolishPrompt(c *gin.Context) {
 	}
 
 	var req struct {
-		Content string `json:"content" binding:"required"`
+		Content string `json:"content" binding:"required,max=8000"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -206,6 +206,9 @@ func (h *SettingsHandler) PolishPrompt(c *gin.Context) {
 
 	polished, err := h.summarizer.Polish(ctx, req.Content)
 	if err != nil {
+		if writeTaskBudgetError(c, err) {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "AI 润色失败: " + err.Error()})
 		return
 	}

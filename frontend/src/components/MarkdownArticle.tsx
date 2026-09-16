@@ -11,6 +11,7 @@ import 'katex/dist/katex.min.css'
 import { stripMathShadow, escapeAmbiguousMathDollars } from '../util/mathShadow'
 import { annotateArticleMarkdown, createArticleAnchorRemarkPlugin, findArticleAnchors, normalizeArticleAnchorSource } from '../util/articleAnchors'
 import VideoEmbed from './VideoEmbed'
+import { useArticleImageSource } from '../util/useArticleImageSource'
 import { parsePlaceholder, type VideoEmbedData } from './parseVideoPlaceholder'
 import { CodeWrapContext } from './CodeWrapContext'
 import { ReaderActionContext } from '../reader/ReaderActionContext'
@@ -213,38 +214,17 @@ function ArticleLink({ href, children, className, node: _node, ...rest }: Articl
 // remounted (cancelling and re-issuing image fetches mid-load).
 const REMARK_PLUGINS = [remarkGfm, remarkCjkFriendly, remarkMath]
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
-const PUBLIC_SHARE_ASSET_RE = /^(?:\/api\/share\/(?:[A-Za-z0-9]{8}|v1_[0-9a-f]{32}_[A-Za-z0-9_-]{43})|\/api\/s\/[0-9A-Za-z]{12})\/assets\/[0-9]+\.(?:png|jpe?g)$/
+function ArticleImage({ src, alt, node: _node, ...rest }: React.ComponentProps<'img'> & ExtraProps) {
+  const dims = useContext(ImageDimensionsContext)
+  const dim = src ? dims?.[src] : undefined
+  const resolved = useArticleImageSource(src)
+  if (isAvatarImg(src, alt)) return null
+  return <img {...rest} src={resolved} alt={alt ?? ''} loading="lazy" decoding="async"
+    width={dim?.[0]} height={dim?.[1]} style={{ maxWidth: '100%', height: 'auto' }} />
+}
+
 const COMPONENTS: Components = {
-  img: ({ src, alt, ...rest }) => {
-    if (isAvatarImg(src, alt)) return null
-    // Exact same-origin article images and signed public-share assets already
-    // pass through nginx. Keep the share pattern narrow so an arbitrary
-    // /api/share path cannot bypass the image proxy allow-list.
-    const isOwnImage = src?.startsWith('/api/articles/') || (src ? PUBLIC_SHARE_ASSET_RE.test(src) : false)
-    const proxied = src
-      ? isOwnImage
-        ? src
-        : `/api/proxy/image?url=${encodeURIComponent(src)}`
-      : undefined
-    // Lookup intrinsic dimensions by ORIGINAL url (the markdown-level src,
-    // before proxy rewriting). When present, modern browsers use the
-    // width+height attributes as an aspect-ratio hint and reserve the
-    // correct vertical space even while the image is still downloading.
-    const dims = useContext(ImageDimensionsContext)
-    const dim = src ? dims?.[src] : undefined
-    return (
-      <img
-        src={proxied}
-        alt={alt ?? ''}
-        loading="lazy"
-        decoding="async"
-        width={dim?.[0]}
-        height={dim?.[1]}
-        style={{ maxWidth: '100%', height: 'auto' }}
-        {...rest}
-      />
-    )
-  },
+  img: ArticleImage,
   a: ArticleLink,
   p: ({ children, node: _node, ...rest }) => {
     const suppressedVideo = useContext(SuppressedVideoContext)

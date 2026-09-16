@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"log"
 	"os"
 	"sync"
@@ -160,7 +161,7 @@ func generateOneDaily(ctx context.Context, deps briefingDeps, userID int, day, s
 	for i, a := range arts {
 		cands[i] = ai.DailyCandidate{Idx: i, Title: a.Title, SummaryBrief: a.SummaryBrief}
 	}
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	cctx, cancel := context.WithTimeout(taskbudget.WithOwner(ctx, userID), 3*time.Minute)
 	defer cancel()
 	sumSem <- struct{}{}
 	picks, intro, err := deps.summarizer.GenerateDailyDigest(cctx, cands)
@@ -251,7 +252,7 @@ func generateOneWeekly(ctx context.Context, deps briefingDeps, userID int, weekS
 	for i, a := range arts {
 		items[i] = ai.WeeklyDigestItem{Title: a.Title, SummaryBrief: a.SummaryBrief}
 	}
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	cctx, cancel := context.WithTimeout(taskbudget.WithOwner(ctx, userID), 3*time.Minute)
 	defer cancel()
 	intro, err := deps.summarizer.GenerateWeeklyIntro(cctx, items)
 	if err != nil || intro == "" {

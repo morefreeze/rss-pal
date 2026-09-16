@@ -17,6 +17,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
+	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/mmcdole/gofeed"
 )
@@ -82,6 +83,14 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
+	workerPolicies, err = taskbudget.LoadPolicies()
+	if err != nil {
+		log.Fatal(err)
+	}
+	workerBudgets = taskbudget.New(db)
+	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
+		return workerBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, workerPolicies["ai"])
+	})
 
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)
@@ -215,10 +224,19 @@ func runFetchCycle(ctx context.Context, cfg *config.Config, feedRepo *repository
 }
 
 func asyncSummarize(summarizer *ai.Summarizer, articleRepo *repository.ArticleRepository, articleID int, title, content string) {
+	// Do not allocate an unbounded goroutine queue. Backfill retries skipped work.
+	select {
+	case sumSem <- struct{}{}:
+	default:
+		return
+	}
 	go func() {
-		sumSem <- struct{}{}
 		defer func() { <-sumSem }()
-		sCtx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+		ownerCtx, err := articleRepo.TaskContext(context.Background(), articleID)
+		if err != nil {
+			return
+		}
+		sCtx, cancel := context.WithTimeout(ownerCtx, 6*time.Minute)
 		defer cancel()
 		result, err := summarizer.Summarize(sCtx, title, content)
 		if err != nil {
@@ -260,7 +278,11 @@ func backfillSummaries(ctx context.Context, cfg *config.Config, articleRepo *rep
 			defer wg.Done()
 			sumSem <- struct{}{}
 			defer func() { <-sumSem }()
-			sCtx, cancel := context.WithTimeout(ctx, 6*time.Minute)
+			ownerCtx, ownerErr := articleRepo.TaskContext(ctx, article.ID)
+			if ownerErr != nil {
+				return
+			}
+			sCtx, cancel := context.WithTimeout(ownerCtx, 6*time.Minute)
 			defer cancel()
 
 			var result *ai.SummaryResult
@@ -354,7 +376,16 @@ func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRep
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			tCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			ownerCtx, ownerErr := articleRepo.TaskContext(ctx, article.ID)
+			if ownerErr != nil {
+				return
+			}
+			release, budgetErr := admitBackground(ownerCtx, "background_fetch")
+			if budgetErr != nil {
+				return
+			}
+			defer release()
+			tCtx, cancel := context.WithTimeout(ownerCtx, 90*time.Second)
 			defer cancel()
 
 			result, err := fetcher.Fetch(tCtx, article)
@@ -431,6 +462,18 @@ func fetchAllFeeds(ctx context.Context, feedRepo *repository.FeedRepository, art
 }
 
 func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, feed model.Feed) {
+	owner := 0
+	if feed.OwnerID != nil {
+		owner = *feed.OwnerID
+	}
+	ctx = taskbudget.WithOwner(ctx, owner)
+	ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
+	defer cancel()
+	release, err := admitBackground(ctx, "background_fetch")
+	if err != nil {
+		return
+	}
+	defer release()
 	log.Printf("Fetching feed: %s", feed.URL)
 
 	if feed.FeedType == "html" {
@@ -663,7 +706,16 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			articleCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			ownerCtx, ownerErr := articleRepo.TaskContext(ctx, article.ID)
+			if ownerErr != nil {
+				return
+			}
+			release, budgetErr := admitBackground(ownerCtx, "background_fetch")
+			if budgetErr != nil {
+				return
+			}
+			defer release()
+			articleCtx, cancel := context.WithTimeout(ownerCtx, 30*time.Second)
 			defer cancel()
 
 			log.Printf("Re-fetching content for article %d: %s", article.ID, article.URL)

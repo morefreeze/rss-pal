@@ -1,3 +1,4 @@
+import { useArticleImageSource } from '../util/useArticleImageSource'
 import { useEffect, useRef, useState } from 'react'
 import type { ExploreArticleListItem, ExploreSort } from '../api/client'
 
@@ -28,11 +29,7 @@ export default function ExploreArticleCard({
   onDampenTopic,
 }: Props) {
 	const cardRef = useRef<HTMLElement | null>(null)
-	const thumbnailSrc = article.thumbnail_url
-		? article.thumbnail_url.startsWith('/api/articles/')
-			? article.thumbnail_url
-			: `/api/proxy/image?url=${encodeURIComponent(article.thumbnail_url)}`
-		: undefined
+  const thumbnailSrc = useArticleImageSource(article.thumbnail_url || undefined)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
