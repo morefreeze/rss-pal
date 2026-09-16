@@ -270,3 +270,38 @@ describe('ArticleDetailCache with storage', () => {
     localStorage.setItem = originalSetItem
   })
 })
+
+describe('article account isolation', () => {
+  beforeEach(() => localStorage.clear())
+  const account = (id: number) => localStorage.setItem('user', JSON.stringify({ id }))
+  it('never returns another account cache from memory or storage', async () => {
+    account(1)
+    const cache = new ArticleDetailCache(async id => detail(id))
+    await cache.fetch(42)
+    account(2)
+    expect(cache.peek(42)).toBeUndefined()
+    expect(new ArticleDetailCache(async id => detail(id)).peek(42)).toBeUndefined()
+  })
+  it('rejects an old account response after switching accounts', async () => {
+    account(1)
+    const pending = deferred<ArticleDetailResponse>()
+    const cache = new ArticleDetailCache(() => pending.promise)
+    const request = cache.fetch(42)
+    account(2)
+    pending.resolve(detail(42))
+    await expect(request).rejects.toThrow()
+    expect(cache.peek(42)).toBeUndefined()
+  })
+  it('does not hydrate legacy unscoped private content', () => {
+    account(2)
+    localStorage.setItem('rss-pal:article-detail:42', JSON.stringify({data: detail(42), receivedAt: Date.now()}))
+    expect(new ArticleDetailCache(async id => detail(id)).peek(42)).toBeUndefined()
+  })
+  it.each([401, 403, 404])('evicts cached content when access returns %s', async status => {
+    account(1)
+    const cache = new ArticleDetailCache(async () => { throw {response: {status}} })
+    cache.put(detail(42))
+    await expect(cache.fetch(42)).rejects.toBeDefined()
+    expect(cache.peek(42)).toBeUndefined()
+  })
+})

@@ -12,6 +12,7 @@ import {
   fetchArticleDetail,
   invalidateArticleDetail,
   peekArticleDetail,
+  isArticleAccessDenied,
 } from '../api/articleDetailCache'
 import { toast } from '../utils/toast'
 import { LinkSetChildren } from '../components/LinkSetChildren'
@@ -395,6 +396,13 @@ export default function ArticlePage() {
       applyDetailResponse(data)
     } catch (err: any) {
       if (!isCurrent()) return
+      if (isArticleAccessDenied(err)) {
+        invalidateArticleDetail(articleID)
+        setArticle(null)
+        setProgress(null)
+        setLoadError('文章不存在或无权访问')
+        return
+      }
       if (hasVisibleDetail) {
         setRefreshError('更新失败，正在显示缓存内容')
         return

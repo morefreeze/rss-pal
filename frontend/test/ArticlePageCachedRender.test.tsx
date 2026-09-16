@@ -257,3 +257,13 @@ describe('ArticlePage immediate loading', () => {
     expect(peekArticleDetail(42)).toBeUndefined()
   })
 })
+
+it.each([401, 403, 404])('removes cached private content when the server returns %s', async status => {
+  resetArticleDetailCache()
+  apiMocks.getArticle.mockRejectedValue({ response: { status } })
+  putArticleDetail(detail(42))
+  render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+  await waitFor(() => expect(screen.queryByTestId('article-body')).toBeNull())
+  expect(screen.getByText('文章不存在或无权访问')).toBeTruthy()
+  expect(peekArticleDetail(42)).toBeUndefined()
+})

@@ -24,13 +24,36 @@ interface PersistedCacheEntry {
   receivedAt: number
 }
 
-const STORAGE_KEY_PREFIX = 'rss-pal:article-detail:'
-const STORAGE_INDEX_KEY = 'rss-pal:article-detail:index'
+function accountScope(): string {
+  try {
+    const id = JSON.parse(localStorage.getItem('user') || 'null')?.id
+    return Number.isSafeInteger(id) && id > 0 ? `user-${id}` : 'anonymous'
+  } catch {
+    return 'anonymous'
+  }
+}
+
+export function isArticleAccessDenied(error: unknown): boolean {
+  const status = (error as { response?: { status?: number } })?.response?.status
+  return status === 401 || status === 403 || status === 404
+}
 
 export class ArticleDetailCache {
   private readonly entries = new Map<number, CacheEntry>()
   private readonly inFlight = new Map<number, Promise<ArticleDetailResponse>>()
   private generation = 0
+  private scope = accountScope()
+  private get storagePrefix() { return `rss-pal:article-detail:v2:${this.scope}:` }
+  private get storageIndexKey() { return this.storagePrefix + 'index' }
+
+  private syncAccount(): void {
+    const scope = accountScope()
+    if (scope === this.scope) return
+    this.scope = scope
+    this.generation += 1
+    this.entries.clear()
+    this.inFlight.clear()
+  }
   private readonly maxEntries: number
   private readonly softTTLms: number
   private readonly now: () => number
@@ -44,9 +67,18 @@ export class ArticleDetailCache {
     this.softTTLms = options.softTTLms ?? 5 * 60 * 1000
     this.now = options.now ?? Date.now
     this.useStorage = options.useStorage ?? true
+    // Discard the old cache whose entries have no trustworthy owner metadata.
+    if (this.useStorage) {
+      try {
+        for (const key of Object.keys(localStorage)) {
+          if (/^rss-pal:article-detail:(index|[0-9]+)$/.test(key)) localStorage.removeItem(key)
+        }
+      } catch { /* Storage can be disabled. */ }
+    }
   }
 
   peek(id: number): ArticleDetailResponse | undefined {
+    this.syncAccount()
     let entry = this.entries.get(id)
 
     // If not in memory, try to hydrate from storage
@@ -64,14 +96,25 @@ export class ArticleDetailCache {
   }
 
   fetch(id: number): Promise<ArticleDetailResponse> {
+    this.syncAccount()
     const pending = this.inFlight.get(id)
     if (pending) return pending
 
     const generation = this.generation
+    const scope = this.scope
     const request = this.loader(id)
       .then(data => {
+        this.syncAccount()
+        if (scope !== this.scope) {
+          throw Object.assign(new Error('Account changed'), { response: { status: 403 } })
+        }
         if (generation === this.generation) this.put(data)
         return data
+      })
+      .catch(error => {
+        this.syncAccount()
+        if (scope === this.scope && isArticleAccessDenied(error)) this.invalidate(id)
+        throw error
       })
       .finally(() => {
         if (this.inFlight.get(id) === request) this.inFlight.delete(id)
@@ -81,6 +124,7 @@ export class ArticleDetailCache {
   }
 
   prefetch(id: number): Promise<ArticleDetailResponse | undefined> {
+    this.syncAccount()
     let entry = this.entries.get(id)
 
     // If not in memory, try to hydrate from storage
@@ -96,6 +140,7 @@ export class ArticleDetailCache {
   }
 
   put(data: ArticleDetailResponse): void {
+    this.syncAccount()
     const id = data.article.id
     this.entries.delete(id)
     const entry = { data, receivedAt: this.now() }
@@ -118,6 +163,7 @@ export class ArticleDetailCache {
   }
 
   invalidate(id: number): void {
+    this.syncAccount()
     this.generation += 1
     this.entries.delete(id)
     this.inFlight.delete(id)
@@ -127,6 +173,7 @@ export class ArticleDetailCache {
   }
 
   reset(): void {
+    this.syncAccount()
     this.generation += 1
     this.entries.clear()
     this.inFlight.clear()
@@ -157,7 +204,7 @@ export class ArticleDetailCache {
 
   private loadFromStorage(id: number): CacheEntry | undefined {
     try {
-      const key = STORAGE_KEY_PREFIX + id
+      const key = this.storagePrefix + id
       const stored = localStorage.getItem(key)
       if (!stored) return undefined
 
@@ -174,7 +221,7 @@ export class ArticleDetailCache {
 
   private saveToStorage(id: number, entry: CacheEntry): void {
     try {
-      const key = STORAGE_KEY_PREFIX + id
+      const key = this.storagePrefix + id
       const toStore: PersistedCacheEntry = {
         data: entry.data,
         receivedAt: entry.receivedAt,
@@ -188,7 +235,7 @@ export class ArticleDetailCache {
           // Try to evict the oldest entry and retry once
           const removed = this.evictOldestFromStorage()
           if (removed) {
-            const key = STORAGE_KEY_PREFIX + id
+            const key = this.storagePrefix + id
             const toStore: PersistedCacheEntry = {
               data: entry.data,
               receivedAt: entry.receivedAt,
@@ -206,10 +253,10 @@ export class ArticleDetailCache {
 
   private removeFromStorage(id: number): void {
     try {
-      const key = STORAGE_KEY_PREFIX + id
+      const key = this.storagePrefix + id
       localStorage.removeItem(key)
       const index = this.loadStorageIndex().filter(entry => entry.id !== id)
-      localStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify(index))
+      localStorage.setItem(this.storageIndexKey, JSON.stringify(index))
     } catch {
       // Silently ignore storage errors
     }
@@ -228,11 +275,11 @@ export class ArticleDetailCache {
       while (index.length > this.maxEntries) {
         const oldest = index.shift()
         if (oldest) {
-          localStorage.removeItem(STORAGE_KEY_PREFIX + oldest.id)
+          localStorage.removeItem(this.storagePrefix + oldest.id)
         }
       }
 
-      localStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify(index))
+      localStorage.setItem(this.storageIndexKey, JSON.stringify(index))
     } catch {
       // Silently ignore storage errors
     }
@@ -240,7 +287,7 @@ export class ArticleDetailCache {
 
   private loadStorageIndex(): StorageIndexEntry[] {
     try {
-      const stored = localStorage.getItem(STORAGE_INDEX_KEY)
+      const stored = localStorage.getItem(this.storageIndexKey)
       if (!stored) return []
       return JSON.parse(stored) as StorageIndexEntry[]
     } catch {
@@ -256,8 +303,8 @@ export class ArticleDetailCache {
       const oldest = index.shift()
       if (!oldest) return false
 
-      localStorage.removeItem(STORAGE_KEY_PREFIX + oldest.id)
-      localStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify(index))
+      localStorage.removeItem(this.storagePrefix + oldest.id)
+      localStorage.setItem(this.storageIndexKey, JSON.stringify(index))
       return true
     } catch {
       return false
@@ -268,9 +315,9 @@ export class ArticleDetailCache {
     try {
       const index = this.loadStorageIndex()
       for (const entry of index) {
-        localStorage.removeItem(STORAGE_KEY_PREFIX + entry.id)
+        localStorage.removeItem(this.storagePrefix + entry.id)
       }
-      localStorage.removeItem(STORAGE_INDEX_KEY)
+      localStorage.removeItem(this.storageIndexKey)
     } catch {
       // Silently ignore storage errors
     }
