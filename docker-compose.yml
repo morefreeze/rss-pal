@@ -34,6 +34,16 @@ x-task-budget-environment: &task-budget-environment
   TASK_BACKGROUND_OCR_CONCURRENT: ${TASK_BACKGROUND_OCR_CONCURRENT:-1}
   TASK_BACKGROUND_OCR_GLOBAL_CONCURRENT: ${TASK_BACKGROUND_OCR_GLOBAL_CONCURRENT:-2}
 
+x-monitoring-environment: &monitoring-environment
+  OPS_MONITOR_CAPTCHA_MIN_FAILURES: ${OPS_MONITOR_CAPTCHA_MIN_FAILURES:-3}
+  OPS_MONITOR_CAPTCHA_FAILURE_RATIO: ${OPS_MONITOR_CAPTCHA_FAILURE_RATIO:-0.2}
+  OPS_MONITOR_LIMIT_THRESHOLD: ${OPS_MONITOR_LIMIT_THRESHOLD:-20}
+  OPS_MONITOR_QUEUE_WAIT_SECONDS: ${OPS_MONITOR_QUEUE_WAIT_SECONDS:-1800}
+  OPS_MONITOR_QUOTA_WARNING_RATIO: ${OPS_MONITOR_QUOTA_WARNING_RATIO:-0.8}
+  OPS_MONITOR_DAILY_COST_BUDGET: ${OPS_MONITOR_DAILY_COST_BUDGET:-}
+  OPS_MONITOR_UNIT_PRICES: ${OPS_MONITOR_UNIT_PRICES:-}
+  OPS_MONITOR_CAPTCHA_EXPIRES_AT: ${OPS_MONITOR_CAPTCHA_EXPIRES_AT:-}
+
 services:
   postgres:
     restart: unless-stopped
@@ -71,7 +81,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql && psql -v ON_ERROR_STOP=1 -f /migrations/043_task_budgets.sql && psql -v ON_ERROR_STOP=1 -f /migrations/044_user_subscriptions.sql"]
+    command: ["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql && psql -v ON_ERROR_STOP=1 -f /migrations/043_task_budgets.sql && psql -v ON_ERROR_STOP=1 -f /migrations/044_user_subscriptions.sql && psql -v ON_ERROR_STOP=1 -f /migrations/045_operations_monitoring.sql"]
 
   api:
     restart: unless-stopped
@@ -80,7 +90,7 @@ services:
       dockerfile: Dockerfile
       network: host
     environment:
-      <<: *task-budget-environment
+      <<: [*task-budget-environment, *monitoring-environment]
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER:-postgres}
@@ -145,7 +155,7 @@ services:
       dockerfile: Dockerfile.worker
       network: host
     environment:
-      <<: *task-budget-environment
+      <<: [*task-budget-environment, *monitoring-environment]
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER:-postgres}

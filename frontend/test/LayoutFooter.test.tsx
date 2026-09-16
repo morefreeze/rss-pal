@@ -25,3 +25,9 @@ describe('Layout footer', () => {
     expect(filingLink.getAttribute('href')).toBe('https://beian.miit.gov.cn/')
   })
 })
+
+it.each([true, false])('运行监控桌面入口只对管理员显示：%s', isAdmin => {
+  render(<MemoryRouter><Routes><Route element={<Layout user={{ id: 1, username: 'reader', is_admin: isAdmin }} onLogout={() => {}} />}><Route path="/" element={<div />} /></Route></Routes></MemoryRouter>)
+  const link = screen.queryByRole('link', { name: /运行监控/ })
+  expect(Boolean(link)).toBe(isAdmin)
+})

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/ai"
@@ -10,6 +12,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/config"
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
+	"github.com/bytedance/rss-pal/internal/opsmonitor"
 	"github.com/bytedance/rss-pal/internal/registrationpolicy"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
@@ -47,6 +50,19 @@ func main() {
 		log.Fatal(err)
 	}
 	taskBudgets := taskbudget.New(adminDB)
+	monitorConfig, err := opsmonitor.LoadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	monitorRecorder := opsmonitor.NewRecorder(adminDB)
+	defer monitorRecorder.Close()
+	httpServer := &http.Server{Addr: ":" + cfg.Server.Port}
+	quiesced := make(chan struct{})
+	stopTermination := monitorRecorder.InstallTerminationHandler(func(ctx context.Context) { _ = httpServer.Shutdown(ctx); close(quiesced) })
+	defer stopTermination()
+	taskBudgets.SetObserver(func(owner int, bucket, reason string, retry *time.Time) {
+		monitorRecorder.Record(opsmonitor.Event{Kind: "limit", Reason: reason, TaskType: bucket, UserID: owner, RetryAt: retry})
+	})
 	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
 		return taskBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, policies["ai"])
 	})
@@ -187,6 +203,8 @@ func main() {
 	authBudgetRepo := repository.NewAuthRateLimitRepository(db)
 	authGuard := api.NewAuthAbuseGuard(authBudgetRepo, cfg.JWT.Secret)
 	authHandler.SetRegistrationBudget(authGuard)
+	authHandler.SetMonitor(monitorRecorder)
+	authGuard.SetMonitor(monitorRecorder)
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -260,6 +278,7 @@ func main() {
 	apiGroup := router.Group("/api")
 	apiGroup.Use(api.ArticleImageCacheControl())
 	apiGroup.Use(authHandler.AuthMiddleware())
+	apiGroup.GET("/admin/monitoring", api.NewAdminMonitoringHandler(adminDB, opsmonitor.NewService(adminDB, monitorConfig, policies)).Get)
 	apiGroup.Use(api.TaskBudgetMiddleware(taskBudgets, policies))
 	apiGroup.Use(api.RLSTxMiddleware(db))
 	{
@@ -385,7 +404,13 @@ func main() {
 	}
 
 	log.Printf("Server starting on port %s", cfg.Server.Port)
-	if err := router.Run(":" + cfg.Server.Port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	httpServer.Handler = router
+	if err := httpServer.ListenAndServe(); err != nil {
+		if errors.Is(err, http.ErrServerClosed) {
+			<-quiesced
+		} else {
+			monitorRecorder.Close()
+			log.Fatalf("Failed to start server: %v", err)
+		}
 	}
 }

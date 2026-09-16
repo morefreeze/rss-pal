@@ -107,3 +107,48 @@ func TestGlobalDailyAcrossOwnersAndUTCDayReset(t *testing.T) {
 		t.Fatalf("system work double charged: %d", used)
 	}
 }
+
+func TestMonitoringDenialReasonsAndKnownReset(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		p     taskbudget.Policy
+		owner int
+		want  string
+	}{
+		{"user daily", taskbudget.Policy{Daily: 1, GlobalDaily: 10, Concurrent: 10, GlobalConcurrent: 10, Lease: time.Minute}, 7, "user_daily"},
+		{"global daily", taskbudget.Policy{Daily: 10, GlobalDaily: 1, Concurrent: 10, GlobalConcurrent: 10, Lease: time.Minute}, 7, "global_daily"},
+		{"user concurrent", taskbudget.Policy{Daily: 10, GlobalDaily: 10, Concurrent: 1, GlobalConcurrent: 10, Lease: time.Minute}, 7, "user_concurrency"},
+		{"global concurrent", taskbudget.Policy{Daily: 10, GlobalDaily: 10, Concurrent: 10, GlobalConcurrent: 1, Lease: time.Minute}, 7, "global_concurrency"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, done := testdb.New(t)
+			defer done()
+			s := taskbudget.New(db)
+			var reason string
+			var retry *time.Time
+			s.SetObserver(func(owner int, bucket, r string, at *time.Time) {
+				reason = r
+				retry = at
+				if owner != 7 || bucket != "ai" {
+					t.Errorf("wrong dimensions")
+				}
+			})
+			release, e := s.Acquire(context.Background(), tc.owner, "ai", 1, tc.p)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer release()
+			_, e = s.Acquire(context.Background(), tc.owner, "ai", 1, tc.p)
+			if !errors.Is(e, taskbudget.ErrExceeded) || reason != tc.want {
+				t.Fatalf("reason %q err %v", reason, e)
+			}
+			if tc.want == "user_daily" || tc.want == "global_daily" {
+				if retry == nil || retry.UTC().Hour() != 0 {
+					t.Fatalf("reset %v", retry)
+				}
+			} else if retry != nil {
+				t.Fatal("concurrency recovery is unknown")
+			}
+		})
+	}
+}

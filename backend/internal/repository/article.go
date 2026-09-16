@@ -832,7 +832,8 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 	query := `
 		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note, kind
 		FROM articles
-		WHERE (summary_brief IS NULL OR summary_brief = '')
+		WHERE EXISTS (SELECT 1 FROM feeds f WHERE f.id=articles.feed_id AND f.status='active' AND f.is_active)
+ AND (summary_brief IS NULL OR summary_brief = '')
 		AND LENGTH(content) > 100
 		AND NOT (
 		    media_type IS NOT NULL

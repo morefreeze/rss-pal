@@ -31,3 +31,9 @@ describe('MobileTabBar', () => {
     ])
   })
 })
+
+it('管理员在手机更多菜单中可进入运行监控', () => {
+  render(<MemoryRouter><MobileTabBar unreadCount={0} onLogout={() => {}} isAdmin /></MemoryRouter>)
+  fireEvent.click(screen.getByRole('button', { name: '更多' }))
+  expect(screen.getByRole('button', { name: /运行监控/ })).toBeTruthy()
+})

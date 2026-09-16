@@ -21,6 +21,7 @@ const STATIC_ROUTE_TITLES: Record<string, string> = {
   '/interests': '兴趣',
   '/stats': '统计',
   '/settings': '设置',
+  '/admin/monitoring': '运行监控',
 }
 
 function cleanTitle(title: string | undefined | null): string {

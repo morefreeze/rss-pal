@@ -14,6 +14,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/imagefetch"
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/opsmonitor"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
@@ -88,6 +89,17 @@ func main() {
 		log.Fatal(err)
 	}
 	workerBudgets = taskbudget.New(db)
+	_, err = opsmonitor.LoadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	monitorRecorder := opsmonitor.NewRecorder(db)
+	defer monitorRecorder.Close()
+	stopTermination := monitorRecorder.InstallTerminationHandler(nil)
+	defer stopTermination()
+	workerBudgets.SetObserver(func(owner int, bucket, reason string, retry *time.Time) {
+		monitorRecorder.Record(opsmonitor.Event{Kind: "limit", Reason: reason, TaskType: bucket, UserID: owner, RetryAt: retry})
+	})
 	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
 		return workerBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, workerPolicies["ai"])
 	})

@@ -232,6 +232,8 @@ function LayoutInner({
     return location.pathname === item.to || location.pathname.startsWith(item.to + '/')
   }
 
+  const navItems = user?.is_admin ? [...NAV_ITEMS, { to: '/admin/monitoring', icon: '🛡️', label: '运行监控' }] : NAV_ITEMS
+
   const navLinkClass = (item: NavItem) => (itemIsActive(item) ? 'nav-link active' : 'nav-link')
 
   // --bottom-chrome = tab-bar height (if shown) + mini-player height (if active)
@@ -254,7 +256,7 @@ function LayoutInner({
           <h1 className="nav-brand">RSS Pal</h1>
 
           <nav className="flex gap-2 desktop-nav" style={{ alignItems: 'center' }}>
-            {NAV_ITEMS.map(item => (
+            {navItems.map(item => (
               <Link key={item.to} to={item.to} className={navLinkClass(item)}>
                 {renderNavLabel(item)}
               </Link>
@@ -279,7 +281,7 @@ function LayoutInner({
             border: '1px solid var(--border)',
             borderRadius: 8,
           }}>
-            {NAV_ITEMS.map(item => (
+            {navItems.map(item => (
               <Link
                 key={item.to}
                 to={item.to}
@@ -306,7 +308,7 @@ function LayoutInner({
       <Toaster />
       <MiniPlayer />
       {bp !== 'desktop' && (
-        <MobileTabBar unreadCount={unreadCount} onLogout={onLogout} />
+        <MobileTabBar unreadCount={unreadCount} onLogout={onLogout} isAdmin={!!user?.is_admin} />
       )}
     </div>
   )

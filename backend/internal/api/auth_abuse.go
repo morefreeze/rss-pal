@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/opsmonitor"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,9 +24,10 @@ type AuthAttemptStore interface {
 }
 
 type AuthAbuseGuard struct {
-	store  AuthAttemptStore
-	secret []byte
-	slots  map[string]chan struct{}
+	monitor *opsmonitor.Recorder
+	store   AuthAttemptStore
+	secret  []byte
+	slots   map[string]chan struct{}
 }
 
 func NewAuthAbuseGuard(store AuthAttemptStore, secret string) *AuthAbuseGuard {
@@ -56,6 +58,14 @@ func (g *AuthAbuseGuard) take(c *gin.Context, scope, value string, limit int, wi
 		return false
 	}
 	if !allowed {
+		reason := "network"
+		if strings.Contains(scope, "global") {
+			reason = "global"
+		} else if strings.Contains(scope, "account") || strings.Contains(scope, "token") {
+			reason = "account"
+		}
+		at := time.Now().Add(retry)
+		g.monitor.Record(opsmonitor.Event{Kind: "limit", Reason: reason, TaskType: c.GetString("monitor_action"), RetryAt: &at})
 		c.Header("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()))))
 		c.AbortWithStatusJSON(429, gin.H{"error": "操作过于频繁，请稍后重试"})
 		return false
@@ -67,11 +77,22 @@ func (g *AuthAbuseGuard) take(c *gin.Context, scope, value string, limit int, wi
 // Budgets count attempts, including failures, and do not reset on success.
 func (g *AuthAbuseGuard) Middleware(action string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Set("monitor_action", action)
+		if action == "register" {
+			defer func() {
+				reason := "failed"
+				if c.Writer.Status() < 300 {
+					reason = "success"
+				}
+				g.monitor.Record(opsmonitor.Event{Kind: "registration", Reason: reason, TaskType: "register", UserID: c.GetInt("monitor_user_id")})
+			}()
+		}
 		c.Header("Cache-Control", "no-store")
 		select {
 		case g.slots[action] <- struct{}{}:
 			defer func() { <-g.slots[action] }()
 		default:
+			g.monitor.Record(opsmonitor.Event{Kind: "limit", Reason: "global_concurrency", TaskType: action})
 			c.Header("Retry-After", "5")
 			c.AbortWithStatusJSON(429, gin.H{"error": "认证请求较多，请稍后重试"})
 			return
@@ -135,3 +156,5 @@ func (g *AuthAbuseGuard) Middleware(action string) gin.HandlerFunc {
 func (g *AuthAbuseGuard) AdmitRegistration(c *gin.Context) bool {
 	return g.take(c, "register-verified-global", "all", 60, time.Hour)
 }
+
+func (g *AuthAbuseGuard) SetMonitor(m *opsmonitor.Recorder) { g.monitor = m }

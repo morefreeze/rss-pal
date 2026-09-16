@@ -97,7 +97,7 @@ Backend follows a layered pattern: `api/` (HTTP handlers) → `service/` (busine
 
 ## Database
 
-PostgreSQL 15. Incremental migrations currently run through `backend/migrations/044_user_subscriptions.sql`. Migrations auto-run via Docker entrypoint (`/docker-entrypoint-initdb.d`) on first start only. For existing volumes, Compose's one-shot `status-migrate` applies migrations 037 through 044 before API and Worker start.
+PostgreSQL 15. Incremental migrations currently run through `backend/migrations/045_operations_monitoring.sql`. Migrations auto-run via Docker entrypoint (`/docker-entrypoint-initdb.d`) on first start only. For existing volumes, Compose's one-shot `status-migrate` applies migrations 037 through 045 before API and Worker start.
 
 Key tables: `users`, `feeds`, `articles`, `user_preferences`, `interest_topics`, `interest_categories`, `reading_progress`, `playback_progress`, `article_events`, `user_insights`, `user_tags`, `article_user_tags`, `saved_articles`, `feed_health_metrics`, `weekly_digests`, `article_shares`, `ai_templates`, `link_set_candidates`, and the subscription Explore tables.
 
@@ -190,3 +190,9 @@ Migration 034 creates a `rsspal_app` Postgres role with `NOSUPERUSER NOBYPASSRLS
 3. Update `.env`: `DB_USER=rsspal_app` and `DB_PASSWORD=<strong-password>`. Also set `DB_ADMIN_USER=postgres` and `DB_ADMIN_PASSWORD=<original postgres password>` so backup/restore (which uses a separate `*sql.DB` via `repository.NewAdminDB`) continues to work with the privilege it needs.
 4. Restart: `docker-compose up -d --build api worker`
 5. Smoke-test isolation with a second invited user.
+
+## Admin operations monitoring
+
+`/admin/monitoring` is restricted to administrators. Its API checks current database admin status, regardless of cached JWT admin claims. Only controlled event categories are recorded; never include passwords, captcha tickets, invite tokens, IPs, article content, or cloud credentials.
+
+Monitoring retains 30 days of events and displays a collection start timestamp. Missing historical data is not zero failures. Queue panels are current snapshots; paused subscriptions are excluded from eligible summary work. Task-budget usage uses UTC dates and counts admitted attempts, including failed work, not tokens or actual provider charges. Optional `OPS_MONITOR_UNIT_PRICES` and `OPS_MONITOR_DAILY_COST_BUDGET` enable partial cost estimates; see `.env.example` for all thresholds. No external notification service is enabled.

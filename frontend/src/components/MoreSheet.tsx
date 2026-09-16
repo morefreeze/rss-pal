@@ -12,12 +12,13 @@ const ITEMS: SheetItem[] = [
 ]
 
 interface Props {
+  isAdmin?: boolean
   open: boolean
   onClose: () => void
   onLogout: () => void
 }
 
-export default function MoreSheet({ open, onClose, onLogout }: Props) {
+export default function MoreSheet({ open, onClose, onLogout, isAdmin = false }: Props) {
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -28,6 +29,8 @@ export default function MoreSheet({ open, onClose, onLogout }: Props) {
   }, [open, onClose])
 
   if (!open) return null
+
+  const items: SheetItem[] = isAdmin ? [{ icon: '🛡️', label: '运行监控', to: '/admin/monitoring' }, ...ITEMS] : ITEMS
 
   const onItem = (item: SheetItem) => {
     onClose()
@@ -68,7 +71,7 @@ export default function MoreSheet({ open, onClose, onLogout }: Props) {
             margin: '8px auto 12px',
           }}
         />
-        {ITEMS.map(item => (
+        {items.map(item => (
           <button
             key={item.label}
             type="button"

@@ -1,0 +1,33 @@
+.admin-monitoring { max-width: 1180px; margin: 0 auto; }
+.monitor-heading,.monitor-controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.monitor-heading { justify-content:space-between; margin-bottom:20px; }
+.monitor-heading h2 { margin:0 0 6px; }
+.monitor-heading p { margin:0; }
+.monitor-controls select { margin-left:6px; padding:8px; }
+.monitor-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(205px,1fr)); gap:14px; margin:18px 0; }
+.monitor-cards h3 { font-size:14px; margin-bottom:12px; }
+.monitor-value { font-size:30px; font-variant-numeric:tabular-nums; }
+.monitor-money { font-size:24px; }
+.monitor-section { margin:18px 0; }
+.monitor-section h3 { margin:0 0 14px; }
+.monitor-notice,.monitor-error { padding:12px; border:1px solid var(--border); border-left:4px solid #b7791f; border-radius:6px; margin:12px 0; }
+.monitor-error { border-left-color:#c53030; }
+.monitor-alerts { list-style:none; padding:0; margin:0; }
+.monitor-alerts li { border-left:4px solid #b7791f; padding:10px 14px; margin:10px 0; }
+.monitor-alerts li.critical { border-left-color:#c53030; }
+.monitor-alerts span { display:block; margin-top:6px; font-size:13px; }
+.monitor-table-wrap { max-height:420px; overflow:auto; margin:12px 0; }
+.monitor-table-wrap table { border-collapse:collapse; width:100%; font-size:14px; }
+.monitor-table-wrap th,.monitor-table-wrap td { padding:10px 12px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+.monitor-table-wrap th { background:var(--surface); position:sticky; top:0; }
+.monitor-queue { padding:12px 0; border-bottom:1px solid var(--border); }
+.monitor-queue h4,.monitor-queue p { margin:6px 0; }
+.monitor-trend { display:flex; height:110px; align-items:stretch; gap:2px; margin:18px 0; border-bottom:1px solid var(--border); }
+.monitor-bar { flex:1; min-width:1px; display:flex; flex-direction:column-reverse; justify-content:flex-start; }
+.monitor-bar span { min-height:0; }
+.series-0 { background:#37845c; }.series-1 { background:#d18b32; }.series-2 { background:#8273b3; }.series-3 { background:#cb5151; }.series-4 { background:#477db4; }
+.admin-monitoring summary { cursor:pointer; padding:8px 0; }
+
+.monitor-legend { display:flex; flex-wrap:wrap; gap:12px; font-size:12px; }
+.monitor-legend span { display:inline-flex; align-items:center; gap:5px; }
+.monitor-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; }

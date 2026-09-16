@@ -18,7 +18,17 @@ type Policy struct {
 	Daily, GlobalDaily, Concurrent, GlobalConcurrent int
 	Lease                                            time.Duration
 }
-type Store struct{ db *sql.DB }
+type Store struct {
+	db       *sql.DB
+	observer func(int, string, string, *time.Time)
+}
+
+func (s *Store) SetObserver(f func(int, string, string, *time.Time)) { s.observer = f }
+func (s *Store) denied(owner int, bucket, reason string, retry *time.Time) {
+	if s.observer != nil {
+		s.observer(owner, bucket, reason, retry)
+	}
+}
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
@@ -47,7 +57,12 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 	if err = tx.QueryRowContext(ctx, `SELECT count(*),count(*) FILTER(WHERE owner_id=$2) FROM task_budget_leases WHERE bucket=$1`, bucket, owner).Scan(&total, &own); err != nil {
 		return nil, ErrUnavailable
 	}
-	if total >= p.GlobalConcurrent || (owner > 0 && own >= p.Concurrent) {
+	if total >= p.GlobalConcurrent {
+		s.denied(owner, bucket, "global_concurrency", nil)
+		return nil, ErrExceeded
+	}
+	if owner > 0 && own >= p.Concurrent {
+		s.denied(owner, bucket, "user_concurrency", nil)
 		return nil, ErrExceeded
 	}
 	var day string
@@ -58,7 +73,14 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(max(used) FILTER(WHERE owner_id=0),0),COALESCE(max(used) FILTER(WHERE owner_id=$2),0) FROM task_budget_daily WHERE bucket=$1 AND day=$3::date`, bucket, owner, day).Scan(&allUsed, &userUsed); err != nil {
 		return nil, ErrUnavailable
 	}
-	if cost > p.GlobalDaily-allUsed || (owner > 0 && cost > p.Daily-userUsed) {
+	reset, _ := time.Parse("2006-01-02", day)
+	reset = reset.Add(24 * time.Hour)
+	if cost > p.GlobalDaily-allUsed {
+		s.denied(owner, bucket, "global_daily", &reset)
+		return nil, ErrExceeded
+	}
+	if owner > 0 && cost > p.Daily-userUsed {
+		s.denied(owner, bucket, "user_daily", &reset)
 		return nil, ErrExceeded
 	}
 	owners := []int{0}

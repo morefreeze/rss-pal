@@ -12,11 +12,12 @@ const TABS: Tab[] = [
 ]
 
 interface Props {
+  isAdmin?: boolean
   unreadCount: number
   onLogout: () => void
 }
 
-export default function MobileTabBar({ unreadCount, onLogout }: Props) {
+export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false }: Props) {
   const [moreOpen, setMoreOpen] = useState(false)
   const location = useLocation()
   const isClipView = location.pathname === '/articles'
@@ -102,7 +103,7 @@ export default function MobileTabBar({ unreadCount, onLogout }: Props) {
           <span>更多</span>
         </button>
       </nav>
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} onLogout={onLogout} />
+      <MoreSheet isAdmin={isAdmin} open={moreOpen} onClose={() => setMoreOpen(false)} onLogout={onLogout} />
     </>
   )
 }

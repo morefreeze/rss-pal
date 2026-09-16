@@ -11,6 +11,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/opsmonitor"
 	"github.com/bytedance/rss-pal/internal/registrationpolicy"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,7 @@ import (
 )
 
 type AuthHandler struct {
+	monitor              *opsmonitor.Recorder
 	registrationVerifier RegistrationVerifier
 	registrationBudget   *AuthAbuseGuard
 	cfg                  *config.Config
@@ -199,6 +201,15 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
+	if h.registrationBudget == nil {
+		defer func() {
+			reason := "failed"
+			if c.Writer.Status() < 300 {
+				reason = "success"
+			}
+			h.monitor.Record(opsmonitor.Event{Kind: "registration", Reason: reason, TaskType: "register", UserID: c.GetInt("monitor_user_id")})
+		}()
+	}
 	var req model.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "注册信息无效，请检查用户名、密码和邀请码"})
@@ -214,6 +225,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 	if h.registrationVerifier == nil {
+		h.monitor.Record(opsmonitor.Event{Kind: "captcha", Reason: "unavailable", TaskType: "register"})
 		c.JSON(503, gin.H{"error": "注册验证暂时不可用，请稍后重试"})
 		return
 	}
@@ -223,12 +235,15 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 	if err := h.registrationVerifier.Verify(c.Request.Context(), proof, c.ClientIP()); err != nil {
 		if errors.Is(err, ErrVerificationUnavailable) {
+			h.monitor.Record(opsmonitor.Event{Kind: "captcha", Reason: "unavailable", TaskType: "register"})
 			c.JSON(503, gin.H{"error": "注册验证暂时不可用，请稍后重试"})
 		} else {
+			h.monitor.Record(opsmonitor.Event{Kind: "captcha", Reason: "rejected", TaskType: "register"})
 			c.JSON(403, gin.H{"error": "请重新完成人机验证"})
 		}
 		return
 	}
+	h.monitor.Record(opsmonitor.Event{Kind: "captcha", Reason: "success", TaskType: "register"})
 	if h.registrationBudget != nil && !h.registrationBudget.AdmitRegistration(c) {
 		return
 	}
@@ -272,6 +287,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	c.Set("monitor_user_id", user.ID)
 	c.JSON(http.StatusOK, gin.H{"token": token, "user": user})
 }
 
@@ -465,3 +481,5 @@ func (h *AuthHandler) RegistrationConfig(c *gin.Context) {
 }
 
 func (h *AuthHandler) SetRegistrationBudget(guard *AuthAbuseGuard) { h.registrationBudget = guard }
+
+func (h *AuthHandler) SetMonitor(m *opsmonitor.Recorder) { h.monitor = m }
