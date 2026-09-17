@@ -15,3 +15,9 @@ docker compose run --rm --no-deps worker ./worker --refresh-explore-once
 此命令只执行一批最多 60 个探索任务，然后生成新的推荐批次；不启动个人订阅、AI 或其他循环。原有探索并发上限仍生效。操作前应避免同时执行另一个恢复命令，运行后核对推荐批次及真实 `last_fetched_at`。
 
 历史重复关联可从同 provider、同 external_key、当前目录版本实际存在的记录恢复观察时间，不能使用当前时间批量覆盖所有源。普通 304 同步也会完成这项修复。无需删除公共文章缓存或用户订阅。
+
+## 安全代理的 URL 身份
+
+SSRF 防护会把连接目标钉在已验证的公网 IP，但 `http.Response.Request` 必须仍指向当前跳转的原始域名 URL。否则上层会把 CDN IP 持久化为 RSS 地址，相对重定向也会丢失站点域名。HTTP、HTTPS 和 SOCKS 代理共用这一恢复边界；连接 IP、Host、TLS SNI 和证书校验均不放宽。
+
+历史上由此产生的 IP 源须隔离并从目录域名重新验证。尤其多个站点可能共享一个 CDN IP，不能假定旧缓存全部属于同一个域名并整体迁移。
