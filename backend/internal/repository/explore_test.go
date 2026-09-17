@@ -690,7 +690,7 @@ func insertExploreUsers(t *testing.T, db *sql.DB) (int, int) {
 func insertExploreSource(t *testing.T, db *sql.DB, url, title string) int {
 	t.Helper()
 	var id int
-	err := db.QueryRow(`INSERT INTO recommended_feeds(url,title,category,language,normalized_url,validation_status,is_broken,health_score) VALUES ($1,$2,'test','en',$1,'valid',false,0.9) RETURNING id`, url, title).Scan(&id)
+	err := db.QueryRow(`INSERT INTO recommended_feeds(url,title,category,language,normalized_url,validation_status,is_broken,health_score,last_fetched_at) VALUES ($1,$2,'test','en',$1,'valid',false,0.9,NOW()) RETURNING id`, url, title).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,3 +723,20 @@ func insertExploreArticle(t *testing.T, db *sql.DB, sourceID int, at time.Time, 
 }
 
 func strPtr(value string) *string { return &value }
+
+func TestExplorePageRejectsStaleSuccessfulFetch(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	userID, _ := insertExploreUsers(t, db)
+	now := time.Now().UTC()
+	source := insertExploreSource(t, db, "https://stale-cache.example/feed", "stale")
+	insertExploreDoneBatch(t, db, userID, now, []exploreTestBatchSource{{sourceID: source, rank: 1, topic: "test"}})
+	insertExploreArticle(t, db, source, now, "cached")
+	if _, err := db.Exec(`UPDATE recommended_feeds SET last_fetched_at=NOW()-INTERVAL '13 hours' WHERE id=$1`, source); err != nil {
+		t.Fatal(err)
+	}
+	page, err := NewExploreRepository(db).GetPage(userID, ExploreListParams{Limit: 20, Sort: SortCaptured, Dir: SortDesc})
+	if err != nil || len(page.Articles) != 0 {
+		t.Fatalf("stale cached source visible: page=%+v err=%v", page, err)
+	}
+}

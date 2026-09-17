@@ -319,7 +319,22 @@ func (r *ExploreRegistryRepository) UpsertCandidate(providerID int, candidate ex
 		return 0, err
 	}
 	var sourceID int
-	err = q.QueryRow(exploreRegistryCandidateUpsertSQL, candidate.FeedURL, title, category, candidate.SiteURL, observedAt).Scan(&sourceID)
+	// The provider key identifies the directory entry even after validation
+	// rewrites its URL to a canonical RSS URL. Reuse an unambiguous verified
+	// source instead of recreating the original discovery URL.
+	err = q.QueryRow(`WITH canonical AS (
+		SELECT DISTINCT source.id FROM explore_source_observations observation
+		JOIN recommended_feeds source ON source.id=observation.source_id
+		WHERE observation.provider_id=$1 AND observation.external_key=$2
+		AND source.validation_status='valid' AND source.merged_into_source_id IS NULL
+	), target AS (SELECT min(id) AS id FROM canonical HAVING count(*)=1)
+	UPDATE recommended_feeds source SET last_observed_at=GREATEST(source.last_observed_at,$3),
+	 title=COALESCE(NULLIF($4,''),source.title),category=COALESCE(NULLIF($5,''),source.category),site_url=COALESCE(NULLIF($6,''),source.site_url)
+	FROM target WHERE source.id=target.id AND source.merged_into_source_id IS NULL
+	RETURNING source.id`, providerID, candidate.ExternalKey, observedAt, title, category, candidate.SiteURL).Scan(&sourceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = q.QueryRow(exploreRegistryCandidateUpsertSQL, candidate.FeedURL, title, category, candidate.SiteURL, observedAt).Scan(&sourceID)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -390,7 +405,12 @@ func (r *ExploreRegistryRepository) RecordNotModified(providerID int, syncedAt t
 			UPDATE explore_source_observations AS observation
 			SET last_seen_at=GREATEST(observation.last_seen_at,$2)
 			WHERE observation.provider_id=$1
-			  AND observation.last_seen_at=$3
+			  AND EXISTS (
+			      SELECT 1 FROM explore_source_observations represented
+			      WHERE represented.provider_id=observation.provider_id
+			        AND represented.external_key=observation.external_key
+			        AND represented.last_seen_at=$3
+			  )
 			RETURNING observation.source_id
 		)
 		UPDATE recommended_feeds AS source

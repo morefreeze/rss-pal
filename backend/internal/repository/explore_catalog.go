@@ -168,8 +168,8 @@ const (
 			)
 		))
 		ORDER BY CASE
-			WHEN source.validation_status = 'pending' THEN 0
-			WHEN source.is_broken=false THEN 1
+			WHEN source.validation_status = 'valid' AND source.is_broken=false THEN 0
+			WHEN source.validation_status = 'pending' THEN 1
 			WHEN source.is_broken AND EXISTS (
 				SELECT 1 FROM explore_source_observations observation
 				JOIN explore_registry_providers provider ON provider.id=observation.provider_id

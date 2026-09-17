@@ -21,11 +21,12 @@ const (
 	ExploreQueueKindSource     = "source"
 	ExploreQueueKindRelated    = "related"
 
-	ExplorePriorityDirectProfile      = 400
-	ExplorePriorityStructuredProvider = 300
-	ExplorePriorityRefresh            = 200
-	ExplorePriorityRelated            = 100
-	ExplorePriorityBrokenHealthCheck  = 0
+	ExplorePriorityRecommendationRefresh = 800
+	ExplorePriorityDirectProfile         = 400
+	ExplorePriorityStructuredProvider    = 300
+	ExplorePriorityRefresh               = 200
+	ExplorePriorityRelated               = 100
+	ExplorePriorityBrokenHealthCheck     = 0
 
 	exploreDispatcherAdvisoryLock int64 = 498571936210
 	maxExploreClaim                     = 500

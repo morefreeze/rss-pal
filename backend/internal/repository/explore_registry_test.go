@@ -440,3 +440,67 @@ func TestExploreRegistryQueueAdapterEnqueuesValidation(t *testing.T) {
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }
+
+func TestRegistryResyncKeepsCanonicalSourceFresh(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreRegistryRepository(db)
+	var provider int
+	if err := db.QueryRow(`SELECT id FROM explore_registry_providers WHERE provider_key='chinese-independent'`).Scan(&provider); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	candidate := explore.Candidate{ExternalKey: "https://alias.example/feed", FeedURL: "https://alias.example/feed", Title: "Alias", OccurrenceCount: 1}
+	id, err := repo.UpsertCandidate(provider, candidate, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE recommended_feeds SET url='https://canonical.example/rss',normalized_url='https://canonical.example/rss',validation_status='valid' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.UpsertCandidate(provider, candidate, old.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != id {
+		t.Fatalf("resync created duplicate %d instead of canonical %d", got, id)
+	}
+}
+
+func TestRegistry304RefreshesCanonicalEvidenceFromLegacyAlias(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreRegistryRepository(db)
+	var provider int
+	if err := db.QueryRow(`SELECT id FROM explore_registry_providers WHERE provider_key='chinese-independent'`).Scan(&provider); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	candidate := explore.Candidate{ExternalKey: "stable-key", FeedURL: "https://canonical.example/rss", Title: "Canonical", OccurrenceCount: 1}
+	id, err := repo.UpsertCandidate(provider, candidate, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alias int
+	if err := db.QueryRow(`INSERT INTO recommended_feeds(url,normalized_url,title,category,language,validation_status,merged_into_source_id) VALUES('https://alias.example','https://alias.example','alias','test','en','invalid',$1) RETURNING id`, id).Scan(&alias); err != nil {
+		t.Fatal(err)
+	}
+	represented := old.Add(time.Hour)
+	if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) VALUES($1,$2,'stable-key',$3)`, provider, alias, represented); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordSuccess(provider, represented, "etag", ""); err != nil {
+		t.Fatal(err)
+	}
+	now := old.Add(24 * time.Hour)
+	if err := repo.RecordNotModified(provider, now, "etag", ""); err != nil {
+		t.Fatal(err)
+	}
+	var seen time.Time
+	if err := db.QueryRow(`SELECT last_seen_at FROM explore_source_observations WHERE provider_id=$1 AND source_id=$2`, provider, id).Scan(&seen); err != nil {
+		t.Fatal(err)
+	}
+	if !seen.Equal(now) {
+		t.Fatalf("canonical evidence remained stale: %s", seen)
+	}
+}

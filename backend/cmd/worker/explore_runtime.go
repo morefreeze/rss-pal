@@ -26,6 +26,8 @@ const exploreCandidateSQL = `
 	       COALESCE(source.health_score,0)
 	FROM recommended_feeds source
 	WHERE source.validation_status='valid' AND source.is_broken=false
+	  AND source.last_fetched_at >= $1::timestamp - INTERVAL '12 hours'
+	  AND source.last_fetched_at <= $1::timestamp
 	  AND source.merged_into_source_id IS NULL
 	  AND EXISTS (
 	      SELECT 1 FROM explore_source_observations observation
@@ -117,7 +119,7 @@ func (scheduler *scheduledExploreRegistry) SyncDue(ctx context.Context, now time
 	for _, source := range due {
 		taskType, priority := repository.ExploreTaskValidateSource, repository.ExplorePriorityStructuredProvider
 		if source.ValidationStatus == model.ExploreValidationValid {
-			taskType, priority = repository.ExploreTaskRefreshArticles, repository.ExplorePriorityRefresh
+			taskType, priority = repository.ExploreTaskRefreshArticles, repository.ExplorePriorityRecommendationRefresh
 		}
 		if source.IsBroken {
 			priority = repository.ExplorePriorityBrokenHealthCheck

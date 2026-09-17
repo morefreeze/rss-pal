@@ -308,6 +308,7 @@ func buildExplorePageQuery(params ExploreListParams) string {
 		  AND source.validation_status='valid'
 		  AND source.is_broken=false
 		  AND source.merged_into_source_id IS NULL
+		  AND source.last_fetched_at BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '12 hours' AND (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
 		  AND NOT EXISTS (
 		      SELECT 1 FROM explore_feedback hidden
 		      WHERE hidden.user_id=$1 AND hidden.feedback_type='hide_source'
@@ -339,6 +340,7 @@ const exploreColdSourcesCTE = `
 		) observation ON true
 		WHERE source.validation_status='valid' AND source.is_broken=false
 		  AND source.merged_into_source_id IS NULL
+		  AND source.last_fetched_at BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '12 hours' AND (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
 		  AND EXISTS (SELECT 1 FROM explore_articles article WHERE article.source_id=source.id)
 		  AND NOT EXISTS (
 			SELECT 1 FROM explore_feedback hidden
