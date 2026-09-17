@@ -24,6 +24,7 @@ const STATIC_ROUTE_TITLES: Record<string, string> = {
   '/admin': '后台管理',
   '/admin/feed-catalog': '公共推荐目录',
   '/admin/monitoring': '运行监控',
+  '/admin/status': '服务状态',
 }
 
 function cleanTitle(title: string | undefined | null): string {

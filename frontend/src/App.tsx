@@ -24,6 +24,7 @@ import ExplorePage from './pages/ExplorePage'
 import ExploreArticlePage from './pages/ExploreArticlePage'
 import Layout from './components/Layout'
 import AdminLayout from './components/AdminLayout'
+import AdminStatusPage from './pages/AdminStatusPage'
 import RoutePageTitle from './components/RoutePageTitle'
 
 export interface User {
@@ -109,6 +110,7 @@ export function AppRoutes({
           <Route index element={<Navigate to="feed-catalog" replace />} />
           <Route path="feed-catalog" element={<AdminFeedCatalogPage user={user} />} />
           <Route path="monitoring" element={<AdminMonitoringPage user={user} />} />
+          <Route path="status" element={<AdminStatusPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/articles" replace />} />

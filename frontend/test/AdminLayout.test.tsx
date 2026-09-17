@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { beforeEach, expect, it, vi } from 'vitest'
 import AdminLayout from '../src/components/AdminLayout'
+import AdminStatusPage from '../src/pages/AdminStatusPage'
 const state = vi.hoisted(() => ({ breakpoint: 'desktop' }))
 vi.mock('../src/hooks/useBreakpoint', () => ({ useBreakpoint: () => state.breakpoint }))
 beforeEach(() => { state.breakpoint = 'desktop' })
@@ -11,6 +12,7 @@ function mount(admin = true, path = '/admin') {
       <Route index element={<Navigate to="feed-catalog" replace />} />
       <Route path="feed-catalog" element={<p>目录内容</p>} />
       <Route path="monitoring" element={<p>监控内容</p>} />
+      <Route path="status" element={<AdminStatusPage />} />
     </Route>
   </Routes></MemoryRouter>)
 }
@@ -36,4 +38,15 @@ it('手机展开后台菜单，选择后收起且切换内容', () => {
   fireEvent.click(screen.getByRole('link',{name:/运行监控/}))
   expect(screen.getByText('监控内容')).toBeTruthy()
   expect(button.getAttribute('aria-expanded')).toBe('false')
+})
+
+it('服务状态嵌入原状态页，并支持刷新和独立访问', () => {
+  mount()
+  fireEvent.click(screen.getByRole('link', {name: /服务状态/}))
+  const original = screen.getByTitle('服务状态与 72 小时可用性')
+  expect(original.getAttribute('src')).toBe('/status')
+  expect(screen.getByRole('link', {name: /打开独立页面/}).getAttribute('href')).toBe('/status')
+  expect(screen.getByRole('link', {name: /服务状态/}).getAttribute('aria-current')).toBe('page')
+  fireEvent.click(screen.getByRole('button', {name: '刷新状态页'}))
+  expect(screen.getByTitle('服务状态与 72 小时可用性')).not.toBe(original)
 })
