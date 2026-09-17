@@ -35,6 +35,7 @@ it('creates drafts and edits with revision, searches and filters', async () => {
   fireEvent.click(screen.getByRole('button', { name: '新增条目' }))
   fireEvent.change(screen.getByLabelText('标题'), { target: { value: '新增来源' } })
   fireEvent.change(screen.getByLabelText('RSS 地址'), { target: { value: item.url } })
+  fireEvent.change(screen.getByLabelText('分类'), { target: { value: '新闻' } })
   fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
   await screen.findByText('新增来源')
   expect(mocks.createCatalogItem.mock.calls[0][0].title).toBe('新增来源')

@@ -72,9 +72,9 @@ export default function AdminFeedCatalogPage({ user }: { user?: { is_admin: bool
       <fieldset disabled={busy}>
         {(['title', 'url', 'category', 'description'] as const).map(field => <label key={field}>
           {{ title: '标题', url: 'RSS 地址', category: '分类', description: '简介' }[field]}
-          <input required={field === 'title' || field === 'url'} value={editor.fields[field]} onChange={e => setEditor({ ...editor, fields: { ...editor.fields, [field]: e.target.value } })} />
+          <input required={field !== 'description'} maxLength={{ title: 200, url: 2048, category: 80, description: 1000 }[field]} value={editor.fields[field]} onChange={e => setEditor({ ...editor, fields: { ...editor.fields, [field]: e.target.value } })} />
         </label>)}
-        <label>排序<input type="number" required step={1} value={editor.fields.sort_order} onChange={e => setEditor({ ...editor, fields: { ...editor.fields, sort_order: Number(e.target.value) } })} /></label>
+        <label>排序<input type="number" required min={0} max={1000000} step={1} value={editor.fields.sort_order} onChange={e => setEditor({ ...editor, fields: { ...editor.fields, sort_order: Number(e.target.value) } })} /></label>
         <div className="catalog-controls"><button type="submit">{editor.id === undefined ? '保存草稿' : '保存修改'}</button><button type="button" className="secondary" onClick={() => setEditor(null)}>取消</button></div>
       </fieldset>
     </form>}
