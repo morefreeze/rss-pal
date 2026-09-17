@@ -23,6 +23,7 @@ import ExtensionConfigPage from './pages/ExtensionConfigPage'
 import ExplorePage from './pages/ExplorePage'
 import ExploreArticlePage from './pages/ExploreArticlePage'
 import Layout from './components/Layout'
+import AdminLayout from './components/AdminLayout'
 import RoutePageTitle from './components/RoutePageTitle'
 
 export interface User {
@@ -104,8 +105,11 @@ export function AppRoutes({
         <Route path="insights" element={<Navigate to="/interests" replace />} />
         <Route path="stats" element={<StatsPage />} />
         <Route path="settings" element={<SettingsPage user={user} />} />
-        <Route path="admin/feed-catalog" element={<AdminFeedCatalogPage user={user} />} />
-        <Route path="admin/monitoring" element={<AdminMonitoringPage user={user} />} />
+        <Route path="admin" element={<AdminLayout user={user} />}>
+          <Route index element={<Navigate to="feed-catalog" replace />} />
+          <Route path="feed-catalog" element={<AdminFeedCatalogPage user={user} />} />
+          <Route path="monitoring" element={<AdminMonitoringPage user={user} />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/articles" replace />} />
     </Routes>
