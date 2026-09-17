@@ -740,3 +740,67 @@ func TestExplorePageRejectsStaleSuccessfulFetch(t *testing.T) {
 		t.Fatalf("stale cached source visible: page=%+v err=%v", page, err)
 	}
 }
+
+func TestExploreExhaustedSnapshotFallsBackWithoutWaitingForNextSlot(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	userID, _ := insertExploreUsers(t, db)
+	now := time.Now().UTC().Truncate(time.Second)
+	original := insertExploreSource(t, db, "https://exhausted.example/feed", "original")
+	replacement := insertExploreSource(t, db, "https://replacement.example/feed", "replacement")
+	insertExploreArticle(t, db, original, now, "original")
+	replacementArticle := insertExploreArticle(t, db, replacement, now, "replacement")
+	batchID := insertExploreDoneBatch(t, db, userID, now, []exploreTestBatchSource{{sourceID: original, rank: 1, topic: "programming"}})
+	var providerID int
+	if err := db.QueryRow(`INSERT INTO explore_registry_providers(provider_key,provider_kind,endpoint,sync_interval_minutes) VALUES ('replacement','directory','https://directory.example',360) RETURNING id`).Scan(&providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) VALUES ($1,$2,'replacement',$3)`, providerID, replacement, now); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewExploreRepository(db)
+	feedback, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackHideSource, SourceID: &original})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := repo.GetPage(userID, ExploreListParams{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Articles) != 1 || page.Articles[0].ID != replacementArticle || page.Snapshot.ID != batchID || !page.Snapshot.UsingFallback {
+		t.Fatalf("exhausted page=%+v", page)
+	}
+	sources, err := repo.GetSources(userID)
+	if err != nil || len(sources) != 1 || sources[0].ID != replacement {
+		t.Fatalf("replacement sources=%+v err=%v", sources, err)
+	}
+	if _, err := repo.GetVisibleArticle(userID, replacementArticle); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteFeedback(userID, feedback.ID); err != nil {
+		t.Fatal(err)
+	}
+	page, err = repo.GetPage(userID, ExploreListParams{Limit: 20})
+	if err != nil || len(page.Articles) != 1 || page.Articles[0].SourceID != original || page.Snapshot.UsingFallback {
+		t.Fatalf("restored page=%+v err=%v", page, err)
+	}
+	// A topic filter with no matches must not replace a still-usable snapshot.
+	page, err = repo.GetPage(userID, ExploreListParams{Limit: 20, Topic: "test"})
+	if err != nil || len(page.Articles) != 0 {
+		t.Fatalf("topic page=%+v err=%v", page, err)
+	}
+	if _, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackDampenTopic, Topic: strPtr("programming")}); err != nil {
+		t.Fatal(err)
+	}
+	page, err = repo.GetPage(userID, ExploreListParams{Limit: 20})
+	if err != nil || len(page.Articles) != 1 || page.Articles[0].ID != replacementArticle {
+		t.Fatalf("topic exhaustion page=%+v err=%v", page, err)
+	}
+	if _, err := repo.CreateFeedback(userID, ExploreFeedbackInput{FeedbackType: model.ExploreFeedbackHideSource, SourceID: &replacement}); err != nil {
+		t.Fatal(err)
+	}
+	page, err = repo.GetPage(userID, ExploreListParams{Limit: 20})
+	if err != nil || len(page.Articles) != 0 {
+		t.Fatalf("all hidden page=%+v err=%v", page, err)
+	}
+}

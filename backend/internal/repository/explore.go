@@ -168,10 +168,15 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 	if err != nil {
 		return nil, err
 	}
+	useFallback, err := useExploreExhaustedFallback(tx, userID, status.ID, formalURLs)
+	if err != nil {
+		return nil, err
+	}
+	status.UsingFallback = status.UsingFallback || useFallback
 	page := &ExplorePage{Snapshot: status, Articles: []ExploreArticleListItem{}, Interests: interests}
 	var args []any
 	var query string
-	if status.ID == 0 {
+	if status.ID == 0 || useFallback {
 		args = []any{userID, pq.Array(formalURLs)}
 		if params.Topic != "" {
 			args = append(args, params.Topic)
@@ -360,6 +365,20 @@ const exploreColdSourcesCTE = `
 		FROM cold_ranked
 	)`
 
+// Only replace an exhausted snapshot. An empty topic filter or a later page
+// must not switch candidate sets and invalidate pagination.
+func useExploreExhaustedFallback(db Querier, userID, batchID int, formalURLs []string) (bool, error) {
+	if batchID == 0 {
+		return false, nil
+	}
+	coldCTE := strings.ReplaceAll(exploreColdSourcesCTE, "$2", "$3")
+	query := coldCTE + ` SELECT EXISTS (SELECT 1 FROM cold_sources)
+		AND NOT EXISTS (` + buildExplorePageQuery(normalizeExploreListParams(ExploreListParams{})) + `)`
+	var fallback bool
+	err := db.QueryRow(query, userID, batchID, pq.Array(formalURLs)).Scan(&fallback)
+	return fallback, err
+}
+
 func buildExploreColdPageQuery(params ExploreListParams) string {
 	topicClause := ""
 	if params.Topic != "" {
@@ -476,6 +495,10 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 	if err != nil {
 		return nil, err
 	}
+	useFallback, err := useExploreExhaustedFallback(r.db, userID, status.ID, formalURLs)
+	if err != nil {
+		return nil, err
+	}
 	query := `
 		WITH latest_done AS (
 			SELECT id FROM explore_batches WHERE user_id=$1 AND status='done'
@@ -497,7 +520,7 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 		JOIN recommended_feeds source ON source.id=batch_source.source_id
 		ORDER BY batch_source.rank, source.id
 	`
-	if status.ID == 0 {
+	if status.ID == 0 || useFallback {
 		query = exploreColdSourcesCTE + `
 			SELECT cold.id,cold.title,cold.url,cold.site_url,cold.rank,cold.topic,cold.reason,
 			       cold.health_score,'valid',false,NULL::integer,

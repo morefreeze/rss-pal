@@ -240,10 +240,21 @@ export function useExploreFeed({
     void recordExploreArticleEvent(articleID, 'click').catch(() => {})
   }, [])
 
+  const refillFirstPage = useCallback(async () => {
+    const nextGeneration = ++requestGenerationRef.current
+    automaticEmptyLoadsRef.current = 0
+    setAutomaticLoadLimitReached(false)
+    setGeneration(nextGeneration)
+    await requestPage(0, true, nextGeneration)
+  }, [requestPage])
+
   const hideSource = useCallback(async (sourceID: number) => {
+    const feedbackGeneration = requestGenerationRef.current
     setHiddenSources(current => new Set(current).add(sourceID))
     try {
       const feedback = await createExploreFeedback({ feedback_type: 'hide_source', source_id: sourceID })
+      const refilled = feedbackGeneration === requestGenerationRef.current && !hasMore && articles.every(article => article.source_id === sourceID)
+      if (refilled) await refillFirstPage()
       return async () => {
         await deleteExploreFeedback(feedback.id)
         setHiddenSources(current => {
@@ -251,6 +262,7 @@ export function useExploreFeed({
           next.delete(sourceID)
           return next
         })
+        if (refilled) await refillFirstPage()
       }
     } catch (requestError) {
       setHiddenSources(current => {
@@ -260,12 +272,15 @@ export function useExploreFeed({
       })
       throw requestError
     }
-  }, [])
+  }, [articles, hasMore, refillFirstPage])
 
   const dampenTopic = useCallback(async (topicName: string) => {
+    const feedbackGeneration = requestGenerationRef.current
     setDampenedTopics(current => new Set(current).add(topicName))
     try {
       const feedback = await createExploreFeedback({ feedback_type: 'dampen_topic', topic: topicName })
+      const refilled = feedbackGeneration === requestGenerationRef.current && !hasMore && articles.every(article => article.topic === topicName)
+      if (refilled) await refillFirstPage()
       return async () => {
         await deleteExploreFeedback(feedback.id)
         setDampenedTopics(current => {
@@ -273,6 +288,7 @@ export function useExploreFeed({
           next.delete(topicName)
           return next
         })
+        if (refilled) await refillFirstPage()
       }
     } catch (requestError) {
       setDampenedTopics(current => {
@@ -282,7 +298,7 @@ export function useExploreFeed({
       })
       throw requestError
     }
-  }, [])
+  }, [articles, hasMore, refillFirstPage])
 
   return {
     articles,
