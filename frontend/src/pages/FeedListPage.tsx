@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
+import { listFeedCatalog, type PublicCatalogItem } from '../api/feedCatalog'
 import { toast } from '../utils/toast'
 import { getInitialPopularFeedsExpanded } from '../utils/popularFeedsVisibility'
 import { parseAuthIntent } from '../utils/authIntent'
@@ -13,66 +14,20 @@ function isPDFURL(u: string): boolean {
   return cleaned.endsWith('.pdf')
 }
 
-const POPULAR_FEEDS: { category: string; emoji: string; items: { name: string; url: string; desc: string }[] }[] = [
-  {
-    category: '视频', emoji: '📺', items: [
-      { name: '影视飓风', url: 'http://rsshub:1200/bilibili/user/video/946974', desc: '影视科技测评' },
-      { name: '罗翔说刑法', url: 'http://rsshub:1200/bilibili/user/video/517327498', desc: '法律普法精品' },
-      { name: 'Kurzgesagt', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsXVk37bltHxD1rDPwtNM8Q', desc: '顶级科普动画' },
-      { name: 'Fireship', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsBjURrPoezykLs9EqgamOA', desc: '高密度技术教学' },
-    ],
-  },
-  {
-    category: '博客', emoji: '✍️', items: [
-      { name: '阮一峰的网络日志', url: 'https://www.ruanyifeng.com/blog/atom.xml', desc: '科技爱好者周刊' },
-      { name: '宝玉的分享', url: 'https://baoyu.io/feed.xml', desc: 'AI/工程译介' },
-      { name: 'Astral Codex Ten', url: 'https://astralcodexten.substack.com/feed', desc: '理性主义通才博客' },
-      { name: 'The Honest Broker', url: 'https://www.honest-broker.com/feed', desc: '文化与音乐评论' },
-    ],
-  },
-  {
-    category: '播客', emoji: '🎙️', items: [
-      { name: '商业就是这样', url: 'http://rsshub:1200/xiaoyuzhou/podcast/6022a180ef5fdaddc30bb101', desc: '第一财经商业播客' },
-      { name: '不合时宜', url: 'http://rsshub:1200/xiaoyuzhou/podcast/5e280fb8418a84a0461fd076', desc: '国际政经文化对谈' },
-      { name: "Lenny's Newsletter", url: 'https://www.lennysnewsletter.com/feed', desc: '产品经理访谈' },
-      { name: 'Acquired', url: 'https://www.acquired.fm/episodes?format=rss', desc: '公司商业史长谈' },
-    ],
-  },
-  {
-    category: '科技', emoji: '💻', items: [
-      { name: '极客公园', url: 'https://www.geekpark.net/rss', desc: '中文产品趋势' },
-      { name: 'Solidot', url: 'https://www.solidot.org/index.rss', desc: '奇客新闻' },
-      { name: 'Stratechery', url: 'https://stratechery.com/feed/', desc: '科技商业策略' },
-      { name: 'Platformer', url: 'https://www.platformer.news/feed', desc: '平台与社交媒体' },
-    ],
-  },
-  {
-    category: 'AI', emoji: '🤖', items: [
-      { name: '量子位', url: 'https://www.qbitai.com/feed', desc: 'AI 业界动向' },
-      { name: '36氪 AI', url: 'http://rsshub:1200/36kr/news/AI', desc: '36氪 AI 产业资讯' },
-      { name: 'Anthropic News', url: 'https://www.anthropic.com/news/feed.xml', desc: 'Anthropic 官方' },
-      { name: 'One Useful Thing', url: 'https://www.oneusefulthing.org/feed', desc: 'Ethan Mollick 的 AI 实用解读' },
-    ],
-  },
-  {
-    category: '健康', emoji: '💊', items: [
-      { name: '思想健康', url: 'http://rsshub:1200/xiaoyuzhou/podcast/63d49e8c531dadd2b1b37fa3', desc: '营养师健康科普' },
-      { name: '果壳科学人', url: 'http://rsshub:1200/guokr/scientific', desc: '科学/健康频道' },
-      { name: 'Harvard Health Blog', url: 'https://www.health.harvard.edu/blog/feed', desc: '哈佛医学院' },
-      { name: 'STAT News', url: 'https://www.statnews.com/feed/', desc: '医学健康新闻' },
-    ],
-  },
-  {
-    category: '新闻', emoji: '📰', items: [
-      { name: '少数派', url: 'https://sspai.com/feed', desc: '数字生活方式' },
-      { name: '澎湃新闻', url: 'http://rsshub:1200/thepaper/featured', desc: '时政深度' },
-      { name: 'The Free Press', url: 'https://www.thefp.com/feed', desc: 'Bari Weiss 中立独立新闻' },
-      { name: 'Letters from an American', url: 'https://heathercoxrichardson.substack.com/feed', desc: '美国时政历史视角' },
-    ],
-  },
-]
-
 export default function FeedListPage() {
+  const [catalog, setCatalog] = useState<PublicCatalogItem[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogError, setCatalogError] = useState(false)
+  const loadCatalog = async () => {
+    setCatalogLoading(true); setCatalogError(false)
+    try { setCatalog(await listFeedCatalog() || []) }
+    catch { setCatalogError(true) }
+    finally { setCatalogLoading(false) }
+  }
+  useEffect(() => { void loadCatalog() }, [])
+  const catalogGroups = Array.from(new Set(catalog.map(item => item.category || '未分类'))).map(category => ({
+    category, items: catalog.filter(item => (item.category || '未分类') === category),
+  }))
   const navigate = useNavigate()
   const location = useLocation()
   const [feeds, setFeeds] = useState<Feed[]>([])
@@ -554,7 +509,10 @@ export default function FeedListPage() {
           <div id="popular-feeds-groups">
             {popularFeedsExpanded && (
               <>
-                {POPULAR_FEEDS.map(group => {
+                {catalogLoading && <p role="status">正在加载推荐…</p>}
+                {catalogError && <div role="alert">推荐目录加载失败 <button type="button" className="secondary" onClick={() => void loadCatalog()}>重试加载推荐</button></div>}
+                {!catalogLoading && !catalogError && catalog.length === 0 && <p className="text-muted">暂无已上架的推荐</p>}
+                {!catalogError && catalogGroups.map(group => {
                   const folded = foldedGroups[group.category] === true
                   return (
                     <div key={group.category} style={{ marginBottom: 6 }}>
@@ -569,7 +527,7 @@ export default function FeedListPage() {
                           gap: 4,
                         }}
                       >
-                        <span>{group.emoji}</span>
+                        <span aria-hidden="true">📡</span>
                         <span>{group.category}</span>
                         <span style={{ fontSize: 10 }}>{folded ? '▸' : '▾'}</span>
                       </button>
@@ -581,10 +539,10 @@ export default function FeedListPage() {
                               type="button"
                               className="secondary"
                               style={{ fontSize: 12, padding: '3px 10px' }}
-                              title={f.desc}
+                              title={f.description}
                               onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
                             >
-                              {f.name}
+                              {f.title}
                             </button>
                           ))}
                         </div>

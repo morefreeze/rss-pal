@@ -11,6 +11,7 @@ import ArticlePage from './pages/ArticlePage'
 import InterestsPage from './pages/InterestsPage'
 import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
+import AdminFeedCatalogPage from './pages/AdminFeedCatalogPage'
 import AdminMonitoringPage from './pages/AdminMonitoringPage'
 import SharePage from './pages/SharePage'
 import WeeklyPage from './pages/WeeklyPage'
@@ -103,6 +104,7 @@ export function AppRoutes({
         <Route path="insights" element={<Navigate to="/interests" replace />} />
         <Route path="stats" element={<StatsPage />} />
         <Route path="settings" element={<SettingsPage user={user} />} />
+        <Route path="admin/feed-catalog" element={<AdminFeedCatalogPage user={user} />} />
         <Route path="admin/monitoring" element={<AdminMonitoringPage user={user} />} />
       </Route>
       <Route path="*" element={<Navigate to="/articles" replace />} />

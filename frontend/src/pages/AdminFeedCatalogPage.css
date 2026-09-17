@@ -1,0 +1,11 @@
+.feed-catalog-admin { max-width: 960px; margin: 0 auto; }
+.catalog-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+.catalog-controls input { flex: 1; min-width: 150px; }
+.catalog-controls h3 { margin: 0; }
+.catalog-item, .catalog-editor { margin-top: 16px; }
+.catalog-item p { margin: 8px 0; overflow-wrap: anywhere; }
+.catalog-url { font-size: 13px; }
+.catalog-error { color: var(--danger, #dc2626); overflow-wrap: anywhere; }
+.catalog-editor fieldset { border: 0; padding: 0; min-width: 0; }
+.catalog-editor label { display: grid; gap: 6px; margin-bottom: 12px; }
+.catalog-editor input { width: 100%; box-sizing: border-box; }
