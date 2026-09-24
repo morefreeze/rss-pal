@@ -191,24 +191,23 @@ func main() {
 		}
 	}()
 
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	runFetchCycle(context.Background(), cfg, feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir, autoTagger)
-
-	for range ticker.C {
-		runFetchCycle(context.Background(), cfg, feedRepo, articleRepo, prefRepo, fetcher, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir, autoTagger)
-	}
+	runWorkerLoops(context.Background(), time.Minute,
+		func(ctx context.Context) {
+			fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
+		},
+		func(ctx context.Context) {
+			runFetchCycle(ctx, cfg, articleRepo, prefRepo, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir, autoTagger)
+		},
+	)
 }
 
-func runFetchCycle(ctx context.Context, cfg *config.Config, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string, autoTagger *service.AutoTagService) {
+func runFetchCycle(ctx context.Context, cfg *config.Config, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string, autoTagger *service.AutoTagService) {
 	if !cycleMu.TryLock() {
 		log.Println("Previous fetch cycle still running, skipping")
 		return
 	}
 	defer cycleMu.Unlock()
 
-	fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
 	detectLinkSetCandidates(ctx, articleRepo, contentFetcher)
 	detectLinkSetSuggestions(ctx, articleRepo, contentFetcher)
 	processQueuedChildren(ctx, articleRepo, contentFetcher, imageBaseDir)
@@ -449,28 +448,25 @@ func fetchAllFeeds(ctx context.Context, feedRepo *repository.FeedRepository, art
 		return
 	}
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxConcurrentFeeds)
-
-	for i := range feeds {
-		if !shouldFetch(&feeds[i]) {
-			continue
+	due := make([]model.Feed, 0, len(feeds))
+	for _, feed := range feeds {
+		if shouldFetch(&feed) {
+			due = append(due, feed)
 		}
-
-		wg.Add(1)
-		go func(feed model.Feed) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			feedCtx, cancel := context.WithTimeout(ctx, feedTimeout)
-			defer cancel()
-
-			processFeed(feedCtx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer, feed)
-		}(feeds[i])
 	}
-
-	wg.Wait()
+	policy := workerPolicies["subscription_fetch"]
+	globalLimit, ownerLimit := policy.GlobalConcurrent, policy.Concurrent
+	if globalLimit <= 0 {
+		globalLimit = maxConcurrentFeeds
+	}
+	if ownerLimit <= 0 {
+		ownerLimit = 2
+	}
+	dispatchSubscriptionFeeds(ctx, due, globalLimit, ownerLimit, func(ctx context.Context, feed model.Feed) {
+		feedCtx, cancel := context.WithTimeout(ctx, feedTimeout)
+		defer cancel()
+		processFeed(feedCtx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer, feed)
+	})
 }
 
 func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, feed model.Feed) {
@@ -481,7 +477,7 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 	ctx = taskbudget.WithOwner(ctx, owner)
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 	defer cancel()
-	release, err := admitBackground(ctx, "background_fetch")
+	release, err := admitBackground(ctx, "subscription_fetch")
 	if err != nil {
 		return
 	}
@@ -500,6 +496,11 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 	}
 
 	if result == nil {
+		// A 304 is a successful check. Keep validators and wait for the next
+		// configured interval instead of spending quota on every worker tick.
+		if err := feedRepo.UpdateFetchInfo(feed.ID, feed.ETag, feed.LastModified, time.Now().UTC()); err != nil {
+			log.Printf("Failed to update unchanged feed check: %v", err)
+		}
 		return
 	}
 

@@ -12,7 +12,7 @@ const labels: Record<string, string> = {
   user_daily: '用户每日额度', global_daily: '全局每日额度', user_concurrent: '用户并发限制',
   global_concurrent: '全局并发限制', concurrency: '并发限制', ai: 'AI 调用',
   fetch: '抓取', interactive: '交互任务', capture: '网摘', pdf: 'PDF', subscribe: '订阅',
-  background_fetch: '后台抓取', background_ocr: '后台 OCR', summary: '摘要',
+  subscription_fetch: '订阅抓取', background_fetch: '内容补抓', background_ocr: '后台 OCR', summary: '摘要',
   explore: '探索', explore_fetch: '探索抓取', explore_validation: '探索验证',
 }
 const label = (key: string) => labels[key] || key || '—'
