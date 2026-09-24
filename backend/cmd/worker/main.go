@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -103,6 +104,27 @@ func main() {
 	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
 		return workerBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, workerPolicies["ai"])
 	})
+
+	// Explicit maintenance invocation: one bounded refresh batch, followed by
+	// fresh snapshots. Never starts personal subscription/AI/background loops.
+	if len(os.Args) == 2 && os.Args[1] == "--refresh-explore-once" {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+		defer cancel()
+		cfg.Explore.FetchBatchLimit = 60
+		cycle := newProductionExploreCycle(db, cfg)
+		now := time.Now().UTC()
+		window := now.In(time.FixedZone("Asia/Shanghai", 8*60*60))
+		cycle.runProviderWindow(ctx, window, now)
+		if ctx.Err() != nil {
+			log.Fatal(ctx.Err())
+		}
+		result := cycle.deps.snapshots.GenerateAll(ctx, window, time.Now().UTC())
+		if result.NeedsRetry() {
+			log.Fatalf("explore refresh snapshot incomplete: %+v", result)
+		}
+		log.Printf("explore refresh complete: snapshots=%d", result.Done)
+		return
+	}
 
 	feedRepo := repository.NewFeedRepository(db)
 	articleRepo := repository.NewArticleRepository(db)

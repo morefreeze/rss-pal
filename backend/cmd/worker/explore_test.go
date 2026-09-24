@@ -416,7 +416,7 @@ func TestScheduledExploreRegistryEnqueuesDueValidationAndRefreshDespiteProviderF
 		t.Fatalf("scheduled tasks = %+v", queue.tasks)
 	}
 	if queue.tasks[0].SourceID != 4 || queue.tasks[0].TaskType != repository.ExploreTaskValidateSource ||
-		queue.tasks[1].SourceID != 8 || queue.tasks[1].TaskType != repository.ExploreTaskRefreshArticles ||
+		queue.tasks[1].SourceID != 8 || queue.tasks[1].TaskType != repository.ExploreTaskRefreshArticles || queue.tasks[1].Priority != repository.ExplorePriorityRecommendationRefresh ||
 		queue.tasks[2].SourceID != 12 || queue.tasks[2].Priority != repository.ExplorePriorityBrokenHealthCheck {
 		t.Fatalf("scheduled task mapping = %+v", queue.tasks)
 	}
@@ -1009,4 +1009,29 @@ func waitExplore(t *testing.T, condition func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("timed out waiting for explore worker")
+}
+
+func TestExploreCandidatesRequireRecentSuccessfulFetch(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, tc := range []struct {
+		name  string
+		hours int
+	}{{"fresh", 1}, {"stale", 13}} {
+		var id int
+		if err := db.QueryRow(`INSERT INTO recommended_feeds(url,normalized_url,title,category,language,validation_status,last_fetched_at) VALUES($1,$1,$2,'test','en','valid',$3) RETURNING id`, "https://"+tc.name+".example/rss", tc.name, now.Add(-time.Duration(tc.hours)*time.Hour)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) SELECT id,$1,$2,$3 FROM explore_registry_providers WHERE provider_key='chinese-independent'`, id, tc.name, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	candidates, err := (&sqlExploreRankInputs{db: db}).LoadCandidates(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].Title != "fresh" {
+		t.Fatalf("stale source can be recommended: %+v", candidates)
+	}
 }

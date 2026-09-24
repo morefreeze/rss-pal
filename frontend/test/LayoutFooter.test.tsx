@@ -26,8 +26,8 @@ describe('Layout footer', () => {
   })
 })
 
-it.each([true, false])('运行监控桌面入口只对管理员显示：%s', isAdmin => {
+it.each([true, false])('后台管理桌面入口只对管理员显示：%s', isAdmin => {
   render(<MemoryRouter><Routes><Route element={<Layout user={{ id: 1, username: 'reader', is_admin: isAdmin }} onLogout={() => {}} />}><Route path="/" element={<div />} /></Route></Routes></MemoryRouter>)
-  const link = screen.queryByRole('link', { name: /运行监控/ })
+  const link = screen.queryByRole('link', { name: /后台管理/ })
   expect(Boolean(link)).toBe(isAdmin)
 })

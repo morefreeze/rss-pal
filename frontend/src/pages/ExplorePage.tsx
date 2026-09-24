@@ -261,7 +261,7 @@ export default function ExplorePage() {
       {feed.snapshot?.generating && <div className="explore-notice">推荐正在后台优化，当前内容可以继续阅读</div>}
       {(feed.snapshot?.using_fallback || feed.snapshot?.refresh_failed) && (
         <div className="explore-notice explore-notice--warning">
-          最近一次更新失败，正在沿用上一批可用内容
+          {feed.snapshot.refresh_failed ? '最近一次更新失败，正在沿用上一批可用内容' : '正在展示缓存中的可用推荐'}
           {feed.snapshot.completed_at ? ` · 上次更新 ${new Date(feed.snapshot.completed_at).toLocaleString('zh-CN')}` : ''}
         </div>
       )}
@@ -325,7 +325,7 @@ export default function ExplorePage() {
         )}
       </main>
 
-      <ExploreSourceDrawer />
+      <ExploreSourceDrawer key={feed.requestGeneration} />
     </div>
   )
 }

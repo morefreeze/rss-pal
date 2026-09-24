@@ -94,7 +94,7 @@ func TestExploreCatalogDueSQLRequiresEnabledObservation(t *testing.T) {
 		"source.is_broken=true",
 		"observation.last_seen_at > COALESCE(source.last_checked_at,source.last_fetched_at)",
 		"COALESCE(source.last_checked_at,source.last_fetched_at) <= $3",
-		"WHEN source.is_broken=false THEN 1",
+		"WHEN source.validation_status = 'valid' AND source.is_broken=false THEN 0",
 		"ELSE 3",
 		"LIMIT $4",
 	} {
@@ -102,7 +102,7 @@ func TestExploreCatalogDueSQLRequiresEnabledObservation(t *testing.T) {
 			t.Errorf("due-source SQL missing %q", fragment)
 		}
 	}
-	normalIndex := strings.Index(exploreDueSourcesSQL, "WHEN source.is_broken=false THEN 1")
+	normalIndex := strings.Index(exploreDueSourcesSQL, "WHEN source.validation_status = 'valid' AND source.is_broken=false THEN 0")
 	freshBrokenIndex := strings.Index(exploreDueSourcesSQL, "WHEN source.is_broken AND EXISTS")
 	if normalIndex < 0 || freshBrokenIndex < 0 || normalIndex > freshBrokenIndex {
 		t.Fatalf("normal refreshes must sort before every broken health check: %s", exploreDueSourcesSQL)
@@ -773,16 +773,16 @@ func TestExploreCatalogListsOnlyDueCanonicalSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 2 || due[0].ID != pendingID || due[1].ID != validID {
+	if len(due) != 2 || due[0].ID != validID || due[1].ID != pendingID {
 		t.Fatalf("due=%+v invalidIDs=%d,%d noObservationID=%d disabledOnlyID=%d", due, invalidID, oldInvalidID, noObservationID, disabledOnlyID)
 	}
 	limited, err := NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), now.Add(-24*time.Hour), 1)
-	if err != nil || len(limited) != 1 || limited[0].ID != pendingID {
+	if err != nil || len(limited) != 1 || limited[0].ID != validID {
 		t.Fatalf("limited=%+v err=%v", limited, err)
 	}
 	insertCatalogObservation(t, db, enabledProviderID, disabledOnlyID, "new-enabled", fresh)
 	due, err = NewExploreCatalogRepository(db).ListDueSources(now.Add(-time.Hour), now.Add(-time.Hour), now.Add(-24*time.Hour), 10)
-	if err != nil || len(due) != 3 || due[1].ID != disabledOnlyID {
+	if err != nil || len(due) != 3 || due[2].ID != disabledOnlyID {
 		t.Fatalf("new enabled observation did not restore source: due=%+v err=%v", due, err)
 	}
 }

@@ -1,0 +1,15 @@
+.admin-workspace { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 24px; align-items: start; }
+.admin-sidebar { position: sticky; top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.admin-sidebar h2 { font-size: 17px; margin: 0 0 16px; }
+.admin-sidebar nav { display: flex; flex-direction: column; gap: 6px; }
+.admin-sidebar nav a { padding: 12px 10px; border-radius: 8px; color: var(--fg); text-decoration: none; }
+.admin-sidebar nav a.active { background: var(--bg); font-weight: 600; box-shadow: inset 3px 0 0 currentColor; }
+.admin-sidebar nav a:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.admin-content { min-width: 0; }
+.admin-menu-toggle { width: 100%; text-align: left; }
+@media (max-width: 1024px) {
+  .admin-workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .admin-sidebar { position: static; }
+  .admin-sidebar h2 { margin-bottom: 8px; }
+  .admin-sidebar nav { margin-top: 10px; }
+}
