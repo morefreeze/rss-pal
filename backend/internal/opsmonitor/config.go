@@ -75,7 +75,7 @@ func LoadConfig() (Config, error) {
 func validNumber(n float64) bool { return n > 0 && !math.IsNaN(n) && !math.IsInf(n, 0) }
 func validTask(s string) bool {
 	switch s {
-	case "", "register", "login", "refresh", "logout", "init", "ai", "interactive", "fetch", "capture", "pdf", "subscribe", "background_fetch", "background_ocr":
+	case "", "register", "login", "refresh", "logout", "init", "ai", "interactive", "fetch", "capture", "pdf", "subscribe", "subscription_fetch", "background_fetch", "background_ocr":
 		return true
 	}
 	return false
@@ -83,7 +83,7 @@ func validTask(s string) bool {
 
 func validPriceTask(k string) bool {
 	switch k {
-	case "ai", "interactive", "fetch", "capture", "pdf", "subscribe", "background_fetch", "background_ocr":
+	case "ai", "interactive", "fetch", "capture", "pdf", "subscribe", "subscription_fetch", "background_fetch", "background_ocr":
 		return true
 	}
 	return false

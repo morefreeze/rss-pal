@@ -27,6 +27,9 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/api/client', () => apiMocks)
+vi.mock('../src/api/feedCatalog', () => ({
+  listFeedCatalog: vi.fn().mockResolvedValue([{ id: 1, title: '宝玉的分享', url: 'https://baoyu.io/feed.xml', category: '博客', description: 'AI/工程译介', sort_order: 1 }]),
+}))
 
 function LocationProbe() {
   const location = useLocation()

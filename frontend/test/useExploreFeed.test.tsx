@@ -305,4 +305,29 @@ describe('useExploreFeed', () => {
     expect(result.current.error).toBeNull()
     expect(result.current.articles.map(item => item.id)).toEqual([9])
   })
+  it('reloads from the first page when the last source is hidden and pagination is exhausted', async () => {
+    api.getExplore.mockResolvedValueOnce(response([article(1, 7)])).mockResolvedValueOnce(response([article(2, 8)]))
+    api.createExploreFeedback.mockResolvedValue({ id: 94 })
+    const { result } = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(result.current.articles).toHaveLength(1))
+    await act(async () => { await result.current.hideSource(7) })
+    await waitFor(() => expect(result.current.articles.map(item => item.id)).toEqual([2]))
+    expect(api.getExplore).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }))
+  })
+
+  it('refills after topic feedback and restores the original source on undo', async () => {
+    api.getExplore
+      .mockResolvedValueOnce(response([article(1, 7, '工程')]))
+      .mockResolvedValueOnce(response([article(2, 8, '设计')]))
+      .mockResolvedValueOnce(response([article(1, 7, '工程')]))
+    api.createExploreFeedback.mockResolvedValue({ id: 95 })
+    api.deleteExploreFeedback.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(result.current.articles.map(item => item.id)).toEqual([1]))
+    let undo!: () => Promise<void>
+    await act(async () => { undo = await result.current.dampenTopic('工程') })
+    expect(result.current.articles.map(item => item.id)).toEqual([2])
+    await act(async () => { await undo() })
+    expect(result.current.articles.map(item => item.id)).toEqual([1])
+  })
 })

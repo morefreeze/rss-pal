@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/ai"
@@ -13,6 +14,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/englife"
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
+	"github.com/bytedance/rss-pal/internal/feedcatalog"
 	"github.com/bytedance/rss-pal/internal/opsmonitor"
 	"github.com/bytedance/rss-pal/internal/registrationpolicy"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -51,6 +53,12 @@ func main() {
 		log.Fatal(err)
 	}
 	taskBudgets := taskbudget.New(adminDB)
+	if len(os.Args) == 2 && os.Args[1] == "--initialize-feed-catalog" {
+		if err := initializeFeedCatalog(adminDB, cfg.RSSHub.BaseURL, taskBudgets, policies); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	monitorConfig, err := opsmonitor.LoadConfig()
 	if err != nil {
 		log.Fatal(err)
@@ -291,6 +299,15 @@ func main() {
 	apiGroup.POST("/admin/integrations/englife/pair", englifeHandler.Pair)
 	apiGroup.POST("/admin/integrations/englife/check", englifeHandler.Check)
 	apiGroup.DELETE("/admin/integrations/englife", englifeHandler.Disconnect)
+	catalogService := feedcatalog.NewFeedCatalogService(repository.NewFeedCatalogRepository(adminDB), feedcatalog.CatalogRSSVerifier(cfg.RSSHub.BaseURL))
+	catalogHandler := api.NewFeedCatalogHandler(adminDB, catalogService)
+	apiGroup.GET("/feed-catalog", catalogHandler.PublicList)
+	catalogAdmin := apiGroup.Group("/admin/feed-catalog", catalogHandler.RequireAdmin, api.TaskBudgetMiddleware(taskBudgets, policies))
+	catalogAdmin.GET("", catalogHandler.List)
+	catalogAdmin.POST("", catalogHandler.Create)
+	catalogAdmin.PUT("/:id", catalogHandler.Update)
+	catalogAdmin.POST("/:id/check", catalogHandler.Check)
+	catalogAdmin.POST("/:id/publication", catalogHandler.Publication)
 	apiGroup.Use(api.TaskBudgetMiddleware(taskBudgets, policies))
 	apiGroup.Use(api.RLSTxMiddleware(db))
 	{

@@ -1,0 +1,52 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { MemoryRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { beforeEach, expect, it, vi } from 'vitest'
+import AdminLayout from '../src/components/AdminLayout'
+import AdminStatusPage from '../src/pages/AdminStatusPage'
+const state = vi.hoisted(() => ({ breakpoint: 'desktop' }))
+vi.mock('../src/hooks/useBreakpoint', () => ({ useBreakpoint: () => state.breakpoint }))
+beforeEach(() => { state.breakpoint = 'desktop' })
+function mount(admin = true, path = '/admin') {
+  return render(<MemoryRouter initialEntries={[path]}><Routes>
+    <Route path="admin" element={<AdminLayout user={{is_admin: admin}} />}>
+      <Route index element={<Navigate to="feed-catalog" replace />} />
+      <Route path="feed-catalog" element={<p>目录内容</p>} />
+      <Route path="monitoring" element={<p>监控内容</p>} />
+      <Route path="status" element={<AdminStatusPage />} />
+    </Route>
+  </Routes></MemoryRouter>)
+}
+it('后台默认目录并通过侧边栏切换，保留当前项高亮', () => {
+  mount()
+  expect(screen.getByText('目录内容')).toBeTruthy()
+  expect(screen.getByRole('link', {name: /公共推荐目录/}).getAttribute('aria-current')).toBe('page')
+  fireEvent.click(screen.getByRole('link', {name: /运行监控/}))
+  expect(screen.getByText('监控内容')).toBeTruthy()
+  expect(screen.getByRole('link', {name: /运行监控/}).getAttribute('aria-current')).toBe('page')
+})
+it('普通用户不能挂载后台内容', () => {
+  mount(false, '/admin/monitoring')
+  expect(screen.getByText('仅管理员可访问后台管理')).toBeTruthy()
+  expect(screen.queryByText('监控内容')).toBeNull()
+  expect(screen.queryByRole('navigation', {name: '后台导航'})).toBeNull()
+})
+it('手机展开后台菜单，选择后收起且切换内容', () => {
+  state.breakpoint = 'phone';mount(true, '/admin/feed-catalog')
+  const button=screen.getByRole('button',{name:/后台菜单/})
+  expect(button.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(button)
+  fireEvent.click(screen.getByRole('link',{name:/运行监控/}))
+  expect(screen.getByText('监控内容')).toBeTruthy()
+  expect(button.getAttribute('aria-expanded')).toBe('false')
+})
+
+it('服务状态嵌入原状态页，并支持刷新和独立访问', () => {
+  mount()
+  fireEvent.click(screen.getByRole('link', {name: /服务状态/}))
+  const original = screen.getByTitle('服务状态与 72 小时可用性')
+  expect(original.getAttribute('src')).toBe('/status')
+  expect(screen.getByRole('link', {name: /打开独立页面/}).getAttribute('href')).toBe('/status')
+  expect(screen.getByRole('link', {name: /服务状态/}).getAttribute('aria-current')).toBe('page')
+  fireEvent.click(screen.getByRole('button', {name: '刷新状态页'}))
+  expect(screen.getByTitle('服务状态与 72 小时可用性')).not.toBe(original)
+})

@@ -232,7 +232,7 @@ function LayoutInner({
     return location.pathname === item.to || location.pathname.startsWith(item.to + '/')
   }
 
-  const navItems = user?.is_admin ? [...NAV_ITEMS, { to: '/admin/monitoring', icon: '🛡️', label: '运行监控' }, { to: '/admin/integrations/englife', icon: '🔗', label: 'englife 连接' }] : NAV_ITEMS
+  const navItems = user?.is_admin ? [...NAV_ITEMS, { to: '/admin', icon: '🛡️', label: '后台管理' }] : NAV_ITEMS
 
   const navLinkClass = (item: NavItem) => (itemIsActive(item) ? 'nav-link active' : 'nav-link')
 

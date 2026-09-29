@@ -267,6 +267,9 @@ func TestClientProxyUsesPinnedTargetAndOriginalHost(t *testing.T) {
 	if _, err := io.ReadAll(response.Body); err != nil {
 		t.Fatalf("read response: %v", err)
 	}
+	if response.Request.URL.String() != "http://safe.example/feed" {
+		t.Fatalf("proxy leaked pinned address as public URL: %s", response.Request.URL)
+	}
 	proxyRequest := <-requests
 	if !strings.Contains(proxyRequest, "GET http://93.184.216.34:80/feed HTTP/1.1\r\n") || !strings.Contains(proxyRequest, "Host: safe.example\r\n") || !strings.Contains(proxyRequest, "Proxy-Authorization: Basic dXNlcjpwYXNz\r\n") {
 		t.Fatalf("proxy request did not preserve pinned target and original host: %q", proxyRequest)
@@ -330,6 +333,9 @@ func TestClientHTTPSProxyPinsConnectAndPreservesSNIAndHost(t *testing.T) {
 	defer response.Body.Close()
 	if _, err := io.ReadAll(response.Body); err != nil {
 		t.Fatalf("read response: %v", err)
+	}
+	if response.Request.URL.String() != "https://safe.example/feed" {
+		t.Fatalf("proxy leaked pinned HTTPS address: %s", response.Request.URL)
 	}
 	got := <-captures
 	if got.connect != "93.184.216.34:443" || got.proxySNI != "proxy.example" || got.sni != "safe.example" || got.host != "safe.example" {
@@ -566,5 +572,64 @@ func TestFetchBoundedRejectsNilClientAndCancelledContext(t *testing.T) {
 	_, err := FetchBounded(ctx, client, "https://8.8.8.8/feed", nil, 1)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestProxyRelativeRedirectRetainsPublicOrigin(t *testing.T) {
+	resolver := fakeResolver{lookup: func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+	}}
+	proxyURL, _ := url.Parse("http://127.0.0.1:8888")
+	var mu sync.Mutex
+	var hosts []string
+	proxyDialer := &recordingDialer{dial: func(_ context.Context, _ string, _ string) (net.Conn, error) {
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			reader := bufio.NewReader(server)
+			requestLine, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			var host string
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					return
+				}
+				if line == "\r\n" {
+					break
+				}
+				if strings.HasPrefix(line, "Host: ") {
+					host = strings.TrimSpace(strings.TrimPrefix(line, "Host: "))
+				}
+			}
+			mu.Lock()
+			hosts = append(hosts, host)
+			mu.Unlock()
+			if strings.Contains(requestLine, "/start ") {
+				_, _ = io.WriteString(server, "HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\n\r\n")
+			} else {
+				_, _ = io.WriteString(server, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+			}
+		}()
+		return client, nil
+	}}
+	client := newClientWithProxy(time.Second, resolver, proxyDialer, func(*http.Request) (*url.URL, error) { return proxyURL, nil })
+	response, err := client.Get("http://safe.example/start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if _, err := io.ReadAll(response.Body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Request.URL.String() != "http://safe.example/final" {
+		t.Fatalf("final URL=%s", response.Request.URL)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(hosts) != 2 || hosts[0] != "safe.example" || hosts[1] != "safe.example" {
+		t.Fatalf("redirect Host changed: %v", hosts)
 	}
 }

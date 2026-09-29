@@ -12,6 +12,7 @@ import InterestsPage from './pages/InterestsPage'
 import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
 import EnglifeIntegrationPage from './pages/EnglifeIntegrationPage'
+import AdminFeedCatalogPage from './pages/AdminFeedCatalogPage'
 import AdminMonitoringPage from './pages/AdminMonitoringPage'
 import SharePage from './pages/SharePage'
 import WeeklyPage from './pages/WeeklyPage'
@@ -23,6 +24,8 @@ import ExtensionConfigPage from './pages/ExtensionConfigPage'
 import ExplorePage from './pages/ExplorePage'
 import ExploreArticlePage from './pages/ExploreArticlePage'
 import Layout from './components/Layout'
+import AdminLayout from './components/AdminLayout'
+import AdminStatusPage from './pages/AdminStatusPage'
 import RoutePageTitle from './components/RoutePageTitle'
 
 export interface User {
@@ -104,8 +107,13 @@ export function AppRoutes({
         <Route path="insights" element={<Navigate to="/interests" replace />} />
         <Route path="stats" element={<StatsPage />} />
         <Route path="settings" element={<SettingsPage user={user} />} />
-        <Route path="admin/integrations/englife" element={<EnglifeIntegrationPage user={user} />} />
-        <Route path="admin/monitoring" element={<AdminMonitoringPage user={user} />} />
+        <Route path="admin" element={<AdminLayout user={user} />}>
+          <Route index element={<Navigate to="feed-catalog" replace />} />
+          <Route path="feed-catalog" element={<AdminFeedCatalogPage user={user} />} />
+          <Route path="monitoring" element={<AdminMonitoringPage user={user} />} />
+          <Route path="status" element={<AdminStatusPage />} />
+          <Route path="integrations/englife" element={<EnglifeIntegrationPage user={user} />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/articles" replace />} />
     </Routes>

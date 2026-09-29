@@ -298,10 +298,18 @@ func (t *safeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 		if err != nil {
 			return nil, err
 		}
+		var response *http.Response
 		if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
-			return roundTripViaSOCKSProxy(t.direct, t.dialer, proxyURL, pinned, serverName, t.tlsConfig)
+			response, err = roundTripViaSOCKSProxy(t.direct, t.dialer, proxyURL, pinned, serverName, t.tlsConfig)
+		} else {
+			response, err = roundTripViaHTTPProxy(req.Context(), t.dialer, proxyURL, pinned, serverName, t.tlsConfig)
 		}
-		return roundTripViaHTTPProxy(req.Context(), t.dialer, proxyURL, pinned, serverName, t.tlsConfig)
+		// IP pinning is transport-only. Redirect resolution and callers must
+		// see the public URL, never persist a shared hosting/CDN IP as identity.
+		if response != nil {
+			response.Request = req
+		}
+		return response, err
 	}
 	return t.direct.RoundTrip(req)
 }

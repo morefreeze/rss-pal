@@ -40,6 +40,23 @@ func TaskBudgetMiddleware(store *taskbudget.Store, policies taskbudget.Policies)
 		ctx := taskbudget.WithOwner(c.Request.Context(), uid)
 		c.Request = c.Request.WithContext(ctx)
 		bucket, cost := taskRoute(c.Request.Method, c.FullPath()), 1
+		// Taking an entry down performs no fetch and must remain possible even
+		// when the administrator's fetch budget is exhausted.
+		if c.FullPath() == "/api/admin/feed-catalog/:id/publication" {
+			body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, 1024))
+			if err != nil {
+				c.AbortWithStatusJSON(413, gin.H{"error": "请求内容过大"})
+				return
+			}
+			c.Request.Body = io.NopCloser(bytes.NewReader(body))
+			var in struct {
+				Published *bool `json:"published"`
+			}
+			if json.Unmarshal(body, &in) == nil && in.Published != nil && !*in.Published {
+				bucket = ""
+			}
+		}
+
 		if bucket == "" {
 			c.Next()
 			return
@@ -110,7 +127,7 @@ func taskRoute(method, path string) string {
 		return "capture"
 	case "/api/feeds", "/api/explore/sources/subscribe-batch", "/api/explore/sources/:id/subscribe":
 		return "subscribe"
-	case "/api/feeds/preview", "/api/feeds/:id/fetch", "/api/articles/:id/content", "/api/articles/:id/expand", "/api/articles/:id/batch_fetch", "/api/articles/:id/confirm_link_set", "/api/articles/:id/youtube-playback":
+	case "/api/admin/feed-catalog/:id/check", "/api/admin/feed-catalog/:id/publication", "/api/feeds/preview", "/api/feeds/:id/fetch", "/api/articles/:id/content", "/api/articles/:id/expand", "/api/articles/:id/batch_fetch", "/api/articles/:id/confirm_link_set", "/api/articles/:id/youtube-playback":
 		return "fetch"
 	case "/api/articles/:id/summary", "/api/settings/polish-prompt":
 		return "interactive"
