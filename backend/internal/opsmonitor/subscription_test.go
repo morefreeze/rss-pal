@@ -23,3 +23,20 @@ func TestSubscriptionBudgetEventsAreRecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestIndependentAIPoolEventsAreRecorded(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	r := &Recorder{db: db, input: make(chan Event, 10)}
+	for _, bucket := range []string{"ai_auto", "ai_manual"} {
+		r.Record(Event{Kind: "limit", Reason: "user_daily", TaskType: bucket, UserID: 1, Count: 1})
+	}
+	r.flush()
+	var count int
+	if err := db.QueryRow(`SELECT count(DISTINCT task_type) FROM operations_events WHERE task_type IN ('ai_auto','ai_manual')`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("pool events lost: %d", count)
+	}
+}

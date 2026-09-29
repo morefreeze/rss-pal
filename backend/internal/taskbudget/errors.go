@@ -24,8 +24,13 @@ func (e *LimitError) Error() string {
 		scope = "全站"
 	}
 	task := "任务"
-	if e.Bucket == "ai" {
+	switch e.Bucket {
+	case "ai":
 		task = "AI 调用"
+	case "ai_auto":
+		task = "自动 AI 调用"
+	case "ai_manual":
+		task = "手动 AI 调用"
 	}
 	if strings.HasSuffix(e.Reason, "_concurrency") {
 		return fmt.Sprintf("%s%s并发已达上限（%d/%d），请等待正在执行的任务结束后重试", scope, task, e.Used, e.Limit)

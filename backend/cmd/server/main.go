@@ -77,7 +77,7 @@ func main() {
 	ai.ConfigureUsageRecorder(aiusage.Recorder(adminDB))
 	articleAI := airouting.NewStore(adminDB, cfg.Share.Secret, cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
-		return taskBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, policies["ai"])
+		return taskBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai_manual", 1, policies["ai_manual"])
 	})
 
 	feedRepo := repository.NewFeedRepository(db)

@@ -110,7 +110,7 @@ func main() {
 	}
 	articleAI := airouting.NewStore(db, cfg.Share.Secret, cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
-		return workerBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, workerPolicies["ai"])
+		return workerBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai_auto", 1, workerPolicies["ai_auto"])
 	})
 
 	// Explicit maintenance invocation: one bounded refresh batch, followed by

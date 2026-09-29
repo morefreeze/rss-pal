@@ -12,7 +12,7 @@ type Policies map[string]Policy
 func LoadPolicies() (Policies, error) {
 	out := Policies{}
 	for key, limits := range map[string][4]int{
-		"ai": {50, 1000, 2, 4}, "interactive": {300, 10000, 2, 20},
+		"ai_auto": {100, 1000, 2, 4}, "ai_manual": {20, 1000, 2, 4}, "interactive": {300, 10000, 2, 20},
 		"fetch": {100, 5000, 2, 10}, "capture": {100, 5000, 2, 10}, "pdf": {10, 300, 1, 3}, "subscribe": {30, 1000, 2, 10},
 		"subscription_fetch": {500, 5000, 2, 5},
 		"background_fetch":   {500, 5000, 2, 5}, "background_ocr": {10, 100, 1, 2},
