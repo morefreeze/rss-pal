@@ -132,6 +132,7 @@ services:
       SERVER_PORT: 8080
       RSSHUB_BASE_URL: http://rsshub:1200
       YOUTUBE_POT_PROVIDER_URL: http://youtube-pot:4416
+      ENGLIFE_SESSION_KEY: ${ENGLIFE_SESSION_KEY:-}
       BACKUP_DIR: /backups
     depends_on:
       postgres:
@@ -179,6 +180,7 @@ services:
       EXPLORE_FETCH_BATCH_LIMIT: ${EXPLORE_FETCH_BATCH_LIMIT:-500}
       EXPLORE_FETCH_CONCURRENCY: ${EXPLORE_FETCH_CONCURRENCY:-5}
       RSSHUB_BASE_URL: http://rsshub:1200
+      ENGLIFE_SESSION_KEY: ${ENGLIFE_SESSION_KEY:-}
       BACKUP_DIR: /backups
     depends_on:
       postgres:

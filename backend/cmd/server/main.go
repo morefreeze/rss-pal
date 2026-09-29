@@ -11,6 +11,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/api"
 	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/config"
+	"github.com/bytedance/rss-pal/internal/englife"
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/opsmonitor"
 	"github.com/bytedance/rss-pal/internal/registrationpolicy"
@@ -100,14 +101,19 @@ func main() {
 	backupRunner := backup.NewRunner(adminDB, cfg.Backup.Dir)
 
 	contentFetcher := rss.NewContentFetcher()
-	transcriptFetcher := &transcript.MultiFetcher{
+	englifeService, err := englife.NewService(englife.NewSQLStore(adminDB), cfg.EnglifeSessionKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+	englifeHandler := api.NewEnglifeHandler(adminDB, englifeService)
+	transcriptFetcher := &transcript.EnglifeFallback{Service: englifeService, Primary: &transcript.MultiFetcher{
 		Strategies: []transcript.Fetcher{
 			&transcript.YouTubeCC{},
 			&transcript.BilibiliCC{},
 			&transcript.YTDLP{},
 			&transcript.HTMLPageScraper{Docs: contentFetcher},
 		},
-	}
+	}}
 
 	pdfImgHandler := api.NewArticleImageHandler(cfg.Backup.Dir,
 		api.ArticleImageAccess(articleRepo))
@@ -274,11 +280,17 @@ func main() {
 		api.TaskBudgetMiddleware(taskBudgets, policies),
 		extensionIngestHandler.Ingest)
 
+	router.POST("/api/integrations/englife/complete", englifeHandler.Complete)
+
 	// Protected routes
 	apiGroup := router.Group("/api")
 	apiGroup.Use(api.ArticleImageCacheControl())
 	apiGroup.Use(authHandler.AuthMiddleware())
 	apiGroup.GET("/admin/monitoring", api.NewAdminMonitoringHandler(adminDB, opsmonitor.NewService(adminDB, monitorConfig, policies)).Get)
+	apiGroup.GET("/admin/integrations/englife", englifeHandler.Get)
+	apiGroup.POST("/admin/integrations/englife/pair", englifeHandler.Pair)
+	apiGroup.POST("/admin/integrations/englife/check", englifeHandler.Check)
+	apiGroup.DELETE("/admin/integrations/englife", englifeHandler.Disconnect)
 	apiGroup.Use(api.TaskBudgetMiddleware(taskBudgets, policies))
 	apiGroup.Use(api.RLSTxMiddleware(db))
 	{

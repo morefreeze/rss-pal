@@ -12,7 +12,9 @@
     "notifications",
     "declarativeNetRequestWithHostAccess"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -32,17 +34,28 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://mp.weixin.qq.com/*", "http://mp.weixin.qq.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://mp.weixin.qq.com/*",
+        "http://mp.weixin.qq.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://*/extension-config"],
-      "js": ["config-receiver.js"],
+      "matches": [
+        "*://*/extension-config"
+      ],
+      "js": [
+        "config-receiver.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://x.com/*"],
+      "matches": [
+        "https://x.com/*"
+      ],
       "js": [
         "adapters/registry.js",
         "queue.js",
@@ -54,10 +67,22 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://rss.morefreeze.top/*"],
+      "matches": [
+        "https://rss.morefreeze.top/*"
+      ],
       "js": [
         "youtube/protocol.js",
         "youtube/bridge-content.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://rss.morefreeze.top/*",
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "js": [
+        "englife/bridge-content.js"
       ]
     }
   ],
@@ -73,5 +98,8 @@
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
-  }
+  },
+  "optional_permissions": [
+    "cookies"
+  ]
 }

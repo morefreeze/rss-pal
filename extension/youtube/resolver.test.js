@@ -1724,6 +1724,7 @@ test('background routes YouTube messages and cleanup through the resolver', asyn
     setTimeout,
   });
   context.globalThis = context;
+  context.__rssPalEnglife = { createConnection: () => ({ cleanup: async () => {}, handle: async () => ({ ok: false }) }) };
   context.__rssPalYouTubeProtocol = protocolGlobal;
   context.__rssPalYouTubeFormatSelection = selectionGlobal;
   context.__rssPalCaptureYouTubePageState = captureGlobal;
@@ -1737,6 +1738,7 @@ test('background routes YouTube messages and cleanup through the resolver', asyn
 
   assert.deepEqual(imported, [
     'queue.js',
+    'englife/connection.js',
     'youtube/protocol.js',
     'youtube/format-selection.js',
     'youtube/page-capture.js',

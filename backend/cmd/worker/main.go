@@ -12,6 +12,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/config"
+	"github.com/bytedance/rss-pal/internal/englife"
 	"github.com/bytedance/rss-pal/internal/imagefetch"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/opsmonitor"
@@ -126,14 +127,18 @@ func main() {
 	fetcher := rss.NewFetcher(cfg.RSSHub.BaseURL)
 	contentFetcher := rss.NewContentFetcher()
 
-	transcriptFetcher := &transcript.MultiFetcher{
+	englifeService, err := englife.NewService(englife.NewSQLStore(db), cfg.EnglifeSessionKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+	transcriptFetcher := &transcript.EnglifeFallback{Service: englifeService, Primary: &transcript.MultiFetcher{
 		Strategies: []transcript.Fetcher{
 			&transcript.YouTubeCC{},
 			&transcript.BilibiliCC{},
 			&transcript.YTDLP{},
 			&transcript.HTMLPageScraper{Docs: contentFetcher},
 		},
-	}
+	}}
 
 	var summarizer *ai.Summarizer
 	if cfg.Claude.APIKey != "" {
@@ -403,6 +408,9 @@ func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRep
 			result, err := fetcher.Fetch(tCtx, article)
 			if err != nil {
 				log.Printf("Transcript fetch error for article %d: %v", article.ID, err)
+				if deferErr := articleRepo.DeferTranscriptRetry(article.ID); deferErr != nil {
+					log.Printf("Transcript retry scheduling failed for article %d", article.ID)
+				}
 				return // leave transcript_fetched_at NULL → retried next cycle
 			}
 			if result == nil || strings.TrimSpace(result.Text) == "" {
@@ -432,7 +440,7 @@ func buildContentWithTranscript(existing string, r *transcript.Result) string {
 		b.WriteString(existing)
 		b.WriteString("\n\n---\n\n")
 	}
-	b.WriteString("## 字幕\n\n")
+	b.WriteString("## " + r.Heading() + "\n\n")
 	if r.Source != "" {
 		b.WriteString("> 来源：")
 		b.WriteString(r.Source)

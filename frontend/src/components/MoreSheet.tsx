@@ -30,7 +30,7 @@ export default function MoreSheet({ open, onClose, onLogout, isAdmin = false }: 
 
   if (!open) return null
 
-  const items: SheetItem[] = isAdmin ? [{ icon: '🛡️', label: '运行监控', to: '/admin/monitoring' }, ...ITEMS] : ITEMS
+  const items: SheetItem[] = isAdmin ? [{ icon: '🛡️', label: '运行监控', to: '/admin/monitoring' }, { icon: '🔗', label: 'englife 连接', to: '/admin/integrations/englife' }, ...ITEMS] : ITEMS
 
   const onItem = (item: SheetItem) => {
     onClose()

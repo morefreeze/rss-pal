@@ -59,3 +59,12 @@ func TestMultiFetcher_AllErrorsReturnFirst(t *testing.T) {
 		t.Errorf("expected first error, got (%+v, %v)", got, err)
 	}
 }
+
+func TestMultiFetcherPreservesLaterPendingError(t *testing.T) {
+	pending := errors.New("pending")
+	m := &MultiFetcher{Strategies: []Fetcher{&stubFetcher{err: errors.New("youtube failed")}, &stubFetcher{err: pending}}}
+	_, err := m.Fetch(context.Background(), &model.Article{})
+	if !errors.Is(err, pending) {
+		t.Fatal("later task state lost", err)
+	}
+}

@@ -724,6 +724,7 @@ func (r *ArticleRepository) GetMediaArticlesWithoutTranscript(limit int) ([]mode
 		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note, kind
 		FROM articles
 		WHERE transcript_fetched_at IS NULL
+ AND (transcript_next_attempt_at IS NULL OR transcript_next_attempt_at<=NOW())
 		  AND media_type IS NOT NULL
 		  AND (media_type LIKE 'video/%' OR media_type LIKE 'audio/%')
 		ORDER BY fetched_at DESC
@@ -1978,7 +1979,6 @@ func (r *ArticleRepository) ResetPDFToProcessing(id int) error {
 // resource access (e.g. PDF image serving). A missing article — or
 // a feed whose owner is someone else — both yield (false, nil); only
 // driver-level failures return a non-nil error.
-//
 func (r *ArticleRepository) UserOwnsArticle(userID, articleID int) (bool, error) {
 	var owns bool
 	err := r.db.QueryRow(`
@@ -2022,3 +2022,9 @@ func (r *ArticleRepository) GetPDFOCRPending(limit int) ([]model.Article, error)
 // _internal_test.go file in this package can assert that WithCtx rebinds it.
 // Do not call from production code.
 func (r *ArticleRepository) querier() Querier { return r.db }
+
+// DeferTranscriptRetry keeps pending providers from monopolizing each batch.
+func (r *ArticleRepository) DeferTranscriptRetry(id int) error {
+	_, err := r.db.Exec(`UPDATE articles SET transcript_next_attempt_at=NOW()+INTERVAL '2 minutes' WHERE id=$1`, id)
+	return err
+}

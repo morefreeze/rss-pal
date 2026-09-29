@@ -9,16 +9,17 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Claude   ClaudeConfig
-	AI       AIConfig
-	Auth     AuthConfig
-	JWT      JWTConfig
-	RSSHub   RSSHubConfig
-	Backup   BackupConfig
-	Explore  ExploreConfig
-	Share    ShareConfig
+	EnglifeSessionKey string
+	Server            ServerConfig
+	Database          DatabaseConfig
+	Claude            ClaudeConfig
+	AI                AIConfig
+	Auth              AuthConfig
+	JWT               JWTConfig
+	RSSHub            RSSHubConfig
+	Backup            BackupConfig
+	Explore           ExploreConfig
+	Share             ShareConfig
 }
 
 type BackupConfig struct {
@@ -108,6 +109,7 @@ const shortShareOrigin = "https://r.morefreeze.top"
 
 func Load() *Config {
 	return &Config{
+		EnglifeSessionKey: getEnv("ENGLIFE_SESSION_KEY", ""),
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8080"),
 		},

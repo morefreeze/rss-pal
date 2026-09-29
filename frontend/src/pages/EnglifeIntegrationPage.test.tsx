@@ -1,0 +1,85 @@
+import { act, fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import EnglifeIntegrationPage from './EnglifeIntegrationPage'
+import { api } from '../api/client'
+vi.mock('../api/client', () => ({ api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() } }))
+vi.mock('../englife/bridge', () => ({ englifeBridge: vi.fn(async () => ({ ok: true })) }))
+const disconnected = { state: 'disconnected', configured: true, jobs: [] }
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers() })
+describe('englife admin connection', () => {
+ it('does not make any integration requests for non-admins', () => {
+   render(<EnglifeIntegrationPage user={{is_admin:false}} />)
+   expect(screen.getByText(/仅管理员/)).toBeTruthy(); expect(api.get).not.toHaveBeenCalled()
+ })
+ it('connect polls status and manual disconnect clears ready account', async () => {
+   vi.mocked(api.get).mockResolvedValue({data:disconnected})
+   vi.mocked(api.post).mockResolvedValue({data:{token:'pair-token',expires_at:new Date(Date.now()+60000).toISOString()}})
+   vi.mocked(api.delete).mockResolvedValue({data:disconnected})
+   render(<EnglifeIntegrationPage user={{is_admin:true}} />)
+   await screen.findByText('未连接')
+   fireEvent.click(screen.getByRole('button',{name:'登录后授权连接'}))
+   await screen.findByText(/请在扩展授权页确认/)
+   vi.mocked(api.get).mockResolvedValue({data:{...disconnected,state:'ready',connection_id:'new-connection',account:'owner@example.test'}})
+   await waitFor(() => expect(screen.getByText('已连接')).toBeTruthy(), {timeout: 4000})
+   expect(screen.getByText(/owner@example.test/)).toBeTruthy()
+   vi.useRealTimers()
+   fireEvent.click(screen.getByRole('button',{name:'断开连接'}))
+   await waitFor(()=>expect(api.delete).toHaveBeenCalledWith('/admin/integrations/englife'))
+   await screen.findByText('未连接')
+ })
+})
+
+it('does not mistake the old ready account for completion of reconnect', async () => {
+ vi.mocked(api.get).mockResolvedValue({data:{...disconnected,state:'ready',connection_id:'old-connection',checked_at:'2026-09-29T00:00:00Z'}})
+ vi.mocked(api.post).mockResolvedValue({data:{token:'new-token',expires_at:new Date(Date.now()+60000).toISOString()}})
+ render(<EnglifeIntegrationPage user={{is_admin:true}} />)
+ await screen.findByText('已连接')
+ fireEvent.click(screen.getByRole('button',{name:'登录后授权连接'}))
+ await screen.findByText(/请在扩展授权页确认/)
+ vi.mocked(api.get).mockResolvedValue({data:{...disconnected,state:'ready',connection_id:'old-connection',checked_at:'2026-09-29T01:00:00Z'}})
+ await act(async () => { await new Promise(resolve => setTimeout(resolve,2200)) })
+ expect(screen.getByText(/请在扩展授权页确认/)).toBeTruthy()
+})
+it('allows check to finish within backend timeout and translates attention jobs', async () => {
+ vi.mocked(api.get).mockResolvedValue({data:{...disconnected,jobs:[{video_id:'abc',status:'needs_attention',updated_at:'2026-09-29T00:00:00Z'}]}})
+ vi.mocked(api.post).mockResolvedValue({data:disconnected})
+ render(<EnglifeIntegrationPage user={{is_admin:true}} />)
+ await screen.findByText('未连接')
+ expect(screen.getByRole('listitem').textContent).toContain('需要人工检查')
+ expect(screen.getByText(/避免重复扣费/)).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'检查状态'}))
+ await waitFor(()=>expect(api.post).toHaveBeenCalledWith('/admin/integrations/englife/check', undefined, {timeout:40000}))
+})
+it('does not authorize a delayed pair result after demotion',async()=>{
+ const {englifeBridge}=await import('../englife/bridge')
+ let resolvePair!: (value:any)=>void
+ vi.mocked(api.get).mockResolvedValue({data:disconnected})
+ vi.mocked(api.post).mockReturnValue(new Promise(resolve=>{resolvePair=resolve}))
+ const view=render(<EnglifeIntegrationPage user={{is_admin:true}} />)
+ await screen.findByText('未连接')
+ fireEvent.click(screen.getByRole('button',{name:'登录后授权连接'}))
+ await waitFor(()=>expect(api.post).toHaveBeenCalled())
+ view.rerender(<EnglifeIntegrationPage user={{is_admin:false}} />)
+ await act(async()=>{resolvePair({data:{token:'late',expires_at:new Date(Date.now()+60000).toISOString()}})})
+ expect(vi.mocked(englifeBridge).mock.calls.map(call=>call[0])).toEqual(['PING'])
+})
+it('ignores stale check response after demotion and regrant',async()=>{
+ let resolveCheck!: (value:any)=>void
+ vi.mocked(api.get).mockResolvedValue({data:disconnected})
+ vi.mocked(api.post).mockReturnValue(new Promise(resolve=>{resolveCheck=resolve}))
+ const view=render(<EnglifeIntegrationPage user={{is_admin:true}} />)
+ await screen.findByText('未连接')
+ fireEvent.click(screen.getByRole('button',{name:'检查状态'}))
+ view.rerender(<EnglifeIntegrationPage user={{is_admin:false}} />)
+ view.rerender(<EnglifeIntegrationPage user={{is_admin:true}} />)
+ await screen.findByText('未连接')
+ await act(async()=>{resolveCheck({data:{...disconnected,state:'ready',account:'stale-account'}})})
+ expect(screen.queryByText(/stale-account/)).toBeNull()
+ expect(screen.getByText('未连接')).toBeTruthy()
+})
+it('links to Settings installation instructions instead of the token configuration receiver',async()=>{
+ vi.mocked(api.get).mockResolvedValue({data:disconnected})
+ render(<EnglifeIntegrationPage user={{is_admin:true}} />)
+ await screen.findByText('未连接')
+ expect(screen.getByRole('link',{name:'在设置中安装/更新扩展'}).getAttribute('href')).toBe('/settings')
+})

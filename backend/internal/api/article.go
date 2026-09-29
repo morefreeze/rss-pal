@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/config"
+	"github.com/bytedance/rss-pal/internal/englife"
 	"github.com/bytedance/rss-pal/internal/imagefetch"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -397,6 +399,10 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	}
 
 	if content, ok, ferr := fetchTranscriptContentForSummary(c.Request.Context(), h.transcriptFetcher, article); ferr != nil {
+		if errors.Is(ferr, englife.ErrPending) || errors.Is(ferr, englife.ErrFailed) || errors.Is(ferr, englife.ErrExpired) || errors.Is(ferr, englife.ErrQuota) || errors.Is(ferr, englife.ErrUnavailable) {
+			c.JSON(http.StatusConflict, gin.H{"error": "视频整理尚未完成；可稍后重试，管理员可在第三方服务查看状态"})
+			return
+		}
 		log.Printf("summary transcript fetch article=%d: %v", article.ID, ferr)
 	} else if ok {
 		wc, rm := rss.ComputeMetrics(content)
@@ -834,7 +840,7 @@ func lacksSummarizableMediaContent(article *model.Article) bool {
 
 func articleHasTranscript(content string) bool {
 	content = strings.TrimSpace(content)
-	return strings.HasPrefix(content, "## 字幕") || strings.Contains(content, "\n## 字幕")
+	return strings.HasPrefix(content, "## 字幕") || strings.Contains(content, "\n## 字幕") || strings.HasPrefix(content, "## 视频整理（englife）") || strings.Contains(content, "\n## 视频整理（englife）")
 }
 
 func appendTranscriptToContent(existing string, r *transcript.Result) string {
@@ -844,7 +850,7 @@ func appendTranscriptToContent(existing string, r *transcript.Result) string {
 		b.WriteString(existing)
 		b.WriteString("\n\n---\n\n")
 	}
-	b.WriteString("## 字幕\n\n")
+	b.WriteString("## " + r.Heading() + "\n\n")
 	if r.Source != "" {
 		b.WriteString("> 来源：")
 		b.WriteString(r.Source)

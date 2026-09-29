@@ -3,7 +3,7 @@
   "version": "1.8.4",
   "private": true,
   "scripts": {
-    "test": "node --test youtube/*.test.js",
+    "test": "node --test youtube/*.test.js englife/*.test.js",
     "smoke": "node adapters/twitter/smoke-test.js",
     "check": "npm test && npm run smoke"
   },

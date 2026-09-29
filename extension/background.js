@@ -5,11 +5,14 @@
 // context. Each dependency attaches its API to the service-worker global.
 importScripts(
   'queue.js',
+  'englife/connection.js',
   'youtube/protocol.js',
   'youtube/format-selection.js',
   'youtube/page-capture.js',
   'youtube/resolver.js',
 );
+
+const englifeConnection = globalThis.__rssPalEnglife.createConnection({ chromeApi: chrome });
 
 const youtubeResolver = globalThis.__rssPalCreateYouTubeResolver({
   chromeApi: chrome,
@@ -60,6 +63,7 @@ cleanupYouTubeOrphans();
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
+    englifeConnection.cleanup().catch(() => {});
     chrome.storage.local.get('__keepalive', () => void chrome.runtime.lastError);
     return;
   }
@@ -77,6 +81,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Content scripts ask us to flush after pushing new items.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.channel === 'englife') {
+    englifeConnection.handle(msg, sender).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
   if (
     msg &&
     (

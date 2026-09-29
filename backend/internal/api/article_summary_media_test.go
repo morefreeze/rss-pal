@@ -127,3 +127,13 @@ func TestLacksSummarizableMediaContent(t *testing.T) {
 		})
 	}
 }
+
+func TestEnglifeOutputIsNotRawCaptions(t *testing.T) {
+	content := appendTranscriptToContent("intro", &transcript.Result{Text: "generated article", Source: "englife", Kind: "article"})
+	if strings.Contains(content, "## 字幕") || !strings.Contains(content, "## 视频整理（englife）") {
+		t.Fatal(content)
+	}
+	if !articleHasTranscript(content) {
+		t.Fatal("will fetch generated article again")
+	}
+}
