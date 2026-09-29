@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"github.com/bytedance/rss-pal/internal/airouting"
+	"github.com/bytedance/rss-pal/internal/aiusage"
 	"log"
 	"os"
 	"path/filepath"
@@ -102,6 +104,11 @@ func main() {
 	workerBudgets.SetObserver(func(owner int, bucket, reason string, retry *time.Time) {
 		monitorRecorder.Record(opsmonitor.Event{Kind: "limit", Reason: reason, TaskType: bucket, UserID: owner, RetryAt: retry})
 	})
+	ai.ConfigureUsageRecorder(aiusage.Recorder(db))
+	if len(cfg.Share.Secret) < 32 {
+		log.Fatal("SHARE_SECRET must be at least 32 bytes for AI credential encryption")
+	}
+	articleAI := airouting.NewStore(db, cfg.Share.Secret, cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
 		return workerBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, workerPolicies["ai"])
 	})
@@ -162,16 +169,12 @@ func main() {
 		},
 	}}
 
-	var summarizer *ai.Summarizer
-	if cfg.Claude.APIKey != "" {
-		summarizer = ai.NewSummarizerWithModel(cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
-		summarizer.SetVisionModel(cfg.AI.Vision.Model)
-		log.Println("AI summarizer initialized")
-	} else {
-		log.Println("CLAUDE_API_KEY not set, AI summarization disabled")
-	}
+	summarizer := ai.NewSummarizerWithModel(cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
+	summarizer.SetVisionModel(cfg.AI.Vision.Model)
+	summarizer.SetArticleResolver(articleAI.Resolve)
+	log.Println("Article AI uses admin provider configuration")
 
-	if summarizer != nil {
+	if cfg.Claude.APIKey != "" {
 		stopCron := scheduleDailyInterestCron(interestCronDeps{
 			userRepo:          userRepo,
 			prefRepo:          prefRepo,
@@ -184,7 +187,7 @@ func main() {
 		defer stopCron()
 	}
 
-	if summarizer != nil {
+	if cfg.Claude.APIKey != "" {
 		stopBriefing := scheduleBriefingCron(briefingDeps{
 			articleRepo: articleRepo,
 			dailyRepo:   dailyDigestRepo,

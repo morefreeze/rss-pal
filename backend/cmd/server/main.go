@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/bytedance/rss-pal/internal/airouting"
+	"github.com/bytedance/rss-pal/internal/aiusage"
 	"log"
 	"net/http"
 	"os"
@@ -72,6 +74,8 @@ func main() {
 	taskBudgets.SetObserver(func(owner int, bucket, reason string, retry *time.Time) {
 		monitorRecorder.Record(opsmonitor.Event{Kind: "limit", Reason: reason, TaskType: bucket, UserID: owner, RetryAt: retry})
 	})
+	ai.ConfigureUsageRecorder(aiusage.Recorder(adminDB))
+	articleAI := airouting.NewStore(adminDB, cfg.Share.Secret, cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {
 		return taskBudgets.Acquire(ctx, taskbudget.Owner(ctx), "ai", 1, policies["ai"])
 	})
@@ -104,6 +108,7 @@ func main() {
 
 	summarizer := ai.NewSummarizerWithModel(cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	summarizer.SetVisionModel(cfg.AI.Vision.Model)
+	summarizer.SetArticleResolver(articleAI.Resolve)
 	summarizerService := service.NewSummarizerService(summarizer)
 
 	backupRunner := backup.NewRunner(adminDB, cfg.Backup.Dir)
@@ -299,6 +304,11 @@ func main() {
 	apiGroup.POST("/admin/integrations/englife/pair", englifeHandler.Pair)
 	apiGroup.POST("/admin/integrations/englife/check", englifeHandler.Check)
 	apiGroup.DELETE("/admin/integrations/englife", englifeHandler.Disconnect)
+	adminAI := api.NewAdminAIHandler(adminDB, articleAI)
+	adminAIGroup := apiGroup.Group("/admin/ai", adminAI.RequireAdmin)
+	adminAIGroup.GET("", adminAI.Get)
+	adminAIGroup.PUT("", adminAI.Save)
+	adminAIGroup.POST("/models", adminAI.Models)
 	catalogService := feedcatalog.NewFeedCatalogService(repository.NewFeedCatalogRepository(adminDB), feedcatalog.CatalogRSSVerifier(cfg.RSSHub.BaseURL))
 	catalogHandler := api.NewFeedCatalogHandler(adminDB, catalogService)
 	apiGroup.GET("/feed-catalog", catalogHandler.PublicList)

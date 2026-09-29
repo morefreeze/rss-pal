@@ -16,6 +16,7 @@ export default function AdminLayout({ user }: { user: { is_admin: boolean } | nu
       {(desktop || open) && <nav id="admin-sidebar-nav" aria-label="后台导航">
         <NavLink to="/admin/feed-catalog">📚 公共推荐目录</NavLink>
         <NavLink to="/admin/monitoring">🛡️ 运行监控</NavLink>
+        <NavLink to="/admin/ai">🤖 AI 模型配置</NavLink>
         <NavLink to="/admin/status">🟢 服务状态</NavLink>
         <NavLink to="/admin/integrations/englife">🔗 englife 连接</NavLink>
       </nav>}

@@ -810,6 +810,7 @@ func newUserSummarizerService(aiCfg *model.UserAIConfig, cfg *config.Config) *se
 		baseURL = cfg.Claude.BaseURL
 	}
 	userSummarizer := ai.NewSummarizerWithModel(aiCfg.APIKey, baseURL, aiCfg.Model)
+	userSummarizer.DisableArticleRouting()
 	if cfg != nil && cfg.AI.Vision.Model != "" {
 		userSummarizer.SetVisionModel(cfg.AI.Vision.Model)
 	}

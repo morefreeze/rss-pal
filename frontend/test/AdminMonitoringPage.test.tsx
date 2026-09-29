@@ -39,7 +39,7 @@ it('展示积压告警、未配置成本和采集起点，历史无数据不显�
   api.getAdminMonitoring.mockResolvedValue(snapshot)
   render(<AdminMonitoringPage user={{ is_admin: true }} />)
   await screen.findByText('提醒 · 摘要等待超过 30 分钟')
-  expect(screen.getByText('未配置单价')).toBeTruthy()
+  expect(screen.getByText('暂无可计费用量')).toBeTruthy()
   expect(screen.getByText('尚无事件数据，不能据此判断历史无故障。')).toBeTruthy()
   expect(screen.getByText(/最老等待 40 分钟/)).toBeTruthy()
   expect(screen.getByText(/采集开始/)).toBeTruthy()
@@ -85,15 +85,16 @@ it('自动刷新只在页面可见时发起，卸载后停止', async () => {
   } finally { hidden.mockRestore(); vi.useRealTimers() }
 })
 
-it('多日估算与今日估算分开展示，单价缺失不伪装成零费用', async () => {
-  api.getAdminMonitoring.mockResolvedValue({ ...snapshot, cost: { ...snapshot.cost,
-    estimate_status: 'partial', estimated_today: 2,
-    by_task: [{task_type:'ai', attempts:10,today_attempts:4,global_daily_limit:100,usage_ratio:.04,unit_price:.5,estimated_cost:5},
-      {task_type:'fetch',attempts:3,today_attempts:3,global_daily_limit:500,usage_ratio:.006,unit_price:null,estimated_cost:null}],
+it('按 token 展示美元估算，缺失 usage 明确提示', async () => {
+  api.getAdminMonitoring.mockResolvedValue({ ...snapshot, token_cost: {
+    currency: 'USD', collection_since: '2026-09-24T00:00:00Z', estimated_today: 0.202, today_missing: 1,
+    rates: [{provider:'api.z.ai',model:'glm-5.3-flash',input:.15,cached:.03,output:.5}],
+    by_model: [{provider:'api.z.ai',model:'glm-5.3-flash',calls:2,missing_usage:1,unpriced_calls:0,input_tokens:1000000,cached_tokens:400000,output_tokens:200000,cost_usd:.202}],
   } })
   render(<AdminMonitoringPage user={{is_admin:true}} />)
-  await screen.findByText('¥2.00')
-  expect(screen.getByText('¥5.00')).toBeTruthy()
-  expect(screen.getByText('涉及 UTC 日期估算')).toBeTruthy()
-  expect(screen.getByText('未配置单价')).toBeTruthy()
+  await screen.findByText('今日 token 估算成本')
+  expect(screen.getAllByText('$0.202000').length).toBe(2)
+  expect(screen.getByText(/今日 1 次请求缺少用量或单价/)).toBeTruthy()
+  expect(screen.getByText('单价（USD / 百万 token）')).toBeTruthy()
+  expect(screen.queryByText('估算单价/次')).toBeNull()
 })

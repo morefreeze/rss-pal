@@ -13,6 +13,11 @@ export interface MonitoringResponse {
   time_series: { at: string; registration_success: number; registration_failed: number; captcha_rejected: number; captcha_unavailable: number; limit_denied: number }[]
   groups: { kind: string; reason: string; task_type: string; user_id: number; count: number }[]
   queues: { name: string; status: string; waiting: number; running: number | null; failed: number | null; expired: number | null; oldest_wait_seconds: number; snapshot_at: string; note: string }[]
+  token_cost?: {
+    currency: 'USD'; collection_since: string; estimated_today: number | null; today_missing: number
+    rates: { provider: string; model: string; input: number; cached: number; output: number }[]
+    by_model: { provider: string; model: string; calls: number; missing_usage: number; unpriced_calls: number; input_tokens: number; cached_tokens: number; output_tokens: number; cost_usd: number | null }[]
+  }
   cost: {
     utc_day: string; ledger_retention_note: string; estimate_status: 'configured' | 'partial' | 'not_configured'
     estimated_today: number | null; daily_alert_budget: number | null; currency: string

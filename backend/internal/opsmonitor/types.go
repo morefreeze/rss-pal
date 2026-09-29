@@ -1,6 +1,7 @@
 package opsmonitor
 
 import "time"
+import "github.com/bytedance/rss-pal/internal/aiusage"
 
 type Registration struct {
 	Attempts int `json:"attempts"`
@@ -80,23 +81,24 @@ type Alert struct {
 	Threshold float64 `json:"threshold"`
 }
 type Response struct {
-	GeneratedAt              time.Time    `json:"generated_at"`
-	CollectionAvailableSince time.Time    `json:"collection_available_since"`
-	WindowStart              time.Time    `json:"window_start"`
-	WindowEnd                time.Time    `json:"window_end"`
-	Hours                    int          `json:"hours"`
-	Status                   string       `json:"status"`
-	RetentionDays            int          `json:"retention_days"`
-	Registration             Registration `json:"registration"`
-	Captcha                  Captcha      `json:"captcha"`
-	LimitTotal               int          `json:"limit_total"`
-	TimeSeries               []Point      `json:"time_series"`
-	Groups                   []Group      `json:"groups"`
-	Queues                   []Queue      `json:"queues"`
-	Cost                     Cost         `json:"cost"`
-	Alerts                   []Alert      `json:"alerts"`
-	RecentEvents             []Event      `json:"recent_events"`
-	NextBeforeID             *int64       `json:"next_before_id"`
-	CaptchaExpiresAt         *time.Time   `json:"captcha_expires_at"`
-	CollectionDropped        int64        `json:"collection_dropped"`
+	TokenCost                aiusage.Summary `json:"token_cost"`
+	GeneratedAt              time.Time       `json:"generated_at"`
+	CollectionAvailableSince time.Time       `json:"collection_available_since"`
+	WindowStart              time.Time       `json:"window_start"`
+	WindowEnd                time.Time       `json:"window_end"`
+	Hours                    int             `json:"hours"`
+	Status                   string          `json:"status"`
+	RetentionDays            int             `json:"retention_days"`
+	Registration             Registration    `json:"registration"`
+	Captcha                  Captcha         `json:"captcha"`
+	LimitTotal               int             `json:"limit_total"`
+	TimeSeries               []Point         `json:"time_series"`
+	Groups                   []Group         `json:"groups"`
+	Queues                   []Queue         `json:"queues"`
+	Cost                     Cost            `json:"cost"`
+	Alerts                   []Alert         `json:"alerts"`
+	RecentEvents             []Event         `json:"recent_events"`
+	NextBeforeID             *int64          `json:"next_before_id"`
+	CaptchaExpiresAt         *time.Time      `json:"captcha_expires_at"`
+	CollectionDropped        int64           `json:"collection_dropped"`
 }

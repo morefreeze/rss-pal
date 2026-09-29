@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/bytedance/rss-pal/internal/aiusage"
 	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"io"
 	"log"
@@ -20,12 +21,18 @@ import (
 const DefaultModel = "glm-5.3"
 
 type Summarizer struct {
-	admission   Admission
-	apiKey      string
-	baseURL     string
-	model       string
-	visionModel string // optional; set via SetVisionModel for SummarizeWithImages*
-	httpClient  *http.Client
+	providerProtocol     string
+	articleResolver      ArticleResolver
+	articleRouted        bool
+	routingErr           error
+	articleModelSelected bool
+	usageRecorder        func(aiusage.Record)
+	admission            Admission
+	apiKey               string
+	baseURL              string
+	model                string
+	visionModel          string // optional; set via SetVisionModel for SummarizeWithImages*
+	httpClient           *http.Client
 }
 
 func NewSummarizer(apiKey, baseURL string) *Summarizer {
@@ -37,11 +44,12 @@ func NewSummarizerWithModel(apiKey, baseURL, model string) *Summarizer {
 		model = DefaultModel
 	}
 	return &Summarizer{
-		admission:  currentAdmission(),
-		apiKey:     apiKey,
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		model:      model,
-		httpClient: &http.Client{Timeout: 3 * time.Minute},
+		admission:     currentAdmission(),
+		usageRecorder: currentUsageRecorder(),
+		apiKey:        apiKey,
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		model:         model,
+		httpClient:    &http.Client{Timeout: 3 * time.Minute},
 	}
 }
 
@@ -91,10 +99,11 @@ type chatResponse struct {
 }
 
 type chatStreamRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	Stream    bool          `json:"stream"`
-	Messages  []chatMessage `json:"messages"`
+	StreamOptions map[string]bool `json:"stream_options"`
+	Model         string          `json:"model"`
+	MaxTokens     int             `json:"max_tokens"`
+	Stream        bool            `json:"stream"`
+	Messages      []chatMessage   `json:"messages"`
 }
 
 type streamChunk struct {
@@ -200,9 +209,10 @@ func (s *Summarizer) doCall(ctx context.Context, body []byte, maxTokens int) (st
 // produce duplicate output. Caller should re-invoke from scratch on error.
 func (s *Summarizer) callStream(ctx context.Context, prompt string, maxTokens int, onDelta func(string)) (string, error) {
 	req := chatStreamRequest{
-		Model:     s.model,
-		MaxTokens: maxTokens,
-		Stream:    true,
+		Model:         s.model,
+		MaxTokens:     maxTokens,
+		Stream:        true,
+		StreamOptions: map[string]bool{"include_usage": true},
 		Messages: []chatMessage{
 			{Role: "system", Content: systemGuardrail},
 			{Role: "user", Content: prompt},
@@ -283,6 +293,10 @@ type SummaryResult struct {
 }
 
 func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*SummaryResult, error) {
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return nil, s.routingErr
+	}
 	brief, err := s.generateBrief(ctx, title, content)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate brief: %w", err)
@@ -303,7 +317,11 @@ func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*Sum
 // onBriefDelta and onDetailedDelta with token chunks as they arrive.
 func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
-	content = truncateContent(content)
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return nil, s.routingErr
+	}
+	content = s.truncateArticle(content)
 
 	briefPrompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头：
 
@@ -342,7 +360,11 @@ func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, content,
 	briefPromptTpl, detailedPromptTpl string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
-	content = truncateContent(content)
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return nil, s.routingErr
+	}
+	content = s.truncateArticle(content)
 	briefReplacer := strings.NewReplacer("{title}", title, "{content}", content)
 
 	brief, err := s.callStream(ctx, briefReplacer.Replace(briefPromptTpl), briefMaxTokens, onBriefDelta)
@@ -360,7 +382,11 @@ func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, con
 }
 
 func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (string, error) {
-	content = truncateContent(content)
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return "", s.routingErr
+	}
+	content = s.truncateArticle(content)
 	prompt := fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头：
 
 标题：%s
@@ -374,7 +400,11 @@ func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (
 }
 
 func (s *Summarizer) generateDetailed(ctx context.Context, title, content string) (string, error) {
-	content = truncateContent(content)
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return "", s.routingErr
+	}
+	content = s.truncateArticle(content)
 	content, anchorInstruction := buildDetailedArticlePromptInput(content)
 	prompt := fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论：
 
@@ -400,7 +430,11 @@ func buildDetailedTemplatePrompt(title, content, detailedPromptTpl string) strin
 }
 
 func (s *Summarizer) ExtractTopics(ctx context.Context, title, content string) ([]string, error) {
-	content = truncateContent(content)
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return nil, s.routingErr
+	}
+	content = s.truncateArticle(content)
 	prompt := fmt.Sprintf(`请从以下文章中提取3-5个主题关键词，每个关键词一行：
 
 标题：%s
@@ -428,7 +462,11 @@ func (s *Summarizer) ExtractTopics(ctx context.Context, title, content string) (
 // SummarizeWithTemplate generates a summary using caller-supplied prompt templates.
 // Templates may contain {title} and {content} placeholders which are replaced before calling the AI.
 func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, briefPromptTpl, detailedPromptTpl string) (*SummaryResult, error) {
-	content = truncateContent(content)
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return nil, s.routingErr
+	}
+	content = s.truncateArticle(content)
 	briefReplacer := strings.NewReplacer("{title}", title, "{content}", content)
 
 	briefPrompt := briefReplacer.Replace(briefPromptTpl)
@@ -549,6 +587,10 @@ func isTransientNetErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	var classified interface{ Transient() bool }
+	if errors.As(err, &classified) {
+		return classified.Transient()
+	}
 	msg := err.Error()
 	return strings.Contains(msg, "EOF") ||
 		strings.Contains(msg, "connection reset") ||
@@ -585,10 +627,14 @@ const imageEmbedInstruction = `如果某张附图能直观说明总结中的某�
 // to the text-only Summarize() path so the caller always gets a SummaryResult
 // if the model is reachable in any form.
 func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content string, imagePaths, imageURLs []string) (*SummaryResult, error) {
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return nil, s.routingErr
+	}
 	if len(imagePaths) == 0 {
 		return s.Summarize(ctx, title, content)
 	}
-	content = truncateContent(content)
+	content = s.truncateArticle(content)
 	urlList := buildImageURLList(imageURLs)
 
 	briefPrompt := buildVisionBriefPrompt(title, content, urlList)
@@ -680,10 +726,11 @@ func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imageP
 		return "", errors.New("no images loaded")
 	}
 	req := chatStreamRequest{
-		Model:     s.visionModel,
-		MaxTokens: maxTokens,
-		Stream:    true,
-		Messages:  msgs,
+		Model:         s.visionModel,
+		MaxTokens:     maxTokens,
+		Stream:        true,
+		StreamOptions: map[string]bool{"include_usage": true},
+		Messages:      msgs,
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -758,10 +805,14 @@ func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imageP
 func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, content string,
 	imagePaths, imageURLs []string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return nil, s.routingErr
+	}
 	if len(imagePaths) == 0 {
 		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
 	}
-	content = truncateContent(content)
+	content = s.truncateArticle(content)
 	urlList := buildImageURLList(imageURLs)
 
 	briefPrompt := buildVisionBriefPrompt(title, content, urlList)
