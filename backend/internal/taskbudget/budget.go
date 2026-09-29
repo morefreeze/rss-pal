@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var ErrExceeded = errors.New("任务额度已用完或已有任务正在执行，请稍后重试")
+var ErrExceeded = errors.New("任务执行受限，请稍后重试")
 var ErrUnavailable = errors.New("任务额度检查暂时不可用，请稍后重试")
 
 type Policy struct {
@@ -60,11 +60,11 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 	}
 	if total >= p.GlobalConcurrent {
 		s.denied(owner, bucket, "global_concurrency", nil)
-		return nil, ErrExceeded
+		return nil, &LimitError{Reason: "global_concurrency", Bucket: bucket, Used: total, Limit: p.GlobalConcurrent, RetryAt: nil}
 	}
 	if owner > 0 && own >= p.Concurrent {
 		s.denied(owner, bucket, "user_concurrency", nil)
-		return nil, ErrExceeded
+		return nil, &LimitError{Reason: "user_concurrency", Bucket: bucket, Used: own, Limit: p.Concurrent, RetryAt: nil}
 	}
 	var day string
 	if err = tx.QueryRowContext(ctx, `SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date::text`).Scan(&day); err != nil {
@@ -78,7 +78,7 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 	reset = reset.Add(24 * time.Hour)
 	if cost > p.GlobalDaily-allUsed {
 		s.denied(owner, bucket, "global_daily", &reset)
-		return nil, ErrExceeded
+		return nil, &LimitError{Reason: "global_daily", Bucket: bucket, Used: allUsed, Limit: p.GlobalDaily, RetryAt: &reset}
 	}
 	daily := p.Daily
 	if owner > 0 && p.AdminDaily > 0 {
@@ -92,7 +92,7 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 	}
 	if owner > 0 && cost > daily-userUsed {
 		s.denied(owner, bucket, "user_daily", &reset)
-		return nil, ErrExceeded
+		return nil, &LimitError{Reason: "user_daily", Bucket: bucket, Used: userUsed, Limit: daily, RetryAt: &reset}
 	}
 	owners := []int{0}
 	if owner > 0 {

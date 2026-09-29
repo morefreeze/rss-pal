@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,16 +16,41 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func writeTaskBudgetError(c *gin.Context, err error) bool {
+// taskBudgetErrorPayload is shared by normal JSON responses and NDJSON streams.
+func taskBudgetErrorPayload(err error) (gin.H, bool) {
 	if !taskbudget.IsDenied(err) {
+		return nil, false
+	}
+	var limit *taskbudget.LimitError
+	if errors.As(err, &limit) {
+		payload := gin.H{"error": limit.Error(), "code": "task_" + limit.Reason, "reason": limit.Reason, "bucket": limit.Bucket, "used": limit.Used, "limit": limit.Limit}
+		if limit.RetryAt != nil {
+			payload["retry_at"] = limit.RetryAt
+		}
+		return payload, true
+	}
+	if errors.Is(err, taskbudget.ErrUnavailable) {
+		return gin.H{"error": taskbudget.ErrUnavailable.Error(), "code": "task_budget_unavailable"}, true
+	}
+	return gin.H{"error": taskbudget.ErrExceeded.Error(), "code": "task_budget_exceeded"}, true
+}
+
+func writeTaskBudgetError(c *gin.Context, err error) bool {
+	payload, denied := taskBudgetErrorPayload(err)
+	if !denied {
 		return false
 	}
 	code := http.StatusServiceUnavailable
 	if errors.Is(err, taskbudget.ErrExceeded) {
 		code = http.StatusTooManyRequests
-		c.Header("Retry-After", "60")
+		seconds := 60
+		var limit *taskbudget.LimitError
+		if errors.As(err, &limit) && limit.RetryAt != nil {
+			seconds = max(1, int(math.Ceil(time.Until(*limit.RetryAt).Seconds())))
+		}
+		c.Header("Retry-After", strconv.Itoa(seconds))
 	}
-	c.AbortWithStatusJSON(code, gin.H{"error": err.Error()})
+	c.AbortWithStatusJSON(code, payload)
 	return true
 }
 

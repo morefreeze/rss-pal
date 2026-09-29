@@ -554,7 +554,14 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 	}
 
 	if serr != nil {
-		writeAndFlush(map[string]any{"type": "error", "msg": serr.Error()})
+		if payload, denied := taskBudgetErrorPayload(serr); denied {
+			payload["type"] = "error"
+			payload["msg"] = payload["error"]
+			delete(payload, "error")
+			writeAndFlush(payload)
+		} else {
+			writeAndFlush(map[string]any{"type": "error", "msg": serr.Error()})
+		}
 		return
 	}
 
