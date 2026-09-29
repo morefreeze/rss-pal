@@ -27,8 +27,8 @@ test('loads the YouTube bridge only on the production RSS Pal origin', () => {
 });
 
 test('requests DNR host access without cookie or debugger permissions', () => {
-  assert.equal(manifest.version, '1.8.4');
-  assert.equal(packageJson.version, '1.8.4');
+  assert.equal(manifest.version, '1.8.5');
+  assert.equal(packageJson.version, '1.8.5');
   assert.equal(
     manifest.permissions.includes('declarativeNetRequestWithHostAccess'),
     true,

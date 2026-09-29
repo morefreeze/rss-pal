@@ -1,6 +1,6 @@
 {
   "name": "rss-pal-extension",
-  "version": "1.8.4",
+  "version": "1.8.5",
   "private": true,
   "scripts": {
     "test": "node --test youtube/*.test.js englife/*.test.js",

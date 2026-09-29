@@ -4,7 +4,7 @@
 
 ## 部署准备
 
-1. 通过项目原有迁移程序应用 `048_englife_integration.sql`。编号预留 046/047，避免与独立开发中的迁移冲突。
+1. 通过项目原有迁移程序应用 `049_englife_integration.sql`。由 status-migrate 按顺序自动执行，支持重复运行。
 2. 生成一次加密密钥：`openssl rand -base64 32`。将结果放入部署的 `ENGLIFE_SESSION_KEY`，API 与 worker 必须一致。没有配置时集成关闭；更换密钥后需重新授权。保存备份数据库时也应保护密钥；单独拿到数据库不应得到明文 Cookie。
 3. 部署包含这次改动的 API、worker、前端及更新后的 RSS Pal 扩展。扩展请求的是可选 cookies 权限，只有在其授权页点击确认时才请求/使用该能力。
 

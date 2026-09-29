@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
+	"os"
 	"testing"
 	"time"
 )
@@ -63,5 +64,19 @@ func TestSQLStoreLocksPairingAndPersistentJobs(t *testing.T) {
 	gotC, err := store.Connection(ctx)
 	if err != nil || len(gotC.Secret) != 0 {
 		t.Fatal("secret retained")
+	}
+}
+
+func TestMigrationCanBeReapplied(t *testing.T) {
+	db, done := testdb.New(t)
+	defer done()
+	migration, err := os.ReadFile("../../migrations/049_englife_integration.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := db.Exec(string(migration)); err != nil {
+			t.Fatalf("reapply %d: %v", i, err)
+		}
 	}
 }
