@@ -80,7 +80,11 @@ func parseClassification(raw string) (*model.Classification, error) {
 // recommendedTopics is the B3 vocabulary list (DB-frequency-driven + seeds).
 func (s *Summarizer) ClassifyArticle(ctx context.Context, title, content string,
 	recommendedTopics []string) (*model.Classification, error) {
-	content = truncateContent(content)
+	s = s.forArticle(ctx, content)
+	if s.routingErr != nil {
+		return nil, s.routingErr
+	}
+	content = s.truncateArticle(content)
 	prompt := buildClassificationPrompt(title, content, recommendedTopics)
 
 	// Use callJSON (response_format=json_object) so GLM-4.5 emits a parseable

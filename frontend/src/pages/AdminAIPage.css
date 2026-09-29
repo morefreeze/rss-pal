@@ -1,0 +1,25 @@
+.admin-ai { max-width: 1000px; margin: 0 auto; }
+.admin-ai header { margin-bottom: 24px; }
+.admin-ai header h2 { margin: 0 0 8px; }
+.admin-ai header p { margin: 0; }
+.ai-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.admin-ai .card { margin-bottom: 20px; }
+.admin-ai h3 { margin: 0 0 16px; font-size: 17px; }
+.admin-ai label { display: block; font-weight: 500; margin: 16px 0 8px; }
+.admin-ai input,.admin-ai select { width: 100%; min-width: 0; max-width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--fg); background: var(--surface); font: inherit; box-sizing: border-box; }
+.admin-ai input:focus-visible,.admin-ai select:focus-visible { outline: 2px solid var(--accent, #477db4); outline-offset: 2px; }
+.admin-ai p { line-height: 1.6; }
+.ai-threshold input { max-width: 240px; }
+.ai-route-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.ai-route { min-width: 0; }
+.ai-route button,.ai-credentials button { margin-top: 16px; }
+.ai-credentials input,.ai-credentials select { max-width: 520px; }
+.ai-notice { padding: 12px; border: 1px solid var(--border); border-left: 4px solid #b7791f; border-radius: 6px; overflow-wrap: anywhere; }
+.ai-error { border-left-color: #c53030; }
+.ai-notice button { display: block; margin-top: 12px; }
+.ai-save { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; padding-bottom: 24px; }
+.ai-save span { color: var(--fg-muted); font-size: 14px; }
+@media (max-width: 640px) {
+  .ai-route-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .admin-ai .card { padding: 18px; }
+}

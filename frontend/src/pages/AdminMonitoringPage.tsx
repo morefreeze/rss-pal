@@ -20,6 +20,7 @@ const when = (value?: string | null) => value ? new Date(value).toLocaleString('
 const number = (value?: number | null) => value == null ? '不可用' : value.toLocaleString('zh-CN')
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`
 const amount = (value: number | null) => value == null ? '未配置单价' : `¥${value.toFixed(2)}`
+const usd = (value?: number | null) => value == null ? '暂无可计费用量' : `$${value.toFixed(6)}`
 const account = (id: number) => id > 0 ? `用户 #${id}` : '系统／未登录'
 function alertValue(code: string, value: number): string {
   if (code === 'captcha_unavailable' || code.startsWith('quota_')) return percent(value)
@@ -102,7 +103,7 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
         <section className="card"><h3>注册</h3><strong className="monitor-value">{hasEvents ? number(data.registration.success) : '—'}</strong><p>成功／尝试 {hasEvents ? number(attempts) : '—'}</p><small>失败率 {attempts ? percent(data.registration.failed / attempts) : '尚无数据'}</small></section>
         <section className="card"><h3>验证码服务故障</h3><strong className="monitor-value">{hasEvents ? number(data.captcha.unavailable) : '—'}</strong><p>未通过验证 {hasEvents ? number(data.captcha.rejected) : '—'}</p><small>服务故障率 {captchaTotal ? percent(data.captcha.unavailable / captchaTotal) : '尚无数据'}</small></section>
         <section className="card"><h3>限流拦截</h3><strong className="monitor-value">{hasEvents ? number(data.limit_total) : '—'}</strong><p>所选时间段内</p><small>包括认证和任务额度限制</small></section>
-        <section className="card"><h3>今日估算成本</h3><strong className="monitor-value monitor-money">{amount(data.cost.estimated_today)}</strong><p>仅配置单价的任务尝试</p><small>UTC 日界线 · 非真实账单</small></section>
+        <section className="card"><h3>今日 token 估算成本</h3><strong className="monitor-value monitor-money">{usd(data.token_cost?.estimated_today)}</strong><p>USD · 按实际 token 与公开单价估算</p><small>UTC 日界线 · 非 Coding 套餐账单</small>{!!data.token_cost?.today_missing && <p>今日 {number(data.token_cost.today_missing)} 次请求缺少用量或单价，合计不完整。</p>}</section>
       </div>
       <section className="card monitor-section"><h3>事件趋势</h3><p className="text-muted text-sm">注册结果、验证码拒绝／故障、限流事件；同一请求可能产生多类事件。</p>
         {!data.time_series.length ? <p>尚无数据</p> : <>
@@ -118,8 +119,16 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
       <section className="card monitor-section"><h3>当前任务积压</h3><p className="text-muted text-sm">实时快照，不随统计范围切换。</p>
         {data.queues.map(q => <div className="monitor-queue" key={q.name}><h4>{label(q.name)}</h4>{q.status === 'unavailable' ? <p>数据不可用</p> : <p>等待 {number(q.waiting)} · 执行中 {number(q.running)} · 失败 {number(q.failed)} · 过期 {number(q.expired)}</p>}<p>最老等待 {q.waiting ? `${Math.ceil(q.oldest_wait_seconds / 60)} 分钟` : '—'}</p><small className="text-muted">{q.note} · {when(q.snapshot_at)}</small></div>)}
       </section>
-      <section className="card monitor-section"><h3>任务额度与成本</h3><p>额度日期：{data.cost.utc_day}（UTC） · 每日金额告警：{data.cost.daily_alert_budget == null ? '未配置' : amount(data.cost.daily_alert_budget)}</p><p className="text-muted text-sm">{data.cost.ledger_retention_note} 调用量按任务尝试统计，可能包含失败尝试；金额为估算，未包含未配置单价的任务。</p>
-        <Table headers={['任务', '涉及 UTC 日期调用量', '今日额度', '已用比例', '估算单价/次', '涉及 UTC 日期估算']}>{data.cost.by_task.map(t => <tr key={t.task_type}><td>{label(t.task_type)}</td><td>{number(t.attempts)}</td><td>{number(t.today_attempts)} / {number(t.global_daily_limit)}</td><td>{percent(t.usage_ratio)}</td><td>{t.unit_price == null ? '未配置' : `¥${t.unit_price}`}</td><td>{amount(t.estimated_cost)}</td></tr>)}</Table>
+      <section className="card monitor-section"><h3>AI token 用量与成本</h3>
+        <p className="text-muted text-sm">按所选时间段统计。输入 token 包含缓存命中；费用 =（输入 − 缓存）× 输入单价 + 缓存 × 缓存单价 + 输出 × 输出单价，再除以一百万。历史未采集的用量无法补算。</p>
+        <p>Token 统计起点：{when(data.token_cost?.collection_since)} · 币种 USD · API 按量价值估算，不代表 Coding 套餐实际扣费。</p>
+        <h4>单价（USD / 百万 token）</h4>
+        <Table headers={['服务商', '模型', '输入', '缓存输入', '输出']}>{data.token_cost?.rates.map(r => <tr key={`${r.provider}:${r.model}`}><td>{r.provider}</td><td>{r.model}</td><td>${r.input}</td><td>${r.cached}</td><td>${r.output}</td></tr>)}</Table>
+        <p className="text-muted text-sm">单价核对日期：2026-09-24 · <a href="https://docs.z.ai/guides/overview/pricing" target="_blank" rel="noreferrer">Z.AI 官方价格</a> · 未配置的模型不计入金额。</p>
+        {!data.token_cost?.by_model.length ? <p>所选时段尚无 token 用量记录</p> : <Table headers={['模型 / 服务商', '请求次数', '输入 token', '缓存 token', '输出 token', '缺少用量 / 单价', '估算费用（USD）']}>{data.token_cost.by_model.map(m => <tr key={`${m.provider}:${m.model}`}><td>{m.model}<small> · {m.provider}</small></td><td>{number(m.calls)}</td><td>{number(m.input_tokens)}</td><td>{number(m.cached_tokens)}</td><td>{number(m.output_tokens)}</td><td>{number(m.missing_usage)} / {number(m.unpriced_calls)}</td><td>{usd(m.cost_usd)}{(m.missing_usage > 0 || m.unpriced_calls > 0) && <small> · 不完整</small>}</td></tr>)}</Table>}
+      </section>
+      <section className="card monitor-section"><h3>任务额度</h3><p>额度日期：{data.cost.utc_day}（UTC）</p><p className="text-muted text-sm">{data.cost.ledger_retention_note} 调用量按任务尝试统计，可能包含失败尝试。</p>
+        <Table headers={['任务', '涉及 UTC 日期调用量', '今日额度', '已用比例']}>{data.cost.by_task.map(t => <tr key={t.task_type}><td>{label(t.task_type)}</td><td>{number(t.attempts)}</td><td>{number(t.today_attempts)} / {number(t.global_daily_limit)}</td><td>{percent(t.usage_ratio)}</td></tr>)}</Table>
         <h4>用户消耗排行（窗口涉及的完整 UTC 日期）</h4>{!data.cost.by_user.length ? <p className="text-muted">尚无数据</p> : <Table headers={['账号', '任务', '调用量']}>{data.cost.by_user.map(t => <tr key={`${t.user_id}:${t.task_type}`}><td>{account(t.user_id)}</td><td>{label(t.task_type)}</td><td>{number(t.attempts)}</td></tr>)}</Table>}
       </section>
       <section className="card monitor-section"><h3>最近事件</h3>{!data.recent_events.length ? <p className="text-muted">尚无数据</p> : <Table headers={['时间', '类型', '原因', '任务', '账号', '次数', '可恢复时间']}>{data.recent_events.map(e => <tr key={e.id}><td>{when(e.at)}</td><td>{label(e.kind)}</td><td>{label(e.reason)}</td><td>{label(e.task_type)}</td><td>{account(e.user_id)}</td><td>{number(e.count)}</td><td>{e.retry_at ? when(e.retry_at) : '未确定'}</td></tr>)}</Table>}

@@ -13,6 +13,7 @@ import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
 import AdminFeedCatalogPage from './pages/AdminFeedCatalogPage'
 import AdminMonitoringPage from './pages/AdminMonitoringPage'
+import AdminAIPage from './pages/AdminAIPage'
 import SharePage from './pages/SharePage'
 import WeeklyPage from './pages/WeeklyPage'
 import DailyPage from './pages/DailyPage'
@@ -111,6 +112,7 @@ export function AppRoutes({
           <Route path="feed-catalog" element={<AdminFeedCatalogPage user={user} />} />
           <Route path="monitoring" element={<AdminMonitoringPage user={user} />} />
           <Route path="status" element={<AdminStatusPage />} />
+          <Route path="ai" element={<AdminAIPage user={user} />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/articles" replace />} />

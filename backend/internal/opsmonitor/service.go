@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/bytedance/rss-pal/internal/aiusage"
 	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"sort"
 	"time"
@@ -31,6 +32,11 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 	}
 	r.WindowEnd = r.GeneratedAt
 	r.WindowStart = r.WindowEnd.Add(-time.Duration(hours) * time.Hour)
+	var tokenErr error
+	r.TokenCost, tokenErr = aiusage.Snapshot(ctx, s.db, r.WindowStart, r.WindowEnd)
+	if tokenErr != nil {
+		return r, tokenErr
+	}
 	r.Status = "available"
 	if r.CollectionAvailableSince.After(r.WindowStart) || r.CollectionDropped > 0 {
 		r.Status = "partial"
