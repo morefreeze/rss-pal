@@ -397,7 +397,7 @@ func TestSubscribeRefreshClearsStaleSummariesAndRecomputesMetrics(t *testing.T) 
 	); err != nil {
 		t.Fatal(err)
 	}
-	if title.String != "New title" || content.String != "<p>Hello <strong>world</strong></p>" ||
+	if title.String != "New title" || content.String != "Hello **world**" ||
 		!gotPublished.Valid || !gotPublished.Time.Equal(newPublished) || !gotFetched.Valid || !gotFetched.Time.Equal(contentFetched) {
 		t.Fatalf("refreshed title=%q content=%q published=%v fetched=%v", title.String, content.String, gotPublished, gotFetched)
 	}
@@ -442,4 +442,27 @@ func seedSubscribeSource(t *testing.T, db *sql.DB, userID int, url, title, statu
 		t.Fatal(err)
 	}
 	return sourceID
+}
+
+func TestSubscribePreservesVersionedMarkdownCode(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Now().UTC()
+	userID := seedSubscribeUser(t, db, "versioned")
+	sourceID := seedSubscribeSource(t, db, userID, "https://code.example/feed", "Code", "valid", now)
+	body := "# Code\n\n```html\n<p>sample</p>\n```\n\nLiteral \\<em>"
+	if _, err := db.Exec(`INSERT INTO explore_articles(source_id,url,normalized_url,title,content,content_version) VALUES($1,'https://code.example/post','https://code.example/post','Code',$2,1)`, sourceID, body); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewSubscribeService(db).SubscribeOne(userID, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT content FROM articles WHERE feed_id=$1`, result.FeedID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != body {
+		t.Fatalf("versioned Markdown changed: %q", got)
+	}
 }

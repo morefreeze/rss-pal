@@ -120,12 +120,17 @@ const (
 
 	exploreArticleUpsertSQL = `
 		INSERT INTO explore_articles
-		(source_id,url,normalized_url,title,content,excerpt,thumbnail_url,published_at,fetched_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		(source_id,url,normalized_url,title,content,excerpt,thumbnail_url,published_at,fetched_at,content_version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (source_id,normalized_url) DO UPDATE SET
 			url=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN EXCLUDED.url ELSE explore_articles.url END,
 			title=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN EXCLUDED.title ELSE explore_articles.title END,
 			content=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.content,explore_articles.content) ELSE explore_articles.content END,
+			legacy_content_hash=CASE
+                WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at AND EXCLUDED.content IS NOT NULL AND EXCLUDED.content_version=0 THEN NULL
+                WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at AND EXCLUDED.content IS NOT NULL AND explore_articles.content_version=0 AND EXCLUDED.content_version=1 THEN md5(explore_articles.content)
+                ELSE explore_articles.legacy_content_hash END,
+            content_version=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at AND EXCLUDED.content IS NOT NULL THEN EXCLUDED.content_version ELSE explore_articles.content_version END,
 			excerpt=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.excerpt,explore_articles.excerpt) ELSE explore_articles.excerpt END,
 			thumbnail_url=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.thumbnail_url,explore_articles.thumbnail_url) ELSE explore_articles.thumbnail_url END,
 			published_at=CASE WHEN EXCLUDED.fetched_at >= explore_articles.fetched_at THEN COALESCE(EXCLUDED.published_at,explore_articles.published_at) ELSE explore_articles.published_at END,
@@ -486,7 +491,7 @@ func (r *ExploreCatalogRepository) UpsertArticle(article model.ExploreArticle) (
 	var articleID int
 	err := r.db.QueryRow(exploreArticleUpsertSQL, article.SourceID, article.URL, article.NormalizedURL,
 		article.Title, article.Content, article.Excerpt, article.ThumbnailURL, article.PublishedAt,
-		article.FetchedAt).Scan(&articleID)
+		article.FetchedAt, article.ContentVersion).Scan(&articleID)
 	return articleID, err
 }
 
@@ -570,7 +575,7 @@ func (r *ExploreCatalogRepository) ListArticles(sourceID, limit int) ([]model.Ex
 	}
 	rows, err := r.db.Query(`
 		SELECT id,source_id,url,normalized_url,title,content,excerpt,published_at,
-		       fetched_at,created_at,updated_at
+		       fetched_at,created_at,updated_at,content_version
 		FROM explore_articles WHERE source_id=$1
 		ORDER BY COALESCE(published_at,fetched_at) DESC,fetched_at DESC,id DESC
 		LIMIT $2`, sourceID, limit)
@@ -584,7 +589,7 @@ func (r *ExploreCatalogRepository) ListArticles(sourceID, limit int) ([]model.Ex
 		if err := rows.Scan(&article.ID, &article.SourceID, &article.URL,
 			&article.NormalizedURL, &article.Title, &article.Content,
 			&article.Excerpt, &article.PublishedAt, &article.FetchedAt,
-			&article.CreatedAt, &article.UpdatedAt); err != nil {
+			&article.CreatedAt, &article.UpdatedAt, &article.ContentVersion); err != nil {
 			return nil, err
 		}
 		articles = append(articles, article)

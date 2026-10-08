@@ -27,7 +27,7 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 		"explore_fetch_queue":         {"id", "source_id", "task_type", "status", "priority", "not_before", "attempts", "run_id", "lease_owner", "lease_token", "lease_expires_at", "last_error", "created_at", "updated_at", "completed_at"},
 		"explore_related_tasks":       {"id", "provider_id", "canonical_seed_url", "status", "priority", "not_before", "attempts", "run_id", "lease_owner", "lease_token", "lease_expires_at", "last_error", "created_at", "updated_at", "completed_at"},
 		"explore_related_scan_state":  {"id", "feed_cursor", "article_cursor", "updated_at"},
-		"explore_articles":            {"id", "source_id", "url", "normalized_url", "title", "content", "excerpt", "thumbnail_url", "published_at", "fetched_at", "created_at", "updated_at"},
+		"explore_articles":            {"id", "source_id", "url", "normalized_url", "title", "content", "excerpt", "thumbnail_url", "published_at", "fetched_at", "created_at", "updated_at", "content_version", "legacy_content_hash"},
 		"explore_batches":             {"id", "user_id", "slot_at", "status", "source_count", "error_message", "generation_token", "started_at", "created_at", "completed_at"},
 		"explore_batch_sources":       {"id", "user_id", "batch_id", "source_id", "rank", "score", "topic", "reason"},
 		"explore_feedback":            {"id", "user_id", "source_id", "topic", "feedback_type", "created_at"},

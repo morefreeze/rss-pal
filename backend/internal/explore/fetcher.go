@@ -14,6 +14,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/httpx"
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/mmcdole/gofeed"
 	"golang.org/x/net/html"
 )
@@ -503,6 +504,11 @@ func exploreArticleFromItem(item *gofeed.Item, base *url.URL, fetchedAt time.Tim
 			article.Content = &excerpt
 		}
 	}
+	if article.Content != nil {
+		content := rss.NormalizeFeedContent(*article.Content, article.URL)
+		article.Content = &content
+	}
+	article.ContentVersion = rss.FeedContentVersion
 	article.ThumbnailURL = exploreItemThumbnail(item, resolved)
 	return article, true
 }

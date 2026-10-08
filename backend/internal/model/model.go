@@ -132,18 +132,19 @@ type ExploreSource struct {
 }
 
 type ExploreArticle struct {
-	ID            int        `json:"id" db:"id"`
-	SourceID      int        `json:"source_id" db:"source_id"`
-	URL           string     `json:"url" db:"url"`
-	NormalizedURL string     `json:"normalized_url" db:"normalized_url"`
-	Title         string     `json:"title" db:"title"`
-	Content       *string    `json:"content,omitempty" db:"content"`
-	Excerpt       *string    `json:"excerpt,omitempty" db:"excerpt"`
-	ThumbnailURL  *string    `json:"thumbnail_url,omitempty" db:"thumbnail_url"`
-	PublishedAt   *time.Time `json:"published_at,omitempty" db:"published_at"`
-	FetchedAt     time.Time  `json:"fetched_at" db:"fetched_at"`
-	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
+	ContentVersion int        `json:"-" db:"content_version"`
+	ID             int        `json:"id" db:"id"`
+	SourceID       int        `json:"source_id" db:"source_id"`
+	URL            string     `json:"url" db:"url"`
+	NormalizedURL  string     `json:"normalized_url" db:"normalized_url"`
+	Title          string     `json:"title" db:"title"`
+	Content        *string    `json:"content,omitempty" db:"content"`
+	Excerpt        *string    `json:"excerpt,omitempty" db:"excerpt"`
+	ThumbnailURL   *string    `json:"thumbnail_url,omitempty" db:"thumbnail_url"`
+	PublishedAt    *time.Time `json:"published_at,omitempty" db:"published_at"`
+	FetchedAt      time.Time  `json:"fetched_at" db:"fetched_at"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 type ExploreBatch struct {

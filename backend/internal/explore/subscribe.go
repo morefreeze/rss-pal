@@ -246,7 +246,7 @@ func loadPromotableSources(db Querier, userID int, sourceIDs []int, now time.Tim
 }
 
 const copyExploreArticleCandidatesSQL = `
-	SELECT article.title,article.url,article.content,article.published_at,article.fetched_at
+	SELECT article.title,article.url,article.content,article.published_at,article.fetched_at,article.content_version
 	FROM explore_articles article
 	JOIN feeds target ON target.id=$2
 	WHERE article.source_id=$1
@@ -272,11 +272,12 @@ const copyExploreArticleUpsertSQL = `
 		reading_minutes=EXCLUDED.reading_minutes`
 
 type exploreArticleCopyCandidate struct {
-	title       string
-	url         string
-	content     sql.NullString
-	publishedAt sql.NullTime
-	fetchedAt   time.Time
+	contentVersion int
+	title          string
+	url            string
+	content        sql.NullString
+	publishedAt    sql.NullTime
+	fetchedAt      time.Time
 }
 
 func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) {
@@ -289,7 +290,7 @@ func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) 
 		var candidate exploreArticleCopyCandidate
 		if err := rows.Scan(
 			&candidate.title, &candidate.url, &candidate.content,
-			&candidate.publishedAt, &candidate.fetchedAt,
+			&candidate.publishedAt, &candidate.fetchedAt, &candidate.contentVersion,
 		); err != nil {
 			rows.Close()
 			return 0, err
@@ -306,6 +307,9 @@ func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) 
 
 	copied := 0
 	for _, candidate := range candidates {
+		if candidate.content.Valid && candidate.contentVersion < rss.FeedContentVersion {
+			candidate.content.String = rss.NormalizeFeedContent(candidate.content.String, candidate.url)
+		}
 		wordCount, readingMinutes := rss.ComputeMetrics(candidate.content.String)
 		var content interface{}
 		if candidate.content.Valid {

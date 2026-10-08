@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"crypto/md5"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -1099,3 +1100,79 @@ func insertCatalogArticles(t *testing.T, db *sql.DB, sourceID int, newest time.T
 }
 
 func ptrTime(value time.Time) *time.Time { return &value }
+
+func TestExploreCatalogContentVersionFollowsSelectedBody(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	var sourceID int
+	if err := db.QueryRow(`INSERT INTO recommended_feeds(url,title,category,language,normalized_url) VALUES('https://version.example/feed','Version','technology','en','https://version.example/feed') RETURNING id`).Scan(&sourceID); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewExploreCatalogRepository(db)
+	now := time.Now().UTC()
+	body := "# Markdown"
+	article := model.ExploreArticle{SourceID: sourceID, URL: "https://version.example/post", NormalizedURL: "https://version.example/post", Title: "Version", Content: &body, ContentVersion: 1, FetchedAt: now}
+	id, err := repo.UpsertArticle(article)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := "<h1>Old</h1>"
+	article.Content = &legacy
+	article.ContentVersion = 0
+	article.FetchedAt = now.Add(-time.Hour)
+	if _, err := repo.UpsertArticle(article); err != nil {
+		t.Fatal(err)
+	}
+	article.Content = nil
+	article.FetchedAt = now.Add(time.Hour)
+	if _, err := repo.UpsertArticle(article); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	var version int
+	if err := db.QueryRow(`SELECT content,content_version FROM explore_articles WHERE id=$1`, id).Scan(&got, &version); err != nil {
+		t.Fatal(err)
+	}
+	if got != body || version != 1 {
+		t.Fatalf("got=%q version=%d", got, version)
+	}
+	listed, err := repo.ListArticles(sourceID, 1)
+	if err != nil || len(listed) != 1 || listed[0].ContentVersion != 1 {
+		t.Fatalf("listed=%+v err=%v", listed, err)
+	}
+	// New legacy bodies must not inherit a previously normalized marker.
+	article.Content = &legacy
+	article.FetchedAt = now.Add(2 * time.Hour)
+	if _, err := repo.UpsertArticle(article); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT content_version FROM explore_articles WHERE id=$1`, id).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 0 {
+		t.Fatalf("raw body marked normalized: %d", version)
+	}
+	article.Content = &body
+	article.ContentVersion = 1
+	article.FetchedAt = now.Add(3 * time.Hour)
+	if _, err := repo.UpsertArticle(article); err != nil {
+		t.Fatal(err)
+	}
+	var hash string
+	if err := db.QueryRow(`SELECT legacy_content_hash FROM explore_articles WHERE id=$1`, id).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	if hash != fmt.Sprintf("%x", md5.Sum([]byte(legacy))) {
+		t.Fatalf("legacy provenance=%q", hash)
+	}
+	article.FetchedAt = now.Add(4 * time.Hour)
+	if _, err := repo.UpsertArticle(article); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT legacy_content_hash FROM explore_articles WHERE id=$1`, id).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	if hash != fmt.Sprintf("%x", md5.Sum([]byte(legacy))) {
+		t.Fatalf("lost legacy provenance=%q", hash)
+	}
+}

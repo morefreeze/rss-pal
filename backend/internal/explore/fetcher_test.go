@@ -491,3 +491,24 @@ func TestSourceFetchErrorClassificationAcceptsWrappedHTTPBodyLimit(t *testing.T)
 		t.Fatalf("kind=%q", got)
 	}
 }
+
+func TestSourceFetchConvertsHTMLBodyToMarkdown(t *testing.T) {
+	now := time.Now().UTC()
+	body := validRSS(`<item><title>Rich</title><link>https://9.9.9.9/posts/one</link><description><![CDATA[<h2>Heading</h2><p>Hello <strong>world</strong>. <a href="/next">Next</a></p><img src="image.png" alt="Photo">]]></description></item>` + rssItem("Second", "https://9.9.9.9/two", now))
+	fetcher := sourceFetcherForTest(now, func(req *http.Request) (*http.Response, error) {
+		return sourceResponse(req, 200, "application/rss+xml", body), nil
+	})
+	result, err := fetcher.Fetch(context.Background(), validConfidenceRequest("https://9.9.9.9/feed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := *result.Articles[0].Content
+	for _, want := range []string{"## Heading", "**world**", "[Next](https://9.9.9.9/next)", "![Photo](https://9.9.9.9/posts/image.png)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+	if strings.Contains(got, "<p>") {
+		t.Fatalf("raw HTML: %s", got)
+	}
+}
