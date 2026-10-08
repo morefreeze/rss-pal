@@ -65,7 +65,7 @@ func HasSourceConfidence(now time.Time, evidence []ObservationEvidence, directPr
 			continue
 		}
 		switch item.ProviderKind {
-		case "opml", "directory", "github_awesome":
+		case "opml", "directory", "github_awesome", "reddit_top":
 			return true
 		case "reddit_stream", "related_site":
 			if item.OccurrenceCount >= 2 {

@@ -57,7 +57,7 @@ type ProviderSyncResult struct {
 }
 
 func DefaultProviderAdapters() map[string]ProviderAdapter {
-	adapters := []ProviderAdapter{OPMLRegistryAdapter{}, DirectoryAdapter{}, RedditLinkStreamAdapter{}, GitHubAwesomeAdapter{}}
+	adapters := []ProviderAdapter{OPMLRegistryAdapter{}, DirectoryAdapter{}, RedditLinkStreamAdapter{}, RedditTopAdapter{}, GitHubAwesomeAdapter{}}
 	result := make(map[string]ProviderAdapter, len(adapters))
 	for _, adapter := range adapters {
 		result[adapter.Kind()] = adapter

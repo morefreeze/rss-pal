@@ -6,6 +6,7 @@ const (
 	ExploreProviderKindOPML          = "opml"
 	ExploreProviderKindDirectory     = "directory"
 	ExploreProviderKindRedditStream  = "reddit_stream"
+	ExploreProviderKindRedditTop     = "reddit_top"
 	ExploreProviderKindGitHubAwesome = "github_awesome"
 	ExploreProviderKindRelatedSite   = "related_site"
 
