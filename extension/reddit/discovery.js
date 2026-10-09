@@ -11,7 +11,7 @@
   // Self-contained: Chrome serializes this function into the Reddit page.
   async function readListing(subreddit, period) {
     if (location.origin !== 'https://www.reddit.com' ||
-        !['programming', 'MachineLearning', 'LocalLLaMA', 'artificial'].includes(subreddit) ||
+        (typeof subreddit !== 'string' || !/^[a-z0-9_]{1,21}$/i.test(subreddit) || /^u_/i.test(subreddit) || ['all','popular','friends','mod'].includes(subreddit.toLowerCase())) ||
         !['week', 'month'].includes(period)) throw new Error('Invalid Reddit collection target');
     const response = await fetch('/r/' + subreddit + '/top.json?t=' + period + '&limit=100&raw_json=1', {
       credentials: 'include', signal: AbortSignal.timeout(20000),
@@ -38,8 +38,76 @@
     return { kind: 'Listing', data: { children } };
   }
 
+  function normalizeSubreddit(name) {
+    if (typeof name !== 'string') return null;
+    name=name.toLowerCase();
+    return /^[a-z0-9_]{1,21}$/.test(name) && !name.startsWith('u_') &&
+      !['all','popular','friends','mod'].includes(name) ? name : null;
+  }
+  function detectSubreddit(address) {
+    try {
+      const url=new URL(address);
+      if (!['https:','http:'].includes(url.protocol) ||
+          !['reddit.com','www.reddit.com','old.reddit.com','new.reddit.com','m.reddit.com'].includes(url.hostname)) return null;
+      const match=url.pathname.match(/^\/r\/([^/]+)(?:\/|$)/i);
+      return match ? normalizeSubreddit(match[1]) : null;
+    } catch (_) {return null;}
+  }
+  async function configOwner(cfg) {
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(cfg.serverUrl+'\n'+cfg.token));
+    return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  function validateConfig(cfg) {
+    if (!cfg.serverUrl || !cfg.token) throw new Error('请先配置服务器和 Token');
+    const url=new URL(cfg.serverUrl);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost','127.0.0.1'].includes(url.hostname))) throw new Error('Reddit 探索需要 HTTPS 服务器');
+  }
+  async function subscriptions(chromeApi, owner) {
+    const data=(await chromeApi.storage.local.get('redditDiscoverySubscriptions')).redditDiscoverySubscriptions;
+    const boards=data?.byOwner?.[owner] || (data?.owner === owner ? data.boards : null);
+    return Array.isArray(boards) ? boards : [];
+  }
+  async function getBoards(chromeApi) {
+    const cfg=await chromeApi.storage.sync.get(['serverUrl','token']);
+    const added=await subscriptions(chromeApi,await configOwner(cfg));
+    return [...BOARDS.map(name=>name.toLowerCase()),...added.map(b=>b.name)];
+  }
+
   function createCollector({ chromeApi, fetchImpl = fetch, now = Date.now }) {
     let busy = false;
+    let registration=Promise.resolve();
+    function addSubreddit(raw) {
+      // Serialize additions separately from tick's state writes so a pending
+      // network fetch cannot overwrite a newly added community.
+      const operation=registration.then(async()=>{
+        const name=normalizeSubreddit(raw);
+        if (!name) throw new Error('当前页面不是可探索的 subreddit');
+        const cfg=await chromeApi.storage.sync.get(['serverUrl','token']);
+        validateConfig(cfg);
+        const owner=await configOwner(cfg);
+        const boards=await subscriptions(chromeApi,owner);
+        if (BOARDS.some(b=>b.toLowerCase()===name) || boards.some(b=>b.name===name)) return name;
+        if (boards.length>=50) throw new Error('最多添加 50 个 subreddit');
+        const response=await fetchImpl(cfg.serverUrl.replace(/\/+$/,'')+'/api/extension/reddit-subreddits',{
+          method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+cfg.token},
+          body:JSON.stringify({subreddit:name}),signal:AbortSignal.timeout(20000),
+        });
+        if (!response.ok) throw new Error(response.status===403?'需要 RSS Pal 管理员 Token':'加入探索失败：HTTP '+response.status);
+        const result=await response.json();
+        if (result.subreddit!==name) throw new Error('服务器返回了无效 subreddit');
+        const latest=await chromeApi.storage.sync.get(['serverUrl','token']);
+        if (await configOwner(latest)!==owner) throw new Error('配置已更改，请重试');
+        boards.push({name,addedAt:now()});
+        const stored=(await chromeApi.storage.local.get('redditDiscoverySubscriptions')).redditDiscoverySubscriptions;
+        const byOwner={...stored?.byOwner};
+        if (stored?.owner && Array.isArray(stored.boards)) byOwner[stored.owner]=stored.boards;
+        byOwner[owner]=boards;
+        await chromeApi.storage.local.set({redditDiscoverySubscriptions:{byOwner}});
+        return name;
+      });
+      registration=operation.catch(()=>{});
+      return operation;
+    }
     async function state() { return (await chromeApi.storage.local.get('redditDiscovery')).redditDiscovery || { enabled: false, jobs: {} }; }
     async function save(value) { await chromeApi.storage.local.set({ redditDiscovery: value }); }
     async function configure(enabled) {
@@ -99,14 +167,21 @@
           if (s.enabled || manual) {s.error='请先配置服务器和 Token';await save(s);}
           return;
         }
-        const server = new URL(cfg.serverUrl);
-        if (server.protocol !== 'https:' && !(server.protocol === 'http:' && ['localhost','127.0.0.1'].includes(server.hostname))) {
-          s.error='Reddit 探索需要 HTTPS 服务器'; await save(s); return;
-        }
-        const digest = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(cfg.serverUrl+'\n'+cfg.token));
-        const owner = Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+        try {validateConfig(cfg);} catch(e) {s.error=e.message;await save(s);return;}
+        const owner=await configOwner(cfg);
         if (s.owner !== owner) s={owner,enabled:s.enabled,jobs:{}};
         s.error=null;
+        const added=await subscriptions(chromeApi,owner);
+        const jobs=[...JOBS];
+        for (const board of added) {
+          if (!normalizeSubreddit(board.name) || BOARDS.some(b=>b.toLowerCase()===board.name)) continue;
+          for (const period of ['week','month']) {
+            const key=board.name+':'+period;
+            jobs.push({key,subreddit:board.name,period});
+            const v=s.jobs[key] ||= {};
+            if (!v.addedAt || v.addedAt < board.addedAt) {v.addedAt=board.addedAt;v.requested=true;}
+          }
+        }
         // A persisted collecting state without a payload means Chrome exited
         // before the fetch completed. Restore intent even in manual mode.
         for (const v of Object.values(s.jobs)) {
@@ -115,11 +190,11 @@
         if (manual > (s.requestedAt || 0)) {
           s.requestedAt=manual;
           const active=Object.values(s.jobs).some(v=>v.requested || v.pending);
-          if (!active) for (const job of JOBS) {s.jobs[job.key] ||= {};s.jobs[job.key].requested=true;}
+          if (!active) for (const job of jobs) {s.jobs[job.key] ||= {};s.jobs[job.key].requested=true;}
         }
         if (s.nextTickAt && s.nextTickAt > now()) {await save(s);return;}
         // One listing per alarm tick. Persisted checkpoints survive SW suspension.
-        const job = JOBS.find(j => {
+        const job = jobs.find(j => {
           const v=s.jobs[j.key] || {};
           return (v.pending && (!v.retryAt || v.retryAt <= now())) ||
             (!v.pending && (v.requested || (s.enabled && (!v.nextAt || v.nextAt <= now()))));
@@ -156,7 +231,7 @@
         await save(s);
       } finally {busy=false;}
     }
-    return {tick,configure,requestRun,state};
+    return {tick,configure,requestRun,state,addSubreddit};
   }
-  globalThis.__rssPalReddit = { readListing, createCollector, JOBS };
+  globalThis.__rssPalReddit = { readListing, createCollector, JOBS, detectSubreddit, getBoards };
 })();

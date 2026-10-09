@@ -294,8 +294,10 @@ func main() {
 		extensionIngestHandler.Ingest)
 
 	// Public-token authentication plus admin check precedes shared catalog writes.
+	redditBrowserHandler := api.NewRedditBrowserHandler(extensionIngestHandler, repository.NewRedditBrowserRepository(adminDB))
+	router.POST("/api/extension/reddit-subreddits", redditBrowserHandler.RegisterSubreddit)
 	router.POST("/api/extension/reddit-discovery",
-		api.NewRedditBrowserHandler(extensionIngestHandler, repository.NewRedditBrowserRepository(adminDB)).Ingest)
+		redditBrowserHandler.Ingest)
 
 	router.POST("/api/integrations/englife/complete", englifeHandler.Complete)
 

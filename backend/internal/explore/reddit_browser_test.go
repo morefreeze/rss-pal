@@ -20,7 +20,7 @@ func TestRedditBrowserBatchValidation(t *testing.T) {
 		name   string
 		mutate func(*RedditBrowserBatch)
 	}{
-		{"unknown board", func(b *RedditBrowserBatch) { b.Subreddit = "unknown" }},
+		{"unknown board", func(b *RedditBrowserBatch) { b.Subreddit = "all" }},
 		{"unknown period", func(b *RedditBrowserBatch) { b.Period = "all" }},
 		{"stale", func(b *RedditBrowserBatch) { b.CapturedAt = now.Add(-13 * time.Hour) }},
 		{"future", func(b *RedditBrowserBatch) { b.CapturedAt = now.Add(6 * time.Minute) }},
@@ -62,5 +62,19 @@ func TestRedditBrowserBatchValidation(t *testing.T) {
 	provider.Endpoint = RedditTopEndpoint("programming", "week", 1)
 	if _, _, err := batch.Parse(provider, now); err == nil {
 		t.Fatal("accepted server threshold below hard minimum")
+	}
+}
+
+func TestRedditBrowserDynamicNames(t *testing.T) {
+	for _, name := range []string{"golang", "Rust", "learn_programming"} {
+		key, err := (RedditBrowserBatch{Subreddit: name, Period: "week"}).ProviderKey()
+		if err != nil || key != "reddit-"+strings.ToLower(name)+"-top-week" {
+			t.Fatalf("name=%s key=%s err=%v", name, key, err)
+		}
+	}
+	for _, name := range []string{"all", "popular", "friends", "mod", "u_someone", "go+rust", "../go", "go?x=1", "", strings.Repeat("a", 22)} {
+		if _, err := (RedditBrowserBatch{Subreddit: name, Period: "week"}).ProviderKey(); err == nil {
+			t.Fatalf("accepted %q", name)
+		}
 	}
 }

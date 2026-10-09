@@ -25,7 +25,7 @@ test('403 and malformed listing are failures, not successful empty discovery',as
   await assert.rejects(()=>api.readListing('programming','week'));
  }
 });
-test('only fixed boards/windows and reddit origin may be read',async()=>{
+test('foreign origins cannot read subreddit listings',async()=>{
  let calls=0;
  const api=load({location:{origin:'https://evil.example'},fetch:async()=>{calls++;}});
  await assert.rejects(()=>api.readListing('programming','week'));
@@ -33,20 +33,20 @@ test('only fixed boards/windows and reddit origin may be read',async()=>{
  assert.equal(calls,0);
 });
 
-function harness({response,collectError}={}) {
- const local={}; const session={};let stamp=1791500000000;let captures=0,uploads=0,closed=0;
+function harness({response,collectError,registrationError}={}) {
+ const local={}; const session={};let stamp=1791500000000;let captures=0,uploads=0,closed=0,registrations=0;
  const store=data=>({get:async keys=>{if(typeof keys==='string')keys=[keys];return Object.fromEntries(keys.filter(k=>k in data).map(k=>[k,structuredClone(data[k])]));},set:async values=>Object.assign(data,structuredClone(values)),remove:async key=>{delete data[key];}});
  const cfg={serverUrl:'https://rss.example',token:'test-only-token'};
  const chromeApi={storage:{local:store(local),sync:store(cfg),session:store(session)},tabs:{create:async()=>{captures++;return{id:7};},get:async()=>({status:'complete'}),remove:async()=>{closed++;},onUpdated:{addListener(){},removeListener(){}}},scripting:{executeScript:async()=>{if(collectError)throw new Error(collectError);return[{result:{kind:'Listing',data:{children:[]}}}];}}};
  const api=load({fetch:()=>{},setTimeout,clearTimeout,TextEncoder,crypto:require('node:crypto').webcrypto});
- const options={chromeApi,now:()=>stamp,fetchImpl:async()=>{uploads++;return response || {ok:true,json:async()=>({accepted:0,stats:{external_posts:0}})};}};
- return {collector:api.createCollector(options),recreate:()=>api.createCollector(options),local,cfg,advance:ms=>{stamp+=ms;},counts:()=>({captures,uploads,closed})};
+ const options={chromeApi,now:()=>stamp,fetchImpl:async(url)=>{if(url.endsWith("/reddit-subreddits")){registrations++;return registrationError?{ok:false,status:403}:{ok:true,json:async()=>({subreddit:"golang"})};}uploads++;return response || {ok:true,json:async()=>({accepted:0,stats:{external_posts:0}})};}};
+ return {collector:api.createCollector(options),recreate:()=>api.createCollector(options),local,cfg,advance:ms=>{stamp+=ms;},counts:()=>({captures,uploads,closed,registrations})};
 }
 test('disabled collector is idle; manual run processes eight lists once across restarts',async()=>{
  const h=harness();await h.collector.tick();assert.equal(h.counts().captures,0);
  await h.collector.requestRun();await h.collector.tick();
  const restarted=h.recreate();for(let i=0;i<9;i++){h.advance(60000);await restarted.tick();}
- assert.deepEqual(h.counts(),{captures:8,uploads:8,closed:8});
+ assert.deepEqual(h.counts(),{captures:8,uploads:8,closed:8,registrations:0});
  assert.equal(Object.values(h.local.redditDiscovery.jobs).filter(j=>j.status==='done').length,8);
 });
 test('upload failures persist and retry without refetching; changing account clears pending data',async()=>{
@@ -65,7 +65,7 @@ test('six-hour scheduling and disabled toggle prevent automatic new reads',async
 });
 test('403 capture records failure, closes owned tab and never uploads',async()=>{
  const h=harness({collectError:'Reddit HTTP 403'});await h.collector.requestRun();await h.collector.tick();
- assert.deepEqual(h.counts(),{captures:1,uploads:0,closed:1});
+ assert.deepEqual(h.counts(),{captures:1,uploads:0,closed:1,registrations:0});
  assert.equal(h.local.redditDiscovery.jobs['programming:week'].status,'failed');
 });
 test('concurrent ticks collect at most one listing',async()=>{
@@ -80,4 +80,32 @@ test('interrupted collection resumes and repeated manual actions respect minute 
  jobs['programming:week']={requested:false,nextAt:1791500000000+6*3600000,status:'collecting'};
  const restarted=h.recreate();h.advance(60000);await restarted.tick();
  assert.equal(h.counts().captures,2);assert.equal(h.local.redditDiscovery.jobs['programming:week'].status,'done');
+});
+
+test('detect subreddit on listing and post pages; reject aggregate/spoofed URLs',()=>{
+ const api=load();
+ for(const url of ['https://www.reddit.com/r/Golang/','https://old.reddit.com/r/golang/comments/abc/title','https://reddit.com/r/golang/top/?t=week'])assert.equal(api.detectSubreddit(url),'golang');
+ for(const url of ['https://reddit.com.evil.test/r/golang','https://www.reddit.com/r/all','https://www.reddit.com/r/popular','https://www.reddit.com/r/go+rust','https://www.reddit.com/user/someone','https://www.reddit.com/r/u_someone'])assert.equal(api.detectSubreddit(url),null);
+});
+test('adding a subreddit registers once, persists and schedules its two lists while auto is off',async()=>{
+ const h=harness();await Promise.all([h.collector.addSubreddit('GoLang'),h.collector.addSubreddit('golang')]);
+ const subs={boards:Object.values(h.local.redditDiscoverySubscriptions.byOwner)[0]};
+ assert.equal(subs.boards.length,1);assert.equal(subs.boards[0].name,'golang');
+ assert.equal(h.counts().registrations,1);
+ const restarted=h.recreate();await restarted.tick();h.advance(60000);await restarted.tick();h.advance(60000);await restarted.tick();
+ assert.equal(h.counts().captures,2);
+ assert.equal(h.local.redditDiscovery.jobs['golang:week'].status,'done');
+ assert.equal(h.local.redditDiscovery.jobs['golang:month'].status,'done');
+});
+test('failed registration leaves list untouched',async()=>{
+ const h=harness({registrationError:true});await assert.rejects(()=>h.collector.addSubreddit('golang'));
+ assert.equal(h.local.redditDiscoverySubscriptions,undefined);
+});
+
+test('switching accounts preserves separate subreddit lists', async()=>{
+ const h=harness();await h.collector.addSubreddit('golang');
+ h.cfg.token='account-B';await h.collector.addSubreddit('golang');
+ assert.equal(Object.keys(h.local.redditDiscoverySubscriptions.byOwner).length,2);
+ h.cfg.token='test-only-token';await h.collector.addSubreddit('golang');
+ assert.equal(h.counts().registrations,2);
 });

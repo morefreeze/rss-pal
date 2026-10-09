@@ -88,3 +88,39 @@ func TestRedditBrowserTransportMigration(t *testing.T) {
 		t.Fatalf("browser seeds=%d", count)
 	}
 }
+
+func TestRegisterRedditSubreddit(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewRedditBrowserRepository(db)
+	ctx := context.Background()
+	for _, input := range []string{"GoLang", "golang"} {
+		name, err := repo.RegisterSubreddit(ctx, input)
+		if err != nil || name != "golang" {
+			t.Fatalf("name=%q err=%v", name, err)
+		}
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM explore_registry_providers WHERE provider_key LIKE 'reddit-golang-top-%' AND browser_only AND enabled AND sync_interval_minutes=360 AND endpoint LIKE '%#min_score=100'`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	now := time.Now().UTC()
+	batch := explore.RedditBrowserBatch{Subreddit: "golang", Period: "week", CapturedAt: now, Listing: json.RawMessage(`{"kind":"Listing","data":{"children":[{"kind":"t3","data":{"id":"newboard","score":100,"subreddit":"golang","url":"https://blog.example/go"}}]}}`)}
+	if result, err := repo.Ingest(ctx, batch, now); err != nil || result.Accepted != 1 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	batch.Subreddit = "rust"
+	if _, err := repo.Ingest(ctx, batch, now); err != repository.ErrRedditBrowserDisabled {
+		t.Fatalf("unregistered err=%v", err)
+	}
+	// A disabled second window must roll back creation of the first window.
+	if _, err := db.Exec(`DELETE FROM explore_registry_providers WHERE provider_key='reddit-golang-top-week'; UPDATE explore_registry_providers SET enabled=false WHERE provider_key='reddit-golang-top-month'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RegisterSubreddit(ctx, "golang"); err != repository.ErrRedditBrowserDisabled {
+		t.Fatalf("disabled err=%v", err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM explore_registry_providers WHERE provider_key LIKE 'reddit-golang-top-%' AND enabled`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("partial registration count=%d err=%v", count, err)
+	}
+}

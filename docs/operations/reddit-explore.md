@@ -2,15 +2,17 @@
 
 从插件 1.8.6 起，四个 subreddit 的 week/month top100 榜单由浏览器采集。服务端不再直接抓取这8个种子，仍负责博客 RSS 验证、探索候选去重与文章处理。
 
-1. 安装/重新加载 RSS Pal 1.8.6 插件，配置 HTTPS 服务地址与管理员 bookmarklet token。
+1. 安装/重新加载 RSS Pal 1.8.7 插件，配置 HTTPS 服务地址与管理员 bookmarklet token。
 2. 在同一浏览器配置中登录 Reddit，确认能正常访问相应 subreddit。
 3. 打开插件中的“Reddit 探索 · ≥100 分”，点击“立即探索”。每分钟处理一个榜单，完整一轮约8分钟。
 4. 可勾选每6小时自动探索，默认关闭。浏览器退出时无法采集，下次运行继续按持久化状态调度。
 5. 状态中的“候选入队”表示外链待RSS验证，不等于最终有效订阅源。403、超时、登录页均显示失败，不能解释为没有候选。
 
-列表固定为 programming、MachineLearning、LocalLLaMA、artificial。分数缺失或低于100跳过；服务端再次执行门槛与外链过滤，管理员可保留更高的既有门槛。没有OAuth令牌或Cookie上传；上传仅含公开帖ID、分数、subreddit、外链及排除标志。Browser读取依赖当前会话和Reddit访问条件，并不代表API授权获批。
+默认列表为 programming、MachineLearning、LocalLLaMA、artificial。1.8.7 起，在任意 subreddit 社区页或帖子页打开插件，点击“加入探索”即可注册该社区的周榜/月榜并排队首次采集，无需开启自动探索。已加入的社区显示“已加入探索”；自定义列表保存在当前浏览器并按服务地址/Token 隔离，最多50个。服务端种子属于共享探索池，添加仍需管理员 Token。分数缺失或低于100跳过；服务端再次执行门槛与外链过滤，管理员可保留更高的既有门槛。没有OAuth令牌或Cookie上传；上传仅含公开帖ID、分数、subreddit、外链及排除标志。Browser读取依赖当前会话和Reddit访问条件，并不代表API授权获批。
 
-接口：`POST /api/extension/reddit-discovery`，Bearer bookmarklet token，必须管理员。请求体最多256KiB，每批最多100帖子，抓取时间有效期12小时。候选、观察、验证队列与成功时间以一个事务保存；同时间或旧批次重传不重复入队。禁用provider返回409。插件暂存失败上传每5分钟重试；切换服务器/Token清除旧身份的待上传批次。
+注册接口：`POST /api/extension/reddit-subreddits`，请求 `{ "subreddit": "golang" }`；周榜/月榜事务注册，重复添加幂等，不重新启用已禁用的种子。
+
+采集接口：`POST /api/extension/reddit-discovery`，Bearer bookmarklet token，必须管理员。请求体最多256KiB，每批最多100帖子，抓取时间有效期12小时。候选、观察、验证队列与成功时间以一个事务保存；同时间或旧批次重传不重复入队。禁用provider返回409。插件暂存失败上传每5分钟重试；切换服务器/Token清除旧身份的待上传批次。
 
 迁移052添加 `explore_registry_providers.browser_only`，把既有8个Reddit provider切换为浏览器运输，保留门槛和启用状态。原050迁移及其只读CLI仍保留供诊断使用。
 

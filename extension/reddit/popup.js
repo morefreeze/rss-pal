@@ -3,8 +3,24 @@
   const toggle=document.getElementById('redditAuto');
   const button=document.getElementById('redditRun');
   const status=document.getElementById('redditStatus');
+  const add=document.getElementById('redditAdd');
+  const addStatus=document.getElementById('redditAddStatus');
+  let currentSubreddit=null;
+  async function renderCurrent() {
+    const boards=await globalThis.__rssPalReddit.getBoards(chrome);
+    document.getElementById('redditBoards').textContent='探索列表：'+boards.map(b=>'r/'+b).join('、');
+    const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+    currentSubreddit=globalThis.__rssPalReddit.detectSubreddit(tab?.url);
+    document.getElementById('redditCurrent').style.display=currentSubreddit?'block':'none';
+    if (currentSubreddit) {
+      document.getElementById('redditCurrentName').textContent='当前 subreddit：r/'+currentSubreddit;
+      const exists=boards.includes(currentSubreddit);
+      add.disabled=exists;add.textContent=exists?'已加入探索':'加入探索';
+    }
+  }
   const labels={collecting:'采集中',failed:'采集失败',upload_failed:'上传失败',done:'已上传'};
   async function render() {
+    await renderCurrent();
     const data=await chrome.storage.local.get(['redditDiscovery','redditDiscoveryEnabled']);
     toggle.checked=data.redditDiscoveryEnabled===true;
     const s=data.redditDiscovery;
@@ -19,13 +35,27 @@
     status.style.whiteSpace='pre-line';status.textContent=lines.join('\n');
   }
   async function send(message) {
-    try {const response=await chrome.runtime.sendMessage(message);if (!response?.ok) throw new Error('无法启动探索');}
-    catch(e) {status.textContent=e.message;}
+    const response=await chrome.runtime.sendMessage(message);
+    if (!response?.ok) throw new Error(response?.error || '无法启动探索');
+    return response;
   }
-  toggle.addEventListener('change',()=>send({action:'redditDiscoveryConfigure',enabled:toggle.checked}));
-  button.addEventListener('click',async()=>{
-    button.disabled=true;await send({action:'redditDiscoveryRun'});status.textContent='已加入探索队列，每分钟处理一个榜单。';button.disabled=false;
+  add.addEventListener('click',async()=>{
+    if (!currentSubreddit) return;
+    add.disabled=true;addStatus.textContent='正在加入…';
+    try {await send({action:'redditDiscoveryAdd',subreddit:currentSubreddit});addStatus.textContent='已加入探索，首次采集已排队。';}
+    catch(e) {addStatus.textContent=e.message;}
+    finally {await renderCurrent();}
   });
-  chrome.storage.onChanged.addListener((_changes,area)=>{if(area==='local')render();});
+  toggle.addEventListener('change',async()=>{
+    try {await send({action:'redditDiscoveryConfigure',enabled:toggle.checked});}
+    catch(e) {status.textContent=e.message;}
+  });
+  button.addEventListener('click',async()=>{
+    button.disabled=true;
+    try {await send({action:'redditDiscoveryRun'});status.textContent='已加入探索队列，每分钟处理一个榜单。';}
+    catch(e) {status.textContent=e.message;}
+    finally {button.disabled=false;}
+  });
+  chrome.storage.onChanged.addListener((_changes,area)=>{if(area==='local' || area==='sync')render();});
   render();
 })();

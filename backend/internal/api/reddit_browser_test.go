@@ -66,3 +66,46 @@ func TestRedditBrowserAuthenticationAndValidation(t *testing.T) {
 		})
 	}
 }
+
+func (s *fakeRedditStore) RegisterSubreddit(_ context.Context, name string) (string, error) {
+	s.calls++
+	return name, s.err
+}
+func TestRegisterRedditSubreddit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name  string
+		admin bool
+		token string
+		sub   string
+		code  int
+	}{
+		{"no token", true, "", "golang", 401}, {"nonadmin", false, testBookmarkletToken, "golang", 403},
+		{"invalid", true, testBookmarkletToken, "all", 400}, {"register", true, testBookmarkletToken, "GoLang", 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			auth := &ExtensionIngestHandler{userRepo: &stubExtUserRepo{token: testBookmarkletToken, user: &model.User{ID: 1, IsAdmin: tc.admin}}}
+			store := &fakeRedditStore{}
+			h := NewRedditBrowserHandler(auth, store)
+			r := gin.New()
+			r.POST("/register", h.RegisterSubreddit)
+			b, _ := json.Marshal(map[string]string{"subreddit": tc.sub})
+			req := httptest.NewRequest("POST", "/register", bytes.NewReader(b))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != tc.code {
+				t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+			}
+			if tc.code != 200 && store.calls != 0 {
+				t.Fatal("unauthorized or invalid registration reached store")
+			}
+			if tc.code == 200 && !bytes.Contains(rec.Body.Bytes(), []byte(`"golang"`)) {
+				t.Fatalf("not normalized: %s", rec.Body)
+			}
+		})
+	}
+}

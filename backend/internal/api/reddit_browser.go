@@ -13,6 +13,7 @@ import (
 )
 
 type redditBrowserStore interface {
+	RegisterSubreddit(context.Context, string) (string, error)
 	Ingest(context.Context, explore.RedditBrowserBatch, time.Time) (repository.RedditBrowserResult, error)
 }
 type RedditBrowserHandler struct {
@@ -58,4 +59,42 @@ func (h *RedditBrowserHandler) Ingest(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// RegisterSubreddit is separate from ingest: merely visiting a Reddit page or
+// uploading an unregistered community cannot silently expand shared discovery.
+func (h *RedditBrowserHandler) RegisterSubreddit(c *gin.Context) {
+	user, err := h.auth.authenticate(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid bookmarklet token"})
+		return
+	}
+	if !user.IsAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "administrator required for shared discovery"})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
+	var body struct {
+		Subreddit string `json:"subreddit"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid subreddit request"})
+		return
+	}
+	name, err := explore.NormalizeSubreddit(body.Subreddit)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	name, err = h.store.RegisterSubreddit(c.Request.Context(), name)
+	if errors.Is(err, repository.ErrRedditBrowserDisabled) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Reddit provider is disabled or unavailable"})
+		return
+	}
+	if err != nil {
+		log.Printf("register Reddit subreddit: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "subreddit registration failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"subreddit": name})
 }

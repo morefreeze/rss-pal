@@ -34,6 +34,12 @@
         <div class="status" id="captureAdapterStatus"></div>
       </div>
 
+      <div id="redditCurrent" style="display:none;">
+        <p id="redditCurrentName"></p>
+        <button class="btn btn-secondary" id="redditAdd">加入探索</button>
+        <p id="redditAddStatus" class="sync-status"></p>
+      </div>
+
       <button class="btn btn-primary" id="captureBtn">⭐ 发送到 RSS Pal</button>
 
       <div class="status" id="status"></div>
@@ -51,7 +57,7 @@
 
       <details class="sync-source-section">
         <summary class="sync-source-summary">Reddit 探索 · ≥100 分</summary>
-        <p>从 programming、MachineLearning、LocalLLaMA、artificial 周榜/月榜发现博客。</p>
+        <p id="redditBoards"></p>
         <label><input type="checkbox" id="redditAuto"> 每 6 小时自动探索（浏览器运行时）</label>
         <button class="btn btn-secondary" id="redditRun">立即探索</button>
         <p id="redditStatus" class="sync-status">需要管理员 Token；每分钟处理一个榜单。</p>
@@ -73,6 +79,7 @@
   </div>
 
   <script src="popup.js"></script>
+  <script src="reddit/discovery.js"></script>
   <script src="reddit/popup.js"></script>
 </body>
 </html>

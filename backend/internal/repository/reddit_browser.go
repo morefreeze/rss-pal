@@ -72,3 +72,34 @@ func (r *RedditBrowserRepository) Ingest(ctx context.Context, b explore.RedditBr
 	}
 	return result, tx.Commit()
 }
+
+// RegisterSubreddit is called only after an explicit administrator action. Both
+// windows are registered together; existing disabled providers stay disabled.
+func (r *RedditBrowserRepository) RegisterSubreddit(ctx context.Context, name string) (string, error) {
+	name, err := explore.NormalizeSubreddit(name)
+	if err != nil {
+		return "", err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	for _, period := range []string{"week", "month"} {
+		key, _ := (explore.RedditBrowserBatch{Subreddit: name, Period: period}).ProviderKey()
+		_, err = tx.ExecContext(ctx, `INSERT INTO explore_registry_providers(provider_key,provider_kind,endpoint,topic,sync_interval_minutes,browser_only)
+    VALUES($1,'reddit_top',$2,'general',360,true) ON CONFLICT(provider_key) DO NOTHING`, key, explore.RedditTopEndpoint(name, period, 100))
+		if err != nil {
+			return "", err
+		}
+		var available bool
+		err = tx.QueryRowContext(ctx, `SELECT enabled AND browser_only AND provider_kind='reddit_top' FROM explore_registry_providers WHERE provider_key=$1 FOR UPDATE`, key).Scan(&available)
+		if err != nil {
+			return "", err
+		}
+		if !available {
+			return "", ErrRedditBrowserDisabled
+		}
+	}
+	return name, tx.Commit()
+}

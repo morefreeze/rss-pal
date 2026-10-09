@@ -21,7 +21,7 @@ func TestMigration038_ExploreSchema(t *testing.T) {
 	defer cleanup()
 
 	for table, want := range map[string][]string{
-		"explore_registry_providers":  {"id", "provider_key", "provider_kind", "endpoint", "topic", "sync_interval_minutes", "enabled", "etag", "last_modified", "last_sync_at", "last_success_at", "last_materialized_at", "consecutive_failures", "last_error", "created_at", "updated_at"},
+		"explore_registry_providers":  {"id", "provider_key", "provider_kind", "endpoint", "topic", "sync_interval_minutes", "enabled", "browser_only", "etag", "last_modified", "last_sync_at", "last_success_at", "last_materialized_at", "consecutive_failures", "last_error", "created_at", "updated_at"},
 		"explore_source_observations": {"id", "provider_id", "source_id", "external_key", "provider_tags", "first_seen_at", "last_seen_at", "occurrence_count"},
 		"explore_fetch_runs":          {"id", "window_at", "status", "claimed_count", "started_at", "completed_at", "worker_id", "error_message", "created_at"},
 		"explore_fetch_queue":         {"id", "source_id", "task_type", "status", "priority", "not_before", "attempts", "run_id", "lease_owner", "lease_token", "lease_expires_at", "last_error", "created_at", "updated_at", "completed_at"},

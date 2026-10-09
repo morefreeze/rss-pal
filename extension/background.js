@@ -89,14 +89,17 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Content scripts ask us to flush after pushing new items.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.action === 'redditDiscoveryRun' || msg?.action === 'redditDiscoveryConfigure') {
+  if (['redditDiscoveryRun','redditDiscoveryConfigure','redditDiscoveryAdd'].includes(msg?.action)) {
     if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) {
       sendResponse({ok:false}); return false;
     }
-    const operation = msg.action === 'redditDiscoveryRun'
-      ? redditCollector.requestRun() : redditCollector.configure(msg.enabled);
-    operation.then(() => {sendResponse({ok:true});return redditCollector.tick();})
-      .catch(e => console.warn('[rss-pal] Reddit discovery:',e.message));
+    const operation = msg.action === 'redditDiscoveryRun' ? redditCollector.requestRun()
+      : msg.action === 'redditDiscoveryAdd' ? redditCollector.addSubreddit(msg.subreddit)
+      : redditCollector.configure(msg.enabled);
+    operation.then(
+      subreddit => {sendResponse({ok:true,subreddit});redditCollector.tick().catch(e=>console.warn('[rss-pal] Reddit discovery:',e.message));},
+      error => sendResponse({ok:false,error:error.message}),
+    );
     return true;
   }
 
