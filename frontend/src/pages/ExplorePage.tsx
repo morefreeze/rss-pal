@@ -12,6 +12,7 @@ import RedditExploreSources from '../components/RedditExploreSources'
 import ExploreSourceDrawer from '../components/ExploreSourceDrawer'
 import { useExploreFeed } from '../hooks/useExploreFeed'
 import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
+import { exploreTopicLabel } from '../components/exploreTopicLabels'
 import { toast } from '../utils/toast'
 
 const PAGE_SIZE = 20
@@ -113,7 +114,7 @@ export default function ExplorePage() {
         ? await feed.hideSource(article.source_id)
         : await feed.dampenTopic(article.topic)
       setFeedbackUndos(current => [...current, undo])
-      toast.info(kind === 'source' ? '已隐藏这个来源' : '已减少这类内容', {
+      toast.info(kind === 'source' ? `已隐藏来源「${article.source_title}」` : `已隐藏主题「${exploreTopicLabel(article.topic)}」`, {
         action: {
           label: '撤销',
           onClick: () => {
@@ -215,7 +216,7 @@ export default function ExplorePage() {
             <span className="sr-only">主题筛选</span>
             <select className="toolbar-control" aria-label="主题筛选" value={feed.topic} onChange={event => pickTopic(event.target.value)}>
               <option value="">全部主题</option>
-              {topics.map(topic => <option key={topic} value={topic}>{topic}</option>)}
+              {topics.map(topic => <option key={topic} value={topic}>{exploreTopicLabel(topic)}</option>)}
             </select>
           </label>
           <div className="explore-sort-buttons" aria-label="排序方式">
@@ -291,8 +292,8 @@ export default function ExplorePage() {
                 清除本次反馈（{feedbackUndos.length}）
               </button>
             )}
-            <button type="button" className="secondary" aria-label="清除隐藏/少推荐反馈" disabled={feedbackClearing} onClick={() => void clearNegativeFeedback()}>
-              {feedbackClearing ? '清除中…' : '清除隐藏/少推荐反馈'}
+            <button type="button" className="secondary" aria-label="清除来源和主题屏蔽" disabled={feedbackClearing} onClick={() => void clearNegativeFeedback()}>
+              {feedbackClearing ? '清除中…' : '清除来源和主题屏蔽'}
             </button>
             {feed.error && (
               <button type="button" className="secondary" onClick={() => void (feed.hasMore ? feed.continueLoading() : feed.reload())}>重试加载</button>

@@ -1,5 +1,6 @@
 import { useArticleImageSource } from '../util/useArticleImageSource'
 import { useEffect, useRef, useState } from 'react'
+import { exploreTopicLabel, feedbackTopicLabel } from './exploreTopicLabels'
 import type { ExploreArticleListItem, ExploreSort } from '../api/client'
 
 interface Props {
@@ -29,6 +30,8 @@ export default function ExploreArticleCard({
   onDampenTopic,
 }: Props) {
 	const cardRef = useRef<HTMLElement | null>(null)
+  const topicLabel = feedbackTopicLabel(article.topic)
+  const sourceLabel = article.source_title || '未命名来源'
   const thumbnailSrc = useArticleImageSource(article.thumbnail_url || undefined)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -117,7 +120,7 @@ export default function ExploreArticleCard({
           </h3>
           {article.excerpt && <p className="explore-article-card__excerpt">{article.excerpt}</p>}
           <div className="explore-article-card__recommendation">
-            <span>{article.topic || '综合'}</span>
+            <span>{exploreTopicLabel(article.topic)}</span>
             <span>{article.reason}</span>
           </div>
         </div>
@@ -146,12 +149,14 @@ export default function ExploreArticleCard({
         >⋯</button>
         {menuOpen && (
           <div role="menu" className="explore-card-menu__popover" onClick={event => event.stopPropagation()}>
-            <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onHideSource(article.source_id) }}>
-              隐藏此源
+            <button type="button" role="menuitem" aria-label={`隐藏来源「${sourceLabel}」`} onClick={() => { setMenuOpen(false); onHideSource(article.source_id) }}>
+              <span>隐藏来源「{sourceLabel}」</span>
+              <small>隐藏该来源的全部探索文章</small>
             </button>
-            <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onDampenTopic(article.topic) }}>
-              少推荐这类内容
-            </button>
+            {topicLabel && <button type="button" role="menuitem" aria-label={`隐藏主题「${topicLabel}」`} onClick={() => { setMenuOpen(false); onDampenTopic(article.topic) }}>
+              <span>隐藏主题「{topicLabel}」</span>
+              <small>隐藏所有来源中属于此主题的探索文章</small>
+            </button>}
           </div>
         )}
       </div>

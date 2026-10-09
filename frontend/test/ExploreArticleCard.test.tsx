@@ -126,3 +126,20 @@ describe('ExploreArticleCard exposure tracking', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 })
+
+describe('explicit exploration feedback targets',()=>{
+ it('names the source and topic and keeps feedback identifiers unchanged',()=>{
+  const hide=vi.fn(),topic=vi.fn();
+  const view=render(<ExploreArticleCard article={{...article,topic:'programming'}} sort="published" onOpen={vi.fn()} onExposure={vi.fn()} onHideSource={hide} onDampenTopic={topic}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Retryable exposure 的更多操作'}));
+  fireEvent.click(screen.getByRole('menuitem',{name:'隐藏主题「编程」'}));expect(topic).toHaveBeenCalledWith('programming');
+  fireEvent.click(screen.getByRole('button',{name:'Retryable exposure 的更多操作'}));
+  fireEvent.click(screen.getByRole('menuitem',{name:'隐藏来源「Source 3」'}));expect(hide).toHaveBeenCalledWith(3);view.unmount();
+ });
+ it.each(['recently-added','recently added','recently_added','Chinese Independent','general','blog','youtube','podcast','chinese-independent',''])('does not offer topic hiding for non-content label %s',topic=>{
+  render(<ExploreArticleCard article={{...article,topic}} sort="published" onOpen={vi.fn()} onExposure={vi.fn()} onHideSource={vi.fn()} onDampenTopic={vi.fn()}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Retryable exposure 的更多操作'}));
+  expect(screen.queryByRole('menuitem',{name:/隐藏主题/})).toBeNull();
+  expect(screen.getByRole('menuitem',{name:'隐藏来源「Source 3」'})).toBeTruthy();
+ });
+});
