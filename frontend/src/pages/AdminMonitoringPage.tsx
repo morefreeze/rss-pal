@@ -28,6 +28,13 @@ function alertValue(code: string, value: number): string {
   if (code.includes('cost')) return amount(value)
   return number(value)
 }
+function estimateDuration(seconds: number) {
+  const minutes = Math.max(1, Math.ceil(seconds / 60))
+  if (minutes < 60) return `${minutes} 分钟`
+  const hours = Math.ceil(minutes / 60)
+  if (hours < 24) return `${hours} 小时`
+  return `${Math.floor(hours / 24)} 天${hours % 24 ? ` ${hours % 24} 小时` : ''}`
+}
 function Table({ headers, children }: { headers: string[]; children: ReactNode }) {
   return <div className="monitor-table-wrap"><table><thead><tr>{headers.map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>
 }
@@ -117,6 +124,7 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
       </section>
       <section className="card monitor-section"><h3>故障与限流分类</h3>{!data.groups.length ? <p className="text-muted">所选时段尚无记录</p> : <Table headers={['类型', '原因', '任务', '账号', '次数']}>{data.groups.map((g,i) => <tr key={i}><td>{label(g.kind)}</td><td>{label(g.reason)}</td><td>{label(g.task_type)}</td><td>{account(g.user_id)}</td><td>{number(g.count)}</td></tr>)}</Table>}</section>
       <section className="card monitor-section"><h3>当前任务积压</h3><p className="text-muted text-sm">实时快照，不随统计范围切换。</p>
+        {data.explore_estimate && <div className="monitor-queue"><h4>探索队列预估处理时长</h4><p>{data.explore_estimate.status === 'estimated' ? `约 ${estimateDuration(data.explore_estimate.seconds ?? 0)} · 预计 ${when(data.explore_estimate.completion_at)} 完成首轮处理（${data.explore_estimate.batches} 批）` : data.explore_estimate.status === 'empty' ? '当前无可执行积压' : data.explore_estimate.status === 'busy' ? '任务执行或恢复中，暂无法估算' : '近期样本不足，暂无法估算'}</p><small className="text-muted">合计探索抓取与关联探索，按最近 {data.explore_estimate.sample_count} 批处理速度和每日 6 个调度窗口估算，包含等待调度的时间。假设调度正常；不含退避等待、新增任务和后续重试，实际耗时可能变化。</small></div>}
         {data.explore_source_states && <div className="monitor-queue"><h4>探索源状态</h4><p>正常 / 待验证 {number(data.explore_source_states.active)} · 暂时不可访问（退避中） {number(data.explore_source_states.retry_wait)} · 重试耗尽 {number(data.explore_source_states.retry_exhausted)} · 确定不可用 {number(data.explore_source_states.unavailable)} · 不符合收录条件 {number(data.explore_source_states.ineligible)}</p><small className="text-muted">按源去重统计。最多重试 6 次：1 小时、4 小时、16 小时、2 天、8 天、32 天，间隔随机偏移 ±10%。停止状态保留记录，不再自动尝试。</small></div>}
         {data.queues.map(q => <div className="monitor-queue" key={q.name}><h4>{label(q.name)}</h4>{q.status === 'unavailable' ? <p>数据不可用</p> : <p>等待 {number(q.waiting)} · 执行中 {number(q.running)} · 历史终止 {number(q.failed)} · 过期 {number(q.expired)}</p>}<p>最老等待 {q.waiting ? `${Math.ceil(q.oldest_wait_seconds / 60)} 分钟` : '—'}</p><small className="text-muted">{q.note} · {when(q.snapshot_at)}</small></div>)}
       </section>

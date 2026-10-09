@@ -81,6 +81,7 @@ type Alert struct {
 	Threshold float64 `json:"threshold"`
 }
 type Response struct {
+	ExploreEstimate          ExploreEstimate `json:"explore_estimate"`
 	ExploreSourceStates      map[string]int  `json:"explore_source_states"`
 	TokenCost                aiusage.Summary `json:"token_cost"`
 	GeneratedAt              time.Time       `json:"generated_at"`

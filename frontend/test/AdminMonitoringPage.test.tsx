@@ -108,3 +108,21 @@ it('按源展示退避和停止状态，区分历史终止任务', async () => {
  expect(screen.getByText(/确定不可用 4/)).toBeTruthy()
  expect(screen.getByText(/不符合收录条件 5/)).toBeTruthy()
 })
+
+it('展示探索首轮完成预估和估算范围', async () => {
+  api.getAdminMonitoring.mockResolvedValue({ ...snapshot, explore_estimate: { status: 'estimated', waiting: 501, batches: 2, sample_count: 12, seconds: 90000, completion_at: '2026-10-10T05:40:00Z' } })
+  render(<AdminMonitoringPage user={{ is_admin: true }} />)
+  await screen.findByText(/约 1 天 1 小时.*完成首轮处理（2 批）/)
+  expect(screen.getByText(/不含退避等待、新增任务和后续重试/)).toBeTruthy()
+})
+
+it.each([
+  ['empty', '当前无可执行积压'],
+  ['busy', '任务执行或恢复中，暂无法估算'],
+  ['insufficient_data', '近期样本不足，暂无法估算'],
+])('预估状态 %s 不伪造完成时间', async (status, message) => {
+  api.getAdminMonitoring.mockResolvedValue({ ...snapshot, explore_estimate: { status, waiting: 0, batches: 0, sample_count: 0 } })
+  render(<AdminMonitoringPage user={{ is_admin: true }} />)
+  await screen.findByText(message)
+  expect(screen.queryByText(/预计.*完成首轮/)).toBeNull()
+})

@@ -5,6 +5,7 @@ export interface MonitoringEvent {
   user_id: number; count: number; retry_at?: string
 }
 export interface MonitoringResponse {
+ explore_estimate?: { status: string; waiting: number; batches: number; sample_count: number; seconds?: number; completion_at?: string }
  explore_source_states?: Record<string, number>
   generated_at: string; collection_available_since: string; window_start: string; window_end: string
   hours: number; status: 'available' | 'partial' | 'no_data'; retention_days: number

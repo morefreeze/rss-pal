@@ -112,6 +112,9 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 	if err = s.queues(ctx, &r); err != nil {
 		return r, err
 	}
+	if err = s.exploreEstimate(ctx, &r); err != nil {
+		return r, err
+	}
 	if err = s.cost(ctx, &r); err != nil {
 		return r, err
 	}

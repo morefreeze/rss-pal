@@ -10,6 +10,7 @@ import (
 )
 
 type Config struct {
+	ExploreBatchLimit   int
 	CaptchaMinFailures  int
 	CaptchaFailureRatio float64
 	LimitThreshold      int
@@ -21,7 +22,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	return Config{CaptchaMinFailures: 3, CaptchaFailureRatio: .2, LimitThreshold: 20, QueueWaitSeconds: 1800, QuotaWarningRatio: .8, UnitPrices: map[string]float64{}}
+	return Config{ExploreBatchLimit: 500, CaptchaMinFailures: 3, CaptchaFailureRatio: .2, LimitThreshold: 20, QueueWaitSeconds: 1800, QuotaWarningRatio: .8, UnitPrices: map[string]float64{}}
 }
 func LoadConfig() (Config, error) {
 	c := DefaultConfig()

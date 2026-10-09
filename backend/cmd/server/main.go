@@ -65,6 +65,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	monitorConfig.ExploreBatchLimit = cfg.Explore.FetchBatchLimit
 	monitorRecorder := opsmonitor.NewRecorder(adminDB)
 	defer monitorRecorder.Close()
 	httpServer := &http.Server{Addr: ":" + cfg.Server.Port}
