@@ -464,42 +464,30 @@ func TestExploreQueueRetryUsesDatabaseClockAndBackoff(t *testing.T) {
 	defer cleanup()
 	repo := repository.NewExploreQueueRepository(db)
 	sourceID := insertExploreSource(t, db, 1)
-	if _, err := repo.Enqueue(sourceID, repository.ExploreTaskValidateSource, repository.ExplorePriorityRefresh); err != nil {
+	if _, err := repo.Enqueue(sourceID, repository.ExploreTaskValidateSource, 200); err != nil {
 		t.Fatal(err)
 	}
-	window := time.Now().Truncate(time.Minute)
-	for _, want := range []int{60, 120, 240} {
-		_, tasks, err := repo.ClaimRun(window, "worker", time.Hour, 1)
+	for index, want := range []int{3600, 14400, 57600, 172800, 691200, 2764800} {
+		_, tasks, err := repo.ClaimRun(time.Now().Add(time.Duration(index)*time.Minute), "worker", time.Hour, 1)
 		if err != nil || len(tasks) != 1 {
-			t.Fatalf("claim tasks=%d err=%v", len(tasks), err)
+			t.Fatalf("claim: %d %v", len(tasks), err)
 		}
 		if err := repo.Retry(tasks[0].ID, *tasks[0].RunID, exploreTaskToken(t, tasks[0]), errors.New("temporary")); err != nil {
 			t.Fatal(err)
 		}
-		var seconds int
-		if err := db.QueryRow(`SELECT round(EXTRACT(EPOCH FROM (not_before-updated_at)))::int FROM explore_fetch_queue WHERE id=$1`, tasks[0].ID).Scan(&seconds); err != nil || seconds != want {
-			t.Fatalf("retry seconds=%d want=%d err=%v", seconds, want, err)
+		var seconds float64
+		if err := db.QueryRow(`SELECT EXTRACT(EPOCH FROM(not_before-updated_at)) FROM explore_fetch_queue WHERE id=$1`, tasks[0].ID).Scan(&seconds); err != nil {
+			t.Fatal(err)
 		}
-		if want != 240 {
-			if _, err := db.Exec(`UPDATE explore_fetch_queue SET not_before=CURRENT_TIMESTAMP WHERE id=$1`, tasks[0].ID); err != nil {
-				t.Fatal(err)
-			}
-			window = window.Add(time.Minute)
+		if seconds < float64(want)*.9 || seconds > float64(want)*1.1 {
+			t.Fatalf("retry %d delay=%f", index, seconds)
 		}
-	}
-	if _, err := db.Exec(`UPDATE explore_fetch_queue SET attempts=2000, not_before=CURRENT_TIMESTAMP WHERE source_id=$1`, sourceID); err != nil {
-		t.Fatal(err)
-	}
-	_, tasks, err := repo.ClaimRun(window.Add(time.Minute), "worker", time.Hour, 1)
-	if err != nil || len(tasks) != 1 {
-		t.Fatalf("cap claim tasks=%d err=%v", len(tasks), err)
-	}
-	if err := repo.Retry(tasks[0].ID, *tasks[0].RunID, exploreTaskToken(t, tasks[0]), errors.New("capped")); err != nil {
-		t.Fatal(err)
-	}
-	var seconds int
-	if err := db.QueryRow(`SELECT round(EXTRACT(EPOCH FROM (not_before-updated_at)))::int FROM explore_fetch_queue WHERE id=$1`, tasks[0].ID).Scan(&seconds); err != nil || seconds != 604800 {
-		t.Fatalf("cap seconds=%d err=%v", seconds, err)
+		if _, err := db.Exec(`UPDATE recommended_feeds SET next_retry_at=CURRENT_TIMESTAMP WHERE id=$1`, sourceID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`UPDATE explore_fetch_queue SET not_before=CURRENT_TIMESTAMP WHERE source_id=$1`, sourceID); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

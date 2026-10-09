@@ -106,6 +106,9 @@ type ExploreFetchTask struct {
 // observations refer to this row; they are evidence about a source rather than
 // alternate source records.
 type ExploreSource struct {
+	FetchState         string     `json:"fetch_state"`
+	FetchFailures      int        `json:"fetch_failures"`
+	NextRetryAt        *time.Time `json:"next_retry_at,omitempty"`
 	ID                 int        `json:"id" db:"id"`
 	URL                string     `json:"url" db:"url"`
 	Title              string     `json:"title" db:"title"`

@@ -47,7 +47,7 @@ func (p *ExploreTaskProcessor) Process(ctx context.Context, task ExploreQueueTas
 	if err != nil {
 		return err
 	}
-	checkedAt := p.now()
+	checkedAt := p.now().UTC()
 	catalog := NewExploreCatalogRepository(p.db)
 	source, err := catalog.GetSourceWithObservations(task.SourceID)
 	if err != nil {
@@ -55,6 +55,12 @@ func (p *ExploreTaskProcessor) Process(ctx context.Context, task ExploreQueueTas
 			return p.finishMissingSource(ctx, task, leaseToken, err)
 		}
 		return err
+	}
+	if stoppedExploreSource(source.Source.FetchState) {
+		return p.finishStoppedSource(ctx, task, leaseToken)
+	}
+	if source.Source.NextRetryAt != nil && source.Source.NextRetryAt.After(time.Now()) {
+		return NewExploreQueueRepository(p.db).deferSourceTask(task)
 	}
 	decision := decideExploreTaskNetwork(task.TaskType, source.Source.ValidationStatus)
 	if decision != exploreTaskFetch {
@@ -85,6 +91,9 @@ func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task Expl
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := tx.Exec(exploreSourceWriteLockSQL, task.SourceID); err != nil {
+		return err
+	}
 	catalog := NewExploreCatalogRepository(tx)
 	queue := NewExploreQueueRepository(p.db).WithQuerier(tx)
 	source, err := catalog.GetSource(task.SourceID)
@@ -96,6 +105,12 @@ func (p *ExploreTaskProcessor) finishWithoutFetch(ctx context.Context, task Expl
 			return tx.Commit()
 		}
 		return err
+	}
+	if stoppedExploreSource(source.FetchState) {
+		if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, errors.New("source automatic attempts stopped")); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	decision := decideExploreTaskNetwork(task.TaskType, source.ValidationStatus)
 	if decision == exploreTaskSkipValidated {
@@ -124,6 +139,9 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockExploreOutcome(tx, task, result, fetchErr); err != nil {
+		return err
+	}
 	catalog := NewExploreCatalogRepository(tx)
 	queue := NewExploreQueueRepository(p.db).WithQuerier(tx)
 
@@ -138,6 +156,18 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 			return tx.Commit()
 		}
 		return err
+	}
+	if stoppedExploreSource(current.Source.FetchState) {
+		if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, errors.New("source automatic attempts stopped")); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	if current.Source.LastCheckedAt != nil && current.Source.LastCheckedAt.After(checkedAt) {
+		if err := queue.Complete(task.ID, *task.RunID, leaseToken); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	decision := decideExploreTaskNetwork(task.TaskType, current.Source.ValidationStatus)
 	if decision == exploreTaskSkipValidated {
@@ -161,12 +191,6 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 
 	if fetchErr != nil {
 		failureDecision := decideExploreTaskFailure(task.TaskType, task.Attempts, fetchErr)
-		if failureDecision == exploreTaskInvalidate && errors.Is(fetchErr, explore.ErrInsufficientSourceConfidence) {
-			latest := buildExploreSourceFetchRequest(*current, task)
-			if explore.HasSourceConfidence(checkedAt, latest.Evidence, latest.DirectProfile) {
-				failureDecision = exploreTaskRetry
-			}
-		}
 		if failureDecision == exploreTaskRetry {
 			if err := catalog.RecordFetchFailure(task.SourceID, checkedAt, fetchErr); err != nil {
 				return err
@@ -189,15 +213,6 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		return persistExploreTerminalResult(tx, catalog, queue, task, leaseToken, checkedAt, errors.New("validation source unexpectedly returned not modified"))
 	}
 	if err := validateExploreTaskResult(task.TaskType, result); err != nil {
-		if task.TaskType == ExploreTaskRefreshArticles && errors.Is(err, explore.ErrInactiveSource) {
-			if recordErr := catalog.RecordFetchFailure(task.SourceID, checkedAt, err); recordErr != nil {
-				return recordErr
-			}
-			if retryErr := queue.Retry(task.ID, *task.RunID, leaseToken, err); retryErr != nil {
-				return retryErr
-			}
-			return tx.Commit()
-		}
 		return persistExploreTerminalResult(tx, catalog, queue, task, leaseToken, checkedAt, err)
 	}
 
@@ -207,6 +222,16 @@ func (p *ExploreTaskProcessor) persistFetchOutcome(ctx context.Context, task Exp
 		if err != nil {
 			return err
 		}
+	}
+	canonical, err := catalog.GetSource(canonicalID)
+	if err != nil {
+		return err
+	}
+	if stoppedExploreSource(canonical.FetchState) || (canonical.NextRetryAt != nil && canonical.NextRetryAt.After(time.Now())) {
+		if err := queue.Invalidate(task.ID, *task.RunID, leaseToken, errors.New("canonical source automatic attempts stopped or deferred")); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	articles := result.Articles
 	if len(articles) > 50 {
@@ -309,10 +334,7 @@ func decideExploreTaskNetwork(taskType, sourceStatus string) exploreTaskNetworkD
 
 func decideExploreTaskFailure(taskType string, attempts int, err error) exploreTaskFailureDecision {
 	if errors.Is(err, explore.ErrInsufficientSourceConfidence) {
-		if taskType == ExploreTaskValidateSource && attempts >= 3 {
-			return exploreTaskInvalidate
-		}
-		return exploreTaskRetry
+		return exploreTaskInvalidate
 	}
 	if explore.ClassifySourceFetchError(err) == explore.SourceFetchRetryable {
 		return exploreTaskRetry
@@ -331,4 +353,31 @@ func validateExploreTaskResult(taskType string, result explore.SourceFetchResult
 		return fmt.Errorf("%w: successful source refresh requires at least one article", explore.ErrInactiveSource)
 	}
 	return nil
+}
+
+func (p *ExploreTaskProcessor) finishStoppedSource(ctx context.Context, task ExploreQueueTask, token string) error {
+	return NewExploreQueueRepository(p.db).Invalidate(task.ID, *task.RunID, token, errors.New("source automatic attempts stopped"))
+}
+
+// Match adoption's canonical advisory -> sorted source rows lock order.
+func lockExploreOutcome(tx *sql.Tx, task ExploreQueueTask, result explore.SourceFetchResult, fetchErr error) error {
+	if task.TaskType == ExploreTaskValidateSource && fetchErr == nil && result.FeedURL != "" {
+		if err := lockExploreCanonicalURL(tx, result.FeedURL); err != nil {
+			return err
+		}
+		var targetID int
+		err := tx.QueryRow(`SELECT id FROM recommended_feeds WHERE normalized_url=$1`, result.FeedURL).Scan(&targetID)
+		if err == nil && targetID == task.SourceID {
+			_, err := tx.Exec(exploreSourceWriteLockSQL, task.SourceID)
+			return err
+		}
+		if err == nil {
+			return lockExploreSourcePair(tx, task.SourceID, targetID)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	_, err := tx.Exec(exploreSourceWriteLockSQL, task.SourceID)
+	return err
 }

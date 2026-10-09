@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -99,8 +100,9 @@ const (
 )
 
 type sourceFetchError struct {
-	kind SourceFetchErrorKind
-	err  error
+	kind       SourceFetchErrorKind
+	retryAfter time.Time
+	err        error
 }
 
 func (e *sourceFetchError) Error() string { return e.err.Error() }
@@ -113,7 +115,7 @@ func ClassifySourceFetchError(err error) SourceFetchErrorKind {
 		return ""
 	}
 	if errors.Is(err, ErrInactiveSource) {
-		return SourceFetchRetryable
+		return SourceFetchTerminal
 	}
 	var classified *sourceFetchError
 	if errors.As(err, &classified) {
@@ -232,7 +234,7 @@ func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified st
 				}, nil
 			}
 			kind := classifyHTTPStatus(response.StatusCode)
-			return SourceFetchResult{}, sourceError(kind, "fetch source: %w", err)
+			return SourceFetchResult{}, &sourceFetchError{kind: kind, err: fmt.Errorf("fetch source: %w", err), retryAfter: parseRetryAfter(response.Header.Get("Retry-After"), now)}
 		}
 		kind := SourceFetchRetryable
 		if errors.Is(err, httpx.ErrResponseTooLarge) || isUnsafeFetchError(err) {
@@ -295,7 +297,7 @@ func (f *SourceFetcher) fetch(ctx context.Context, rawURL, etag, lastModified st
 }
 
 func classifyHTTPStatus(status int) SourceFetchErrorKind {
-	if status == http.StatusRequestTimeout || status == http.StatusTooEarly || status == http.StatusTooManyRequests || status >= 500 {
+	if status != http.StatusGone {
 		return SourceFetchRetryable
 	}
 	return SourceFetchTerminal
@@ -597,4 +599,14 @@ func clipSourceUTF8(value string, maxBytes int) string {
 		value = value[:len(value)-1]
 	}
 	return value
+}
+
+func parseRetryAfter(value string, now time.Time) time.Time {
+	if seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && seconds >= 0 && seconds <= int64((365*24*time.Hour)/time.Second) {
+		return now.Add(time.Duration(seconds) * time.Second)
+	}
+	if at, err := http.ParseTime(value); err == nil && at.After(now) {
+		return at
+	}
+	return time.Time{}
 }

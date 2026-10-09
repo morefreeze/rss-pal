@@ -105,27 +105,18 @@ func TestExploreTaskNetworkDecisionSkipsDuplicateOrIneligibleWork(t *testing.T) 
 	}
 }
 
-func TestExploreTaskOutcomeRetriesInsufficientConfidenceBeforeThirdFailure(t *testing.T) {
-	err := fmt.Errorf("wrapped: %w", explore.ErrInsufficientSourceConfidence)
-	for _, tc := range []struct {
-		attempts int
-		want     exploreTaskFailureDecision
-	}{{0, exploreTaskRetry}, {1, exploreTaskRetry}, {2, exploreTaskRetry}, {3, exploreTaskInvalidate}} {
-		if got := decideExploreTaskFailure(ExploreTaskValidateSource, tc.attempts, err); got != tc.want {
-			t.Fatalf("attempts=%d decision=%q want=%q", tc.attempts, got, tc.want)
+func TestExploreTaskOutcomeStopsIneligibleSourcesImmediately(t *testing.T) {
+	for _, cause := range []error{explore.ErrInsufficientSourceConfidence, explore.ErrInactiveSource} {
+		for _, task := range []string{ExploreTaskValidateSource, ExploreTaskRefreshArticles} {
+			for _, attempts := range []int{0, 1, 3, 6} {
+				if got := decideExploreTaskFailure(task, attempts, cause); got != exploreTaskInvalidate {
+					t.Fatalf("%s %d %v: %s", task, attempts, cause, got)
+				}
+			}
 		}
 	}
-	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 0, errors.New("network")); got != exploreTaskRetry {
-		t.Fatalf("refresh retryable decision=%q", got)
-	}
-	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 2, err); got != exploreTaskRetry {
-		t.Fatalf("early insufficient refresh decision=%q", got)
-	}
-	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 3, err); got != exploreTaskRetry {
-		t.Fatalf("refresh confidence must not become terminal, decision=%q", got)
-	}
-	if got := decideExploreTaskFailure(ExploreTaskRefreshArticles, 0, explore.ErrInactiveSource); got != exploreTaskRetry {
-		t.Fatalf("inactive refresh decision=%q want retry", got)
+	if decideExploreTaskFailure(ExploreTaskRefreshArticles, 0, errors.New("network")) != exploreTaskRetry {
+		t.Fatal("network must retry")
 	}
 }
 
@@ -242,11 +233,11 @@ func TestExploreTaskProcessorPersistsFailure304MergeAndSkipOutcomes(t *testing.T
 		wantCalls  int
 	}{
 		{"retryable-refresh", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{}, errors.New("temporary"), model.ExploreFetchTaskPending, model.ExploreValidationValid, 1},
-		{"early-insufficient-validation", model.ExploreValidationPending, ExploreTaskValidateSource, 2, explore.SourceFetchResult{}, fmt.Errorf("wrapped: %w", explore.ErrInsufficientSourceConfidence), model.ExploreFetchTaskPending, model.ExploreValidationPending, 1},
+		{"early-insufficient-validation", model.ExploreValidationPending, ExploreTaskValidateSource, 2, explore.SourceFetchResult{}, fmt.Errorf("wrapped: %w", explore.ErrInsufficientSourceConfidence), model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
 		{"third-insufficient-validation", model.ExploreValidationPending, ExploreTaskValidateSource, 3, explore.SourceFetchResult{}, fmt.Errorf("wrapped: %w", explore.ErrInsufficientSourceConfidence), model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
 		{"terminal-refresh", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{}, httpx.ErrResponseTooLarge, model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
-		{"refresh-not-modified", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{NotModified: true}, nil, model.ExploreFetchTaskPending, model.ExploreValidationValid, 1},
-		{"inactive-refresh", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{}, explore.ErrInactiveSource, model.ExploreFetchTaskPending, model.ExploreValidationValid, 1},
+		{"refresh-not-modified", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{NotModified: true}, nil, model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
+		{"inactive-refresh", model.ExploreValidationValid, ExploreTaskRefreshArticles, 0, explore.SourceFetchResult{}, explore.ErrInactiveSource, model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
 		{"validation-not-modified", model.ExploreValidationPending, ExploreTaskValidateSource, 0, explore.SourceFetchResult{NotModified: true}, nil, model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
 		{"defensive-short-200", model.ExploreValidationPending, ExploreTaskValidateSource, 0, explore.SourceFetchResult{FeedURL: "https://processor-case.example/feed", Articles: []model.ExploreArticle{{Title: "one"}}}, nil, model.ExploreFetchTaskInvalid, model.ExploreValidationInvalid, 1},
 		{"valid-validation-skips", model.ExploreValidationValid, ExploreTaskValidateSource, 0, explore.SourceFetchResult{}, nil, model.ExploreFetchTaskDone, model.ExploreValidationValid, 0},
@@ -363,13 +354,13 @@ func TestExploreTaskProcessorPersistsFailure304MergeAndSkipOutcomes(t *testing.T
 		if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task); err != nil {
 			t.Fatal(err)
 		}
-		assertProcessorTaskStatus(t, db, task.ID, model.ExploreFetchTaskPending)
+		assertProcessorTaskStatus(t, db, task.ID, model.ExploreFetchTaskInvalid)
 		var status string
 		if err := db.QueryRow(`SELECT validation_status FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&status); err != nil {
 			t.Fatal(err)
 		}
-		if status != model.ExploreValidationPending {
-			t.Fatalf("provider-success race invalidated source: %q", status)
+		if status != model.ExploreValidationInvalid {
+			t.Fatalf("provider-success race unexpectedly reactivated source: %q", status)
 		}
 	})
 }
@@ -482,7 +473,7 @@ func TestExploreTaskProcessorSourceDeletedDuringFetchUsesFencedTransition(t *tes
 	}
 }
 
-func TestExploreTaskProcessorInactiveRefreshPreservesLastGoodCacheAndRetries(t *testing.T) {
+func TestExploreTaskProcessorInactiveRefreshPreservesLastGoodCacheAndStops(t *testing.T) {
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	checkedAt := time.Date(2026, 9, 1, 5, 0, 0, 0, time.UTC)
@@ -504,7 +495,7 @@ func TestExploreTaskProcessorInactiveRefreshPreservesLastGoodCacheAndRetries(t *
 	if err := NewExploreTaskProcessor(db, fetcher, func() time.Time { return checkedAt }).Process(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	assertProcessorTaskStatus(t, db, task.ID, model.ExploreFetchTaskPending)
+	assertProcessorTaskStatus(t, db, task.ID, model.ExploreFetchTaskInvalid)
 	var status, title, content string
 	var health float64
 	var fetchedAt time.Time
@@ -514,7 +505,7 @@ func TestExploreTaskProcessorInactiveRefreshPreservesLastGoodCacheAndRetries(t *
 	if err := db.QueryRow(`SELECT title,content FROM explore_articles WHERE source_id=$1`, sourceID).Scan(&title, &content); err != nil {
 		t.Fatal(err)
 	}
-	if status != model.ExploreValidationValid || health >= 1 || !fetchedAt.Equal(lastGood) || title != "Last good" || content != "cached body" {
+	if status != model.ExploreValidationInvalid || health >= 1 || !fetchedAt.Equal(lastGood) || title != "Last good" || content != "cached body" {
 		t.Fatalf("status=%q health=%v fetched=%v cache=%q/%q", status, health, fetchedAt, title, content)
 	}
 }

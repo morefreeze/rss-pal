@@ -98,3 +98,13 @@ it('按 token 展示美元估算，缺失 usage 明确提示', async () => {
   expect(screen.getByText('单价（USD / 百万 token）')).toBeTruthy()
   expect(screen.queryByText('估算单价/次')).toBeNull()
 })
+
+it('按源展示退避和停止状态，区分历史终止任务', async () => {
+ api.getAdminMonitoring.mockResolvedValue({...snapshot, explore_source_states: {active: 10, retry_wait: 3, retry_exhausted: 2, unavailable: 4, ineligible: 5}})
+ render(<AdminMonitoringPage user={{is_admin: true}} />)
+ await screen.findByText('探索源状态')
+ expect(screen.getByText(/暂时不可访问（退避中） 3/)).toBeTruthy()
+ expect(screen.getByText(/重试耗尽 2/)).toBeTruthy()
+ expect(screen.getByText(/确定不可用 4/)).toBeTruthy()
+ expect(screen.getByText(/不符合收录条件 5/)).toBeTruthy()
+})

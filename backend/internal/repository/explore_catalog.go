@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/rss-pal/internal/explore"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/lib/pq"
@@ -28,7 +29,7 @@ const (
 		id, url, title, description, category, language, feed_type, is_broken,
 		sort_order, site_url, normalized_url, validation_status, verified_at,
 		last_checked_at, last_fetched_at, etag, last_modified, health_score,
-		last_error, merged_into_source_id, first_discovered_at, last_observed_at, created_at`
+		last_error, merged_into_source_id, first_discovered_at, last_observed_at, created_at, fetch_state, fetch_failures, next_retry_at`
 
 	exploreArticleRetentionSQL = `
 		WITH ranked AS (
@@ -64,7 +65,7 @@ const (
 
 	exploreFetchSuccessSQL = `
 		UPDATE recommended_feeds
-		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
+		SET fetch_state='active', fetch_failures=0, next_retry_at=NULL, validation_status='valid', verified_at=$2, last_checked_at=$2,
 		    last_fetched_at=$2, etag=NULLIF($3,''),
 		    last_modified=NULLIF($4,''),
 		    health_score=1, last_error=NULL, is_broken=false
@@ -73,7 +74,7 @@ const (
 
 	exploreValidationValidSQL = `
 		UPDATE recommended_feeds
-		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
+		SET fetch_state='active', fetch_failures=0, next_retry_at=NULL, validation_status='valid', verified_at=$2, last_checked_at=$2,
 		    etag=NULLIF($3,''), last_modified=NULLIF($4,''),
 		    health_score=1, last_error=NULL, is_broken=false
 		WHERE id=$1
@@ -81,14 +82,14 @@ const (
 
 	exploreValidationInvalidSQL = `
 		UPDATE recommended_feeds
-		SET validation_status='invalid', last_checked_at=$2, health_score=0,
+		SET fetch_state=$4, next_retry_at=NULL, validation_status='invalid', last_checked_at=$2, health_score=0,
 		    last_error=$3, is_broken=true
 		WHERE id=$1
 		  AND (last_checked_at IS NULL OR last_checked_at <= $2)`
 
 	exploreFetchNotModifiedSQL = `
 		UPDATE recommended_feeds
-		SET validation_status='valid', verified_at=$2, last_checked_at=$2,
+		SET fetch_state='active', fetch_failures=0, next_retry_at=NULL, validation_status='valid', verified_at=$2, last_checked_at=$2,
 		    last_fetched_at=$2, health_score=1, last_error=NULL, is_broken=false
 		WHERE id=$1
 		  AND (last_checked_at IS NULL OR last_checked_at <= $2)`
@@ -144,12 +145,14 @@ const (
 	exploreDueSourcesSQL = `
 		SELECT ` + exploreSourceColumns + `
 		FROM recommended_feeds source
-		WHERE EXISTS (
+		WHERE source.fetch_state IN ('active','retry_wait')
+ AND (source.next_retry_at IS NULL OR source.next_retry_at <= CURRENT_TIMESTAMP)
+ AND EXISTS (
 			SELECT 1
 			FROM explore_source_observations observation
 			JOIN explore_registry_providers provider ON provider.id=observation.provider_id
 			WHERE observation.source_id = source.id AND provider.enabled
-		) AND ((
+		) AND (source.fetch_state='retry_wait' OR (
 			source.validation_status = 'pending'
 			AND source.is_broken=false
 			AND (source.last_checked_at IS NULL OR source.last_checked_at <= $1)
@@ -306,7 +309,7 @@ func (r *ExploreCatalogRepository) ListDueSources(validationDueBefore, refreshDu
 func (r *ExploreCatalogRepository) MarkValidationPending(sourceID int) error {
 	result, err := r.db.Exec(`
 		UPDATE recommended_feeds
-		SET validation_status='pending', is_broken=false, last_error=NULL
+		SET fetch_state='active', fetch_failures=0, next_retry_at=NULL, validation_status='pending', is_broken=false, last_error=NULL
 		WHERE id=$1`, sourceID)
 	return expectExploreSourceUpdate(result, err, sourceID)
 }
@@ -319,8 +322,30 @@ func (r *ExploreCatalogRepository) MarkValidationValid(sourceID int, checkedAt t
 // MarkValidationInvalid records a terminal validation outcome without
 // removing conditional request state or the last successfully cached rows.
 func (r *ExploreCatalogRepository) MarkValidationInvalid(sourceID int, checkedAt time.Time, cause error) error {
-	result, err := r.db.Exec(exploreValidationInvalidSQL, sourceID, checkedAt, ClipExploreError(cause))
-	return expectExploreSourceMonotonicUpdate(r.db, result, err, sourceID)
+	if db, ok := r.db.(*sql.DB); ok {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err = NewExploreCatalogRepository(tx).MarkValidationInvalid(sourceID, checkedAt, cause); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	result, err := r.db.Exec(exploreValidationInvalidSQL, sourceID, checkedAt, ClipExploreError(cause), explore.StoppedSourceState(cause))
+	if err := expectExploreSourceMonotonicUpdate(r.db, result, err, sourceID); err != nil {
+		return err
+	}
+	var state string
+	if err := r.db.QueryRow(`SELECT fetch_state FROM recommended_feeds WHERE id=$1`, sourceID).Scan(&state); err != nil {
+		return err
+	}
+	if stoppedExploreSource(state) {
+		return settleStoppedExploreTasks(r.db, sourceID)
+	}
+	return nil
 }
 
 // RecordFetchFailure atomically degrades health. Four consecutive failures
@@ -611,7 +636,7 @@ func scanExploreSource(row rowScanner) (*model.ExploreSource, error) {
 		&source.NormalizedURL, &source.ValidationStatus, &source.VerifiedAt,
 		&source.LastCheckedAt, &source.LastFetchedAt, &etag, &lastModified,
 		&source.HealthScore, &lastError, &source.MergedIntoSourceID, &source.FirstDiscoveredAt,
-		&source.LastObservedAt, &source.CreatedAt,
+		&source.LastObservedAt, &source.CreatedAt, &source.FetchState, &source.FetchFailures, &source.NextRetryAt,
 	)
 	if err != nil {
 		return nil, err

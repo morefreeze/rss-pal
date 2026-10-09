@@ -70,6 +70,23 @@ func (r *ExploreQueueRepository) WithCtx(c ctxkey.CtxGetter) *ExploreQueueReposi
 }
 
 func (r *ExploreQueueRepository) Enqueue(sourceID int, taskType string, priority int) (*ExploreQueueTask, error) {
+	if db, ok := r.db.(*sql.DB); ok {
+		tx, err := db.Begin()
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		task, err := r.WithQuerier(tx).Enqueue(sourceID, taskType, priority)
+		if err != nil {
+			return nil, err
+		}
+		return task, tx.Commit()
+	}
+	allowed, err := r.sourceCanEnqueue(sourceID)
+	if err != nil || !allowed {
+		return nil, err
+	}
+
 	return scanExploreQueueTask(r.db.QueryRow(`
 		INSERT INTO explore_fetch_queue (source_id, task_type, priority)
 		VALUES ($1, $2, $3)
@@ -207,7 +224,7 @@ type exploreClaimCandidate struct {
 func lockExploreCandidates(tx *sql.Tx, limit int) ([]exploreClaimCandidate, error) {
 	all := make([]exploreClaimCandidate, 0, limit*2)
 	queries := []struct{ kind, sql string }{
-		{ExploreQueueKindSource, `SELECT id,priority,created_at,priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT FROM explore_fetch_queue WHERE status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP ORDER BY priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT DESC,priority DESC,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1`},
+		{ExploreQueueKindSource, `SELECT id,priority,created_at,priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT FROM explore_fetch_queue WHERE EXISTS (SELECT 1 FROM recommended_feeds s WHERE s.id=explore_fetch_queue.source_id AND s.fetch_state IN ('active','retry_wait') AND (s.next_retry_at IS NULL OR s.next_retry_at<=CURRENT_TIMESTAMP)) AND status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP ORDER BY priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT DESC,priority DESC,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1`},
 		{ExploreQueueKindRelated, `SELECT id,priority,created_at,priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT FROM explore_related_tasks WHERE status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP ORDER BY priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT DESC,priority DESC,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1`},
 	}
 	for _, query := range queries {
@@ -280,17 +297,9 @@ func (r *ExploreQueueRepository) Complete(taskID, runID int, leaseToken string) 
 	return expectExploreLeaseTransition(result, err, taskID)
 }
 
-// Persistent failures back off up to seven days without discarding the task.
-// Clamp the exponent before power() to avoid overflow for historical attempts.
+// Retry persists the source-wide, bounded retry schedule.
 func (r *ExploreQueueRepository) Retry(taskID, runID int, leaseToken string, cause error) error {
-	result, err := r.db.Exec(`
-		UPDATE explore_fetch_queue
-		SET status = 'pending', attempts = attempts + 1,
-		    not_before = CURRENT_TIMESTAMP + (LEAST(604800, 60 * power(2, LEAST(attempts, 14))) * INTERVAL '1 second'),
-		    run_id = NULL, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, last_error = $4, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1 AND run_id = $2 AND status = 'leased' AND lease_token = $3 AND lease_expires_at > CURRENT_TIMESTAMP
-	`, taskID, runID, leaseToken, clipExploreError(cause))
-	return expectExploreLeaseTransition(result, err, taskID)
+	return r.retrySource(taskID, runID, leaseToken, cause)
 }
 
 func (r *ExploreQueueRepository) Invalidate(taskID, runID int, leaseToken string, cause error) error {

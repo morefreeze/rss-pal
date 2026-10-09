@@ -379,7 +379,7 @@ func TestSourceFetchBodyLimitAndStatusClassification(t *testing.T) {
 		{"425", 425, "", nil, SourceFetchRetryable},
 		{"429", 429, "", nil, SourceFetchRetryable},
 		{"500", 500, "", nil, SourceFetchRetryable},
-		{"404", 404, "", nil, SourceFetchTerminal},
+		{"404", 404, "", nil, SourceFetchRetryable},
 		{"network", 0, "", errors.New("network down"), SourceFetchRetryable},
 	}
 	for _, tc := range cases {

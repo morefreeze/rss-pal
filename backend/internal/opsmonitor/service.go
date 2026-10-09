@@ -129,6 +129,26 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 	return r, nil
 }
 func (s *Service) queues(ctx context.Context, r *Response) error {
+	r.ExploreSourceStates = map[string]int{"active": 0, "retry_wait": 0, "retry_exhausted": 0, "unavailable": 0, "ineligible": 0}
+	rows, err := s.db.QueryContext(ctx, `SELECT fetch_state,count(*) FROM recommended_feeds WHERE merged_into_source_id IS NULL GROUP BY fetch_state`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var state string
+		var count int
+		if err := rows.Scan(&state, &count); err != nil {
+			rows.Close()
+			return err
+		}
+		r.ExploreSourceStates[state] = count
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+
 	q := Queue{Name: "summary", Status: "partial", SnapshotAt: r.GeneratedAt, Note: "可执行摘要：活跃订阅、无摘要、正文超过100字符、音视频已获取转录。无持久化执行/失败状态，数量不可用；等待时间按 fetched_at。"}
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*),COALESCE(greatest(0,extract(epoch from ($1::timestamptz-min(a.fetched_at)))),0) FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE f.status='active' AND f.is_active AND (a.summary_brief IS NULL OR a.summary_brief='') AND length(a.content)>100 AND NOT(a.media_type IS NOT NULL AND (a.media_type LIKE 'video/%' OR a.media_type LIKE 'audio/%') AND a.transcript_fetched_at IS NULL)`, r.GeneratedAt).Scan(&q.Waiting, &q.OldestWaitSeconds); err != nil {
 		return err
@@ -136,7 +156,7 @@ func (s *Service) queues(ctx context.Context, r *Response) error {
 	r.Queues = append(r.Queues, q)
 	for _, table := range []string{"explore_fetch_queue", "explore_related_tasks"} {
 		running, failed, expired := 0, 0, 0
-		q = Queue{Name: table, Status: "available", SnapshotAt: r.GeneratedAt, Running: &running, Failed: &failed, Expired: &expired, Note: "等待仅计 pending、未绑定运行且 not_before 已到期；failed 为 invalid，expired 为已过期 leased；等待时间按创建时间。"}
+		q = Queue{Name: table, Status: "available", SnapshotAt: r.GeneratedAt, Running: &running, Failed: &failed, Expired: &expired, Note: "等待仅计 pending、未绑定运行且 not_before 已到期；failed 为历史终止任务（invalid），并非当前失败源数；expired 为已过期 leased；等待时间按创建时间。"}
 		query := `SELECT count(*) FILTER(WHERE status='pending' AND run_id IS NULL AND not_before<=$1),count(*) FILTER(WHERE status='leased' AND lease_expires_at>$1),count(*) FILTER(WHERE status='invalid'),count(*) FILTER(WHERE status='leased' AND lease_expires_at<=$1),COALESCE(greatest(0,extract(epoch from ($1::timestamptz-min(created_at) FILTER(WHERE status='pending' AND run_id IS NULL AND not_before<=$1)))),0) FROM ` + table
 		if err := s.db.QueryRowContext(ctx, query, r.GeneratedAt).Scan(&q.Waiting, &running, &failed, &expired, &q.OldestWaitSeconds); err != nil {
 			return err

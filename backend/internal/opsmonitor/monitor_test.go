@@ -176,3 +176,23 @@ func TestRecorderFailureIsBoundedAndReported(t *testing.T) {
 		t.Fatal("failed persistence not reported")
 	}
 }
+
+func TestSnapshotSeparatesExploreSourceStates(t *testing.T) {
+	db, done := testdb.New(t)
+	defer done()
+	for _, state := range []string{"active", "retry_wait", "retry_exhausted", "unavailable", "ineligible"} {
+		if _, err := db.Exec(`INSERT INTO recommended_feeds(url,normalized_url,title,category,language,feed_type,fetch_state) VALUES($1,$1,$2::text,'tech','en','rss',$2::text)`, "https://"+state+".example/feed", state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewService(db, DefaultConfig(), nil)
+	snapshot, err := s.Snapshot(context.Background(), 24, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"retry_wait", "retry_exhausted", "unavailable", "ineligible"} {
+		if snapshot.ExploreSourceStates[state] != 1 {
+			t.Fatalf("%s: %+v", state, snapshot.ExploreSourceStates)
+		}
+	}
+}
