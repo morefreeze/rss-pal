@@ -74,7 +74,7 @@ func (r *RedditBrowserRepository) Ingest(ctx context.Context, b explore.RedditBr
 }
 
 // RegisterSubreddit is called only after an explicit administrator action. Both
-// windows are registered together; existing disabled providers stay disabled.
+// windows are registered together; an explicit re-add restores a removed browser provider.
 func (r *RedditBrowserRepository) RegisterSubreddit(ctx context.Context, name string) (string, error) {
 	name, err := explore.NormalizeSubreddit(name)
 	if err != nil {
@@ -93,13 +93,47 @@ func (r *RedditBrowserRepository) RegisterSubreddit(ctx context.Context, name st
 			return "", err
 		}
 		var available bool
-		err = tx.QueryRowContext(ctx, `SELECT enabled AND browser_only AND provider_kind='reddit_top' FROM explore_registry_providers WHERE provider_key=$1 FOR UPDATE`, key).Scan(&available)
+		err = tx.QueryRowContext(ctx, `SELECT browser_only AND provider_kind='reddit_top' FROM explore_registry_providers WHERE provider_key=$1 FOR UPDATE`, key).Scan(&available)
 		if err != nil {
 			return "", err
 		}
 		if !available {
 			return "", ErrRedditBrowserDisabled
 		}
+		if _, err = tx.ExecContext(ctx, `UPDATE explore_registry_providers SET enabled=true WHERE provider_key=$1`, key); err != nil {
+			return "", err
+		}
 	}
 	return name, tx.Commit()
+}
+
+type RedditSubreddit struct {
+	Name          string     `json:"name"`
+	Enabled       bool       `json:"enabled"`
+	LastSuccessAt *time.Time `json:"last_success_at"`
+}
+
+func (r *RedditBrowserRepository) ListSubreddits(ctx context.Context) ([]RedditSubreddit, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT regexp_replace(provider_key,'^reddit-(.*)-top-(week|month)$','\1'),bool_and(enabled),max(last_success_at) FROM explore_registry_providers WHERE provider_kind='reddit_top' AND browser_only AND provider_key ~ '^reddit-[a-z0-9_]+-top-(week|month)$' GROUP BY 1 ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []RedditSubreddit{}
+	for rows.Next() {
+		var item RedditSubreddit
+		if err := rows.Scan(&item.Name, &item.Enabled, &item.LastSuccessAt); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+func (r *RedditBrowserRepository) RemoveSubreddit(ctx context.Context, name string) error {
+	name, err := explore.NormalizeSubreddit(name)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, `UPDATE explore_registry_providers SET enabled=false WHERE provider_kind='reddit_top' AND browser_only AND provider_key IN ($1,$2)`, "reddit-"+name+"-top-week", "reddit-"+name+"-top-month")
+	return err
 }

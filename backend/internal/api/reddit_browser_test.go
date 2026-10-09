@@ -109,3 +109,46 @@ func TestRegisterRedditSubreddit(t *testing.T) {
 		})
 	}
 }
+
+func (f *fakeRedditStore) ListSubreddits(context.Context) ([]repository.RedditSubreddit, error) {
+	f.calls++
+	return []repository.RedditSubreddit{}, f.err
+}
+func (f *fakeRedditStore) RemoveSubreddit(context.Context, string) error { f.calls++; return f.err }
+
+func TestRedditManagementAuthorization(t *testing.T) {
+	for _, method := range []string{"GET", "DELETE"} {
+		for _, tc := range []struct {
+			token string
+			admin bool
+			want  int
+		}{{"", true, 401}, {testBookmarkletToken, false, 403}, {testBookmarkletToken, true, 200}} {
+			auth := &ExtensionIngestHandler{userRepo: &stubExtUserRepo{token: testBookmarkletToken, user: &model.User{ID: 1, IsAdmin: tc.admin}}}
+			store := &fakeRedditStore{}
+			h := NewRedditBrowserHandler(auth, store)
+			r := gin.New()
+			r.GET("/boards", h.ListSubreddits)
+			r.DELETE("/boards/:name", h.RemoveSubreddit)
+			path := "/boards"
+			want := tc.want
+			if method == "DELETE" {
+				path += "/golang"
+				if want == 200 {
+					want = 204
+				}
+			}
+			req := httptest.NewRequest(method, path, nil)
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != want {
+				t.Fatalf("%s status=%d want=%d", method, rec.Code, want)
+			}
+			if want >= 400 && store.calls != 0 {
+				t.Fatal("unauthorized store call")
+			}
+		}
+	}
+}

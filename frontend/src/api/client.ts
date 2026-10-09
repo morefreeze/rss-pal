@@ -532,11 +532,23 @@ export interface ExploreBatchSubscribeResponse {
   results: ExploreSubscribeResult[]
 }
 
+// A backend replacement can briefly make the Docker upstream unavailable.
+// Retry only these read requests, with a bounded 14-second recovery window.
+async function exploreRead<T>(request: () => Promise<T>): Promise<T> {
+  const delays = [2000, 4000, 8000]
+  for (let attempt = 0; ; attempt++) {
+    try { return await request() } catch (error) {
+      const status = (error as AxiosError).response?.status
+      if (!status || ![502, 503, 504].includes(status) || attempt >= delays.length) throw error
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+    }
+  }
+}
 export const getExplore = (params?: ExploreListParams) =>
-  api.get<ExploreListResponse>('/explore', { params }).then(res => res.data)
+  exploreRead(() => api.get<ExploreListResponse>('/explore', { params }).then(res => res.data))
 
 export const getExploreSources = () =>
-  api.get<ExploreSource[]>('/explore/sources').then(res => res.data)
+  exploreRead(() => api.get<ExploreSource[]>('/explore/sources').then(res => res.data))
 
 export const getExploreArticle = (id: number) =>
   api.get<ExploreArticleDetail>(`/explore/articles/${id}`).then(res => res.data)
@@ -1261,3 +1273,7 @@ export const getClip = (params: GetClipParams = {}) => {
   if (params.saved) query.saved = 'true'
   return api.get<ClipListResponse>('/clip', { params: query }).then(r => r.data)
 }
+
+export interface RedditSubreddit { name: string; enabled: boolean; last_success_at: string | null }
+export const getRedditSubreddits = () => api.get<RedditSubreddit[]>('/admin/explore/subreddits').then(res => res.data)
+export const removeRedditSubreddit = (name: string) => api.delete(`/admin/explore/subreddits/${encodeURIComponent(name)}`).then(() => undefined)

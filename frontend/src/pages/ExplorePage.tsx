@@ -8,6 +8,7 @@ import {
   type ExploreSort,
 } from '../api/client'
 import ExploreArticleCard from '../components/ExploreArticleCard'
+import RedditExploreSources from '../components/RedditExploreSources'
 import ExploreSourceDrawer from '../components/ExploreSourceDrawer'
 import { useExploreFeed } from '../hooks/useExploreFeed'
 import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
@@ -232,6 +233,8 @@ export default function ExplorePage() {
           </div>
         </div>
       </header>
+
+      <RedditExploreSources />
 
       {feed.snapshot?.id === 0 && (
         <section className="explore-notice explore-notice--cold">

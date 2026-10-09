@@ -297,6 +297,8 @@ func main() {
 	// Public-token authentication plus admin check precedes shared catalog writes.
 	redditBrowserHandler := api.NewRedditBrowserHandler(extensionIngestHandler, repository.NewRedditBrowserRepository(adminDB))
 	router.POST("/api/extension/reddit-subreddits", redditBrowserHandler.RegisterSubreddit)
+	router.GET("/api/extension/reddit-subreddits", redditBrowserHandler.ListSubreddits)
+	router.DELETE("/api/extension/reddit-subreddits/:name", redditBrowserHandler.RemoveSubreddit)
 	router.POST("/api/extension/reddit-discovery",
 		redditBrowserHandler.Ingest)
 
@@ -312,6 +314,9 @@ func main() {
 	apiGroup.POST("/admin/integrations/englife/check", englifeHandler.Check)
 	apiGroup.DELETE("/admin/integrations/englife", englifeHandler.Disconnect)
 	adminAI := api.NewAdminAIHandler(adminDB, articleAI)
+	redditAdmin := apiGroup.Group("/admin/explore/subreddits", adminAI.RequireAdmin)
+	redditAdmin.GET("", redditBrowserHandler.ListManagedSubreddits)
+	redditAdmin.DELETE("/:name", redditBrowserHandler.RemoveManagedSubreddit)
 	adminAIGroup := apiGroup.Group("/admin/ai", adminAI.RequireAdmin)
 	adminAIGroup.GET("", adminAI.Get)
 	adminAIGroup.PUT("", adminAI.Save)

@@ -34,13 +34,21 @@ test('foreign origins cannot read subreddit listings',async()=>{
 });
 
 function harness({response,collectError,registrationError}={}) {
- const local={}; const session={};let stamp=1791500000000;let captures=0,uploads=0,closed=0,registrations=0;
+ const local={}; const session={};const serverByToken={};let syncError=false;let stamp=1791500000000;let captures=0,uploads=0,closed=0,registrations=0;
  const store=data=>({get:async keys=>{if(typeof keys==='string')keys=[keys];return Object.fromEntries(keys.filter(k=>k in data).map(k=>[k,structuredClone(data[k])]));},set:async values=>Object.assign(data,structuredClone(values)),remove:async key=>{delete data[key];}});
  const cfg={serverUrl:'https://rss.example',token:'test-only-token'};
  const chromeApi={storage:{local:store(local),sync:store(cfg),session:store(session)},tabs:{create:async()=>{captures++;return{id:7};},get:async()=>({status:'complete'}),remove:async()=>{closed++;},onUpdated:{addListener(){},removeListener(){}}},scripting:{executeScript:async()=>{if(collectError)throw new Error(collectError);return[{result:{kind:'Listing',data:{children:[]}}}];}}};
  const api=load({fetch:()=>{},setTimeout,clearTimeout,TextEncoder,crypto:require('node:crypto').webcrypto});
- const options={chromeApi,now:()=>stamp,fetchImpl:async(url)=>{if(url.endsWith("/reddit-subreddits")){registrations++;return registrationError?{ok:false,status:403}:{ok:true,json:async()=>({subreddit:"golang"})};}uploads++;return response || {ok:true,json:async()=>({accepted:0,stats:{external_posts:0}})};}};
- return {collector:api.createCollector(options),recreate:()=>api.createCollector(options),local,cfg,advance:ms=>{stamp+=ms;},counts:()=>({captures,uploads,closed,registrations})};
+ const options={chromeApi,now:()=>stamp,fetchImpl:async(url,opts={})=>{
+  const token=opts.headers?.Authorization;const names=serverByToken[token] ||= new Set(['programming','machinelearning','localllama','artificial']);
+  if(url.includes('/reddit-subreddits')) {
+   if(opts.method==='DELETE'){names.delete(url.split('/').pop());return{ok:true};}
+   if(opts.method!=='POST')return syncError?{ok:false,status:503}:{ok:true,json:async()=>Array.from(names,name=>({name,enabled:true}))};
+   registrations++;if(registrationError)return{ok:false,status:403};const name=JSON.parse(opts.body).subreddit;names.add(name);return{ok:true,json:async()=>({subreddit:name})};
+  }
+  uploads++;return response || {ok:true,json:async()=>({accepted:0,stats:{external_posts:0}})};
+ }};
+ return {collector:api.createCollector(options),recreate:()=>api.createCollector(options),local,cfg,serverByToken,failSync:()=>{syncError=true},advance:ms=>{stamp+=ms;},counts:()=>({captures,uploads,closed,registrations})};
 }
 test('disabled collector is idle; manual run processes eight lists once across restarts',async()=>{
  const h=harness();await h.collector.tick();assert.equal(h.counts().captures,0);
@@ -108,4 +116,38 @@ test('switching accounts preserves separate subreddit lists', async()=>{
  assert.equal(Object.keys(h.local.redditDiscoverySubscriptions.byOwner).length,2);
  h.cfg.token='test-only-token';await h.collector.addSubreddit('golang');
  assert.equal(h.counts().registrations,2);
+});
+
+test('server removal cancels pending jobs including defaults and prevents new uploads',async()=>{
+ const h=harness({response:{ok:false,status:503}});await h.collector.requestRun();await h.collector.tick();
+ assert.ok(h.local.redditDiscovery.jobs['programming:week'].pending);
+ await h.collector.removeSubreddit('programming');h.advance(60000);await h.collector.tick();
+ assert.equal(h.local.redditDiscovery.jobs['programming:week'],undefined);
+ assert.ok(!h.local.redditDiscoveryServerBoards.names.includes('programming'));
+});
+test('web removal is observed on next tick; sync failures do not collect stale boards',async()=>{
+ const h=harness();await h.collector.addSubreddit('golang');
+ h.serverByToken['Bearer test-only-token'].delete('golang');await h.collector.tick();assert.equal(h.counts().captures,0);
+ await h.collector.requestRun();h.failSync();await h.collector.tick();assert.equal(h.counts().captures,0);assert.match(h.local.redditDiscovery.error,/同步失败/);
+});
+
+test('removed mixed-case default can be re-added and collected without blocking manual runs',async()=>{
+ const h=harness();await h.collector.removeSubreddit('MachineLearning');await h.collector.addSubreddit('MachineLearning');
+ await h.collector.tick();h.advance(60000);await h.collector.tick();assert.equal(h.counts().captures,2);
+ assert.equal(h.local.redditDiscovery.jobs['machinelearning:week'].status,'done');
+ await h.collector.requestRun();h.advance(60000);await h.collector.tick();assert.equal(h.counts().captures,3);
+});
+test('removed custom communities release capacity and can be added again',async()=>{
+ const h=harness();await h.collector.addSubreddit('golang');
+ const boards=Object.values(h.local.redditDiscoverySubscriptions.byOwner)[0];
+ for(let i=1;i<50;i++)boards.push({name:'retired'+i,addedAt:1});
+ await h.collector.removeSubreddit('golang');await h.collector.addSubreddit('golang');
+ assert.equal(h.counts().registrations,2);
+});
+test('legacy mixed-case pending jobs migrate to canonical scheduling keys',async()=>{
+ const h=harness();await h.collector.tick();
+ h.local.redditDiscovery.jobs['MachineLearning:week']={requested:true};
+ await h.collector.tick();assert.equal(h.counts().captures,1);
+ assert.equal(h.local.redditDiscovery.jobs['MachineLearning:week'],undefined);
+ assert.equal(h.local.redditDiscovery.jobs['machinelearning:week'].status,'done');
 });

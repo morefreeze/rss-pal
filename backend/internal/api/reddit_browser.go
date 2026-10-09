@@ -14,6 +14,8 @@ import (
 
 type redditBrowserStore interface {
 	RegisterSubreddit(context.Context, string) (string, error)
+	ListSubreddits(context.Context) ([]repository.RedditSubreddit, error)
+	RemoveSubreddit(context.Context, string) error
 	Ingest(context.Context, explore.RedditBrowserBatch, time.Time) (repository.RedditBrowserResult, error)
 }
 type RedditBrowserHandler struct {
@@ -97,4 +99,52 @@ func (h *RedditBrowserHandler) RegisterSubreddit(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"subreddit": name})
+}
+
+func (h *RedditBrowserHandler) ListSubreddits(c *gin.Context) {
+	user, err := h.auth.authenticate(c)
+	if err != nil {
+		c.JSON(401, gin.H{"error": "invalid bookmarklet token"})
+		return
+	}
+	if !user.IsAdmin {
+		c.JSON(403, gin.H{"error": "administrator required"})
+		return
+	}
+	h.ListManagedSubreddits(c)
+}
+func (h *RedditBrowserHandler) RemoveSubreddit(c *gin.Context) {
+	user, err := h.auth.authenticate(c)
+	if err != nil {
+		c.JSON(401, gin.H{"error": "invalid bookmarklet token"})
+		return
+	}
+	if !user.IsAdmin {
+		c.JSON(403, gin.H{"error": "administrator required"})
+		return
+	}
+	h.RemoveManagedSubreddit(c)
+}
+
+// Managed handlers are mounted behind JWT and administrator middleware.
+func (h *RedditBrowserHandler) ListManagedSubreddits(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	items, err := h.store.ListSubreddits(c.Request.Context())
+	if err != nil {
+		c.JSON(500, gin.H{"error": "无法加载 subreddit 列表"})
+		return
+	}
+	c.JSON(200, items)
+}
+func (h *RedditBrowserHandler) RemoveManagedSubreddit(c *gin.Context) {
+	name, err := explore.NormalizeSubreddit(c.Param("name"))
+	if err != nil {
+		c.JSON(400, gin.H{"error": "invalid subreddit"})
+		return
+	}
+	if err = h.store.RemoveSubreddit(c.Request.Context(), name); err != nil {
+		c.JSON(500, gin.H{"error": "移除失败"})
+		return
+	}
+	c.Status(204)
 }

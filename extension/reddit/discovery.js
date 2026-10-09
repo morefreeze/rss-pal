@@ -4,7 +4,7 @@
   'use strict';
   const BOARDS = ['programming', 'MachineLearning', 'LocalLLaMA', 'artificial'];
   const JOBS = BOARDS.flatMap(subreddit => ['week', 'month'].map(period => ({
-    key: subreddit + ':' + period, subreddit, period,
+    key: subreddit.toLowerCase() + ':' + period, subreddit, period,
   })));
   const SIX_HOURS = 6 * 60 * 60 * 1000;
 
@@ -69,13 +69,43 @@
   }
   async function getBoards(chromeApi) {
     const cfg=await chromeApi.storage.sync.get(['serverUrl','token']);
-    const added=await subscriptions(chromeApi,await configOwner(cfg));
+    const owner=await configOwner(cfg);
+    const cached=(await chromeApi.storage.local.get('redditDiscoveryServerBoards')).redditDiscoveryServerBoards;
+    if (cached?.owner===owner && Array.isArray(cached.names)) return cached.names;
+    const added=await subscriptions(chromeApi,owner);
     return [...BOARDS.map(name=>name.toLowerCase()),...added.map(b=>b.name)];
   }
 
   function createCollector({ chromeApi, fetchImpl = fetch, now = Date.now }) {
     let busy = false;
     let registration=Promise.resolve();
+    async function syncSubreddits() {
+      const cfg=await chromeApi.storage.sync.get(['serverUrl','token']);validateConfig(cfg);
+      const owner=await configOwner(cfg);
+      const response=await fetchImpl(cfg.serverUrl.replace(/\/+$/,'')+'/api/extension/reddit-subreddits',{
+        headers:{Authorization:'Bearer '+cfg.token},signal:AbortSignal.timeout(20000),
+      });
+      if (!response.ok) throw new Error('探索列表同步失败：HTTP '+response.status);
+      const items=await response.json();
+      if (!Array.isArray(items) || items.some(item=>!normalizeSubreddit(item.name) || typeof item.enabled!=='boolean')) throw new Error('无效的探索列表');
+      if (await configOwner(await chromeApi.storage.sync.get(['serverUrl','token']))!==owner) throw new Error('配置已更改，请重试');
+      const value={owner,names:items.filter(item=>item.enabled).map(item=>item.name)};
+      const previous=(await chromeApi.storage.local.get('redditDiscoveryServerBoards')).redditDiscoveryServerBoards;
+      if (JSON.stringify(previous)!==JSON.stringify(value)) await chromeApi.storage.local.set({redditDiscoveryServerBoards:value});
+      return value.names;
+    }
+    function removeSubreddit(raw) {
+      const operation=registration.then(async()=>{
+        const name=normalizeSubreddit(raw);if(!name)throw new Error('无效 subreddit');
+        const cfg=await chromeApi.storage.sync.get(['serverUrl','token']);validateConfig(cfg);
+        const response=await fetchImpl(cfg.serverUrl.replace(/\/+$/,'')+'/api/extension/reddit-subreddits/'+name,{
+          method:'DELETE',headers:{Authorization:'Bearer '+cfg.token},signal:AbortSignal.timeout(20000),
+        });
+        if(!response.ok)throw new Error('移除失败：HTTP '+response.status);
+        await syncSubreddits();
+      });
+      registration=operation.catch(()=>{});return operation;
+    }
     function addSubreddit(raw) {
       // Serialize additions separately from tick's state writes so a pending
       // network fetch cannot overwrite a newly added community.
@@ -86,8 +116,9 @@
         validateConfig(cfg);
         const owner=await configOwner(cfg);
         const boards=await subscriptions(chromeApi,owner);
-        if (BOARDS.some(b=>b.toLowerCase()===name) || boards.some(b=>b.name===name)) return name;
-        if (boards.length>=50) throw new Error('最多添加 50 个 subreddit');
+        const active=await syncSubreddits();
+        if(active.includes(name))return name;
+        if (active.filter(b=>!BOARDS.some(defaultBoard=>defaultBoard.toLowerCase()===b)).length>=50) throw new Error('最多添加 50 个 subreddit');
         const response=await fetchImpl(cfg.serverUrl.replace(/\/+$/,'')+'/api/extension/reddit-subreddits',{
           method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+cfg.token},
           body:JSON.stringify({subreddit:name}),signal:AbortSignal.timeout(20000),
@@ -97,12 +128,14 @@
         if (result.subreddit!==name) throw new Error('服务器返回了无效 subreddit');
         const latest=await chromeApi.storage.sync.get(['serverUrl','token']);
         if (await configOwner(latest)!==owner) throw new Error('配置已更改，请重试');
-        boards.push({name,addedAt:now()});
+        const existing=boards.find(b=>b.name===name);
+        if(existing)existing.addedAt=now();else boards.push({name,addedAt:now()});
         const stored=(await chromeApi.storage.local.get('redditDiscoverySubscriptions')).redditDiscoverySubscriptions;
         const byOwner={...stored?.byOwner};
         if (stored?.owner && Array.isArray(stored.boards)) byOwner[stored.owner]=stored.boards;
         byOwner[owner]=boards;
         await chromeApi.storage.local.set({redditDiscoverySubscriptions:{byOwner}});
+        await syncSubreddits();
         return name;
       });
       registration=operation.catch(()=>{});
@@ -170,17 +203,33 @@
         try {validateConfig(cfg);} catch(e) {s.error=e.message;await save(s);return;}
         const owner=await configOwner(cfg);
         if (s.owner !== owner) s={owner,enabled:s.enabled,jobs:{}};
+        // Migrate pre-1.8.8 mixed-case default job keys, retaining pending work.
+        for(const [key,value] of Object.entries(s.jobs)) {
+          const normalized=key.toLowerCase();
+          if(key!==normalized) {
+            const current=s.jobs[normalized];
+            s.jobs[normalized]={...value,...current,requested:!!value.requested || !!current?.requested};
+            delete s.jobs[key];
+          }
+        }
         s.error=null;
+        let active;
+        try {active=await syncSubreddits();} catch(e) {s.error=e.message;await save(s);return;}
         const added=await subscriptions(chromeApi,owner);
-        const jobs=[...JOBS];
+        const jobs=JOBS.filter(job=>active.includes(job.subreddit.toLowerCase()));
+        for (const key of Object.keys(s.jobs)) if(!active.includes(key.split(':')[0].toLowerCase()))delete s.jobs[key];
         for (const board of added) {
-          if (!normalizeSubreddit(board.name) || BOARDS.some(b=>b.toLowerCase()===board.name)) continue;
+          if (!active.includes(board.name)) continue;
           for (const period of ['week','month']) {
             const key=board.name+':'+period;
-            jobs.push({key,subreddit:board.name,period});
+            if(!jobs.some(job=>job.key.toLowerCase()===key))jobs.push({key,subreddit:board.name,period});
             const v=s.jobs[key] ||= {};
             if (!v.addedAt || v.addedAt < board.addedAt) {v.addedAt=board.addedAt;v.requested=true;}
           }
+        }
+        for(const name of active) for(const period of ['week','month']) {
+          const key=name+':'+period;
+          if(!jobs.some(job=>job.key.toLowerCase()===key))jobs.push({key,subreddit:name,period});
         }
         // A persisted collecting state without a payload means Chrome exited
         // before the fetch completed. Restore intent even in manual mode.
@@ -231,7 +280,7 @@
         await save(s);
       } finally {busy=false;}
     }
-    return {tick,configure,requestRun,state,addSubreddit};
+    return {tick,configure,requestRun,state,addSubreddit,removeSubreddit,syncSubreddits};
   }
   globalThis.__rssPalReddit = { readListing, createCollector, JOBS, detectSubreddit, getBoards };
 })();

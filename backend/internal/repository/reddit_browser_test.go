@@ -113,14 +113,44 @@ func TestRegisterRedditSubreddit(t *testing.T) {
 	if _, err := repo.Ingest(ctx, batch, now); err != repository.ErrRedditBrowserDisabled {
 		t.Fatalf("unregistered err=%v", err)
 	}
-	// A disabled second window must roll back creation of the first window.
-	if _, err := db.Exec(`DELETE FROM explore_registry_providers WHERE provider_key='reddit-golang-top-week'; UPDATE explore_registry_providers SET enabled=false WHERE provider_key='reddit-golang-top-month'`); err != nil {
+
+	if err := repo.RemoveSubreddit(ctx, "golang"); err != nil {
+		t.Fatal(err)
+	}
+	batch.Subreddit = "golang"
+	if _, err := repo.Ingest(ctx, batch, now); err != repository.ErrRedditBrowserDisabled {
+		t.Fatalf("removed ingestion err=%v", err)
+	}
+	items, err := repo.ListSubreddits(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range items {
+		if item.Name == "golang" {
+			found = true
+			if item.Enabled {
+				t.Fatal("removed still enabled")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("removed seed/history lost")
+	}
+	if _, err := repo.RegisterSubreddit(ctx, "golang"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM explore_registry_providers WHERE provider_key LIKE 'reddit-golang-top-%' AND enabled`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("restore count=%d err=%v", count, err)
+	}
+	// Incompatible providers must still roll back both windows.
+	if _, err := db.Exec(`DELETE FROM explore_registry_providers WHERE provider_key='reddit-golang-top-week';UPDATE explore_registry_providers SET browser_only=false WHERE provider_key='reddit-golang-top-month'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.RegisterSubreddit(ctx, "golang"); err != repository.ErrRedditBrowserDisabled {
-		t.Fatalf("disabled err=%v", err)
+		t.Fatalf("incompatible err=%v", err)
 	}
-	if err := db.QueryRow(`SELECT count(*) FROM explore_registry_providers WHERE provider_key LIKE 'reddit-golang-top-%' AND enabled`).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("partial registration count=%d err=%v", count, err)
+	if err := db.QueryRow(`SELECT count(*) FROM explore_registry_providers WHERE provider_key='reddit-golang-top-week'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("partial count=%d err=%v", count, err)
 	}
 }

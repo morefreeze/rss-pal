@@ -8,7 +8,15 @@
   let currentSubreddit=null;
   async function renderCurrent() {
     const boards=await globalThis.__rssPalReddit.getBoards(chrome);
-    document.getElementById('redditBoards').textContent='探索列表：'+boards.map(b=>'r/'+b).join('、');
+    const list=document.getElementById('redditBoards');list.replaceChildren();
+    for(const name of boards) {
+      const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:6px 0';
+      const label=document.createElement('span');label.textContent='r/'+name;
+      const remove=document.createElement('button');remove.textContent='移除';remove.setAttribute('aria-label','移除 r/'+name);
+      remove.addEventListener('click',async()=>{remove.disabled=true;try{await send({action:'redditDiscoveryRemove',subreddit:name});await renderCurrent();}catch(e){status.textContent=e.message;remove.disabled=false;}});
+      row.append(label,remove);list.append(row);
+    }
+    if(!boards.length)list.textContent='尚未添加 subreddit';
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
     currentSubreddit=globalThis.__rssPalReddit.detectSubreddit(tab?.url);
     document.getElementById('redditCurrent').style.display=currentSubreddit?'block':'none';
@@ -58,4 +66,5 @@
   });
   chrome.storage.onChanged.addListener((_changes,area)=>{if(area==='local' || area==='sync')render();});
   render();
+  send({action:'redditDiscoverySync'}).then(()=>render()).catch(e=>{status.textContent=e.message;});
 })();

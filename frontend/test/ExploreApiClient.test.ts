@@ -13,7 +13,7 @@ import {
   subscribeExploreSources,
 } from '../src/api/client'
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {vi.restoreAllMocks();vi.useRealTimers()})
 
 describe('Explore API client', () => {
   it('maps all ten Explore operations to their authenticated API endpoints', async () => {
@@ -55,3 +55,15 @@ describe('Explore API client', () => {
     })
   })
 })
+
+describe('Explore transient upstream recovery',()=>{
+ it('recovers from deployment 502 without retrying writes',async()=>{
+  vi.useFakeTimers();const get=vi.spyOn(api,'get').mockRejectedValueOnce({response:{status:502}}).mockResolvedValue({data:{articles:[]}});
+  const result=getExplore();await vi.advanceTimersByTimeAsync(2000);await expect(result).resolves.toEqual({articles:[]});expect(get).toHaveBeenCalledTimes(2);
+ });
+ it('stops after bounded retries and does not retry auth failures',async()=>{
+  vi.useFakeTimers();const error={response:{status:503}};const get=vi.spyOn(api,'get').mockRejectedValue(error);
+  const result=getExploreSources().catch(e=>e);await vi.runAllTimersAsync();expect(await result).toBe(error);expect(get).toHaveBeenCalledTimes(4);
+  get.mockClear().mockRejectedValue({response:{status:401}});await expect(getExplore()).rejects.toMatchObject({response:{status:401}});expect(get).toHaveBeenCalledTimes(1);
+ });
+});
