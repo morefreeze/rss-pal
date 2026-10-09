@@ -32,3 +32,11 @@ If you adapt OpenCLI code into this codebase in the future, you must:
 3. Update this file with the specific borrowing
 
 For now, no third-party source code is included.
+
+## Reddit browser discovery
+
+`extension/reddit/discovery.js` is independently implemented. OpenCLI's
+`clis/reddit/subreddit.js` (locally inspected package version 1.8.6) informed
+the same-origin listing-fetch approach. No OpenCLI code or Browser Bridge is
+bundled. RSS Pal uses its own fixed scheduling, minimal payload, administrator
+authentication, retries and server-side filtering.

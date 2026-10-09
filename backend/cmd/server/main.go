@@ -293,6 +293,10 @@ func main() {
 		api.TaskBudgetMiddleware(taskBudgets, policies),
 		extensionIngestHandler.Ingest)
 
+	// Public-token authentication plus admin check precedes shared catalog writes.
+	router.POST("/api/extension/reddit-discovery",
+		api.NewRedditBrowserHandler(extensionIngestHandler, repository.NewRedditBrowserRepository(adminDB)).Ingest)
+
 	router.POST("/api/integrations/englife/complete", englifeHandler.Complete)
 
 	// Protected routes

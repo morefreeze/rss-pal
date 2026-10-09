@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RSS Pal",
-  "version": "1.8.5",
+  "version": "1.8.6",
   "description": "将网页内容捕获并发送到 RSS Pal",
   "permissions": [
     "activeTab",

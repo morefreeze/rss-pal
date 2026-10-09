@@ -36,7 +36,7 @@ select_deploy_services() {
         add_deploy_service api
         add_deploy_service worker
         ;;
-      frontend/*|certs/*|nginx.prod.conf|rss-pal.nginx)
+      frontend/*|extension/*|certs/*|nginx.prod.conf|rss-pal.nginx)
         add_deploy_service frontend
         ;;
       status-monitor/*)

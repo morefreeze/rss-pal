@@ -203,7 +203,7 @@ func (r *ExploreRegistryRepository) LoadDueProviders(now time.Time) ([]explore.R
 		SELECT id, provider_key, provider_kind, endpoint, topic, sync_interval_minutes,
 		       enabled, etag, last_modified, last_sync_at, last_success_at, consecutive_failures
 		FROM explore_registry_providers
-		WHERE enabled AND provider_kind <> 'related_site'
+		WHERE enabled AND NOT browser_only AND provider_kind <> 'related_site'
 		  AND (last_sync_at IS NULL OR last_sync_at + sync_interval_minutes * POWER(2, LEAST(consecutive_failures, 6)) * INTERVAL '1 minute' <= $1)
 		ORDER BY id ASC`, now)
 	if err != nil {

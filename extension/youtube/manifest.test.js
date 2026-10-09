@@ -27,8 +27,8 @@ test('loads the YouTube bridge only on the production RSS Pal origin', () => {
 });
 
 test('requests DNR host access without cookie or debugger permissions', () => {
-  assert.equal(manifest.version, '1.8.5');
-  assert.equal(packageJson.version, '1.8.5');
+  assert.equal(manifest.version, '1.8.6');
+  assert.equal(packageJson.version, '1.8.6');
   assert.equal(
     manifest.permissions.includes('declarativeNetRequestWithHostAccess'),
     true,
@@ -91,7 +91,7 @@ test('sets only the approved RSS Pal CORS response headers', () => {
 
 test('keeps repeatable unit and smoke checks in package scripts', () => {
   assert.deepEqual(packageJson.scripts, {
-    test: 'node --test youtube/*.test.js englife/*.test.js',
+    test: 'node --test youtube/*.test.js englife/*.test.js reddit/*.test.js',
     smoke: 'node adapters/twitter/smoke-test.js',
     check: 'npm test && npm run smoke',
   });

@@ -1724,6 +1724,7 @@ test('background routes YouTube messages and cleanup through the resolver', asyn
     setTimeout,
   });
   context.globalThis = context;
+  context.__rssPalReddit = { createCollector: () => ({ tick: async () => {}, configure: async () => {}, requestRun: async () => {} }) };
   context.__rssPalEnglife = { createConnection: () => ({ cleanup: async () => {}, handle: async () => ({ ok: false }) }) };
   context.__rssPalYouTubeProtocol = protocolGlobal;
   context.__rssPalYouTubeFormatSelection = selectionGlobal;
@@ -1738,6 +1739,7 @@ test('background routes YouTube messages and cleanup through the resolver', asyn
 
   assert.deepEqual(imported, [
     'queue.js',
+    'reddit/discovery.js',
     'englife/connection.js',
     'youtube/protocol.js',
     'youtube/format-selection.js',
@@ -1757,7 +1759,7 @@ test('background routes YouTube messages and cleanup through the resolver', asyn
   events.startup.emit();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(cleanupCalls.length, 3);
-  assert.equal(alarmsCreated.length, 6);
+  assert.equal(alarmsCreated.length, 9);
 
   events.tabRemoved.emit(44);
   await new Promise((resolve) => setImmediate(resolve));

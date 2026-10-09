@@ -5,12 +5,15 @@
 // context. Each dependency attaches its API to the service-worker global.
 importScripts(
   'queue.js',
+  'reddit/discovery.js',
   'englife/connection.js',
   'youtube/protocol.js',
   'youtube/format-selection.js',
   'youtube/page-capture.js',
   'youtube/resolver.js',
 );
+
+const redditCollector = globalThis.__rssPalReddit.createCollector({ chromeApi: chrome });
 
 const englifeConnection = globalThis.__rssPalEnglife.createConnection({ chromeApi: chrome });
 
@@ -39,6 +42,7 @@ const FLUSH_ALARM = 'flushQueue';
 function scheduleAlarms() {
   chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 });
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
+  chrome.alarms.create('redditDiscovery', { periodInMinutes: 1 });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -62,6 +66,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 cleanupYouTubeOrphans();
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'redditDiscovery') {
+    redditCollector.tick().catch(e => console.warn('[rss-pal] Reddit discovery:', e.message));
+    return;
+  }
   if (alarm.name === KEEPALIVE_ALARM) {
     englifeConnection.cleanup().catch(() => {});
     chrome.storage.local.get('__keepalive', () => void chrome.runtime.lastError);
@@ -81,6 +89,17 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Content scripts ask us to flush after pushing new items.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.action === 'redditDiscoveryRun' || msg?.action === 'redditDiscoveryConfigure') {
+    if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) {
+      sendResponse({ok:false}); return false;
+    }
+    const operation = msg.action === 'redditDiscoveryRun'
+      ? redditCollector.requestRun() : redditCollector.configure(msg.enabled);
+    operation.then(() => {sendResponse({ok:true});return redditCollector.tick();})
+      .catch(e => console.warn('[rss-pal] Reddit discovery:',e.message));
+    return true;
+  }
+
   if (msg?.channel === 'englife') {
     englifeConnection.handle(msg, sender).then(sendResponse, () => sendResponse({ ok: false }));
     return true;

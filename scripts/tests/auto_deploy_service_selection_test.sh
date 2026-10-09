@@ -29,6 +29,7 @@ assert_selection() {
 
 assert_selection $'backend/internal/rss/content.go\ndocs/note.md' false "api worker"
 assert_selection $'frontend/src/App.tsx\nnginx.prod.conf' false "frontend"
+assert_selection 'extension/reddit/discovery.js' false "frontend"
 assert_selection 'status-monitor/server.py' false "status-monitor"
 assert_selection $'backend/internal/rss/content.go\nfrontend/src/App.tsx\nstatus-monitor/server.py' false "api worker frontend status-monitor"
 assert_selection 'docker-compose.yml' true ""
@@ -120,7 +121,7 @@ README_FILE="$ROOT_DIR/README.md"
 
 status_migrate_block=$(sed -n '/^  status-migrate:$/,/^  api:$/p' "$COMPOSE_FILE")
 migration_command=$(printf '%s\n' "$status_migrate_block" | sed -n 's/^    command: \["sh", "-ec", "\(.*\)"\]$/\1/p')
-expected_migration_command='psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql && psql -v ON_ERROR_STOP=1 -f /migrations/043_task_budgets.sql && psql -v ON_ERROR_STOP=1 -f /migrations/044_user_subscriptions.sql && psql -v ON_ERROR_STOP=1 -f /migrations/045_operations_monitoring.sql && psql -v ON_ERROR_STOP=1 -f /migrations/046_public_feed_catalog.sql && psql -v ON_ERROR_STOP=1 -f /migrations/047_ai_token_usage.sql && psql -v ON_ERROR_STOP=1 -f /migrations/048_platform_ai_config.sql && psql -v ON_ERROR_STOP=1 -f /migrations/049_englife_integration.sql && psql -v ON_ERROR_STOP=1 -f /migrations/050_reddit_top_seeds.sql && psql -v ON_ERROR_STOP=1 -f /migrations/051_explore_content_version.sql'
+expected_migration_command='psql -v ON_ERROR_STOP=1 -f /migrations/037_service_heartbeats.sql && psql -v ON_ERROR_STOP=1 -f /migrations/038_subscription_explore.sql && psql -v ON_ERROR_STOP=1 -f /migrations/039_article_shares.sql && psql -v ON_ERROR_STOP=1 -f /migrations/040_explore_provider_materialized_at.sql && psql -v ON_ERROR_STOP=1 -f /migrations/041_article_share_short_codes.sql && psql -v ON_ERROR_STOP=1 -f /migrations/042_auth_rate_limits.sql && psql -v ON_ERROR_STOP=1 -f /migrations/043_task_budgets.sql && psql -v ON_ERROR_STOP=1 -f /migrations/044_user_subscriptions.sql && psql -v ON_ERROR_STOP=1 -f /migrations/045_operations_monitoring.sql && psql -v ON_ERROR_STOP=1 -f /migrations/046_public_feed_catalog.sql && psql -v ON_ERROR_STOP=1 -f /migrations/047_ai_token_usage.sql && psql -v ON_ERROR_STOP=1 -f /migrations/048_platform_ai_config.sql && psql -v ON_ERROR_STOP=1 -f /migrations/049_englife_integration.sql && psql -v ON_ERROR_STOP=1 -f /migrations/050_reddit_top_seeds.sql && psql -v ON_ERROR_STOP=1 -f /migrations/051_explore_content_version.sql && psql -v ON_ERROR_STOP=1 -f /migrations/052_reddit_browser_transport.sql'
 [ "$migration_command" = "$expected_migration_command" ] || {
   echo "FAIL: status-migrate must execute ordered 037-046 psql steps joined only by &&" >&2
   exit 1

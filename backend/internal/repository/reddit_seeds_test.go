@@ -12,8 +12,13 @@ import (
 )
 
 func TestRedditTopSeedsLoadedAndLegacyDisabled(t *testing.T) {
-	db, cleanup := testdb.New(t)
+	db, cleanup := testdb.NewThroughMigration(t, "051_explore_content_version.sql")
 	defer cleanup()
+	// The later transport migration adds this column; exercise old seed setup
+	// with the new repository schema expectation without switching transport yet.
+	if _, err := db.Exec(`ALTER TABLE explore_registry_providers ADD COLUMN browser_only BOOLEAN NOT NULL DEFAULT false`); err != nil {
+		t.Fatal(err)
+	}
 	providers, err := repository.NewExploreRegistryRepository(db).LoadDueProviders(time.Now())
 	if err != nil {
 		t.Fatal(err)
