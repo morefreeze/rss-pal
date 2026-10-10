@@ -35,8 +35,8 @@ def durable(path, value):
         os.fsync(f.fileno())
 
 
-def tool(binary, op, url='', raw=''):
-    p = subprocess.run([binary], input=json.dumps(dict(Op=op, URL=url, Raw=raw))+'\n', text=True, capture_output=True, timeout=35, check=True)
+def tool(binary, op, url='', raw='', description=''):
+    p = subprocess.run([binary], input=json.dumps(dict(Op=op, URL=url, Raw=raw, Description=description))+'\n', text=True, capture_output=True, timeout=35, check=True)
     result = json.loads(p.stdout)
     if result.get('error'):
         raise ValueError(result['error'])
@@ -47,9 +47,9 @@ def candidate(content):
     return bool(re.search(r'\$|\\[a-zA-Z([]|math/tex|<math|katex|RSSPALMATH|(?:equation|theorem|lemma|proof|公式|定理)', content, re.I))
 
 
-def compare(row, raw, op, args):
-    old = tool(args.old, op, row['url'], raw).get('content', '')
-    new = tool(args.new, op, row['url'], raw).get('content', '')
+def compare(row, raw, op, args, description=""):
+    old = tool(args.old, op, row['url'], raw, description).get('content', '')
+    new = tool(args.new, op, row['url'], raw, description).get('content', '')
     if old == new:
         return None, 'same_conversion' if (row['content'] or '').strip() in (old.strip(), raw.strip()) else 'source_mismatch'
     # These changes must be mathematical, not unrelated HTML normalization.
@@ -62,7 +62,7 @@ def compare(row, raw, op, args):
         return None, 'source_mismatch'
     if not new.strip() or len(new) < len(current)*0.5:
         return None, 'short_result'
-    return dict(row, source_raw=raw, source_op=op, new_content=new, old_md5=hashlib.md5(current.encode()).hexdigest(), method=op), 'repairable'
+    return dict(row, source_raw=raw, source_description=description, source_op=op, new_content=new, old_md5=hashlib.md5(current.encode()).hexdigest(), method=op), 'repairable'
 
 
 def audit(args):
@@ -90,12 +90,15 @@ FROM explore_articles a JOIN recommended_feeds f ON f.id=a.source_id WHERE a.fet
         try:
             raw = tool(args.new,'fetch',url).get('raw','')
             items = tool(args.new,'feed_items',url,raw).get('items',[])
-            by_url = {i['URL'].rstrip('/'):i['Raw'] for i in items}
+            by_url = {i['URL'].rstrip('/'):i for i in items}
             for row in entries:
-                source = by_url.get(row['url'].rstrip('/'))
-                if source is None:
+                entry = by_url.get(row['url'].rstrip('/'))
+                if entry is None:
                     continue
+                source = entry['Raw']
                 plan, reason = compare(row,source,'fragment',args)
+                if row['kind'] == 'article' and reason == 'source_mismatch':
+                    plan, reason = compare(row,source,'subscription',args,entry.get('Description',''))
                 with lock:
                     if reason in ('repairable', 'already_fixed', 'same_conversion'):
                         checked.add((row['kind'],row['id']))

@@ -104,3 +104,11 @@ func dollarStartsMath(r []rune) bool {
 	}
 	return false
 }
+
+func feedHasMath(raw string) bool {
+	if !strings.ContainsAny(raw, "$\\") && !strings.Contains(raw, "math") && !strings.Contains(raw, "katex") {
+		return false
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(raw))
+	return err == nil && len(extractTexAnnotations(doc.Selection)) > 0
+}

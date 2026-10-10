@@ -75,3 +75,13 @@ func TestNumericInlineMath(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }
+
+func TestSubscriptionFallbackPreservesMath(t *testing.T) {
+	raw := `<p>Ring $x \in B$.</p><script type="math/tex; mode=display">2x=0</script>`
+	for _, tt := range []struct{ description, content string }{{raw, ""}, {"", raw}, {"Brief summary", raw}} {
+		got, _ := BuildItemContent(tt.description, tt.content, "https://example.org/post")
+		if !strings.Contains(got, `$x \in B$`) || !strings.Contains(got, "$$\n2x=0\n$$") {
+			t.Errorf("lost subscription math: %q", got)
+		}
+	}
+}

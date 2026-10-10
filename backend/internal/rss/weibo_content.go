@@ -15,6 +15,13 @@ const bloggerCommentHeading = "### 博主首评"
 func BuildItemContent(description, fallback, itemURL string) (content string, enriched bool) {
 	uid, ok := desktopWeiboStatusUID(itemURL)
 	if !ok {
+		// Full RSS content can be the only surviving source when the page is
+		// unavailable. Keep formula markup rather than flattening it to text.
+		for _, raw := range []string{fallback, description} {
+			if feedHasMath(raw) {
+				return NormalizeFeedContent(raw, itemURL), false
+			}
+		}
 		content = StripHTML(description)
 		if content == "" {
 			content = StripHTML(fallback)

@@ -19,14 +19,14 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-type request struct{ Op, URL, Raw string }
+type request struct{ Op, URL, Raw, Description string }
 type response struct {
 	Content string `json:"content,omitempty"`
 	Raw     string `json:"raw,omitempty"`
 	Error   string `json:"error,omitempty"`
 	Items   []item `json:"items,omitempty"`
 }
-type item struct{ URL, Raw string }
+type item struct{ URL, Raw, Description string }
 
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
@@ -86,9 +86,12 @@ func run(req request) response {
 			if strings.TrimSpace(raw) == "" {
 				raw = entry.Description
 			}
-			out.Items = append(out.Items, item{entry.Link, raw})
+			out.Items = append(out.Items, item{entry.Link, raw, entry.Description})
 		}
 		return out
+	case "subscription":
+		content, _ := rss.BuildItemContent(req.Description, req.Raw, req.URL)
+		return response{Content: content}
 	case "fragment":
 		return response{Content: rss.NormalizeFeedContent(req.Raw, req.URL)}
 	case "page":
