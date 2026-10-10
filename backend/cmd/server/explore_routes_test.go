@@ -12,6 +12,7 @@ func TestRegisterExploreRoutes(t *testing.T) {
 	router := gin.New()
 	registerExploreRoutes(router.Group("/api"), &api.ExploreHandler{})
 	want := map[string]bool{
+		"PUT /api/explore/articles/:id/state":       false,
 		"GET /api/explore":                          false,
 		"GET /api/explore/sources":                  false,
 		"GET /api/explore/articles/:id":             false,

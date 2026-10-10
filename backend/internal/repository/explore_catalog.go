@@ -46,6 +46,7 @@ const (
 		USING ranked, recommended_feeds source
 		WHERE article.id = ranked.id
 		  AND source.id = $1
+          AND NOT EXISTS (SELECT 1 FROM explore_article_states state WHERE state.normalized_url=article.normalized_url AND state.saved)
 		  AND (
 			ranked.position > 50
 			OR (

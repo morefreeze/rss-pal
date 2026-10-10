@@ -1,3 +1,5 @@
+import ExploreArticleActions from '../components/ExploreArticleActions'
+import { useExploreArticleActions } from '../hooks/useExploreArticleActions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -216,6 +218,7 @@ export default function ExploreArticlePage() {
   }
 
   const goBack = () => navigate(returnPath)
+  const actions = useExploreArticleActions(articleID, article?.saved, goBack, article?.skipped)
 
   if (loading) {
     return (
@@ -261,9 +264,10 @@ export default function ExploreArticlePage() {
     <div className="reading-layout explore-article-reader">
       <div className="reading-toolbar flex-between">
         <button type="button" className="reading-exit" aria-label="返回探索" onClick={goBack}>← 返回探索</button>
-        {subscribeButton('top')}
+        <div className="explore-article-actions"><ExploreArticleActions actions={actions} />{subscribeButton('top')}</div>
       </div>
 
+      {actions.error && <div className="explore-inline-error" role="alert">{actions.error}</div>}
       {subscribeError && <div className="explore-inline-error" role="alert">{subscribeError}</div>}
 
       <article
@@ -289,7 +293,7 @@ export default function ExploreArticlePage() {
 
         <div className="reading-nav">
           <button type="button" className="reading-nav-btn" aria-label="返回探索列表" onClick={goBack}>返回探索</button>
-          {subscribeButton('bottom')}
+          <ExploreArticleActions actions={actions} />{subscribeButton('bottom')}
         </div>
       </article>
 

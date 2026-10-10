@@ -65,6 +65,43 @@ describe('useExploreFeed', () => {
     api.recordExploreArticleEvent.mockResolvedValue({ recorded: true })
   })
 
+  it('keeps duplicate normalized article URLs coherent without changing their IDs', async () => {
+    const normalized_url = 'https://example.test/shared'
+    api.getExplore.mockResolvedValueOnce(response([
+      {...article(1), normalized_url}, {...article(2), normalized_url}, article(3),
+    ]))
+    const { result } = renderHook(() => useExploreFeed())
+    await waitFor(() => expect(result.current.articles).toHaveLength(3))
+    for (const saved of [true, false]) {
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('explore-article-state-changed', {detail:{id:1, normalized_url, saved, skipped:false}}))
+      })
+      expect(result.current.articles.map(item => item.id)).toEqual([1, 2, 3])
+      expect(result.current.articles.slice(0, 2).map(item => item.saved)).toEqual([saved, saved])
+      expect(result.current.articles[2].saved).toBeUndefined()
+    }
+    expect(api.getExplore).toHaveBeenCalledTimes(1)
+    expect(api.createExploreFeedback).not.toHaveBeenCalled()
+  })
+
+  it('requests later view and restarts pagination after article membership changes', async () => {
+    api.getExplore
+      .mockResolvedValueOnce(response([article(1), article(2)], true))
+      .mockResolvedValueOnce(response([article(3), article(4)], true))
+      .mockResolvedValueOnce(response([article(2), article(3)], true))
+    const { result } = renderHook(() => useExploreFeed({ pageSize: 2, view: 'later' }))
+    await waitFor(() => expect(result.current.articles).toHaveLength(2))
+    expect(api.getExplore).toHaveBeenLastCalledWith(expect.objectContaining({ view: 'later', offset: 0 }))
+    await act(async () => { await result.current.loadMore() })
+    expect(result.current.articles).toHaveLength(4)
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('explore-article-state-changed', {detail:{id:1, saved:false, skipped:false}}))
+    })
+    await waitFor(() => expect(result.current.articles.map(item => item.id)).toEqual([2, 3]))
+    expect(api.getExplore).toHaveBeenLastCalledWith(expect.objectContaining({offset:0}))
+    expect(api.createExploreFeedback).not.toHaveBeenCalled()
+  })
+
   it('starts at published descending and merges later pages by article id', async () => {
     api.getExplore
       .mockResolvedValueOnce(response([article(1), article(2)], true))

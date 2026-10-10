@@ -377,3 +377,39 @@ func performExploreRequest(router http.Handler, method, path string, body any) *
 	router.ServeHTTP(w, req)
 	return w
 }
+
+func (f *fakeExploreStore) UpdateArticleState(userID, articleID int, patch repository.ExploreArticleStatePatch) (*repository.ExploreArticleState, error) {
+	f.lastUserID, f.lastArticleID = userID, articleID
+	return &repository.ExploreArticleState{Saved: patch.Saved != nil && *patch.Saved, Skipped: patch.Skipped != nil && *patch.Skipped}, f.err
+}
+
+func TestExploreArticleStateHandler(t *testing.T) {
+	store := &fakeExploreStore{}
+	handler := newExploreHandlerWithStore(store, time.Now)
+	router := exploreTestRouter(handler)
+	router.PUT("/api/explore/articles/:id/state", handler.UpdateArticleState)
+	for _, body := range []string{`{}`, `{"saved":null}`, `{"saved":"true"}`, `{"saved":true,"unknown":1}`, `{"saved":false} trailing`} {
+		w := performExploreRequest(router, http.MethodPut, "/api/explore/articles/10/state", json.RawMessage(body))
+		if w.Code != 400 {
+			t.Fatalf("body=%s status=%d response=%s", body, w.Code, w.Body.String())
+		}
+	}
+	w := performExploreRequest(router, http.MethodPut, "/api/explore/articles/10/state", json.RawMessage(`{"saved":true}`))
+	if w.Code != 200 || store.lastArticleID != 10 || store.lastUserID != 42 || !bytes.Contains(w.Body.Bytes(), []byte(`"saved":true`)) {
+		t.Fatalf("save: %d %s user=%d", w.Code, w.Body.String(), store.lastUserID)
+	}
+	store.err = repository.ErrExploreNotFound
+	w = performExploreRequest(router, http.MethodPut, "/api/explore/articles/10/state", json.RawMessage(`{"skipped":true}`))
+	if w.Code != 404 {
+		t.Fatalf("visibility: %d", w.Code)
+	}
+	store.err = nil
+	w = performExploreRequest(router, http.MethodGet, "/api/explore?view=later", nil)
+	if w.Code != 200 || store.lastParams.View != "later" {
+		t.Fatalf("later view: %d %+v", w.Code, store.lastParams)
+	}
+	w = performExploreRequest(router, http.MethodGet, "/api/explore?view=unknown", nil)
+	if w.Code != 400 {
+		t.Fatalf("invalid view: %d", w.Code)
+	}
+}

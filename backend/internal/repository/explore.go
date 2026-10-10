@@ -73,6 +73,7 @@ type ExploreListParams struct {
 	Sort   SortMode
 	Dir    SortDir
 	Topic  string
+	View   string
 }
 
 type ExploreSnapshotStatus struct {
@@ -87,18 +88,21 @@ type ExploreSnapshotStatus struct {
 }
 
 type ExploreArticleListItem struct {
-	ID           int        `json:"id"`
-	SourceID     int        `json:"source_id"`
-	SourceTitle  string     `json:"source_title"`
-	Title        string     `json:"title"`
-	URL          string     `json:"url"`
-	Excerpt      string     `json:"excerpt"`
-	ThumbnailURL *string    `json:"thumbnail_url,omitempty"`
-	PublishedAt  *time.Time `json:"published_at"`
-	FetchedAt    time.Time  `json:"fetched_at"`
-	Topic        string     `json:"topic"`
-	Reason       string     `json:"reason"`
-	IsSubscribed bool       `json:"is_subscribed"`
+	ID            int        `json:"id"`
+	SourceID      int        `json:"source_id"`
+	SourceTitle   string     `json:"source_title"`
+	Title         string     `json:"title"`
+	URL           string     `json:"url"`
+	NormalizedURL string     `json:"normalized_url"`
+	Excerpt       string     `json:"excerpt"`
+	ThumbnailURL  *string    `json:"thumbnail_url,omitempty"`
+	PublishedAt   *time.Time `json:"published_at"`
+	FetchedAt     time.Time  `json:"fetched_at"`
+	Topic         string     `json:"topic"`
+	Reason        string     `json:"reason"`
+	IsSubscribed  bool       `json:"is_subscribed"`
+	Saved         bool       `json:"saved"`
+	Skipped       bool       `json:"skipped"`
 }
 
 type ExplorePage struct {
@@ -127,19 +131,22 @@ type ExploreSourceItem struct {
 }
 
 type ExploreArticleDetail struct {
-	ID           int        `json:"id"`
-	SourceID     int        `json:"source_id"`
-	SourceTitle  string     `json:"source_title"`
-	SourceURL    string     `json:"source_url"`
-	SiteURL      *string    `json:"site_url,omitempty"`
-	Title        string     `json:"title"`
-	URL          string     `json:"url"`
-	Content      *string    `json:"content"`
-	Excerpt      *string    `json:"excerpt,omitempty"`
-	ThumbnailURL *string    `json:"thumbnail_url,omitempty"`
-	PublishedAt  *time.Time `json:"published_at"`
-	FetchedAt    time.Time  `json:"fetched_at"`
-	IsSubscribed bool       `json:"is_subscribed"`
+	ID            int        `json:"id"`
+	SourceID      int        `json:"source_id"`
+	SourceTitle   string     `json:"source_title"`
+	SourceURL     string     `json:"source_url"`
+	SiteURL       *string    `json:"site_url,omitempty"`
+	Title         string     `json:"title"`
+	URL           string     `json:"url"`
+	NormalizedURL string     `json:"normalized_url"`
+	Content       *string    `json:"content"`
+	Excerpt       *string    `json:"excerpt,omitempty"`
+	ThumbnailURL  *string    `json:"thumbnail_url,omitempty"`
+	PublishedAt   *time.Time `json:"published_at"`
+	FetchedAt     time.Time  `json:"fetched_at"`
+	IsSubscribed  bool       `json:"is_subscribed"`
+	Saved         bool       `json:"saved"`
+	Skipped       bool       `json:"skipped"`
 }
 
 type ExploreFeedbackInput struct {
@@ -150,6 +157,9 @@ type ExploreFeedbackInput struct {
 
 func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*ExplorePage, error) {
 	params = normalizeExploreListParams(params)
+	if params.View == "later" {
+		return r.getSavedPage(userID, params)
+	}
 	tx, commit, rollback, err := txOrBegin(r.db)
 	if err != nil {
 		return nil, err
@@ -200,7 +210,7 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 		if err := rows.Scan(
 			&item.ID, &item.SourceID, &item.SourceTitle, &item.Title, &item.URL,
 			&item.Excerpt, &item.ThumbnailURL, &item.PublishedAt, &item.FetchedAt, &item.Topic,
-			&item.Reason, &item.IsSubscribed,
+			&item.Reason, &item.IsSubscribed, &item.Saved, &item.Skipped, &item.NormalizedURL,
 		); err != nil {
 			rows.Close()
 			return nil, err
@@ -297,7 +307,8 @@ func buildExplorePageQuery(params ExploreListParams) string {
 		       COALESCE(explore_articles.excerpt, ''), explore_articles.thumbnail_url, explore_articles.published_at,
 		       explore_articles.fetched_at, COALESCE(batch_source.topic, ''),
 		       COALESCE(batch_source.reason, ''),
-		       source.normalized_url=ANY($3) AS is_subscribed
+		       source.normalized_url=ANY($3) AS is_subscribed,
+            EXISTS (SELECT 1 FROM explore_article_states state WHERE state.user_id=$1 AND state.normalized_url=explore_articles.normalized_url AND state.saved) AS saved, false AS skipped, explore_articles.normalized_url
 		FROM explore_batches batch
 		JOIN explore_batch_sources batch_source
 		  ON batch_source.batch_id=batch.id AND batch_source.user_id=$1
@@ -305,6 +316,7 @@ func buildExplorePageQuery(params ExploreListParams) string {
 		JOIN LATERAL (
 			SELECT explore_articles.* FROM explore_articles
 			WHERE explore_articles.source_id=source.id
+              AND NOT EXISTS (SELECT 1 FROM explore_article_states state WHERE state.user_id=$1 AND state.normalized_url=explore_articles.normalized_url AND state.skipped)
 			ORDER BY COALESCE(explore_articles.published_at, explore_articles.fetched_at) DESC,
 			         explore_articles.fetched_at DESC, explore_articles.id DESC
 			LIMIT 5
@@ -390,11 +402,13 @@ func buildExploreColdPageQuery(params ExploreListParams) string {
 		       explore_articles.title, explore_articles.url,
 		       COALESCE(explore_articles.excerpt, ''), explore_articles.thumbnail_url,
 		       explore_articles.published_at, explore_articles.fetched_at,
-		       cold.topic, cold.reason, false AS is_subscribed
+		       cold.topic, cold.reason, false AS is_subscribed,
+            EXISTS (SELECT 1 FROM explore_article_states state WHERE state.user_id=$1 AND state.normalized_url=explore_articles.normalized_url AND state.saved) AS saved, false AS skipped, explore_articles.normalized_url
 		FROM cold_sources cold
 		JOIN LATERAL (
 			SELECT explore_articles.* FROM explore_articles
 			WHERE explore_articles.source_id=cold.id
+              AND NOT EXISTS (SELECT 1 FROM explore_article_states state WHERE state.user_id=$1 AND state.normalized_url=explore_articles.normalized_url AND state.skipped)
 			ORDER BY COALESCE(explore_articles.published_at, explore_articles.fetched_at) DESC,
 			         explore_articles.fetched_at DESC, explore_articles.id DESC
 			LIMIT 5
@@ -560,9 +574,10 @@ func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreAr
 		SELECT article.id, article.source_id, source.title, source.url, source.site_url,
 		       article.title, article.url, article.content, article.excerpt, article.thumbnail_url,
 		       article.published_at, article.fetched_at,
-		       source.normalized_url=ANY($2) AS is_subscribed
+		       source.normalized_url=ANY($2) AS is_subscribed, COALESCE(state.saved,false), COALESCE(state.skipped,false), article.normalized_url
 		FROM explore_articles article
 		JOIN recommended_feeds source ON source.id=article.source_id
+        LEFT JOIN explore_article_states state ON state.user_id=$1 AND state.normalized_url=article.normalized_url
 		WHERE article.id=$3 AND (
 			EXISTS (
 				SELECT 1 FROM explore_batch_sources batch_source
@@ -570,12 +585,12 @@ func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreAr
 				  ON batch.id=batch_source.batch_id AND batch.user_id=batch_source.user_id
 				WHERE batch_source.user_id=$1 AND batch_source.source_id=article.source_id
 				  AND batch.status='done' AND batch.completed_at >= NOW() - INTERVAL '30 days'
-			) OR source.normalized_url=ANY($2) OR source.id IN (SELECT id FROM cold_sources)
+			) OR source.normalized_url=ANY($2) OR source.id IN (SELECT id FROM cold_sources) OR state.saved OR state.skipped
 		)
 	`, userID, pq.Array(formalURLs), articleID).Scan(
 		&detail.ID, &detail.SourceID, &detail.SourceTitle, &detail.SourceURL,
 		&detail.SiteURL, &detail.Title, &detail.URL, &detail.Content, &detail.Excerpt, &detail.ThumbnailURL,
-		&detail.PublishedAt, &detail.FetchedAt, &detail.IsSubscribed,
+		&detail.PublishedAt, &detail.FetchedAt, &detail.IsSubscribed, &detail.Saved, &detail.Skipped, &detail.NormalizedURL,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrExploreNotFound

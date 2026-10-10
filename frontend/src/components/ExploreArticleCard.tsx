@@ -1,3 +1,5 @@
+import ExploreArticleActions from './ExploreArticleActions'
+import { useExploreArticleActions } from '../hooks/useExploreArticleActions'
 import { useArticleImageSource } from '../util/useArticleImageSource'
 import { useEffect, useRef, useState } from 'react'
 import { exploreTopicLabel, feedbackTopicLabel } from './exploreTopicLabels'
@@ -30,6 +32,7 @@ export default function ExploreArticleCard({
   onDampenTopic,
 }: Props) {
 	const cardRef = useRef<HTMLElement | null>(null)
+  const actions = useExploreArticleActions(article.id, article.saved, undefined, article.skipped)
   const topicLabel = feedbackTopicLabel(article.topic)
   const sourceLabel = article.source_title || '未命名来源'
   const thumbnailSrc = useArticleImageSource(article.thumbnail_url || undefined)
@@ -135,6 +138,7 @@ export default function ExploreArticleCard({
         )}
       </div>
 
+      <ExploreArticleActions actions={actions} />
       <div ref={menuRef} className="explore-card-menu">
         <button
           type="button"

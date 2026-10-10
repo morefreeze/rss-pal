@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +16,7 @@ import (
 )
 
 type exploreStore interface {
+	UpdateArticleState(userID, articleID int, patch repository.ExploreArticleStatePatch) (*repository.ExploreArticleState, error)
 	GetPage(userID int, params repository.ExploreListParams) (*repository.ExplorePage, error)
 	GetSources(userID int) ([]repository.ExploreSourceItem, error)
 	GetVisibleArticle(userID, articleID int) (*repository.ExploreArticleDetail, error)
@@ -88,6 +91,11 @@ func (h *ExploreHandler) GetExplore(c *gin.Context) {
 
 func parseExploreListParams(c *gin.Context) (repository.ExploreListParams, bool) {
 	params := repository.ExploreListParams{Limit: 20, Sort: repository.SortPublished, Dir: repository.SortDesc}
+	params.View = c.Query("view")
+	if params.View != "" && params.View != "later" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "view must be later"})
+		return params, false
+	}
 	if raw := c.Query("limit"); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil {
@@ -371,9 +379,39 @@ func writeExploreError(c *gin.Context, err error) {
 	case errors.Is(err, repository.ErrInvalidExploreFeedback),
 		errors.Is(err, repository.ErrInvalidExploreEvent),
 		errors.Is(err, repository.ErrInvalidExploreInterest),
+		errors.Is(err, repository.ErrInvalidExploreArticleState),
 		errors.Is(err, explorelogic.ErrInvalidSubscribeRequest):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 	}
+}
+
+func (h *ExploreHandler) UpdateArticleState(c *gin.Context) {
+	id, ok := positiveExploreID(c, "id")
+	if !ok {
+		return
+	}
+	var patch repository.ExploreArticleStatePatch
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&patch); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid article state"})
+		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid article state"})
+		return
+	}
+	if patch.Saved == nil && patch.Skipped == nil {
+		writeExploreError(c, repository.ErrInvalidExploreArticleState)
+		return
+	}
+	state, err := h.storeFor(c).UpdateArticleState(getUserID(c), id, patch)
+	if err != nil {
+		writeExploreError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.JSON(http.StatusOK, state)
 }

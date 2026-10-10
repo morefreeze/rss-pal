@@ -95,6 +95,28 @@ describe('ExplorePage', () => {
     api.replaceExploreInterests.mockResolvedValue({ interests: [] })
   })
 
+  it('clears topic when opening later, preserves sort, and omits recommendation notices', async () => {
+    api.getExplore.mockResolvedValue(response({snapshot:{...response().snapshot, generating:true, using_fallback:true}}))
+    renderPage('/explore?topic=engineering&sort=captured&order=asc')
+    await screen.findByText('Article 1')
+    fireEvent.click(screen.getByRole('link', {name:'稍后读'}))
+    await screen.findByText('保存感兴趣的文章，随时回来继续阅读')
+    await waitFor(() => expect(api.getExplore).toHaveBeenLastCalledWith({limit:20, offset:0, view:'later', sort:'captured', order:'asc'}))
+    expect(screen.queryByText('推荐正在后台优化，当前内容可以继续阅读')).toBeNull()
+    expect(screen.queryByText(/正在展示缓存中的可用推荐/)).toBeNull()
+  })
+
+  it('opens the later view and gives its own empty state', async () => {
+    api.getExplore.mockResolvedValue(response({articles:[]}))
+    renderPage('/explore?view=later')
+    await screen.findByText('还没有稍后读文章')
+    expect(api.getExplore).toHaveBeenLastCalledWith(expect.objectContaining({view:'later'}))
+    expect(screen.queryByRole('button', {name:'清除来源和主题屏蔽'})).toBeNull()
+    fireEvent.click(screen.getByRole('link', {name:'推荐'}))
+    await screen.findByText('暂时没有候选文章')
+    expect(api.getExplore).toHaveBeenLastCalledWith(expect.not.objectContaining({view:'later'}))
+  })
+
   it('defaults to published descending, switches sort/order/topic, and requests another page', async () => {
     api.getExplore.mockImplementation(({ offset = 0 }: { offset?: number }) => Promise.resolve(
       offset === 0 ? response({ has_more: true }) : response({ articles: [article(3)], has_more: false }),

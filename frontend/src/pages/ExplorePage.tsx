@@ -41,13 +41,26 @@ const EXPLORE_INTERESTS = [
 type UndoFeedback = () => Promise<void>
 
 export default function ExplorePage() {
+  const location = useLocation()
+  return <ExplorePageContent key={location.search} />
+}
+
+function ExplorePageContent() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const initialSort: ExploreSort = searchParams.get('sort') === 'captured' ? 'captured' : 'published'
   const initialOrder: ExploreOrder = searchParams.get('order') === 'asc' ? 'asc' : 'desc'
   const initialTopic = searchParams.get('topic') || undefined
-  const feed = useExploreFeed({ pageSize: PAGE_SIZE, initialSort, initialOrder, initialTopic })
+  const view = searchParams.get('view') === 'later' ? 'later' : undefined
+  const alternateViewParams = new URLSearchParams(searchParams)
+  if (view) alternateViewParams.delete('view')
+  else {
+    alternateViewParams.set('view', 'later')
+    alternateViewParams.delete('topic')
+  }
+  const alternateViewPath = `/explore?${alternateViewParams}`
+  const feed = useExploreFeed({ view, pageSize: PAGE_SIZE, initialSort, initialOrder, initialTopic })
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [feedbackError, setFeedbackError] = useState<string | null>(null)
   const [feedbackUndos, setFeedbackUndos] = useState<UndoFeedback[]>([])
@@ -208,10 +221,11 @@ export default function ExplorePage() {
     <div className="explore-page">
       <header className="explore-header">
         <div>
-          <h1>探索</h1>
-          <p>从你的订阅出发，发现持续更新的新来源</p>
+          <h1>{view ? '稍后读' : '探索'}</h1>
+          <p>{view ? '保存感兴趣的文章，随时回来继续阅读' : '从你的订阅出发，发现持续更新的新来源'}</p>
         </div>
         <div className="explore-toolbar" aria-label="探索排序与筛选">
+          <Link className="toolbar-control" to={alternateViewPath}>{view ? '推荐' : '稍后读'}</Link>
           <label>
             <span className="sr-only">主题筛选</span>
             <select className="toolbar-control" aria-label="主题筛选" value={feed.topic} onChange={event => pickTopic(event.target.value)}>
@@ -235,9 +249,9 @@ export default function ExplorePage() {
         </div>
       </header>
 
-      <RedditExploreSources />
+      {!view && <RedditExploreSources />}
 
-      {feed.snapshot?.id === 0 && (
+      {!view && feed.snapshot?.id === 0 && (
         <section className="explore-notice explore-notice--cold">
           <strong>正在为你发现第一批优质内容</strong>
           <span>先选择几个兴趣，系统会用稳定更新的公开来源生成候选内容。</span>
@@ -262,8 +276,8 @@ export default function ExplorePage() {
           {interestSaved && <div role="status" className="text-muted">兴趣已保存，下一批推荐会优先使用这些主题</div>}
         </section>
       )}
-      {feed.snapshot?.generating && <div className="explore-notice">推荐正在后台优化，当前内容可以继续阅读</div>}
-      {(feed.snapshot?.using_fallback || feed.snapshot?.refresh_failed) && (
+      {!view && feed.snapshot?.generating && <div className="explore-notice">推荐正在后台优化，当前内容可以继续阅读</div>}
+      {!view && (feed.snapshot?.using_fallback || feed.snapshot?.refresh_failed) && (
         <div className="explore-notice explore-notice--warning">
           {feed.snapshot.refresh_failed ? '最近一次更新失败，正在沿用上一批可用内容' : '正在展示缓存中的可用推荐'}
           {feed.snapshot.completed_at ? ` · 上次更新 ${new Date(feed.snapshot.completed_at).toLocaleString('zh-CN')}` : ''}
@@ -275,6 +289,13 @@ export default function ExplorePage() {
       <main className="explore-stream" aria-busy={feed.loading}>
         {feed.loading && feed.articles.length === 0 ? (
           <div className="card text-muted">正在加载探索内容…</div>
+        ) : feed.articles.length === 0 && view ? (
+          <div className="card explore-empty-state">
+            <strong>{feed.topic ? '当前主题没有稍后读文章' : '还没有稍后读文章'}</strong>
+            <span>在探索文章上点击「稍后读」，即可保存在这里。</span>
+            {feed.topic && <button type="button" className="secondary" onClick={() => pickTopic('')}>清除筛选</button>}
+            {feed.error && <button type="button" onClick={() => void feed.reload()}>重试加载</button>}
+          </div>
         ) : feed.articles.length === 0 && feed.topic ? (
           <div className="card explore-empty-state">
             <strong>当前主题没有候选文章</strong>
@@ -323,13 +344,13 @@ export default function ExplorePage() {
                   : <button type="button" className="secondary" onClick={() => void feed.loadMore()}>加载更多</button>}
               </div>
             ) : feed.articles.length > 0 ? (
-              <div className="explore-end">— 已加载全部候选文章 —</div>
+              <div className="explore-end">{view ? '— 已加载全部稍后读文章 —' : '— 已加载全部候选文章 —'}</div>
             ) : null}
           </>
         )}
       </main>
 
-      <ExploreSourceDrawer key={feed.requestGeneration} />
+      {!view && <ExploreSourceDrawer key={feed.requestGeneration} />}
     </div>
   )
 }

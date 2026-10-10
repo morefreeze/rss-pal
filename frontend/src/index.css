@@ -1605,3 +1605,5 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
 }
 @keyframes explore-drawer-right { from { transform: translateX(100%); } }
 @keyframes explore-drawer-bottom { from { transform: translateY(100%); } }
+
+.explore-article-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }

@@ -420,6 +420,7 @@ export type ExploreFeedbackType = 'hide_source' | 'dampen_topic' | 'boost_topic'
 export type ExploreArticleEventType = 'exposure' | 'click' | 'completed_read'
 
 export interface ExploreListParams {
+  view?: 'later'
   limit?: number
   offset?: number
   sort?: ExploreSort
@@ -438,6 +439,9 @@ export interface ExploreSnapshotStatus {
 }
 
 export interface ExploreArticleListItem {
+  normalized_url?: string
+  saved?: boolean
+  skipped?: boolean
   id: number
   source_id: number
   source_title: string
@@ -479,6 +483,9 @@ export interface ExploreSource {
 }
 
 export interface ExploreArticleDetail {
+  normalized_url?: string
+  saved?: boolean
+  skipped?: boolean
   id: number
   source_id: number
   source_title: string
@@ -1277,3 +1284,6 @@ export const getClip = (params: GetClipParams = {}) => {
 export interface RedditSubreddit { name: string; enabled: boolean; last_success_at: string | null }
 export const getRedditSubreddits = () => api.get<RedditSubreddit[]>('/admin/explore/subreddits').then(res => res.data)
 export const removeRedditSubreddit = (name: string) => api.delete(`/admin/explore/subreddits/${encodeURIComponent(name)}`).then(() => undefined)
+
+export const updateExploreArticleState = (id: number, state: { saved?: boolean; skipped?: boolean }) =>
+  api.put<{ saved: boolean; skipped: boolean; normalized_url?: string }>(`/explore/articles/${id}/state`, state).then(res => res.data)

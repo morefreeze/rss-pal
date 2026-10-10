@@ -1,3 +1,4 @@
+import { EXPLORE_STATE_CHANGED } from './useExploreArticleActions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createExploreFeedback,
@@ -42,6 +43,7 @@ function persistReportedExposures(key: string, values: Set<number>) {
 }
 
 interface ExploreFeedOptions {
+  view?: 'later'
   pageSize?: number
   initialSort?: ExploreSort
   initialOrder?: ExploreOrder
@@ -63,6 +65,7 @@ function mergeByID(
 }
 
 export function useExploreFeed({
+  view,
   pageSize = DEFAULT_PAGE_SIZE,
   initialSort = 'published',
   initialOrder = 'desc',
@@ -105,6 +108,7 @@ export function useExploreFeed({
 
     try {
       const page = await getExplore({
+        ...(view ? { view } : {}),
         limit: pageSize,
         offset: nextOffset,
         sort,
@@ -132,7 +136,7 @@ export function useExploreFeed({
         else setLoadingMore(false)
       }
     }
-  }, [order, pageSize, sort, topic])
+  }, [order, pageSize, sort, topic, view])
 
   const reload = useCallback(async () => {
     const nextGeneration = ++requestGenerationRef.current
@@ -153,7 +157,24 @@ export function useExploreFeed({
 
   useEffect(() => {
     void reload()
+    return () => { ++requestGenerationRef.current }
   }, [reload])
+
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const state = (event as CustomEvent<{id:number; saved:boolean; skipped:boolean; normalized_url?:string}>).detail
+      const matches = (article: ExploreArticleListItem) => article.id === state.id
+        || Boolean(state.normalized_url && article.normalized_url === state.normalized_url)
+      // A membership change shifts server offsets; restart pagination.
+      if (state.skipped || view === 'later' || !baseArticles.some(matches)) {
+        void reload()
+      } else {
+        setBaseArticles(current => current.map(article => matches(article) ? {...article, saved: state.saved, skipped: state.skipped} : article))
+      }
+    }
+    window.addEventListener(EXPLORE_STATE_CHANGED, changed)
+    return () => window.removeEventListener(EXPLORE_STATE_CHANGED, changed)
+  }, [baseArticles, reload, view])
 
   const loadMore = useCallback(async () => {
     if (!hasMore || loading || loadingMore || requestInFlightGenerationRef.current === requestGenerationRef.current) return

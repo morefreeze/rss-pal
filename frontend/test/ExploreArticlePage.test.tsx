@@ -6,6 +6,7 @@ import type { ExploreArticleDetail, ExploreArticleListItem } from '../src/api/cl
 
 const api = vi.hoisted(() => ({
   getExploreArticle: vi.fn(),
+  updateExploreArticleState: vi.fn(),
   recordExploreArticleEvent: vi.fn(),
   subscribeExploreSource: vi.fn(),
   saveArticle: vi.fn(),
@@ -135,6 +136,31 @@ describe('ExploreArticlePage', () => {
     api.getExploreArticle.mockResolvedValue(detail)
     api.recordExploreArticleEvent.mockResolvedValue({ recorded: true })
     api.subscribeExploreSource.mockResolvedValue({ feed_id: 70, created: true, copied_articles: 4 })
+  })
+
+  it('shows an already skipped saved article without allowing another skip', async () => {
+    api.getExploreArticle.mockResolvedValue({...detail, saved:true, skipped:true})
+    renderPage()
+    const buttons = await screen.findAllByRole('button', {name:'已略过'})
+    expect(buttons).toHaveLength(2)
+    buttons.forEach(button => expect((button as HTMLButtonElement).disabled).toBe(true))
+    expect(screen.getAllByRole('button', {name:'取消稍后读'})).toHaveLength(2)
+    expect(screen.queryByRole('button', {name:'略过这篇'})).toBeNull()
+  })
+
+  it('offers article actions at both ends, saves in place, and skips back to later', async () => {
+    api.updateExploreArticleState.mockResolvedValueOnce({saved:true, skipped:false}).mockResolvedValueOnce({saved:true, skipped:true})
+    renderPage({pathname:'/explore/articles/23', state:{from:'/explore?view=later'}})
+    const saveButtons = await screen.findAllByRole('button', {name:'稍后读'})
+    expect(saveButtons).toHaveLength(2)
+    expect(screen.getAllByRole('button', {name:'略过这篇'})).toHaveLength(2)
+    fireEvent.click(saveButtons[1])
+    await waitFor(() => expect(screen.getAllByRole('button', {name:'取消稍后读'})).toHaveLength(2))
+    expect(api.updateExploreArticleState).toHaveBeenLastCalledWith(23, {saved:true})
+    fireEvent.click(screen.getAllByRole('button', {name:'略过这篇'})[0])
+    await waitFor(() => expect(api.updateExploreArticleState).toHaveBeenLastCalledWith(23, {skipped:true}))
+    await waitFor(() => expect(screen.queryByRole('button', {name:'略过这篇'})).toBeNull())
+    expect(api.subscribeExploreSource).not.toHaveBeenCalled()
   })
 
   it('loads the candidate detail, renders safe Markdown and updates the preview title', async () => {
