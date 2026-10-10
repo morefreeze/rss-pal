@@ -144,7 +144,7 @@ func TestExploreQueueEnqueueIsIdempotentAndClampsPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.ID != first.ID || second.Priority != 10000 || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.After(first.UpdatedAt) {
+	if second.ID != first.ID || second.Priority != 10000 || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.Equal(first.UpdatedAt) {
 		t.Fatalf("enqueue conflict first=%+v second=%+v", first, second)
 	}
 	lowered, err := repo.Enqueue(sourceID, repository.ExploreTaskRefreshArticles, repository.ExplorePriorityBrokenHealthCheck)
