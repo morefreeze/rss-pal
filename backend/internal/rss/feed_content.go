@@ -26,7 +26,7 @@ func NormalizeFeedContent(raw, articleURL string) string {
 	if err != nil {
 		return raw
 	}
-	doc.Find("script, style, noscript, template").Remove()
+	doc.Find(`script:not([type^="math/tex"]), style, noscript, template`).Remove()
 	PromoteLazyImages(doc)
 	ResolveURLs(doc, articleURL)
 	// Heading permalink glyphs are navigation, not part of heading text.

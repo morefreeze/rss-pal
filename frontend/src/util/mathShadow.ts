@@ -81,6 +81,11 @@ export function escapeAmbiguousMathDollars(md: string): string {
     }
     const body = r.slice(i + 1, j).join('')
     if (shouldEscapeProseDollarPair(body)) {
+      if (dollarStartsMath(r.slice(j))) {
+        out += '\\$'
+        i++
+        continue
+      }
       out += '\\$' + body + '\\$'
       i = j + 1
       continue
@@ -91,13 +96,25 @@ export function escapeAmbiguousMathDollars(md: string): string {
   return out
 }
 
+function dollarStartsMath(r: string[]): boolean {
+  for (let j = 1; j < r.length && r[j] !== '\n'; j++) {
+    if (r[j] === '\\') { j++; continue }
+    if (r[j] === '$') {
+      const body = r.slice(1, j).join('')
+      return body !== '' && body === body.trim() && !shouldEscapeProseDollarPair(body)
+    }
+  }
+  return false
+}
+
 function shouldEscapeProseDollarPair(body: string): boolean {
+  if (/^[0-9]+(?:\.[0-9]+)?$/.test(body)) return false
   if (body.length === 0) return false
   const first = body.codePointAt(0)
   if (first === undefined) return false
   if (!isAsciiDigitCp(first)) return false
   for (const ch of body) {
-    if (ch === '\\' || ch === '{' || ch === '}' || ch === '_' || ch === '^') {
+    if (ch === '\\' || ch === '{' || ch === '}' || ch === '_' || ch === '^' || ch === '=' || ch === '<' || ch === '>') {
       return false
     }
   }

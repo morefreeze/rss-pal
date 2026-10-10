@@ -842,7 +842,7 @@ func TestExtractTexAnnotations_KatexDisplay(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	got := ExtractMarkdown(doc.Selection)
-	if !strings.Contains(got, `$$x = \frac{3 \pm \sqrt{33}}{2}$$`) {
+	if !strings.Contains(got, "$$\n"+`x = \frac{3 \pm \sqrt{33}}{2}`+"\n$$") {
 		t.Errorf("expected display math block, got:\n%s", got)
 	}
 	if strings.Contains(got, "x=2 3±33") {
@@ -1070,7 +1070,7 @@ func TestExtractTexAnnotations_RawTextMathDivDisplay(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	got := ExtractMarkdown(doc.Selection)
-	want := `$$K_{SS}(w) = J_S(w) J_S(w)^\top$$`
+	want := "$$\n" + `K_{SS}(w) = J_S(w) J_S(w)^\top` + "\n$$"
 	if !strings.Contains(got, want) {
 		t.Errorf("expected display math\n  want substring: %q\n  got: %q", want, got)
 	}
@@ -1099,7 +1099,7 @@ func TestExtractTexAnnotations_RawTextMathBracketDisplay(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	got := ExtractMarkdown(doc.Selection)
-	want := `$$\partial_t u = -K_{SS} g$$`
+	want := "$$\n" + `\partial_t u = -K_{SS} g` + "\n$$"
 	if !strings.Contains(got, want) {
 		t.Errorf("expected display math\n  want substring: %q\n  got: %q", want, got)
 	}

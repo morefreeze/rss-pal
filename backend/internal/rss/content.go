@@ -55,7 +55,7 @@ type ContentResult struct {
 	Title   string
 }
 
-const articleChromeSelector = "script, style, nav, header, footer, aside, " +
+const articleChromeSelector = `script:not([type^="math/tex"]), style, nav, header, footer, aside, ` +
 	"[role='navigation'], [role='contentinfo'], " +
 	".sidebar, .comments, .advertisement, .ad, .social-share, .related-posts, .tags, " +
 	"[class*=share], [class*=comment], [class*=recommend], [class*=social], " +
@@ -388,6 +388,7 @@ func flattenImageAltBlankLines(md string) string {
 // Falls back to the selection's plain text if conversion fails (which should
 // not happen under normal use but keeps the pipeline robust).
 func ExtractMarkdown(selection *goquery.Selection) string {
+	selection = selection.Clone()
 	// GFM cells cannot contain line breaks. The table plugin otherwise drops
 	// the entire table when publishers use <br> in a header or data cell.
 	// Normalize only table breaks; paragraph breaks elsewhere stay intact.
@@ -829,6 +830,7 @@ func extractTexAnnotations(selection *goquery.Selection) []mathPlaceholder {
 		add(s, latex, display)
 	})
 
+	phs = extractRawTextMath(selection, phs)
 	return phs
 }
 
@@ -860,7 +862,7 @@ func reinsertMathPlaceholders(md string, phs []mathPlaceholder) string {
 	for _, p := range phs {
 		var rep string
 		if p.display {
-			rep = "\n\n$$" + p.latex + "$$\n\n"
+			rep = "\n\n$$\n" + p.latex + "\n$$\n\n"
 		} else {
 			rep = "$" + p.latex + "$"
 		}
@@ -874,7 +876,7 @@ func reinsertMathPlaceholders(md string, phs []mathPlaceholder) string {
 // escaping, remark-math greedily pairs them into a single inline-math span.
 //
 // A pair is escaped when its body starts with an ASCII digit AND contains no
-// LaTeX specials (`\` `{` `}` `_` `^`). Real math like `$\sqrt{x}$` keeps its
+// LaTeX specials (`\` `{` `}` `_` `^`) or relation operators (`=` `<` `>`). Real math like `$\sqrt{x}$` keeps its
 // `$` because of the LaTeX specials; algebra like `$x = 1$` keeps its `$`
 // because it doesn't start with a digit. False positives only occur on the
 // rare case of digit-led pure-arithmetic math like `$5x+3$`, which degrades
@@ -920,6 +922,11 @@ func escapeAmbiguousMathDollars(md string) string {
 		}
 		body := r[i+1 : j]
 		if shouldEscapeProseDollarPair(body) {
+			if dollarStartsMath(r[j:]) {
+				b.WriteString(`\$`)
+				i++
+				continue
+			}
 			b.WriteString(`\$`)
 			b.WriteString(string(body))
 			b.WriteString(`\$`)
@@ -933,7 +940,12 @@ func escapeAmbiguousMathDollars(md string) string {
 	return b.String()
 }
 
+var numericMathBody = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
+
 func shouldEscapeProseDollarPair(body []rune) bool {
+	if numericMathBody.MatchString(string(body)) {
+		return false
+	}
 	if len(body) == 0 {
 		return false
 	}
@@ -942,7 +954,7 @@ func shouldEscapeProseDollarPair(body []rune) bool {
 	}
 	for _, c := range body {
 		switch c {
-		case '\\', '{', '}', '_', '^':
+		case '\\', '{', '}', '_', '^', '=', '<', '>':
 			return false
 		}
 	}
