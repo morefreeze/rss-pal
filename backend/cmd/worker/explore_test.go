@@ -21,9 +21,21 @@ import (
 
 var exploreTestShanghai = time.FixedZone("Asia/Shanghai", 8*60*60)
 
-type fakeExploreClock struct{ now time.Time }
+type fakeExploreClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
 
-func (clock *fakeExploreClock) Now() time.Time { return clock.now }
+func (clock *fakeExploreClock) Now() time.Time {
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+	return clock.now
+}
+func (clock *fakeExploreClock) Set(now time.Time) {
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+	clock.now = now
+}
 
 type lockedBuffer struct {
 	mu sync.Mutex
@@ -317,7 +329,7 @@ func newExploreCycleForTest(now time.Time, registry *fakeExploreRegistry, queue 
 	})
 }
 
-func TestExploreCycleRunsProviderSyncThirtyMinutesBeforeSlotAndClaimsOncePerWindow(t *testing.T) {
+func TestExploreCycleRunsProviderSyncThirtyMinutesBeforeSlotAndGuardsImmediateQueueRepeat(t *testing.T) {
 	now := time.Date(2026, 9, 1, 10, 30, 0, 0, exploreTestShanghai)
 	registry := &fakeExploreRegistry{}
 	queue := &fakeExploreQueue{}
@@ -325,7 +337,7 @@ func TestExploreCycleRunsProviderSyncThirtyMinutesBeforeSlotAndClaimsOncePerWind
 
 	cycle.Run(context.Background())
 	cycle.Run(context.Background())
-	waitExplore(t, func() bool { calls, _, _ := queue.snapshot(); return calls == 1 })
+	waitExplore(t, func() bool { calls, _, _ := queue.snapshot(); return calls == 1 && registry.count() == 1 })
 
 	if registry.count() != 1 {
 		t.Fatalf("provider sync calls = %d, want 1", registry.count())
@@ -366,7 +378,7 @@ func TestExploreCycleRunsCleanupOncePerShanghaiDayAndRetriesFailureWithoutBlocki
 	}
 }
 
-func TestExploreCycleRecoversOriginalRunBeforeClaimingFreshWindow(t *testing.T) {
+func TestExploreCycleRecoversOneRunThenClaimsFreshBatchAfterCooldown(t *testing.T) {
 	now := time.Date(2026, 9, 1, 10, 30, 0, 0, exploreTestShanghai)
 	queue := &fakeExploreQueue{
 		recoveryRun:   &repository.ExploreFetchRun{ID: 41, Status: model.ExploreFetchRunFailed, ClaimedCount: 1},
@@ -376,6 +388,12 @@ func TestExploreCycleRecoversOriginalRunBeforeClaimingFreshWindow(t *testing.T) 
 	handler := &fakeExploreTaskHandler{}
 	cycle := newExploreCycleForTest(now, &fakeExploreRegistry{}, queue, handler, &fakeExploreSnapshotRunner{}, log.New(&bytes.Buffer{}, "", 0))
 
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return queue.finishCount() == 1 && exploreQueueIdle(cycle) })
+	if calls, _, _ := queue.snapshot(); calls != 0 {
+		t.Fatalf("recovery also claimed fresh batch: %d", calls)
+	}
+	cycle.deps.clock.(*fakeExploreClock).Set(now.Add(time.Minute))
 	cycle.Run(context.Background())
 	waitExplore(t, func() bool { return handler.done.Load() == 2 && queue.finishCount() == 2 })
 
@@ -510,9 +528,9 @@ func TestExploreCycleSnapshotDoesNotWaitForQueueDrainAndNightHasNoSnapshot(t *te
 	handler := &fakeExploreTaskHandler{started: make(chan int, 1), release: make(chan struct{})}
 	snapshots := &fakeExploreSnapshotRunner{started: make(chan time.Time, 1)}
 	cycle := newExploreCycleForTest(now, &fakeExploreRegistry{}, queue, handler, snapshots, log.New(&bytes.Buffer{}, "", 0))
-	// Seed the provider window as still running to model a slow 07:30 queue.
-	cycle.markProviderWindowStarted(now.Add(-30 * time.Minute))
-	go cycle.processQueueWindow(context.Background(), now.Add(-30*time.Minute))
+	// Start a batch before launching the snapshot cycle.
+	cycle.markQueueStarted(now)
+	go cycle.runQueueBatch(context.Background())
 	select {
 	case <-handler.started:
 	case <-time.After(time.Second):
@@ -779,7 +797,7 @@ func TestExploreCycleRetriesPersistedSnapshotFailureThenClosesGuardAfterSuccess(
 		status, _, failures, _ := store.snapshot()
 		return status == model.ExploreBatchFailed && failures == 1 && !exploreSnapshotSlotMarked(cycle, slot)
 	})
-	clock.now = now.Add(time.Minute)
+	clock.Set(now.Add(time.Minute))
 	cycle.Run(context.Background())
 	waitExplore(t, func() bool {
 		status, claims, _, publishes := store.snapshot()
@@ -1034,4 +1052,133 @@ func TestExploreCandidatesRequireRecentSuccessfulFetch(t *testing.T) {
 	if len(candidates) != 1 || candidates[0].Title != "fresh" {
 		t.Fatalf("stale source can be recommended: %+v", candidates)
 	}
+}
+
+type blockedExploreRegistry struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (registry *blockedExploreRegistry) SyncDue(ctx context.Context, _ time.Time) ([]explorelogic.ProviderSyncResult, error) {
+	close(registry.started)
+	select {
+	case <-registry.release:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestExploreContinuousQueueOutsideProviderWindow(t *testing.T) {
+	now := time.Date(2026, 9, 1, 3, 12, 34, 0, exploreTestShanghai)
+	queue := &fakeExploreQueue{tasks: makeExploreTasks(1)}
+	registry := &fakeExploreRegistry{}
+	snapshots := &fakeExploreSnapshotRunner{}
+	cycle := newExploreCycleForTest(now, registry, queue, &fakeExploreTaskHandler{}, snapshots, log.New(&lockedBuffer{}, "", 0))
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return queue.finishCount() == 1 })
+	_, windows, _ := queue.snapshot()
+	if len(windows) != 1 || windows[0].Format(time.RFC3339) != now.Truncate(time.Minute).Format(time.RFC3339) {
+		t.Fatalf("batch keys=%v", windows)
+	}
+	if registry.count() != 0 || snapshots.count() != 0 {
+		t.Fatal("queue changed provider or snapshot schedule")
+	}
+}
+
+func TestExploreContinuousQueueDoesNotWaitForProvider(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 30, 0, 0, exploreTestShanghai)
+	registry := &blockedExploreRegistry{started: make(chan struct{}), release: make(chan struct{})}
+	defer close(registry.release)
+	queue := &fakeExploreQueue{tasks: makeExploreTasks(1)}
+	cycle := newExploreCycle(exploreCycleDeps{clock: &fakeExploreClock{now: now}, registry: registry, queue: queue, taskHandler: &fakeExploreTaskHandler{}, logger: log.New(&lockedBuffer{}, "", 0)})
+	cycle.Run(context.Background())
+	select {
+	case <-registry.started:
+	case <-time.After(time.Second):
+		t.Fatal("provider did not start")
+	}
+	waitExplore(t, func() bool { return queue.finishCount() == 1 })
+}
+
+func TestExploreContinuousQueueCancelledContextDoesNotClaim(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 30, 0, 0, exploreTestShanghai)
+	queue := &fakeExploreQueue{}
+	cycle := newExploreCycleForTest(now, &fakeExploreRegistry{}, queue, &fakeExploreTaskHandler{}, &fakeExploreSnapshotRunner{}, log.New(&lockedBuffer{}, "", 0))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cycle.Run(ctx)
+	time.Sleep(20 * time.Millisecond)
+	if calls, _, _ := queue.snapshot(); calls != 0 {
+		t.Fatalf("cancelled run claimed %d batches", calls)
+	}
+}
+
+func TestExploreContinuousQueueNoOverlapAndCooldownStartsAtFinish(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 30, 0, 0, exploreTestShanghai)
+	clock := &fakeExploreClock{now: now}
+	queue := &fakeExploreQueue{tasks: makeExploreTasks(1)}
+	handler := &fakeExploreTaskHandler{started: make(chan int, 5), release: make(chan struct{})}
+	cycle := newExploreCycleForTest(now, &fakeExploreRegistry{}, queue, handler, &fakeExploreSnapshotRunner{}, log.New(&lockedBuffer{}, "", 0))
+	cycle.deps.clock = clock
+	cycle.Run(context.Background())
+	select {
+	case <-handler.started:
+	case <-time.After(time.Second):
+		t.Fatal("batch did not start")
+	}
+	clock.Set(now.Add(2 * time.Minute))
+	cycle.Run(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if calls, _, _ := queue.snapshot(); calls != 1 {
+		t.Fatalf("overlapping claims=%d", calls)
+	}
+	close(handler.release)
+	waitExplore(t, func() bool { return queue.finishCount() == 1 && exploreQueueIdle(cycle) })
+	clock.Set(now.Add(2*time.Minute + 59*time.Second))
+	cycle.Run(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if calls, _, _ := queue.snapshot(); calls != 1 {
+		t.Fatalf("claimed before cooldown=%d", calls)
+	}
+	clock.Set(now.Add(3 * time.Minute))
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return queue.finishCount() == 2 })
+}
+
+func exploreQueueIdle(cycle *exploreCycle) bool {
+	cycle.mu.Lock()
+	defer cycle.mu.Unlock()
+	return !cycle.queueRunning
+}
+
+type failingExploreQueue struct {
+	fakeExploreQueue
+	calls atomic.Int32
+}
+
+func (queue *failingExploreQueue) RecoverExpired(string, time.Duration) (*repository.ExploreFetchRun, []repository.ExploreQueueTask, error) {
+	queue.calls.Add(1)
+	return nil, nil, errors.New("database unavailable")
+}
+
+func TestExploreContinuousQueueFailureAlsoWaitsForCooldown(t *testing.T) {
+	now := time.Date(2026, 9, 1, 3, 0, 0, 0, exploreTestShanghai)
+	clock := &fakeExploreClock{now: now}
+	queue := &failingExploreQueue{}
+	cycle := newExploreCycle(exploreCycleDeps{clock: clock, queue: queue, taskHandler: &fakeExploreTaskHandler{}, logger: log.New(&lockedBuffer{}, "", 0)})
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return queue.calls.Load() == 1 && exploreQueueIdle(cycle) })
+	for i := 0; i < 10; i++ {
+		cycle.Run(context.Background())
+	}
+	clock.Set(now.Add(time.Minute - time.Nanosecond))
+	cycle.Run(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if calls := queue.calls.Load(); calls != 1 {
+		t.Fatalf("failure hot loop: %d attempts", calls)
+	}
+	clock.Set(now.Add(time.Minute))
+	cycle.Run(context.Background())
+	waitExplore(t, func() bool { return queue.calls.Load() == 2 && exploreQueueIdle(cycle) })
 }

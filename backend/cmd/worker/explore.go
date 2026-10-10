@@ -21,6 +21,7 @@ const (
 	exploreDefaultConcurrency = 5
 	exploreMaxConcurrency     = 5
 	exploreDefaultLease       = 20 * time.Minute
+	exploreQueueCooldown      = time.Minute
 	// The last queue position must remain leased while earlier concurrency
 	// waves perform the initial source request and every discovery candidate.
 	exploreTaskWorstCaseDuration  = time.Duration(explorelogic.SourceFetchMaxRequests) * explorelogic.SourceFetchRequestTimeout
@@ -84,9 +85,8 @@ type exploreCycleDeps struct {
 	logger           *log.Logger
 }
 
-// exploreCycle only makes lightweight launch decisions. Provider/queue work
-// and snapshot work have independent logical-window guards, so a slow queue
-// cannot delay a due personalized snapshot.
+// exploreCycle makes independent launch decisions for fixed provider/snapshot
+// windows and continuously consumed queue batches.
 type exploreCycle struct {
 	deps            exploreCycleDeps
 	mu              sync.Mutex
@@ -94,6 +94,8 @@ type exploreCycle struct {
 	snapshotSlots   map[time.Time]struct{}
 	cleanupDays     map[string]struct{}
 	coldRunning     bool
+	queueRunning    bool
+	queueNextAt     time.Time
 }
 
 func newExploreCycle(deps exploreCycleDeps) *exploreCycle {
@@ -150,10 +152,13 @@ func newExploreWorkerOwner() string {
 }
 
 func (cycle *exploreCycle) Run(ctx context.Context) {
-	if cycle == nil {
+	if cycle == nil || ctx.Err() != nil {
 		return
 	}
 	now := cycle.deps.clock.Now()
+	if cycle.deps.queue != nil && cycle.markQueueStarted(now) {
+		go cycle.runQueueBatch(ctx)
+	}
 	if cycle.deps.snapshots != nil && cycle.markColdStarted() {
 		go func() {
 			defer cycle.clearColdStarted()
@@ -182,7 +187,7 @@ func (cycle *exploreCycle) Run(ctx context.Context) {
 			}
 		}()
 	}
-	if window, due := dueExploreProviderWindow(schedule, now); due && cycle.markProviderWindowStarted(window) {
+	if window, due := dueExploreProviderWindow(schedule, now); due && cycle.deps.registry != nil && cycle.markProviderWindowStarted(window) {
 		go cycle.runProviderWindow(ctx, window, now)
 	}
 }
@@ -266,26 +271,48 @@ func (cycle *exploreCycle) runProviderWindow(ctx context.Context, window, now ti
 		}
 		cycle.deps.logger.Printf("explore provider_sync window=%s providers=%d failures=%d candidates=%d duration_ms=%d", window.Format(time.RFC3339), len(results), failures, candidates, time.Since(started).Milliseconds())
 	}
-	cycle.processQueueWindow(ctx, window)
+}
+
+func (cycle *exploreCycle) markQueueStarted(now time.Time) bool {
+	cycle.mu.Lock()
+	defer cycle.mu.Unlock()
+	if cycle.queueRunning || now.Before(cycle.queueNextAt) {
+		return false
+	}
+	cycle.queueRunning = true
+	return true
+}
+
+func (cycle *exploreCycle) runQueueBatch(ctx context.Context) {
+	defer func() {
+		cycle.mu.Lock()
+		cycle.queueNextAt = cycle.deps.clock.Now().Add(exploreQueueCooldown)
+		cycle.queueRunning = false
+		cycle.mu.Unlock()
+	}()
+	// Keep the legacy Shanghai wall-clock convention of window_at.
+	cycle.processQueueWindow(ctx, cycle.deps.clock.Now().In(time.FixedZone("Asia/Shanghai", 8*60*60)).Truncate(time.Minute))
 }
 
 func (cycle *exploreCycle) processQueueWindow(ctx context.Context, window time.Time) {
-	// Drain crashed runs in original-window order before creating a new run.
-	// Recovery preserves run_id and claimed_count, so it never consumes the
-	// current window's fresh quota.
-	for ctx.Err() == nil {
-		run, tasks, err := cycle.deps.queue.RecoverExpired(cycle.deps.owner, cycle.deps.leaseDuration)
-		if err != nil {
-			cycle.deps.logger.Printf("explore queue_recover window=%s error=true", window.Format(time.RFC3339))
-			return
-		}
-		if run == nil || len(tasks) == 0 {
-			break
-		}
-		cycle.processTaskRun(ctx, run, tasks)
+	if ctx.Err() != nil {
+		return
 	}
-
-	run, tasks, err := cycle.deps.queue.ClaimRun(window, cycle.deps.owner, cycle.deps.leaseDuration, cycle.deps.batchLimit)
+	// Recovery consumes this cycle's single batch. A fresh batch waits until
+	// the recovered run finishes and the completion cooldown has elapsed.
+	run, tasks, err := cycle.deps.queue.RecoverExpired(cycle.deps.owner, cycle.deps.leaseDuration)
+	if err != nil {
+		cycle.deps.logger.Printf("explore queue_recover window=%s error=true", window.Format(time.RFC3339))
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if run != nil && len(tasks) > 0 {
+		cycle.processTaskRun(ctx, run, tasks)
+		return
+	}
+	run, tasks, err = cycle.deps.queue.ClaimRun(window, cycle.deps.owner, cycle.deps.leaseDuration, cycle.deps.batchLimit)
 	if err != nil {
 		cycle.deps.logger.Printf("explore queue_claim window=%s error=true", window.Format(time.RFC3339))
 		return

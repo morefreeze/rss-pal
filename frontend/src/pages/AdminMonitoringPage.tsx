@@ -24,7 +24,7 @@ const usd = (value?: number | null) => value == null ? '暂无可计费用量' :
 const account = (id: number) => id > 0 ? `用户 #${id}` : '系统／未登录'
 function alertValue(code: string, value: number): string {
   if (code === 'captcha_unavailable' || code.startsWith('quota_')) return percent(value)
-  if (code.startsWith('queue_')) return `${Math.ceil(value / 60)} 分钟`
+  if (code.startsWith('queue_') || code === 'explore_stalled') return `${Math.ceil(value / 60)} 分钟`
   if (code.includes('cost')) return amount(value)
   return number(value)
 }
@@ -106,6 +106,7 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
           <strong>{a.severity === 'critical' ? '严重' : '提醒'} · {a.message}</strong><span>当前值 {alertValue(a.code, a.value)} ／ 触发阈值 {alertValue(a.code, a.threshold)}</span>
         </li>)}</ul>}
       </section>
+      {!!data.quota_exhaustions?.length && <section className="card monitor-section"><h3>额度等待恢复</h3><p className="text-muted text-sm">日额度耗尽，恢复后可继续执行；重复被拦截的次数不代表新的故障。</p>{data.quota_exhaustions.map(q => <div className="monitor-queue" key={`${q.task_type}:${q.user_id}:${q.reason}`}><p>{label(q.task_type)} · {q.reason === 'global_daily' ? '全站' : account(q.user_id)} · {number(q.used)} / {number(q.limit)}</p><small>恢复时间：{when(q.retry_at)}</small></div>)}</section>}
       <div className="monitor-cards">
         <section className="card"><h3>注册</h3><strong className="monitor-value">{hasEvents ? number(data.registration.success) : '—'}</strong><p>成功／尝试 {hasEvents ? number(attempts) : '—'}</p><small>失败率 {attempts ? percent(data.registration.failed / attempts) : '尚无数据'}</small></section>
         <section className="card"><h3>验证码服务故障</h3><strong className="monitor-value">{hasEvents ? number(data.captcha.unavailable) : '—'}</strong><p>未通过验证 {hasEvents ? number(data.captcha.rejected) : '—'}</p><small>服务故障率 {captchaTotal ? percent(data.captcha.unavailable / captchaTotal) : '尚无数据'}</small></section>
@@ -124,9 +125,15 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
       </section>
       <section className="card monitor-section"><h3>故障与限流分类</h3>{!data.groups.length ? <p className="text-muted">所选时段尚无记录</p> : <Table headers={['类型', '原因', '任务', '账号', '次数']}>{data.groups.map((g,i) => <tr key={i}><td>{label(g.kind)}</td><td>{label(g.reason)}</td><td>{label(g.task_type)}</td><td>{account(g.user_id)}</td><td>{number(g.count)}</td></tr>)}</Table>}</section>
       <section className="card monitor-section"><h3>当前任务积压</h3><p className="text-muted text-sm">实时快照，不随统计范围切换。</p>
-        {data.explore_estimate && <div className="monitor-queue"><h4>探索队列预估处理时长</h4><p>{data.explore_estimate.status === 'estimated' ? `约 ${estimateDuration(data.explore_estimate.seconds ?? 0)} · 预计 ${when(data.explore_estimate.completion_at)} 完成首轮处理（${data.explore_estimate.batches} 批）` : data.explore_estimate.status === 'empty' ? '当前无可执行积压' : data.explore_estimate.status === 'busy' ? '任务执行或恢复中，暂无法估算' : '近期样本不足，暂无法估算'}</p><small className="text-muted">合计探索抓取与关联探索，按最近 {data.explore_estimate.sample_count} 批处理速度和每日 6 个调度窗口估算，包含等待调度的时间。假设调度正常；不含退避等待、新增任务和后续重试，实际耗时可能变化。</small></div>}
-        {data.explore_source_states && <div className="monitor-queue"><h4>探索源状态</h4><p>正常 / 待验证 {number(data.explore_source_states.active)} · 暂时不可访问（退避中） {number(data.explore_source_states.retry_wait)} · 重试耗尽 {number(data.explore_source_states.retry_exhausted)} · 确定不可用 {number(data.explore_source_states.unavailable)} · 不符合收录条件 {number(data.explore_source_states.ineligible)}</p><small className="text-muted">按源去重统计。最多重试 6 次：1 小时、4 小时、16 小时、2 天、8 天、32 天，间隔随机偏移 ±10%。停止状态保留记录，不再自动尝试。</small></div>}
-        {data.queues.map(q => <div className="monitor-queue" key={q.name}><h4>{label(q.name)}</h4>{q.status === 'unavailable' ? <p>数据不可用</p> : <p>等待 {number(q.waiting)} · 执行中 {number(q.running)} · 历史终止 {number(q.failed)} · 过期 {number(q.expired)}</p>}<p>最老等待 {q.waiting ? `${Math.ceil(q.oldest_wait_seconds / 60)} 分钟` : '—'}</p><small className="text-muted">{q.note} · {when(q.snapshot_at)}</small></div>)}
+        {data.explore_health && <div className="monitor-queue"><h4>探索处理进度</h4><p>{data.explore_health.status === 'healthy' ? '探索处理正常' : data.explore_health.status === 'expired' ? '有执行租约过期，等待恢复' : '探索处理停滞，请检查 worker'}</p><small className="text-muted">最近处理进展：{when(data.explore_health.last_progress_at)} · 有到期任务时每分钟检查，每批完成后短暂休息；连续 {Math.ceil((data.explore_health.stall_threshold_seconds ?? 1800) / 60)} 分钟无处理进展才告警。</small></div>}
+        {data.explore_estimate && <div className="monitor-queue"><h4>探索队列预估处理时长</h4><p>{data.explore_estimate.status === 'estimated' ? `约 ${estimateDuration(data.explore_estimate.seconds ?? 0)} · 预计 ${when(data.explore_estimate.completion_at)} 完成首轮处理（${data.explore_estimate.batches} 批）` : data.explore_estimate.status === 'empty' ? '当前无可执行积压' : data.explore_estimate.status === 'busy' || data.explore_estimate.status === 'unavailable' ? '任务停滞或等待恢复，暂无法估算' : '近期样本不足，暂无法估算'}</p><small className="text-muted">合计探索抓取与关联探索的可执行及执行中任务，按最近 {data.explore_estimate.sample_count} 批处理速度估算，包含批次间短暂等待。假设处理持续正常；不含退避等待、新增任务和后续重试，实际耗时可能变化。</small></div>}
+        {data.explore_source_states && <div className="monitor-queue"><h4>探索源状态</h4><p>正常 / 待验证 {number(data.explore_source_states.active)} · 暂时不可访问 / 等待重试 {number(data.explore_source_states.retry_wait)} · 重试耗尽 {number(data.explore_source_states.retry_exhausted)} · 确定不可用 {number(data.explore_source_states.unavailable)} · 不符合收录条件 {number(data.explore_source_states.ineligible)}</p><small className="text-muted">按源去重统计。最多重试 6 次：1 小时、4 小时、16 小时、2 天、8 天、32 天，间隔随机偏移 ±10%。停止状态保留记录，不再自动尝试。</small></div>}
+        {data.queues.map(q => {
+          const exploration = q.name === 'explore_fetch_queue' || q.name === 'explore_related_tasks'
+          return <div className="monitor-queue" key={q.name}><h4>{label(q.name)}</h4>{q.status === 'partial' && <small className="text-muted">状态信息不完整，不能仅凭等待时长判断故障。</small>}{q.status === 'unavailable' ? <p>数据不可用</p> : exploration ? <p>可执行 {number(q.waiting)} · 执行中 {number(q.running)} · 退避等待 {number(q.deferred)} · 待恢复 {number(q.expired)}</p> : <p>等待 {number(q.waiting)} · 执行中 {number(q.running)}</p>}
+            {exploration ? <><details><summary>历史记录详情</summary><p>本轮最长排队 {q.waiting && q.ready_wait_seconds != null ? `${Math.ceil(q.ready_wait_seconds / 60)} 分钟` : '—'}<small className="text-muted"> · 从本次可执行时间计起，不等于预计剩余时间</small></p><p>最老待执行记录年龄 {q.waiting ? `${Math.ceil(q.oldest_wait_seconds / 86400)} 天` : '—'} · 历史终止 {number(q.failed)}</p><small>记录年龄包含退避及历次尝试，不用于判断当前是否停滞。</small></details></> : <p>最老等待 {q.waiting ? `${Math.ceil(q.oldest_wait_seconds / 60)} 分钟` : '—'}</p>}
+            <small className="text-muted">{q.note} · {when(q.snapshot_at)}</small></div>
+        })}
       </section>
       <section className="card monitor-section"><h3>AI token 用量与成本</h3>
         <p className="text-muted text-sm">按所选时间段统计。输入 token 包含缓存命中；费用 =（输入 − 缓存）× 输入单价 + 缓存 × 缓存单价 + 输出 × 输出单价，再除以一百万。历史未采集的用量无法补算。</p>

@@ -38,7 +38,23 @@ type Event struct {
 	Count    int        `json:"count"`
 	RetryAt  *time.Time `json:"retry_at,omitempty"`
 }
+type ExploreHealth struct {
+	StallThresholdSeconds float64    `json:"stall_threshold_seconds"`
+	Status                string     `json:"status"`
+	LastProgressAt        *time.Time `json:"last_progress_at,omitempty"`
+	NoProgressSeconds     float64    `json:"no_progress_seconds"`
+}
+type QuotaExhaustion struct {
+	TaskType string    `json:"task_type"`
+	UserID   int       `json:"user_id"`
+	Reason   string    `json:"reason"`
+	RetryAt  time.Time `json:"retry_at"`
+	Used     int       `json:"used"`
+	Limit    int       `json:"limit"`
+}
 type Queue struct {
+	Deferred          int       `json:"deferred"`
+	ReadyWaitSeconds  float64   `json:"ready_wait_seconds"`
 	Name              string    `json:"name"`
 	Status            string    `json:"status"`
 	Waiting           int       `json:"waiting"`
@@ -81,26 +97,28 @@ type Alert struct {
 	Threshold float64 `json:"threshold"`
 }
 type Response struct {
-	ExploreEstimate          ExploreEstimate `json:"explore_estimate"`
-	ExploreSourceStates      map[string]int  `json:"explore_source_states"`
-	TokenCost                aiusage.Summary `json:"token_cost"`
-	GeneratedAt              time.Time       `json:"generated_at"`
-	CollectionAvailableSince time.Time       `json:"collection_available_since"`
-	WindowStart              time.Time       `json:"window_start"`
-	WindowEnd                time.Time       `json:"window_end"`
-	Hours                    int             `json:"hours"`
-	Status                   string          `json:"status"`
-	RetentionDays            int             `json:"retention_days"`
-	Registration             Registration    `json:"registration"`
-	Captcha                  Captcha         `json:"captcha"`
-	LimitTotal               int             `json:"limit_total"`
-	TimeSeries               []Point         `json:"time_series"`
-	Groups                   []Group         `json:"groups"`
-	Queues                   []Queue         `json:"queues"`
-	Cost                     Cost            `json:"cost"`
-	Alerts                   []Alert         `json:"alerts"`
-	RecentEvents             []Event         `json:"recent_events"`
-	NextBeforeID             *int64          `json:"next_before_id"`
-	CaptchaExpiresAt         *time.Time      `json:"captcha_expires_at"`
-	CollectionDropped        int64           `json:"collection_dropped"`
+	ExploreHealth            ExploreHealth     `json:"explore_health"`
+	QuotaExhaustions         []QuotaExhaustion `json:"quota_exhaustions"`
+	ExploreEstimate          ExploreEstimate   `json:"explore_estimate"`
+	ExploreSourceStates      map[string]int    `json:"explore_source_states"`
+	TokenCost                aiusage.Summary   `json:"token_cost"`
+	GeneratedAt              time.Time         `json:"generated_at"`
+	CollectionAvailableSince time.Time         `json:"collection_available_since"`
+	WindowStart              time.Time         `json:"window_start"`
+	WindowEnd                time.Time         `json:"window_end"`
+	Hours                    int               `json:"hours"`
+	Status                   string            `json:"status"`
+	RetentionDays            int               `json:"retention_days"`
+	Registration             Registration      `json:"registration"`
+	Captcha                  Captcha           `json:"captcha"`
+	LimitTotal               int               `json:"limit_total"`
+	TimeSeries               []Point           `json:"time_series"`
+	Groups                   []Group           `json:"groups"`
+	Queues                   []Queue           `json:"queues"`
+	Cost                     Cost              `json:"cost"`
+	Alerts                   []Alert           `json:"alerts"`
+	RecentEvents             []Event           `json:"recent_events"`
+	NextBeforeID             *int64            `json:"next_before_id"`
+	CaptchaExpiresAt         *time.Time        `json:"captcha_expires_at"`
+	CollectionDropped        int64             `json:"collection_dropped"`
 }

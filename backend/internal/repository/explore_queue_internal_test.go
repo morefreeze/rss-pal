@@ -186,3 +186,31 @@ func openExploreShadowDB(t *testing.T, schema string) *sql.DB {
 	}
 	return db
 }
+
+func TestRelatedRediscoveryDoesNotResetProgress(t *testing.T) {
+	db, done := testdb.New(t)
+	defer done()
+	var provider int
+	if err := db.QueryRow(`SELECT id FROM explore_registry_providers WHERE provider_key='related-sites'`).Scan(&provider); err != nil {
+		t.Fatal(err)
+	}
+	var before time.Time
+	if err := db.QueryRow(`INSERT INTO explore_related_tasks(provider_id,canonical_seed_url,attempts,updated_at) VALUES($1,'https://progress.example/',1,now()-interval '2 hours') RETURNING updated_at`, provider).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err = enqueueRelatedSeed(context.Background(), tx, provider, "https://progress.example/", 200); err != nil {
+		t.Fatal(err)
+	}
+	var after time.Time
+	if err = tx.QueryRow(`SELECT updated_at FROM explore_related_tasks WHERE canonical_seed_url='https://progress.example/'`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if !after.Equal(before) {
+		t.Fatalf("rediscovery fabricated progress: %v -> %v", before, after)
+	}
+}

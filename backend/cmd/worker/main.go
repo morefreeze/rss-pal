@@ -123,6 +123,7 @@ func main() {
 		now := time.Now().UTC()
 		window := now.In(time.FixedZone("Asia/Shanghai", 8*60*60))
 		cycle.runProviderWindow(ctx, window, now)
+		cycle.runQueueBatch(ctx)
 		if ctx.Err() != nil {
 			log.Fatal(ctx.Err())
 		}

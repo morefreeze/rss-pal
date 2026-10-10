@@ -212,8 +212,17 @@ func TestConcurrentAliasAndCanonicalValidation(t *testing.T) {
 	defer cleanup()
 	canonical := insertProcessorSource(t, db, "https://concurrent-retry.example/feed", model.ExploreValidationPending)
 	alias := insertProcessorSource(t, db, "https://concurrent-retry.example/", model.ExploreValidationPending)
-	a := leaseProcessorTask(t, db, alias, ExploreTaskValidateSource, 300, "alias")
-	b := leaseProcessorTask(t, db, canonical, ExploreTaskValidateSource, 300, "canonical")
+	repo := NewExploreQueueRepository(db)
+	for _, id := range []int{alias, canonical} {
+		if _, err := repo.Enqueue(id, ExploreTaskValidateSource, 300); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, tasks, err := repo.ClaimRun(time.Now(), "concurrent-batch", time.Hour, 2)
+	if err != nil || len(tasks) != 2 {
+		t.Fatalf("claim tasks=%d err=%v", len(tasks), err)
+	}
+	a, b := tasks[0], tasks[1]
 	ready := make(chan struct{}, 2)
 	release := make(chan struct{})
 	results := make(chan error, 2)

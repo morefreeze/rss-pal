@@ -88,7 +88,7 @@ func TestQueuesAndSummaryEligibility(t *testing.T) {
 	if err != nil || len(articles) != 1 {
 		t.Fatalf("selector len=%d err=%v", len(articles), err)
 	}
-	if r.Queues[0].Waiting != 1 || r.Queues[0].Running != nil || len(r.Alerts) != 1 {
+	if r.Queues[0].Waiting != 1 || r.Queues[0].Running != nil || r.Queues[0].Status != "partial" || len(r.Alerts) != 0 {
 		t.Fatalf("queues %+v alerts %+v", r.Queues, r.Alerts)
 	}
 }

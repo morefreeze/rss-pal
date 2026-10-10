@@ -1,6 +1,6 @@
 # Explore source retry states
 
-The approved retry delays after the initial failure are 1h, 4h, 16h, 2d, 8d and 32d, with ±10% jitter. A later HTTP Retry-After takes precedence. These are earliest eligibility times; existing worker windows still determine actual dispatch.
+The approved retry delays after the initial failure are 1h, 4h, 16h, 2d, 8d and 32d, with ±10% jitter. A later HTTP Retry-After takes precedence. These are earliest eligibility times; continuous worker dispatch still determines actual execution.
 
 `recommended_feeds.fetch_state` distinguishes `active`, `retry_wait`, `retry_exhausted`, `unavailable`, and `ineligible`. Counters live on the source so rediscovery cannot reset the budget. Inactivity, insufficient provenance, and missing RSS stop automatically. Retrying is bounded; exhaustion is not evidence of permanent unavailability. Existing cached articles and task records are retained.
 
@@ -20,8 +20,10 @@ For this rollout, production migration approval is required by automatic approva
 
 Source states persist until an explicit reset; routine observations, source refresh scheduling, and canonical alias discovery cannot reactivate stopped sources. A code rollback can keep additive columns, but reverting the historical queue/source changes requires the saved backup and a separately reviewed recovery plan.
 
-## Monitoring completion estimate
+## Continuous queue consumption (2026-10-10)
 
-The monitoring page estimates the first pass over the current executable source-fetch and related-discovery backlog together, since both share one batch limit. API and worker receive the same `EXPLORE_FETCH_BATCH_LIMIT`. The estimate includes the six Shanghai dispatch windows, overnight waits, and the average preparation and per-task execution cost from up to 12 completed standard runs within seven days. At least three samples are required. A consumed current window is skipped; the final partial batch receives a full batch duration allowance.
+Queue dispatch is independent from the six daily discovery/snapshot slots. Each minute the worker can start one recovered or fresh batch (up to 500 tasks, at most 5 concurrent handlers). A finished attempt is followed by at least 60 seconds of cooldown; minute polling means the next start is generally 60–120 seconds later. Database lease guards prevent fresh batches while older leases remain across worker instances. Only eligible work runs: stopped sources and future retry deadlines remain excluded.
 
-The estimate assumes normal dispatch and excludes tasks waiting for backoff, future discoveries, and subsequent retries. Running or expired leases show an explicit unavailable state rather than a completion time. No executable tasks show an empty state. This is an estimate, not a drain-time guarantee.
+Monitoring alerts on shared exploration processing inactivity (default 30 minutes while work is executable or leased), and on expired leases needing recovery. Historical record age and current eligibility age are only details, not service-failure signals. Duplicate source discovery must not advance the queue processing timestamp; successful outcomes and failed attempts entering backoff do count as progress. Daily quota exhaustion appears once with its reset time, based on the current UTC-day ledger and current policy; repeated daily-denial events no longer drive burst alerts.
+
+The completion estimate now covers executable and in-flight tasks using recent batch throughput and up to 120 seconds between batches. It excludes future retry eligibility and incoming work. Provider synchronization and recommendation snapshots retain the six daily slots. Existing source budget, terminal-state rules, and lease fencing remain in effect.

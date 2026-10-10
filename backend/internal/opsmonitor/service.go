@@ -119,12 +119,15 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 		return r, err
 	}
 	var unavailable, total, limits int
-	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(sum(count) FILTER(WHERE kind='captcha' AND reason='unavailable'),0),COALESCE(sum(count) FILTER(WHERE kind='captcha'),0),COALESCE(sum(count) FILTER(WHERE kind='limit'),0) FROM operations_events WHERE at>=$1 AND at<=$2`, r.WindowEnd.Add(-15*time.Minute), r.WindowEnd).Scan(&unavailable, &total, &limits)
+	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(sum(count) FILTER(WHERE kind='captcha' AND reason='unavailable'),0),COALESCE(sum(count) FILTER(WHERE kind='captcha'),0),COALESCE(sum(count) FILTER(WHERE kind='limit' AND reason NOT IN ('user_daily','global_daily')),0) FROM operations_events WHERE at>=$1 AND at<=$2`, r.WindowEnd.Add(-15*time.Minute), r.WindowEnd).Scan(&unavailable, &total, &limits)
 	if err != nil {
 		return r, err
 	}
 	if unavailable >= s.cfg.CaptchaMinFailures && total > 0 && float64(unavailable)/float64(total) > s.cfg.CaptchaFailureRatio {
 		r.Alerts = append(r.Alerts, Alert{"captcha_unavailable", "critical", fmt.Sprintf("最近15分钟验票服务故障 %d 次（次数阈值 %d），故障率超过 %.1f%%", unavailable, s.cfg.CaptchaMinFailures, s.cfg.CaptchaFailureRatio*100), float64(unavailable) / float64(total), s.cfg.CaptchaFailureRatio})
+	}
+	if err := s.quotaExhaustions(ctx, &r); err != nil {
+		return r, err
 	}
 	if limits >= s.cfg.LimitThreshold {
 		r.Alerts = append(r.Alerts, Alert{"limit_denied", "warning", "最近15分钟限流达到阈值", float64(limits), float64(s.cfg.LimitThreshold)})
@@ -159,19 +162,15 @@ func (s *Service) queues(ctx context.Context, r *Response) error {
 	r.Queues = append(r.Queues, q)
 	for _, table := range []string{"explore_fetch_queue", "explore_related_tasks"} {
 		running, failed, expired := 0, 0, 0
-		q = Queue{Name: table, Status: "available", SnapshotAt: r.GeneratedAt, Running: &running, Failed: &failed, Expired: &expired, Note: "等待仅计 pending、未绑定运行且 not_before 已到期；failed 为历史终止任务（invalid），并非当前失败源数；expired 为已过期 leased；等待时间按创建时间。"}
-		query := `SELECT count(*) FILTER(WHERE status='pending' AND run_id IS NULL AND not_before<=$1),count(*) FILTER(WHERE status='leased' AND lease_expires_at>$1),count(*) FILTER(WHERE status='invalid'),count(*) FILTER(WHERE status='leased' AND lease_expires_at<=$1),COALESCE(greatest(0,extract(epoch from ($1::timestamptz-min(created_at) FILTER(WHERE status='pending' AND run_id IS NULL AND not_before<=$1)))),0) FROM ` + table
-		if err := s.db.QueryRowContext(ctx, query, r.GeneratedAt).Scan(&q.Waiting, &running, &failed, &expired, &q.OldestWaitSeconds); err != nil {
+		q = Queue{Name: table, Status: "available", SnapshotAt: r.GeneratedAt, Running: &running, Failed: &failed, Expired: &expired, Note: "等待仅计 pending、未绑定运行且 not_before 已到期；failed 为历史终止任务（invalid），并非当前失败源数；expired 为已过期 leased；历史等待按创建时间，可执行等待按本次 not_before；停滞按共享执行进度判断。"}
+		query := `SELECT count(*) FILTER(WHERE status='pending' AND run_id IS NULL AND not_before<=$1),count(*) FILTER(WHERE status='leased' AND lease_expires_at>$1),count(*) FILTER(WHERE status='invalid'),count(*) FILTER(WHERE status='leased' AND lease_expires_at<=$1),COALESCE(greatest(0,extract(epoch from ($1::timestamptz-min(created_at) FILTER(WHERE status='pending' AND run_id IS NULL AND not_before<=$1)))),0) ,COALESCE(greatest(0,extract(epoch from ($1::timestamptz-min(greatest(created_at,not_before)) FILTER(WHERE status='pending' AND run_id IS NULL AND not_before<=$1)))),0) ,count(*) FILTER(WHERE status='pending' AND run_id IS NULL AND not_before>$1) FROM ` + table
+		if err := s.db.QueryRowContext(ctx, query, r.GeneratedAt).Scan(&q.Waiting, &running, &failed, &expired, &q.OldestWaitSeconds, &q.ReadyWaitSeconds, &q.Deferred); err != nil {
 			return err
 		}
 		r.Queues = append(r.Queues, q)
 	}
-	for _, q := range r.Queues {
-		if q.Waiting > 0 && q.OldestWaitSeconds > s.cfg.QueueWaitSeconds {
-			r.Alerts = append(r.Alerts, Alert{"queue_" + q.Name, "warning", q.Name + " 可执行任务等待超过阈值", q.OldestWaitSeconds, s.cfg.QueueWaitSeconds})
-		}
-	}
-	return nil
+	// Historical age alone cannot establish a processing failure.
+	return s.exploreHealth(ctx, r)
 }
 func (s *Service) cost(ctx context.Context, r *Response) error {
 	r.Cost = Cost{UTCDay: r.GeneratedAt.UTC().Format("2006-01-02"), LedgerRetentionNote: "额度账本按 UTC 日聚合；窗口调用量包含与窗口相交的完整 UTC 日期，不能精确裁剪小时。账本由现有清理任务保留，最早可用日期见实际记录；次数为准入尝试，不是 token 或账单。", EstimateStatus: "not_configured", Currency: "CNY", ByTask: []TaskCost{}, ByUser: []UserCost{}, DailyAlertBudget: s.cfg.DailyCostBudget}
@@ -231,11 +230,8 @@ func (s *Service) cost(ctx context.Context, r *Response) error {
 			allPriced = false
 		}
 		r.Cost.ByTask = append(r.Cost.ByTask, v)
-		if v.UsageRatio >= s.cfg.QuotaWarningRatio {
+		if v.UsageRatio >= s.cfg.QuotaWarningRatio && v.UsageRatio < 1 {
 			severity := "warning"
-			if v.UsageRatio >= 1 {
-				severity = "critical"
-			}
 			r.Alerts = append(r.Alerts, Alert{"quota_" + k, severity, k + " 今日 UTC 全局额度达到阈值", v.UsageRatio, s.cfg.QuotaWarningRatio})
 		}
 	}

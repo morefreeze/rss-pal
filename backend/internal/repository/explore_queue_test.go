@@ -637,3 +637,57 @@ func TestExploreRelatedRetryBackoffAndLeaseFencing(t *testing.T) {
 		t.Fatalf("status=%s attempts=%d seconds=%d", status, attempts, seconds)
 	}
 }
+
+func TestExploreContinuousClaimsWaitForExistingBatch(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	repo := repository.NewExploreQueueRepository(db)
+	enqueueExploreTasks(t, db, repo, 3, repository.ExplorePriorityRefresh)
+	now := time.Now()
+	first, tasks, err := repo.ClaimRun(now, "worker-a", time.Hour, 1)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("first %v %v", tasks, err)
+	}
+	_, next, err := repo.ClaimRun(now.Add(time.Minute), "worker-b", time.Hour, 1)
+	if err != nil || len(next) != 0 {
+		t.Fatalf("overlapping batch tasks=%d err=%v", len(next), err)
+	}
+	if _, err = db.Exec(`UPDATE explore_fetch_queue SET lease_expires_at=now()-interval '1 second' WHERE run_id=$1`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, next, err = repo.ClaimRun(now.Add(2*time.Minute), "worker-b", time.Hour, 1)
+	if err != nil || len(next) != 0 {
+		t.Fatalf("must recover expired before fresh: %d %v", len(next), err)
+	}
+	recovered, leased, err := repo.RecoverExpired("worker-b", time.Hour)
+	if err != nil || recovered == nil || len(leased) != 1 {
+		t.Fatalf("recovery %v %d %v", recovered, len(leased), err)
+	}
+	if err = repo.Complete(leased[0].ID, recovered.ID, exploreTaskToken(t, leased[0])); err != nil {
+		t.Fatal(err)
+	}
+	_, next, err = repo.ClaimRun(now.Add(3*time.Minute), "worker-b", time.Hour, 1)
+	if err != nil || len(next) != 1 {
+		t.Fatalf("next batch %d %v", len(next), err)
+	}
+}
+
+func TestExploreRediscoveryDoesNotResetProcessingProgress(t *testing.T) {
+	db, done := testdb.New(t)
+	defer done()
+	repo := repository.NewExploreQueueRepository(db)
+	enqueueExploreTasks(t, db, repo, 1, repository.ExplorePriorityRefresh)
+	var sourceID int
+	var before time.Time
+	if err := db.QueryRow(`UPDATE explore_fetch_queue SET attempts=1,updated_at=now()-interval '2 hours' RETURNING source_id,updated_at`).Scan(&sourceID, &before); err != nil {
+		t.Fatal(err)
+	}
+	var taskType string
+	if err := db.QueryRow(`SELECT task_type FROM explore_fetch_queue WHERE source_id=$1 AND attempts=1`, sourceID).Scan(&taskType); err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.Enqueue(sourceID, taskType, repository.ExplorePriorityStructuredProvider)
+	if err != nil || task == nil || !task.UpdatedAt.Equal(before) {
+		t.Fatalf("rediscovery fabricated progress: task=%+v err=%v", task, err)
+	}
+}

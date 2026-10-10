@@ -103,7 +103,7 @@ it('按源展示退避和停止状态，区分历史终止任务', async () => {
  api.getAdminMonitoring.mockResolvedValue({...snapshot, explore_source_states: {active: 10, retry_wait: 3, retry_exhausted: 2, unavailable: 4, ineligible: 5}})
  render(<AdminMonitoringPage user={{is_admin: true}} />)
  await screen.findByText('探索源状态')
- expect(screen.getByText(/暂时不可访问（退避中） 3/)).toBeTruthy()
+ expect(screen.getByText(/暂时不可访问 \/ 等待重试 3/)).toBeTruthy()
  expect(screen.getByText(/重试耗尽 2/)).toBeTruthy()
  expect(screen.getByText(/确定不可用 4/)).toBeTruthy()
  expect(screen.getByText(/不符合收录条件 5/)).toBeTruthy()
@@ -118,11 +118,28 @@ it('展示探索首轮完成预估和估算范围', async () => {
 
 it.each([
   ['empty', '当前无可执行积压'],
-  ['busy', '任务执行或恢复中，暂无法估算'],
+  ['busy', '任务停滞或等待恢复，暂无法估算'],
   ['insufficient_data', '近期样本不足，暂无法估算'],
 ])('预估状态 %s 不伪造完成时间', async (status, message) => {
   api.getAdminMonitoring.mockResolvedValue({ ...snapshot, explore_estimate: { status, waiting: 0, batches: 0, sample_count: 0 } })
   render(<AdminMonitoringPage user={{ is_admin: true }} />)
   await screen.findByText(message)
   expect(screen.queryByText(/预计.*完成首轮/)).toBeNull()
+})
+
+it('历史年龄不再展示为当前阻塞，正常消费显示进展', async () => {
+ api.getAdminMonitoring.mockResolvedValue({...snapshot, alerts:[], explore_health:{status:'healthy',last_progress_at:'2026-10-10T09:00:00Z',no_progress_seconds:30}, queues:[{name:'explore_fetch_queue',status:'available',waiting:500,running:5,failed:100,expired:0,deferred:300,oldest_wait_seconds:25951*60,ready_wait_seconds:120,snapshot_at:snapshot.generated_at,note:'当前任务已到期'}]})
+ render(<AdminMonitoringPage user={{is_admin:true}} />)
+ await screen.findByText(/探索处理正常/)
+ expect(screen.getByText(/可执行 500.*执行中 5.*退避等待 300/)).toBeTruthy()
+ expect(screen.queryByText(/最老等待 25951/)).toBeNull()
+ expect(screen.getByText('历史记录详情')).toBeTruthy()
+})
+
+it('额度耗尽显示恢复时间而非重复拦截次数', async () => {
+ api.getAdminMonitoring.mockResolvedValue({...snapshot, alerts:[], quota_exhaustions:[{task_type:'subscription_fetch',user_id:1,reason:'user_daily',retry_at:'2026-10-11T00:00:00Z',used:10000,limit:10000}]})
+ render(<AdminMonitoringPage user={{is_admin:true}} />)
+ await screen.findByText('额度等待恢复')
+ expect(screen.getByText(/订阅抓取.*用户 #1.*10,000.*10,000/)).toBeTruthy()
+ expect(screen.getByText(/恢复时间/)).toBeTruthy()
 })

@@ -155,7 +155,7 @@ func enqueueRelatedSeed(ctx context.Context, tx *sql.Tx, providerID int, canonic
 		INSERT INTO explore_related_tasks(provider_id,canonical_seed_url,priority)
 		VALUES ($1,$2,$3)
 		ON CONFLICT (canonical_seed_url) WHERE status IN ('pending','leased')
-		DO UPDATE SET priority=EXCLUDED.priority,updated_at=CURRENT_TIMESTAMP
+		DO UPDATE SET priority=EXCLUDED.priority
 		RETURNING id`, providerID, canonical, sanitizeExplorePriority(priority)).Scan(&id)
 	return err == nil, err
 }

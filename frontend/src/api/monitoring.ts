@@ -5,7 +5,9 @@ export interface MonitoringEvent {
   user_id: number; count: number; retry_at?: string
 }
 export interface MonitoringResponse {
- explore_estimate?: { status: string; waiting: number; batches: number; sample_count: number; seconds?: number; completion_at?: string }
+ explore_health?: { status: string; last_progress_at?: string; no_progress_seconds: number; stall_threshold_seconds?: number }
+ quota_exhaustions?: { task_type: string; user_id: number; reason: string; retry_at: string; used: number; limit: number }[]
+ explore_estimate?: { status: string; waiting: number; running?: number; remaining?: number; batches: number; sample_count: number; seconds?: number; completion_at?: string }
  explore_source_states?: Record<string, number>
   generated_at: string; collection_available_since: string; window_start: string; window_end: string
   hours: number; status: 'available' | 'partial' | 'no_data'; retention_days: number
@@ -14,7 +16,7 @@ export interface MonitoringResponse {
   limit_total: number
   time_series: { at: string; registration_success: number; registration_failed: number; captcha_rejected: number; captcha_unavailable: number; limit_denied: number }[]
   groups: { kind: string; reason: string; task_type: string; user_id: number; count: number }[]
-  queues: { name: string; status: string; waiting: number; running: number | null; failed: number | null; expired: number | null; oldest_wait_seconds: number; snapshot_at: string; note: string }[]
+  queues: { name: string; status: string; waiting: number; running: number | null; failed: number | null; expired: number | null; oldest_wait_seconds: number; ready_wait_seconds?: number; deferred?: number; snapshot_at: string; note: string }[]
   token_cost?: {
     currency: 'USD'; collection_since: string; estimated_today: number | null; today_missing: number
     rates: { provider: string; model: string; input: number; cached: number; output: number }[]

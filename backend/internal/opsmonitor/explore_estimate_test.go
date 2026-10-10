@@ -7,28 +7,6 @@ import (
 	"time"
 )
 
-func TestExploreEstimateSchedule(t *testing.T) {
-	loc := time.FixedZone("CST", 8*3600)
-	for _, tc := range []struct {
-		name, now, want string
-		waiting         int
-		consumed        bool
-	}{
-		{"overnight", "2026-10-09T23:05:00", "2026-10-10T07:40:00", 500, false},
-		{"shared capacity", "2026-10-09T09:00:00", "2026-10-09T13:40:00", 501, false},
-		{"current window unused", "2026-10-09T10:35:00", "2026-10-09T10:45:00", 500, false},
-		{"current window consumed", "2026-10-09T10:35:00", "2026-10-09T13:40:00", 500, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			now, _ := time.ParseInLocation("2006-01-02T15:04:05", tc.now, loc)
-			got := estimateExplore(now, tc.waiting, 500, 600, tc.consumed)
-			if got.Format("2006-01-02T15:04:05") != tc.want {
-				t.Fatalf("got %v want %s", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestExploreEstimateHistoryAndStates(t *testing.T) {
 	db, done := testdb.New(t)
 	defer done()
@@ -52,7 +30,7 @@ func TestExploreEstimateHistoryAndStates(t *testing.T) {
 		}
 	}
 	check("estimated")
-	if r.ExploreEstimate.Batches != 2 || r.ExploreEstimate.SampleCount != 3 || r.ExploreEstimate.CompletionAt.UTC() != time.Date(2026, 10, 9, 5, 45, 0, 0, time.UTC) {
+	if r.ExploreEstimate.Batches != 2 || r.ExploreEstimate.SampleCount != 3 || r.ExploreEstimate.CompletionAt.UTC() != now.Add(842*time.Second) {
 		t.Fatalf("%+v", r.ExploreEstimate)
 	}
 	// The current Shanghai window is stored as wall time, not as UTC.
@@ -60,15 +38,18 @@ func TestExploreEstimateHistoryAndStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("estimated")
-	if r.ExploreEstimate.CompletionAt.UTC() != time.Date(2026, 10, 9, 8, 45, 0, 0, time.UTC) {
+	if r.ExploreEstimate.CompletionAt.UTC() != now.Add(842*time.Second) {
 		t.Fatalf("consumed window: %+v", r.ExploreEstimate)
 	}
 	n := 1
 	r.Queues[0].Running = &n
-	check("busy")
+	check("estimated")
+	if r.ExploreEstimate.Running != 1 || r.ExploreEstimate.Remaining != 502 || r.ExploreEstimate.Batches != 3 || r.ExploreEstimate.Seconds == nil {
+		t.Fatalf("active ETA %+v", r.ExploreEstimate)
+	}
 	r.Queues[0].Running = nil
 	r.Queues[0].Expired = &n
-	check("busy")
+	check("unavailable")
 	svc.cfg.ExploreBatchLimit = 60
 	r.Queues[0].Expired = nil
 	check("estimated")

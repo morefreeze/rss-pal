@@ -94,7 +94,7 @@ func (r *ExploreQueueRepository) Enqueue(sourceID int, taskType string, priority
 		DO UPDATE SET priority = CASE
 			WHEN EXCLUDED.priority = 0 THEN 0
 			ELSE GREATEST(explore_fetch_queue.priority, EXCLUDED.priority)
-		END, updated_at = CURRENT_TIMESTAMP
+		END
 		RETURNING id, source_id, task_type, status, priority, not_before, attempts,
 		          run_id, lease_owner, lease_token, lease_expires_at, last_error, created_at, updated_at, completed_at
 	`, sourceID, taskType, sanitizeExplorePriority(priority)))
@@ -222,6 +222,16 @@ type exploreClaimCandidate struct {
 // Retries age from their latest eligibility time so repeated failures cannot
 // retain weeks of priority over never-attempted tasks.
 func lockExploreCandidates(tx *sql.Tx, limit int) ([]exploreClaimCandidate, error) {
+	// A transaction advisory lock serializes both dispatch and recovery. Keep
+	// only one batch leased across all workers, including crash leftovers.
+	var active bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM explore_fetch_queue WHERE status='leased') OR EXISTS(SELECT 1 FROM explore_related_tasks WHERE status='leased')`).Scan(&active); err != nil {
+		return nil, err
+	}
+	if active {
+		return nil, nil
+	}
+
 	all := make([]exploreClaimCandidate, 0, limit*2)
 	queries := []struct{ kind, sql string }{
 		{ExploreQueueKindSource, `SELECT id,priority,created_at,priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT FROM explore_fetch_queue WHERE EXISTS (SELECT 1 FROM recommended_feeds s WHERE s.id=explore_fetch_queue.source_id AND s.fetch_state IN ('active','retry_wait') AND (s.next_retry_at IS NULL OR s.next_retry_at<=CURRENT_TIMESTAMP)) AND status = 'pending' AND run_id IS NULL AND not_before <= CURRENT_TIMESTAMP ORDER BY priority::BIGINT+FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP-(CASE WHEN attempts > 0 THEN not_before ELSE created_at END)))/3600)::BIGINT DESC,priority DESC,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1`},
@@ -353,6 +363,14 @@ func (r *ExploreQueueRepository) RecoverExpired(newOwner string, leaseDuration t
 	}
 	if !locked {
 		return nil, nil, ErrExploreDispatcherBusy
+	}
+	// Recovery must not add another executing batch while valid leases remain.
+	var live bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM explore_fetch_queue WHERE status='leased' AND lease_expires_at>CURRENT_TIMESTAMP) OR EXISTS(SELECT 1 FROM explore_related_tasks WHERE status='leased' AND lease_expires_at>CURRENT_TIMESTAMP)`).Scan(&live); err != nil {
+		return nil, nil, err
+	}
+	if live {
+		return nil, nil, tx.Commit()
 	}
 	run := &ExploreFetchRun{}
 	err = tx.QueryRow(`
