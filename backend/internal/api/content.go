@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -89,7 +90,15 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 }
 
 func (h *ContentHandler) fetchFreshContent(ctx context.Context, target string) (string, error) {
-	return h.contentFetcher.FetchContentFresh(ctx, target)
+	// Fit extraction and optional media lookup inside the proxy/client's 60s
+	// deadline. A cancelled lookup must never be reported as an empty success.
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	content, err := h.contentFetcher.FetchContentFresh(ctx, target)
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return content, err
 }
 
 // tryBackfillMedia attempts to fill media_* columns for an article when they
@@ -107,7 +116,10 @@ func (h *ContentHandler) tryBackfillMedia(c *gin.Context, article *model.Article
 		return
 	}
 
-	ctx := c.Request.Context()
+	// This optional work runs inside the article update transaction. Keep it
+	// short so a slow feed cannot make the browser cancel and roll back content.
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
 	var mi *rss.MediaInfo
 
 	// Tier 1: parent feed RSS (cheap when it works).
@@ -128,7 +140,7 @@ func (h *ContentHandler) tryBackfillMedia(c *gin.Context, article *model.Article
 	}
 
 	// Tier 2: scan the article's HTML page for embedded audio/video URLs.
-	if mi == nil && article.URL != "" {
+	if mi == nil && article.URL != "" && ctx.Err() == nil {
 		mi = h.contentFetcher.FindMediaInHTML(ctx, article.URL)
 	}
 

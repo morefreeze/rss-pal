@@ -9,24 +9,20 @@ import (
 
 const bloggerCommentHeading = "### 博主首评"
 
-// BuildItemContent normalizes an RSS item's description while retaining the
-// existing plain-text behavior for non-Weibo items. The enriched result is
-// true only when a same-author blogger comment was appended.
+// BuildItemContent prefers the feed's full body over its summary. Weibo keeps
+// its description-specific blogger-comment enrichment.
 func BuildItemContent(description, fallback, itemURL string) (content string, enriched bool) {
 	uid, ok := desktopWeiboStatusUID(itemURL)
 	if !ok {
-		// Full RSS content can be the only surviving source when the page is
-		// unavailable. Keep formula and code markup rather than flattening it to text.
-		for _, raw := range []string{fallback, description} {
-			if feedHasMath(raw) || feedHasCodeBlock(raw) {
-				return NormalizeFeedContent(raw, itemURL), false
+		if strings.TrimSpace(fallback) != "" {
+			if full := strings.TrimSpace(NormalizeFeedContent(fallback, itemURL)); full != "" {
+				return full, false
 			}
 		}
-		content = StripHTML(description)
-		if content == "" {
-			content = StripHTML(fallback)
+		if feedHasMath(description) || feedHasCodeBlock(description) {
+			return NormalizeFeedContent(description, itemURL), false
 		}
-		return content, false
+		return StripHTML(description), false
 	}
 
 	raw := description

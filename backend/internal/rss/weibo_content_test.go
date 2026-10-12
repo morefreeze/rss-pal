@@ -209,7 +209,7 @@ func TestBuildItemContentNonWeiboMatchesStripHTML(t *testing.T) {
 	description := `<p>Hello <a href="https://example.com/ignored">world</a>.</p><p>Second  paragraph.</p>`
 	want := StripHTML(description)
 
-	content, enriched := BuildItemContent(description, "unused fallback", "https://example.com/articles/42")
+	content, enriched := BuildItemContent(description, "", "https://example.com/articles/42")
 
 	if enriched {
 		t.Fatal("BuildItemContent() enriched = true, want false")
@@ -273,5 +273,19 @@ func TestShouldDeepFetchArticle(t *testing.T) {
 				t.Errorf("ShouldDeepFetchArticle(%q, %q, %q) = %t, want %t", tt.feedType, tt.itemURL, tt.mediaType, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildItemContentPrefersFullBodyToSummary(t *testing.T) {
+	got, enriched := BuildItemContent("First paragraph...", `<p>First paragraph.</p><p>Final paragraph with <a href="/book">a book</a>.</p>`, "https://example.com/article")
+	if enriched || !strings.Contains(got, "Final paragraph") || !strings.Contains(got, "[a book](https://example.com/book)") || !strings.Contains(got, "\n\n") {
+		t.Fatalf("full feed body lost: %q (enriched=%v)", got, enriched)
+	}
+}
+
+func TestBuildItemContentEmptyFullBodyUsesSummary(t *testing.T) {
+	got, _ := BuildItemContent("Useful summary", "  ", "https://example.com/article")
+	if got != "Useful summary" {
+		t.Fatalf("got %q", got)
 	}
 }
