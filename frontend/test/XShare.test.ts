@@ -173,3 +173,20 @@ describe('X share post composer', () => {
     expect(url.searchParams.get('text')).toBe('ready post')
   })
 })
+
+ describe('share excerpt fallback', () => {
+  it('uses article opening when summaries are missing', () => {
+    expect(buildXPostText({title: 'Title', content: '<p>Opening paragraph.</p>', shareURL: 'https://r.example/123'})).toContain('Opening paragraph.')
+  })
+  it('keeps a long literal URL inside the copy budget when possible', () => {
+    const url = 'https://r.example/' + 'x'.repeat(75)
+    const text = buildXPostText({title: 'Title'.repeat(20), summaryBrief: 'Summary'.repeat(30), shareURL: url})
+    expect(Array.from(text).length).toBeLessThanOrEqual(140)
+    expect(text.endsWith(url)).toBe(true)
+  })
+  it('does not copy scripts or HTML entities as markup', () => {
+    const text = buildXPostText({title: 'Title', content: '<script>secret()</script><p>Tom &amp; Jerry</p>', shareURL: 'https://r.example/123'})
+    expect(text).toContain('Tom & Jerry')
+    expect(text).not.toContain('secret')
+  })
+})

@@ -1,3 +1,5 @@
+import ShareActions from './ShareActions'
+import { buildXPostText } from '../utils/xShare'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   createArticleShare,
@@ -11,6 +13,9 @@ type ExpiryOption = '7d' | '30d' | 'custom' | 'permanent'
 export type ShareDialogProps = {
   articleId: number
   articleTitle: string
+  summaryBrief?: string
+  summaryDetailed?: string
+  content?: string
   open: boolean
   onClose(): void
   onCopyXiaohongshu(): void
@@ -61,6 +66,9 @@ function expiryValue(option: ExpiryOption, customExpiry: string): string | null 
 export function ShareDialog({
   articleId,
   articleTitle,
+  summaryBrief,
+  summaryDetailed,
+  content,
   open,
   onClose,
   onCopyXiaohongshu,
@@ -74,13 +82,15 @@ export function ShareDialog({
   const [creating, setCreating] = useState(false)
   const [revoking, setRevoking] = useState<Set<string>>(() => new Set())
   const [fallbackURL, setFallbackURL] = useState('')
+  const [notice, setNotice] = useState('')
+  const [fallbackIsText, setFallbackIsText] = useState(false)
   const generationRef = useRef(0)
   const listReadyForRef = useRef<number | null>(null)
   const createRequestRef = useRef<Promise<ArticleShareListItem> | null>(null)
   const revokeRequestsRef = useRef(new Map<string, Promise<ArticleShareListItem>>())
   const dialogRef = useRef<HTMLElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
-  const fallbackInputRef = useRef<HTMLInputElement>(null)
+  const fallbackInputRef = useRef<HTMLTextAreaElement>(null)
   const onCloseRef = useRef(onClose)
 
   useLayoutEffect(() => {
@@ -90,6 +100,7 @@ export function ShareDialog({
   const closeDialog = useCallback(() => {
     setError('')
     setFallbackURL('')
+    setNotice('')
     onCloseRef.current()
   }, [])
 
@@ -100,6 +111,7 @@ export function ShareDialog({
     // effect can run for a newly mounted dialog surface.
     setError('')
     setFallbackURL('')
+    setNotice('')
     closeButtonRef.current?.focus()
     return () => {
       if (opener?.isConnected) opener.focus()
@@ -114,6 +126,7 @@ export function ShareDialog({
     setLoading(true)
     setError('')
     setFallbackURL('')
+    setNotice('')
     setCreating(false)
     setRevoking(new Set())
     createRequestRef.current = null
@@ -199,21 +212,24 @@ export function ShareDialog({
     if (!url) {
       if (generationRef.current === generation) {
         setFallbackURL('')
+        setNotice('')
         setError(created ? '链接已创建，但未返回可复制的地址' : '该分享链接当前不可复制')
       }
       return
     }
     try {
       if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
-      await navigator.clipboard.writeText(url)
+      await navigator.clipboard.writeText(created ? buildXPostText({title: articleTitle, summaryBrief, summaryDetailed, content, shareURL: url}) : url)
       if (generationRef.current === generation) {
         setFallbackURL('')
         setError('')
+        setNotice(created ? '链接已创建，分享文案已复制' : '链接已复制')
       }
     } catch {
       if (generationRef.current === generation) {
-        setFallbackURL(url)
-        setError(created ? '链接已创建，但复制失败，请手动复制链接' : '复制失败，请手动复制链接')
+        setFallbackIsText(created)
+        setFallbackURL(created ? buildXPostText({title: articleTitle, summaryBrief, summaryDetailed, content, shareURL: url}) : url)
+        setError(created ? '链接已创建，但复制失败，请手动复制分享文案' : '复制失败，请手动复制链接')
       }
     }
   }
@@ -270,18 +286,6 @@ export function ShareDialog({
     }
   }
 
-  const shareToX = (row: ArticleShareListItem) => {
-    const url = absoluteShareURL(row)
-    if (!url) {
-      setError('该分享链接当前不可用')
-      return
-    }
-    const intent = new URL('https://twitter.com/intent/tweet')
-    intent.searchParams.set('text', articleTitle)
-    intent.searchParams.set('url', url)
-    window.open(intent.toString(), '_blank', 'noopener,noreferrer')
-  }
-
   return (
     <div className="share-dialog-overlay" onMouseDown={(event) => {
       if (event.target === event.currentTarget) closeDialog()
@@ -329,14 +333,15 @@ export function ShareDialog({
             {creating ? '创建中…' : '创建新链接'}
           </button>
 
+          {notice && <p role="status" className="text-muted text-sm">{notice}</p>}
           {error && <p className="share-dialog-error" role="alert">{error}</p>}
           {fallbackURL && (
             <div className="share-copy-fallback">
-              <label htmlFor="share-copy-fallback">手动复制链接</label>
-              <input
+              <label htmlFor="share-copy-fallback">{fallbackIsText ? '手动复制分享文案' : '手动复制链接'}</label>
+              <textarea
                 ref={fallbackInputRef}
                 id="share-copy-fallback"
-                type="text"
+                rows={4}
                 value={fallbackURL}
                 readOnly
                 onFocus={(event) => event.currentTarget.select()}
@@ -371,7 +376,7 @@ export function ShareDialog({
                           {copyable && (
                             <>
                               <button type="button" className="secondary btn-sm" onClick={() => void copyURL(row)}>复制链接</button>
-                              <button type="button" className="secondary btn-sm" onClick={() => shareToX(row)}>分享到 X</button>
+                              <ShareActions key={`${articleId}:${row.id}`} title={articleTitle} summaryBrief={summaryBrief} summaryDetailed={summaryDetailed} content={content} shareURL={absoluteShareURL(row)!} copyLink={false} xAsButton />
                             </>
                           )}
                           {revocable && (

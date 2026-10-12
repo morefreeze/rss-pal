@@ -1611,3 +1611,20 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
 @keyframes explore-drawer-bottom { from { transform: translateY(100%); } }
 
 .explore-article-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+/* Shared controls wrap on narrow screens; fallbacks stay in the reading flow. */
+.social-share { min-width: 0; max-width: 100%; }
+.social-share-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.social-share textarea, .share-copy-fallback textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
+.wechat-share-help { margin-top: 12px; overflow-wrap: anywhere; }
+.wechat-share-help svg { background: white; max-width: 100%; height: auto; }
+.share-list-actions { flex: 1 1 100%; min-width: 0; }
+.share-list > li { flex-wrap: wrap; }
+.public-reader-actions { flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .share-dialog { max-height: 90dvh; }
+  .share-dialog-body { max-height: calc(90dvh - 62px); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .social-share-buttons button, .social-share-buttons a, .share-list-actions > button { min-height: 44px; }
+  .social-share-buttons > *, .share-list-actions .social-share-buttons button { flex: 1 1 120px; text-align: center; white-space: nowrap; }
+  .share-list-actions .social-share { flex-basis: 100%; }
+}

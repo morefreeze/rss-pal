@@ -133,13 +133,13 @@ describe('ShareDialog', () => {
 
     await user.click(await screen.findByRole('button', { name: '创建新链接' }))
     expect(apiMocks.createArticleShare).toHaveBeenCalledWith(42, null)
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(shortURL))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('A useful article\n\n' + shortURL))
     expect(screen.getByText('new-id')).toBeTruthy()
     expect(screen.getByRole('dialog')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: '分享到 X' }))
 
     const intent = new URL(String(open.mock.calls[0][0]))
-    expect(intent.searchParams.get('url')).toBe(shortURL)
+    expect(intent.searchParams.get('text')).toContain(shortURL)
     open.mockRestore()
   })
 
@@ -179,7 +179,7 @@ describe('ShareDialog', () => {
     expect((submit as HTMLButtonElement).disabled).toBe(false)
     await user.click(submit)
     expect(apiMocks.createArticleShare).toHaveBeenCalledWith(42, new Date('2026-09-10T09:30').toISOString())
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://rss.example/share/signed-custom'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('A useful article\n\nhttps://rss.example/share/signed-custom'))
   })
 
   it('rejects a custom expiry exactly equal to now', async () => {
@@ -215,7 +215,7 @@ describe('ShareDialog', () => {
     renderShareDialog()
 
     await user.click(await screen.findByRole('button', { name: '创建新链接' }))
-    expect(await screen.findByText('链接已创建，但复制失败，请手动复制链接')).toBeTruthy()
+    expect(await screen.findByText('链接已创建，但复制失败，请手动复制分享文案')).toBeTruthy()
     expect(screen.getByText('created-but-not-copied')).toBeTruthy()
     expect(screen.getByRole('dialog')).toBeTruthy()
   })
@@ -245,9 +245,9 @@ describe('ShareDialog', () => {
 
     await user.click(screen.getByRole('button', { name: '分享到 X' }))
     const intent = new URL(String(open.mock.calls[0][0]))
-    expect(intent.origin + intent.pathname).toBe('https://twitter.com/intent/tweet')
-    expect(intent.searchParams.get('text')).toBe('A useful article')
-    expect(intent.searchParams.get('url')).toBe('https://rss.example/share/signed-active')
+    expect(intent.origin + intent.pathname).toBe('https://x.com/intent/post')
+    expect(intent.searchParams.get('text')).toContain('A useful article')
+    expect(intent.searchParams.get('text')).toContain('https://rss.example/share/signed-active')
     expect(open).toHaveBeenCalledWith(expect.any(String), '_blank', 'noopener,noreferrer')
   })
 
@@ -301,12 +301,12 @@ describe('ShareDialog', () => {
     renderShareDialog()
 
     await user.click(await screen.findByRole('button', { name: '创建新链接' }))
-    const fallback = await screen.findByLabelText('手动复制链接') as HTMLInputElement
-    expect(fallback.value).toBe('https://rss.example/share/manual-copy')
+    const fallback = await screen.findByLabelText('手动复制分享文案') as HTMLInputElement
+    expect(fallback.value).toBe('A useful article\n\nhttps://rss.example/share/manual-copy')
     expect(document.activeElement).toBe(fallback)
     expect(fallback.selectionStart).toBe(0)
     expect(fallback.selectionEnd).toBe(fallback.value.length)
-    expect(screen.getByText('链接已创建，但复制失败，请手动复制链接')).toBeTruthy()
+    expect(screen.getByText('链接已创建，但复制失败，请手动复制分享文案')).toBeTruthy()
     expect(screen.getByText('no-clipboard')).toBeTruthy()
   })
 
@@ -319,15 +319,15 @@ describe('ShareDialog', () => {
     renderShareDialog()
 
     await user.click(await screen.findByRole('button', { name: '创建新链接' }))
-    const fallback = await screen.findByLabelText('手动复制链接') as HTMLInputElement
-    expect(fallback.value).toBe('https://rss.example/share/retry-copy')
+    const fallback = await screen.findByLabelText('手动复制分享文案') as HTMLInputElement
+    expect(fallback.value).toBe('A useful article\n\nhttps://rss.example/share/retry-copy')
     expect(fallback.selectionStart).toBe(0)
     expect(fallback.selectionEnd).toBe(fallback.value.length)
 
     const row = screen.getByText('retry-copy').closest('li')!
     await user.click(within(row).getByRole('button', { name: '复制链接' }))
     expect(writeText).toHaveBeenCalledTimes(2)
-    expect(screen.queryByLabelText('手动复制链接')).toBeNull()
+    expect(screen.queryByLabelText('手动复制分享文案')).toBeNull()
   })
 
   it('preserves Xiaohongshu and Markdown callbacks and exposes accessible close controls', async () => {
@@ -416,15 +416,15 @@ describe('ShareDialog', () => {
     opener.focus()
     await user.click(opener)
     await user.click(await screen.findByRole('button', { name: '创建新链接' }))
-    expect(document.activeElement).toBe(await screen.findByLabelText('手动复制链接'))
+    expect(document.activeElement).toBe(await screen.findByLabelText('手动复制分享文案'))
 
     await user.click(screen.getByRole('button', { name: '关闭' }))
-    expect(screen.queryByLabelText('手动复制链接')).toBeNull()
+    expect(screen.queryByLabelText('手动复制分享文案')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '父级确认关闭' }))
     expect(document.activeElement).toBe(opener)
     await user.click(opener)
     expect(await screen.findByRole('dialog')).toBeTruthy()
-    expect(screen.queryByLabelText('手动复制链接')).toBeNull()
+    expect(screen.queryByLabelText('手动复制分享文案')).toBeNull()
     await user.click(screen.getByRole('button', { name: '关闭' }))
     fireEvent.click(screen.getByRole('button', { name: '父级确认关闭' }))
     expect(document.activeElement).toBe(opener)

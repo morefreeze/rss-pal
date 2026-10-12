@@ -1483,6 +1483,9 @@ export default function ArticlePage() {
       <ShareDialog
         articleId={article.id}
         articleTitle={article.title}
+        summaryBrief={article.summary_brief}
+        summaryDetailed={article.summary_detailed}
+        content={article.content}
         open={shareDialogOpen}
         onClose={() => setShareDialogOpen(false)}
         onCopyXiaohongshu={handleShareXiaohongshu}

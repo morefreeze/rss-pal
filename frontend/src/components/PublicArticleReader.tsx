@@ -4,7 +4,7 @@ import SummaryMarkdown from './SummaryMarkdown'
 import VideoEmbed from './VideoEmbed'
 import { parseStoredEmbedURL } from './parseVideoPlaceholder'
 import { authSearch, parseAuthIntent, safePublicSourceURL } from '../utils/authIntent'
-import { buildXIntentURL, buildXPostText } from '../utils/xShare'
+import ShareActions from './ShareActions'
 
 export { safePublicSourceURL } from '../utils/authIntent'
 
@@ -185,12 +185,6 @@ function PublicMedia({ article, sourceURL }: ArticleProps & { sourceURL: string 
 export default function PublicArticleReader({ article, shareURL, shareRef }: Props) {
   const published = formatDate(article.published_at)
   const sourceURL = safePublicSourceURL(article.url)
-  const xIntentURL = buildXIntentURL(buildXPostText({
-    title: article.title,
-    summaryBrief: article.summary_brief,
-    summaryDetailed: article.summary_detailed,
-    shareURL,
-  }))
   return (
     <main className="public-reader">
       <header className="public-reader-brand">
@@ -235,10 +229,8 @@ export default function PublicArticleReader({ article, shareURL, shareRef }: Pro
               </a>
             )
             : <span className="text-muted">原文链接不可用</span>}
-          <a className="public-reader-x-cta" href={xIntentURL} target="_blank" rel="noopener noreferrer">
-            <span aria-hidden="true">𝕏</span>
-            <span>分享到 X</span>
-          </a>
+          <ShareActions key={shareURL} title={article.title} summaryBrief={article.summary_brief}
+            summaryDetailed={article.summary_detailed} content={article.content} shareURL={shareURL} />
         </section>
       </article>
 
