@@ -16,9 +16,9 @@ func BuildItemContent(description, fallback, itemURL string) (content string, en
 	uid, ok := desktopWeiboStatusUID(itemURL)
 	if !ok {
 		// Full RSS content can be the only surviving source when the page is
-		// unavailable. Keep formula markup rather than flattening it to text.
+		// unavailable. Keep formula and code markup rather than flattening it to text.
 		for _, raw := range []string{fallback, description} {
-			if feedHasMath(raw) {
+			if feedHasMath(raw) || feedHasCodeBlock(raw) {
 				return NormalizeFeedContent(raw, itemURL), false
 			}
 		}

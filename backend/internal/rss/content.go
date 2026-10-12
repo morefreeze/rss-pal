@@ -389,6 +389,7 @@ func flattenImageAltBlankLines(md string) string {
 // not happen under normal use but keeps the pipeline robust).
 func ExtractMarkdown(selection *goquery.Selection) string {
 	selection = selection.Clone()
+	normalizeCodeBlocks(selection)
 	// GFM cells cannot contain line breaks. The table plugin otherwise drops
 	// the entire table when publishers use <br> in a header or data cell.
 	// Normalize only table breaks; paragraph breaks elsewhere stay intact.
@@ -418,6 +419,7 @@ func ExtractMarkdown(selection *goquery.Selection) string {
 }
 
 func cleanContent(content string) string {
+	content, restoreCode := protectCodeFences(content)
 	// Remove excessive whitespace
 	re := regexp.MustCompile(`\n{3,}`)
 	content = re.ReplaceAllString(content, "\n\n")
@@ -449,7 +451,7 @@ func cleanContent(content string) string {
 	}
 	content = strings.Join(filtered, "\n")
 
-	return strings.TrimSpace(content)
+	return strings.TrimSpace(restoreCode(content))
 }
 
 // FetchContentFromReader extracts content from an io.Reader (for testing or reuse)
