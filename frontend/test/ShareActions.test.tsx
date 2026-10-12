@@ -54,3 +54,15 @@ it('keeps QR available after cancelling a WeChat chooser without copying', async
   await waitFor(() => expect((screen.getByRole('button', {name: '分享到微信'}) as HTMLButtonElement).disabled).toBe(false))
   expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
 })
+
+it('hands WeChat a single URL item and keeps the complete copy action', async () => {
+  const share = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'share', {configurable: true, value: share})
+  render(<ShareActions {...input} />)
+  fireEvent.click(screen.getByRole('button', {name: '分享到微信'}))
+  expect(share).toHaveBeenCalledWith({url: input.shareURL})
+  await waitFor(() => expect((screen.getByRole('button', {name: '分享到微信'}) as HTMLButtonElement).disabled).toBe(false))
+  expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', {name: '复制分享文案'}))
+  await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('标题\n\nAI 总结\n\nhttps://r.example/abc'))
+})

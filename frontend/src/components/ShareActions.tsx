@@ -40,7 +40,10 @@ export default function ShareActions({ copyLink = true, xAsButton = false, ...in
     try {
       if (!navigator.share) throw new Error('native share unavailable')
       // Do not await anything before share: iOS requires the original click activation.
-      await navigator.share({
+      // Keep the WeChat handoff to one URL item. Its recipient picker belongs to
+      // the native extension; sending mixed items needlessly complicates that path.
+      // Full article copy remains available through the separate copy action.
+      await navigator.share(toWechat ? { url: input.shareURL } : {
         title: text.split('\n')[0],
         text: text.endsWith(input.shareURL) ? text.slice(0, -input.shareURL.length).trim() : text,
         url: input.shareURL,

@@ -192,6 +192,11 @@ export default function PublicArticleReader({ article, shareURL, shareRef }: Pro
         <span className="text-muted">· 分享文章</span>
       </header>
 
+      <section className="card public-reader-share" aria-label="分享文章">
+        <ShareActions key={shareURL} title={article.title} summaryBrief={article.summary_brief}
+          summaryDetailed={article.summary_detailed} content={article.content} shareURL={shareURL} />
+      </section>
+
       <article>
         <section className="card public-reader-heading">
           <h1>{article.title}</h1>
@@ -229,8 +234,6 @@ export default function PublicArticleReader({ article, shareURL, shareRef }: Pro
               </a>
             )
             : <span className="text-muted">原文链接不可用</span>}
-          <ShareActions key={shareURL} title={article.title} summaryBrief={article.summary_brief}
-            summaryDetailed={article.summary_detailed} content={article.content} shareURL={shareURL} />
         </section>
       </article>
 

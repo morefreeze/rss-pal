@@ -596,3 +596,14 @@ describe('SharePage public reader', () => {
     expect(document.title).toBe('Before late response')
   })
 })
+
+it('places exactly one share toolbar at the beginning, before the article title', async () => {
+  axiosMock.get.mockResolvedValueOnce({data: sharedSnapshot()})
+  renderSharePage()
+  const copy = await screen.findByRole('button', {name: '复制分享文案'})
+  const heading = screen.getByRole('heading', {name: 'Shared title'})
+  expect(copy.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(screen.getAllByRole('button', {name: '分享到微信'})).toHaveLength(1)
+  expect(document.querySelector('.public-reader-actions .social-share')).toBeNull()
+  expect(screen.getByRole('link', {name: '阅读原文'})).toBeTruthy()
+})
