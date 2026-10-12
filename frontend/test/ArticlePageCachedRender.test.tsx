@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticlePage from '../src/pages/ArticlePage'
 import {
@@ -136,7 +136,52 @@ describe('ArticlePage immediate loading', () => {
   beforeEach(() => {
     resetArticleDetailCache()
     vi.clearAllMocks()
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     vi.stubGlobal('ResizeObserver', TestResizeObserver)
+  })
+
+  it('starts cached unread articles at the top, including same-page navigation', async () => {
+    let scrollY = 1800
+    vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY)
+    vi.spyOn(window, 'scrollTo').mockImplementation((x: unknown, y?: number) => {
+      scrollY = typeof x === 'object' ? (x as ScrollToOptions).top ?? scrollY : y ?? 0
+    })
+    apiMocks.getArticle.mockImplementation(() => new Promise(() => {}))
+    putArticleDetail(detail(42))
+    putArticleDetail(detail(43))
+    render(
+      <MemoryRouter initialEntries={['/articles/42']}>
+        <Link to="/articles/43">Next test article</Link>
+        <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+      </MemoryRouter>,
+    )
+    expect(scrollY).toBe(0)
+    scrollY = 1200
+    fireEvent.click(screen.getByText('Next test article'))
+    await waitFor(() => expect(apiMocks.getArticle).toHaveBeenCalledWith(43))
+    expect(scrollY).toBe(0)
+    expect(apiMocks.updateProgress).not.toHaveBeenCalled()
+  })
+
+  it('clears the list offset before restoring this article saved reading position', async () => {
+    let scrollY = 1800
+    vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY)
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800)
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(2800)
+    vi.spyOn(window, 'scrollTo').mockImplementation((x: unknown, y?: number) => {
+      scrollY = typeof x === 'object' ? (x as ScrollToOptions).top ?? scrollY : y ?? 0
+    })
+    apiMocks.getArticle.mockImplementation(() => new Promise(() => {}))
+    const cached = detail(42)
+    cached.progress = { id: 1, article_id: 42, scroll_position: 0.4, is_completed: false, last_read_at: '2026-10-12T00:00:00Z' }
+    putArticleDetail(cached)
+    render(
+      <MemoryRouter initialEntries={['/articles/42']}>
+        <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+      </MemoryRouter>,
+    )
+    expect(scrollY).toBe(0)
+    await waitFor(() => expect(scrollY).toBe(800))
   })
 
   it('renders cached full content while revalidation is pending', () => {

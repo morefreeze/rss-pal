@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
@@ -417,6 +417,12 @@ export default function ArticlePage() {
     }
   }
 
+  // Reset before paint, including cached content and next/previous navigation.
+  // Otherwise the list's window offset can become a new article's progress.
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+  }, [id])
+
   useEffect(() => {
     scrollRestoredForRef.current = null
     setCurrentScrollPosition(0)
@@ -444,7 +450,7 @@ export default function ArticlePage() {
   // first stable measurement that places the saved fraction within the
   // scrollable range.
   useEffect(() => {
-    if (!article) return
+    if (!article || article.id !== Number(id)) return
     if (scrollRestoredForRef.current === article.id) return
     const saved = progress?.scroll_position ?? 0
     // Skip only when: no saved position, OR user already explicitly
@@ -510,7 +516,7 @@ export default function ArticlePage() {
     }
     // Re-run on content change (markdown body length is the cheapest stable
     // proxy that catches both initial load and worker-triggered updates).
-  }, [article?.id, progress?.scroll_position, article?.content?.length])
+  }, [id, article?.id, progress?.scroll_position, article?.content?.length])
 
   // Auto-expand stub link_set children and poll until ready/failed
   useEffect(() => {
