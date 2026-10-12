@@ -1,8 +1,4 @@
 const RETURN_LABEL = '跳回 AI 总结'
-const RETURN_LINK_GAP = 4
-const RETURN_LINK_VIEWPORT_MARGIN = 8
-const RETURN_LINK_FALLBACK_WIDTH = 36
-
 type ActiveRoundTrip = {
   source: HTMLAnchorElement
   cleanup: () => void
@@ -26,13 +22,17 @@ function isPlainPrimaryClick(event: MouseEvent): boolean {
     && !event.altKey
 }
 
-function finalContentRect(target: HTMLElement): DOMRect | null {
-  if (!target.hasChildNodes()) return null
-  const range = document.createRange()
-  range.selectNodeContents(target)
-  if (typeof range.getClientRects !== 'function') return null
-  const rects = Array.from(range.getClientRects()).filter(rect => rect.width > 0 || rect.height > 0)
-  return rects[rects.length - 1] ?? null
+// Keep text targets inline; structural/media blocks get a sibling control row.
+function inlineReturnContainer(target: HTMLElement): HTMLElement | null {
+  if (target.matches('p, h1, h2, h3, h4, h5, h6')) return target
+  if (target.matches('li, blockquote')) {
+    const last = target.lastElementChild
+    if (last instanceof HTMLElement && last.matches('p, li, blockquote')) {
+      return inlineReturnContainer(last)
+    }
+    if (target.matches('li') && !target.querySelector('p, ul, ol, table, pre, div')) return target
+  }
+  return null
 }
 
 export function clearArticleAnchorRoundTrip(source?: HTMLAnchorElement): void {
@@ -46,6 +46,7 @@ export function startArticleAnchorRoundTrip(
   options: ArticleAnchorRoundTripOptions = {},
 ): void {
   clearArticleAnchorRoundTrip()
+  if (!source.isConnected || !target.isConnected) return
 
   const returnLink = document.createElement('a')
   returnLink.className = 'article-anchor-return-link'
@@ -53,44 +54,14 @@ export function startArticleAnchorRoundTrip(
   returnLink.textContent = '↩⌖'
   returnLink.setAttribute('aria-label', RETURN_LABEL)
   returnLink.title = RETURN_LABEL
-  document.body.append(returnLink)
-
-  const updatePosition = () => {
-    if (!source.isConnected || !target.isConnected) {
-      clearArticleAnchorRoundTrip(source)
-      return
-    }
-    const targetRect = target.getBoundingClientRect()
-    const outsideViewport = targetRect.bottom < 0
-      || targetRect.top > window.innerHeight
-      || targetRect.right < 0
-      || targetRect.left > window.innerWidth
-    returnLink.hidden = outsideViewport
-
-    const contentRect = finalContentRect(target)
-    const returnWidth = returnLink.getBoundingClientRect().width || RETURN_LINK_FALLBACK_WIDTH
-    const maxLeft = Math.max(
-      RETURN_LINK_VIEWPORT_MARGIN,
-      window.innerWidth - returnWidth - RETURN_LINK_VIEWPORT_MARGIN,
-    )
-
-    if (contentRect) {
-      const afterTextLeft = contentRect.right + RETURN_LINK_GAP
-      const fitsAfterText = afterTextLeft + returnWidth <= window.innerWidth - RETURN_LINK_VIEWPORT_MARGIN
-      returnLink.style.left = `${fitsAfterText
-        ? afterTextLeft
-        : Math.min(Math.max(contentRect.right - returnWidth, RETURN_LINK_VIEWPORT_MARGIN), maxLeft)}px`
-      returnLink.style.top = `${fitsAfterText
-        ? Math.max(contentRect.top - RETURN_LINK_GAP, RETURN_LINK_VIEWPORT_MARGIN)
-        : contentRect.bottom + 2}px`
-      return
-    }
-
-    returnLink.style.left = `${Math.min(
-      Math.max(targetRect.right - returnWidth, RETURN_LINK_VIEWPORT_MARGIN),
-      maxLeft,
-    )}px`
-    returnLink.style.top = `${Math.max(targetRect.top, RETURN_LINK_VIEWPORT_MARGIN)}px`
+  const inlineContainer = inlineReturnContainer(target)
+  const row = inlineContainer ? null : document.createElement('div')
+  if (row) {
+    row.className = 'article-anchor-return-row'
+    row.append(returnLink)
+    target.after(row)
+  } else {
+    inlineContainer!.append(returnLink)
   }
 
   const onClick = (event: MouseEvent) => {
@@ -112,27 +83,24 @@ export function startArticleAnchorRoundTrip(
     event.preventDefault()
   }
 
-  const scrollOptions: AddEventListenerOptions = { passive: true }
-  window.addEventListener('scroll', updatePosition, scrollOptions)
-  window.addEventListener('resize', updatePosition)
   returnLink.addEventListener('click', onClick)
   returnLink.addEventListener('auxclick', onAuxClick)
 
-  const resizeObserver = typeof ResizeObserver === 'undefined'
-    ? null
-    : new ResizeObserver(updatePosition)
-  resizeObserver?.observe(target)
+  const observer = new MutationObserver(() => {
+    if (!source.isConnected || !target.isConnected || !returnLink.isConnected) {
+      clearArticleAnchorRoundTrip(source)
+    }
+  })
+  observer.observe(document.body, { childList: true, subtree: true })
 
   const cleanup = () => {
-    window.removeEventListener('scroll', updatePosition, scrollOptions)
-    window.removeEventListener('resize', updatePosition)
-    resizeObserver?.disconnect()
+    observer.disconnect()
     returnLink.removeEventListener('click', onClick)
     returnLink.removeEventListener('auxclick', onAuxClick)
     returnLink.remove()
+    row?.remove()
     if (activeRoundTrip?.cleanup === cleanup) activeRoundTrip = null
   }
 
   activeRoundTrip = { source, cleanup }
-  updatePosition()
 }

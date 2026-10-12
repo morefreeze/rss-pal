@@ -69,8 +69,7 @@ describe('article anchor round trip', () => {
     expect(back?.getAttribute('href')).toBe('#summary-article-source-1')
     expect(back?.getAttribute('aria-label')).toBe('跳回 AI 总结')
     expect(back?.getAttribute('title')).toBe('跳回 AI 总结')
-    expect(back?.style.left).toBe('184px')
-    expect(back?.style.top).toBe('40px')
+    expect(back?.parentElement).toBe(target)
 
     fireEvent.click(back!, { detail: 1 })
 
@@ -81,59 +80,45 @@ describe('article anchor round trip', () => {
     expect(history.length).toBe(historyLength)
   })
 
-  it('positions the return anchor after the final rendered text line', () => {
+  it('keeps the return link in the paragraph flow without measuring on scroll', () => {
     const source = addAnchor('summary-article-source-1')
     const target = addTarget()
-    target.append('A wrapped destination sentence')
-    const range = document.createRange()
-    Object.defineProperty(range, 'getClientRects', {
-      value: () => [{
-        x: 20,
-        y: 55,
-        left: 20,
-        top: 55,
-        right: 140,
-        bottom: 75,
-        width: 120,
-        height: 20,
-        toJSON: () => ({}),
-      }],
-    })
-    vi.spyOn(document, 'createRange').mockReturnValue(range)
-
+    target.textContent = 'A wrapped destination sentence'
     startArticleAnchorRoundTrip(source, target)
-
-    const back = document.querySelector<HTMLAnchorElement>('.article-anchor-return-link')!
-    expect(back.style.left).toBe('144px')
-    expect(back.style.top).toBe('51px')
+    const back = target.querySelector<HTMLAnchorElement>('.article-anchor-return-link')!
+    expect(back).not.toBeNull()
+    expect(target.lastChild).toBe(back)
+    expect(back.style.left).toBe('')
+    expect(back.style.top).toBe('')
+    vi.mocked(target.getBoundingClientRect).mockClear()
+    window.dispatchEvent(new Event('scroll'))
+    expect(target.getBoundingClientRect).not.toHaveBeenCalled()
   })
 
-  it('moves the return anchor below the final line when it cannot fit beside the text', () => {
+  it.each(['table', 'div', 'pre'])('places the return link after a %s block', (tag) => {
     const source = addAnchor('summary-article-source-1')
-    const target = addTarget()
-    target.append('A destination sentence that reaches the viewport edge')
-    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(160)
-    const range = document.createRange()
-    Object.defineProperty(range, 'getClientRects', {
-      value: () => [{
-        x: 20,
-        y: 55,
-        left: 20,
-        top: 55,
-        right: 150,
-        bottom: 75,
-        width: 130,
-        height: 20,
-        toJSON: () => ({}),
-      }],
-    })
-    vi.spyOn(document, 'createRange').mockReturnValue(range)
-
+    const article = document.createElement('article')
+    const target = document.createElement(tag)
+    article.append(target)
+    document.body.append(article)
     startArticleAnchorRoundTrip(source, target)
+    const back = article.querySelector('.article-anchor-return-link')!
+    expect(back).not.toBeNull()
+    expect(target.contains(back)).toBe(false)
+    expect(target.nextElementSibling?.contains(back)).toBe(true)
+    clearArticleAnchorRoundTrip()
+    expect(article.children).toHaveLength(1)
+  })
 
-    const back = document.querySelector<HTMLAnchorElement>('.article-anchor-return-link')!
-    expect(back.style.left).toBe('114px')
-    expect(back.style.top).toBe('77px')
+  it('appends inside the final paragraph of a quote', () => {
+    const source = addAnchor('summary-article-source-1')
+    const target = document.createElement('blockquote')
+    target.innerHTML = '<p>First</p><p>Last <a href="https://example.com">link</a></p>'
+    document.body.append(target)
+    startArticleAnchorRoundTrip(source, target)
+    const back = target.querySelector('.article-anchor-return-link')!
+    expect(back.parentElement).toBe(target.lastElementChild)
+    expect(back.closest('a[href="https://example.com"]')).toBeNull()
   })
 
   it('uses instant scrolling and focuses the source for keyboard activation', () => {
@@ -198,13 +183,13 @@ describe('article anchor round trip', () => {
     expect(location.hash).toBe('')
   })
 
-  it('cleans up when the target detaches before the next layout update', () => {
+  it('cleans up when the target detaches without waiting for scrolling', async () => {
     const source = addAnchor('summary-article-source-1')
     const target = addTarget()
     startArticleAnchorRoundTrip(source, target)
     target.remove()
 
-    window.dispatchEvent(new Event('scroll'))
+    await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(document.querySelector('.article-anchor-return-link')).toBeNull()
   })

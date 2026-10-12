@@ -890,8 +890,9 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .article-anchor-return-link {
-  position: fixed;
-  z-index: 30;
+  margin-inline-start: 4px;
+  vertical-align: baseline;
+  white-space: nowrap;
   display: inline-grid;
   place-items: center;
   min-width: 2.1em;
@@ -910,7 +911,10 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .article-anchor-return-link:focus-visible {
   background: var(--surface-hover);
 }
-.article-anchor-return-link[hidden] { display: none; }
+.article-anchor-return-row {
+  display: block;
+  margin-block: 4px;
+}
 
 .article-anchor-highlight {
   background-color: var(--accent-soft, rgba(0, 102, 204, 0.18));

@@ -171,6 +171,19 @@ describe('ReaderInteractionSurface desktop selection', () => {
 })
 
 describe('ReaderInteractionSurface touch long press', () => {
+  it('does not intercept a summary return control after a touch hold', () => {
+    vi.useFakeTimers()
+    const onReturn = vi.fn((event) => event.preventDefault())
+    subject(<p>Text <a className="article-anchor-return-link" href="#summary-source" onClick={onReturn}>↩⌖</a></p>)
+    const back = screen.getByRole('link', { name: '↩⌖' })
+    fireEvent.pointerDown(back, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
+    act(() => vi.advanceTimersByTime(500))
+    expect(screen.queryByRole('menu')).toBeNull()
+    fireEvent.pointerUp(back, { pointerType: 'touch', pointerId: 1 })
+    fireEvent.click(back)
+    expect(onReturn).toHaveBeenCalledTimes(1)
+  })
+
   it('opens at 500ms, then suppresses the generated click and touch contextmenu only', () => {
     vi.useFakeTimers()
     subject()

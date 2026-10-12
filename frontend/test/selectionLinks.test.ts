@@ -36,6 +36,14 @@ afterEach(() => {
 })
 
 describe('resolveSelectionLinks', () => {
+  it('excludes inline summary return controls from selected article links', () => {
+    const root = mount('<p><a href="/real">Real link</a> <a class="article-anchor-return-link" href="#summary-source">↩⌖</a></p>')
+    const [real, back] = root.querySelectorAll('a')
+    expect(urls(root, select(real.firstChild!, 0, back.firstChild!, 2))).toEqual([
+      'https://reader.example/real',
+    ])
+  })
+
   it('promotes a partial selection to the complete link target', () => {
     const root = mount('<p>Before <a href="/alpha">Alpha readable title</a> after</p>')
     const anchor = root.querySelector('a')!

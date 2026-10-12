@@ -8,6 +8,8 @@ describe('article anchor round-trip styles', () => {
     const rule = css.match(/\.article-anchor-return-link\s*\{[^}]+\}/)?.[0] ?? ''
 
     expect(rule).not.toMatch(/transform\s*:/)
+    expect(rule).not.toMatch(/position:\s*(fixed|absolute|sticky)/)
+    expect(rule).toMatch(/white-space:\s*nowrap/)
   })
 
   it('sizes the summary article link around its label and icon', () => {

@@ -27,6 +27,8 @@ export function linkTargetFromAnchor(
   anchor: HTMLAnchorElement,
   normalizeLink: NormalizeLink,
 ): ReaderLinkTarget | null {
+  // Navigation controls are not source-article links for selection or long press.
+  if (anchor.classList.contains('article-anchor-return-link')) return null
   const href = anchor.getAttribute('href')
   if (!href) return null
   const url = normalizeLink(href)
