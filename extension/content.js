@@ -7,7 +7,8 @@
 
   function extractGenericHtml() {
     var clone = document.documentElement.cloneNode(true);
-    clone.querySelectorAll('script,style,link,noscript,template').forEach(function (n) {
+    // JSON-LD is inert article metadata; the server reads it before removing scripts.
+    clone.querySelectorAll('script:not([type="application/ld+json" i]),style,link,noscript,template').forEach(function (n) {
       n.remove();
     });
     clone.querySelectorAll('img').forEach(function (img) {
@@ -121,15 +122,41 @@
                 document.querySelector('#js_text_title') ||
                 document.querySelector('.rich_media_title');
     var titleText = title ? title.textContent.trim() : '';
+    var publicationMeta = extractWechatPublicationMeta();
 
     var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' +
       titleText.replace(/</g, '&lt;').replace(/>/g, '&gt;') +
-      '</title></head><body>' +
+      '</title>' + publicationMeta + '</head><body>' +
       '<div id="js_content">' +
       (imgHtml ? imgHtml : '') +
       clone.innerHTML +
       '</div></body></html>';
 
+    return html;
+  }
+
+  function extractWechatPublicationMeta() {
+    // Preserve metadata tiers and leave date parsing/conflict detection to the server.
+    var metadata = document.querySelectorAll('head meta[property="article:published_time"],head meta[name="article:published_time"],head meta[itemprop="datePublished"],head meta[name="datePublished"],head meta[name="pubdate"],head meta[name="publishdate"],head meta[name="publish_date"],head meta[name="publication_date"]');
+    var html = Array.from(metadata).map(function (meta) { return meta.outerHTML; }).join('');
+    var excluded = 'aside,nav,footer,[class*="comment"],[id*="comment"],[itemprop="comment"],[itemtype$="/Comment"],[class*="related"],[id*="related"],[class*="recommend"],[id*="recommend"]';
+    html += Array.from(document.querySelectorAll('script[type="application/ld+json" i]'))
+      .filter(function (script) { return !script.closest(excluded); })
+      .map(function (script) { return script.outerHTML; }).join('');
+    var sources = document.querySelectorAll('#publish_time');
+    for (var i = 0; i < sources.length; i++) {
+      if (sources[i].closest(excluded)) continue;
+      var values = [sources[i].getAttribute('datetime'), sources[i].getAttribute('content'), sources[i].textContent];
+      for (var j = 0; j < values.length; j++) {
+        var value = (values[j] || '').trim();
+        // Do not invent a year for relative dates such as "昨天" or "9月20日".
+        if (!/^\d{4}(?:-\d{1,2}-\d{1,2}|年\d{1,2}月\d{1,2}日)(?:$|[T\s])/.test(value)) continue;
+        var meta = document.createElement('meta');
+        meta.setAttribute('name', 'rsspal:wechat_publish_time');
+        meta.setAttribute('content', value);
+        return html + meta.outerHTML;
+      }
+    }
     return html;
   }
 

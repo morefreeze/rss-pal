@@ -14,7 +14,7 @@ const apiMocks = vi.hoisted(() => ({
   dislikeArticle: vi.fn(async () => undefined),
   expandLinkSetChild: vi.fn(async () => undefined),
   exportMarkdown: vi.fn(async () => ''),
-  fetchContent: vi.fn(async () => ({ content: '' })),
+  fetchContent: vi.fn(async (): Promise<{ content: string; published_at?: string | null }> => ({ content: '' })),
   generateSummaryStream: vi.fn(),
   getArticle: vi.fn(),
   getTemplates: vi.fn(async () => []),
@@ -181,6 +181,22 @@ describe('ArticlePage immediate loading', () => {
     expect(screen.queryByText('旧想法')).toBeNull()
   })
 
+  it('copies a public share directly beside Share without opening the dialog', async () => {
+    apiMocks.getArticle.mockImplementation(() => new Promise(() => {}))
+    putArticleDetail(detail(42))
+    const url = 'https://r.morefreeze.top/Aa0000000000'
+    apiMocks.createArticleShare.mockResolvedValueOnce({id:'a',url,status:'active',legacy:false,expires_at:null})
+    Object.defineProperty(navigator, 'clipboard', {configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}})
+    render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+    const share = screen.getByRole('button', {name:'分享'})
+    const copy = screen.getByRole('button', {name:'复制链接'})
+    expect(share.nextElementSibling?.contains(copy)).toBe(true)
+    fireEvent.click(copy)
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(url))
+    expect(apiMocks.createArticleShare).toHaveBeenCalledWith(42, null)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('starts cached unread articles at the top, including same-page navigation', async () => {
     let scrollY = 1800
     vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY)
@@ -340,6 +356,33 @@ describe('ArticlePage immediate loading', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '重新抓取' }))
     await waitFor(() => expect(apiMocks.fetchContent).toHaveBeenCalledWith(42))
+    expect(peekArticleDetail(42)).toBeUndefined()
+  })
+
+  it.each([
+    { name: 'newly extracted date', response: { content: 'Fresh body', published_at: '2026-09-20T08:30:00+08:00' }, expected: '2026-09-20T08:30:00+08:00' },
+    { name: 'older endpoint without date', response: { content: 'Fresh body' }, expected: '2026-07-27T00:00:00Z' },
+    { name: 'explicitly absent date', response: { content: 'Fresh body', published_at: null }, expected: null },
+  ])('updates refetched content and publication display for $name', async ({ response, expected }) => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    apiMocks.fetchContent.mockResolvedValueOnce(response)
+    putArticleDetail(detail(42))
+    render(
+      <MemoryRouter initialEntries={['/articles/42']}>
+        <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    const publicationDisplay = screen.getByRole('link', { name: '原文链接' }).parentElement!.querySelector('span')!
+    const oldDisplay = publicationDisplay.textContent
+    fireEvent.click(screen.getByRole('button', { name: '重新抓取' }))
+    await waitFor(() => expect(screen.getByTestId('article-body').textContent).toBe('Fresh body'))
+    expect(playerCardMocks.render.mock.calls.at(-1)?.[0].article.published_at).toBe(expected)
+    if (expected === response.published_at) {
+      expect(publicationDisplay.textContent).not.toBe(oldDisplay)
+    } else {
+      expect(publicationDisplay.textContent).toBe(oldDisplay)
+    }
     expect(peekArticleDetail(42)).toBeUndefined()
   })
 })

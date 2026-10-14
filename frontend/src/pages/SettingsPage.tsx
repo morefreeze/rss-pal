@@ -92,14 +92,32 @@ function buildBookmarkletJS(apiBase: string, token: string): string {
   // rockpapershotgun.com), which severs window.opener and broke an earlier
   // postMessage-handshake design.
   //
-  // Pre-trim on a clone of documentElement: drops script/style/link/noscript
+  // Pre-trim on a clone of documentElement: drops executable scripts/style/link/noscript
   // (≈60× shrink on mp.weixin.qq.com — 3 MiB → 50 KiB — also keeping the
   // resulting URL fragment well under browser limits) and promotes data-src
   // into src so lazy-loaded article images survive the round trip. The live
-  // DOM is not mutated.
+  // DOM is not mutated. Keep inert JSON-LD for server-side publication-date extraction.
   const code = `(function(){
 var c=document.documentElement.cloneNode(true);
-c.querySelectorAll('script,style,link,noscript,template').forEach(function(n){n.remove();});
+c.querySelectorAll('script:not([type="application/ld+json" i]),style,link,noscript,template').forEach(function(n){n.remove();});
+if(location.hostname==='mp.weixin.qq.com'){
+  var sources=document.querySelectorAll('#publish_time');
+  var published='';
+  for(var i=0;i<sources.length&&!published;i++){
+    if(sources[i].closest('aside,nav,footer,[class*="comment"],[id*="comment"],[itemprop="comment"],[itemtype$="/Comment"],[class*="related"],[id*="related"],[class*="recommend"],[id*="recommend"]'))continue;
+    var values=[sources[i].getAttribute('datetime'),sources[i].getAttribute('content'),sources[i].textContent];
+    for(var j=0;j<values.length;j++){
+      var value=(values[j]||'').trim();
+      if(/^\\d{4}(?:-\\d{1,2}-\\d{1,2}|年\\d{1,2}月\\d{1,2}日)(?:$|[T\\s])/.test(value)){published=value;break;}
+    }
+  }
+  if(published){
+    var meta=document.createElement('meta');
+    meta.setAttribute('name','rsspal:wechat_publish_time');
+    meta.setAttribute('content',published);
+    c.querySelector('head').appendChild(meta);
+  }
+}
 c.querySelectorAll('img').forEach(function(i){
   var s=(i.getAttribute('src')||'').trim();
   if(!s||s.indexOf('data:')===0){

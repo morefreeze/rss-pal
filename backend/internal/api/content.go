@@ -16,7 +16,7 @@ import (
 )
 
 type articleContentFetcher interface {
-	FetchContentFresh(context.Context, string) (string, error)
+	FetchContentFreshWithMetadata(context.Context, string) (rss.ContentResult, error)
 	FindMediaInHTML(context.Context, string) *rss.MediaInfo
 }
 
@@ -63,14 +63,22 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 		return
 	}
 
-	content, err := h.fetchFreshContent(c.Request.Context(), article.URL)
+	result, err := h.fetchFreshContent(c.Request.Context(), article.URL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	if err := articleRepo.UpdateArticlePublishedAtIfNull(id, result.PublishedAt); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if article.PublishedAt == nil {
+		article.PublishedAt = result.PublishedAt
+	}
+	content := result.Content
 	if content == "" {
-		c.JSON(http.StatusOK, gin.H{"content": article.Content, "message": "no content found"})
+		c.JSON(http.StatusOK, gin.H{"content": article.Content, "published_at": article.PublishedAt, "message": "no content found"})
 		return
 	}
 
@@ -86,15 +94,15 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 	// update is what the user really asked for.
 	h.tryBackfillMedia(c, article)
 
-	c.JSON(http.StatusOK, gin.H{"content": content})
+	c.JSON(http.StatusOK, gin.H{"content": content, "published_at": article.PublishedAt})
 }
 
-func (h *ContentHandler) fetchFreshContent(ctx context.Context, target string) (string, error) {
+func (h *ContentHandler) fetchFreshContent(ctx context.Context, target string) (rss.ContentResult, error) {
 	// Fit extraction and optional media lookup inside the proxy/client's 60s
 	// deadline. A cancelled lookup must never be reported as an empty success.
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	content, err := h.contentFetcher.FetchContentFresh(ctx, target)
+	content, err := h.contentFetcher.FetchContentFreshWithMetadata(ctx, target)
 	if err == nil && ctx.Err() != nil {
 		err = ctx.Err()
 	}

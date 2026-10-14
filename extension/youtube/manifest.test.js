@@ -91,7 +91,7 @@ test('sets only the approved RSS Pal CORS response headers', () => {
 
 test('keeps repeatable unit and smoke checks in package scripts', () => {
   assert.deepEqual(packageJson.scripts, {
-    test: 'node --test youtube/*.test.js englife/*.test.js reddit/*.test.js test/*.test.js',
+    test: 'node --test *.test.js youtube/*.test.js englife/*.test.js reddit/*.test.js test/*.test.js',
     smoke: 'node adapters/twitter/smoke-test.js',
     check: 'npm test && npm run smoke',
   });

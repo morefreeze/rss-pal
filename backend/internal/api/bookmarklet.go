@@ -105,6 +105,7 @@ type bookmarkletArticleRepo interface {
 	FindByOwnerAndURL(ownerID int, exactURL string) (*model.Article, error)
 	Create(article *model.Article) error
 	UpdateContent(id int, content string, wordCount, readingMinutes int) error
+	UpdateArticlePublishedAtIfNull(id int, publishedAt *time.Time) error
 	UpdateTitle(id int, title string) error
 	UpdateSummary(id int, summaryBrief, summaryDetailed string) error
 	UpdateMedia(articleID int, mediaURL, mediaType string, durationSeconds int) error
@@ -173,6 +174,10 @@ func (a bookmarkletArticleRepoAdapter) UpdateContent(id int, content string, wor
 }
 func (a bookmarkletArticleRepoAdapter) UpdateTitle(id int, title string) error {
 	return a.r.UpdateTitle(id, title)
+}
+
+func (a bookmarkletArticleRepoAdapter) UpdateArticlePublishedAtIfNull(id int, publishedAt *time.Time) error {
+	return a.r.UpdateArticlePublishedAtIfNull(id, publishedAt)
 }
 func (a bookmarkletArticleRepoAdapter) UpdateSummary(id int, summaryBrief, summaryDetailed string) error {
 	return a.r.UpdateSummary(id, summaryBrief, summaryDetailed)
@@ -302,13 +307,14 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	if !wasTwitter {
-		body, capturedMedia, err := extractArticleFromHTML(req.HTML, req.URL)
+		body, capturedMedia, capturedDate, err := extractArticleWithPublication(req.HTML, req.URL)
 		if err != nil || strings.TrimSpace(body) == "" {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "无法从页面提取正文"})
 			return
 		}
 		content = body
 		media = capturedMedia
+		publishedAt = capturedDate
 		if media != nil {
 			if _, err := httpx.ValidateURL(normalized); err != nil {
 				media = nil
@@ -360,6 +366,10 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		if err := articleRepo.UpdateContent(existing.ID, content, wc, rm); err != nil {
 			log.Printf("bookmarklet: UpdateContent failed for article=%d: %v", existing.ID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章失败"})
+			return
+		}
+		if err := articleRepo.UpdateArticlePublishedAtIfNull(existing.ID, publishedAt); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章时间失败"})
 			return
 		}
 		// A bookmarklet re-capture is the user explicitly asking for a fresh
@@ -414,7 +424,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		Title:       title,
 		URL:         normalized,
 		Content:     content,
-		PublishedAt: publishedAt, // tweet's original time for Twitter captures, nil otherwise
+		PublishedAt: publishedAt,
 		IsClip:      true,
 		Kind:        articleKind(wasTwitter),
 	}
@@ -479,10 +489,16 @@ func extractContentFromHTML(html, baseURL string) (string, error) {
 }
 
 func extractArticleFromHTML(html, baseURL string) (string, *rss.MediaInfo, error) {
+	content, media, _, err := extractArticleWithPublication(html, baseURL)
+	return content, media, err
+}
+
+func extractArticleWithPublication(html, baseURL string) (string, *rss.MediaInfo, *time.Time, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
+	publishedAt := rss.ExtractPublishedAt(doc, baseURL)
 	// If the HTML is a clean extraction from our extension (body contains
 	// #js_content and optionally #wx_images), skip the aggressive generic
 	// cleanup — the extension already did targeted cleanup and the generic
@@ -519,7 +535,7 @@ func extractArticleFromHTML(html, baseURL string) (string, *rss.MediaInfo, error
 		content = b.String()
 	}
 
-	return strings.TrimSpace(content), media, nil
+	return strings.TrimSpace(content), media, publishedAt, nil
 }
 
 // GenerateBookmarkletToken returns a 32-byte random hex string suitable for

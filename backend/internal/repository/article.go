@@ -774,6 +774,16 @@ func (r *ArticleRepository) UpdatePublishedAtIfNull(feedID int, url string, publ
 	return err
 }
 
+// UpdateArticlePublishedAtIfNull preserves existing dates and uses the caller's
+// RLS transaction through WithCtx. TIMESTAMP columns store UTC wall time.
+func (r *ArticleRepository) UpdateArticlePublishedAtIfNull(id int, publishedAt *time.Time) error {
+	if publishedAt == nil {
+		return nil
+	}
+	_, err := r.db.Exec(`UPDATE articles SET published_at=$1 WHERE id=$2 AND published_at IS NULL`, publishedAt.UTC(), id)
+	return err
+}
+
 func (r *ArticleRepository) GetRecommended(limit int, userID int) ([]model.Article, error) {
 	query := `
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind

@@ -16,6 +16,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
 RUN CGO_ENABLED=0 GOOS=linux go build -o backfill_image_dimensions ./cmd/backfill_image_dimensions
 RUN CGO_ENABLED=0 GOOS=linux go build -o repair_explore_content ./cmd/repair_explore_content
+RUN CGO_ENABLED=0 GOOS=linux go build -o backfill_clip_dates ./cmd/backfill_clip_dates
 
 # Runtime stage
 FROM alpine:latest
@@ -41,6 +42,7 @@ WORKDIR /app
 COPY --from=builder /app/server .
 COPY --from=builder /app/backfill_image_dimensions .
 COPY --from=builder /app/repair_explore_content .
+COPY --from=builder /app/backfill_clip_dates .
 
 EXPOSE 8080
 

@@ -5,10 +5,10 @@
 **Tech Stack:** Chrome MV3、Go/Gin/PostgreSQL RLS、React/TypeScript、node:test/vitest。
 
 ## Tasks
-- [ ] Backend: 先写 HTTP/DB 失败测试；新增 055 migration、RLS 矩阵与 compose migration；repository WithCtx，capture append（2000字，累计10000字，重试不重复，空值不擦除），详情/网摘与 PATCH 访问隔离，响应 note_saved；公开分享不得暴露，备份覆盖。运行对应 go tests。
+- [x] Backend: 先写 HTTP/DB 失败测试；新增 055 migration、RLS 矩阵与 compose migration；repository WithCtx，capture append（2000字，累计10000字，重试不重复，空值不擦除），详情/网摘与 PATCH 访问隔离，响应 note_saved；公开分享不得暴露，备份覆盖。运行对应 go tests。
 - [x] Extension: 先写 popup DOM 测试；新增 focused capture-note helper 与可选输入/快捷提示/引用/计数/快捷键，草稿按账号网页隔离，输入期间关闭也保留，保存锁定输入，只在 note_saved 后清理；对接 HTML/PDF 和 duplicate，版本 1.9.0。运行 npm run check。
 - [x] Frontend: 先写 ArticleNote 组件编辑/失败保留测试；新增组件与样式、client PATCH/类型、ArticlePage 嵌入并更新 detail cache、ArticleCard 单行预览。运行 npm run check 与 build。
-- [ ] Review: 按 requesting-code-review 派独立 reviewer，修正发现，完整回归。用真实浏览器验证布局/输入流程。
+- [x] Review: 按 requesting-code-review 派独立 reviewer，修正发现，完整回归。用真实浏览器验证布局/输入流程。
 - [ ] Delivery: 保留主目录未提交工作，合并 master、推送，等待 deploy-tencent workflow；远端 exact revision、容器、API、bundle/extension ZIP 与用户行为验证。
 
 ## Execution
@@ -16,7 +16,11 @@
 
 ## Verification progress
 
-- Extension: 192 tests plus Twitter adapter smoke passed.
-- Frontend: 695 Vitest cases and 9 legacy tests passed; production build passed.
+- Extension: 226 tests plus Twitter adapter smoke passed after integration with the publication-date changes.
+- Frontend: 720 Vitest cases in 76 suites and 9 legacy tests passed; production build passed after integration.
 - Real Chrome extension: prompt insertion, close/reopen draft restore, capture acknowledgement and draft clear verified against isolated API/DB. Article detail edit, page reload persistence, and clip-list preview verified through actual UI.
-- Independent review: stale article GET overriding a new note reproduced then fixed; adapter-only scope hint added. Backend commit acknowledgement, PDF filesystem rollback and child-article backup identity are being hardened before integration.
+- Independent review: stale article GET overriding a new note reproduced then fixed; adapter-only scope hint added. Backend commit acknowledgement, PDF filesystem rollback and child-article backup identity fixed and re-reviewed. Deferred commit failures return 500; backup v2 retains parent identity and reads v1. Content refetch races also preserve freshly saved notes.
+
+- Integrated real Chrome verification: duplicate capture appends the note and clears the acknowledged draft; article editing persists across refresh. Upstream publication-date metadata and the direct share-copy control remain present.
+
+- Integrated backend: 28 packages, 1952 tests/subtests passed, zero failures or skips; go vet passed for API, backup, repository, RSS and clip-date backfill.

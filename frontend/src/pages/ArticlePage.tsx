@@ -52,6 +52,7 @@ import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
 import ArticleProgressBar from '../components/ArticleProgressBar'
 import ShareDialog from '../components/ShareDialog'
+import CopyPublicLinkButton from '../components/CopyPublicLinkButton'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 import FeedSourceLink from '../components/FeedSourceLink'
 import { extractSearchFromPath } from '../utils/feedFilterLink'
@@ -872,7 +873,11 @@ export default function ArticlePage() {
     try {
       const result = await fetchContent(article.id)
       invalidateArticleDetail(article.id)
-      setArticle(current => current?.id === article.id ? { ...current, content: result.content } : current)
+      setArticle(current => current?.id === article.id ? {
+        ...current,
+        content: result.content,
+        published_at: result.published_at === undefined ? current.published_at : result.published_at,
+      } : current)
     } catch {
       toast.error('获取内容失败')
     } finally {
@@ -1308,6 +1313,7 @@ export default function ArticlePage() {
           >
             📖 阅读模式
           </button>
+          <div className="article-share-shortcuts">
           <button
             className="secondary"
             onClick={() => setShareDialogOpen(true)}
@@ -1315,6 +1321,8 @@ export default function ArticlePage() {
           >
             分享
           </button>
+          <CopyPublicLinkButton key={article.id} articleId={article.id} />
+          </div>
           <ArticleActionsMenu onDelete={handleDelete} />
         </div>
       </div>
