@@ -140,6 +140,22 @@ describe('ArticlePage immediate loading', () => {
     vi.stubGlobal('ResizeObserver', TestResizeObserver)
   })
 
+  it('copies a public share directly beside Share without opening the dialog', async () => {
+    apiMocks.getArticle.mockImplementation(() => new Promise(() => {}))
+    putArticleDetail(detail(42))
+    const url = 'https://r.morefreeze.top/Aa0000000000'
+    apiMocks.createArticleShare.mockResolvedValueOnce({id:'a',url,status:'active',legacy:false,expires_at:null})
+    Object.defineProperty(navigator, 'clipboard', {configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}})
+    render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+    const share = screen.getByRole('button', {name:'分享'})
+    const copy = screen.getByRole('button', {name:'复制链接'})
+    expect(share.nextElementSibling?.contains(copy)).toBe(true)
+    fireEvent.click(copy)
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(url))
+    expect(apiMocks.createArticleShare).toHaveBeenCalledWith(42, null)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('starts cached unread articles at the top, including same-page navigation', async () => {
     let scrollY = 1800
     vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY)

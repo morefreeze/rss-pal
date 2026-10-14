@@ -51,6 +51,7 @@ import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
 import ArticleProgressBar from '../components/ArticleProgressBar'
 import ShareDialog from '../components/ShareDialog'
+import CopyPublicLinkButton from '../components/CopyPublicLinkButton'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
 import FeedSourceLink from '../components/FeedSourceLink'
 import { extractSearchFromPath } from '../utils/feedFilterLink'
@@ -1296,6 +1297,7 @@ export default function ArticlePage() {
           >
             分享
           </button>
+          <CopyPublicLinkButton key={article.id} articleId={article.id} />
           <ArticleActionsMenu onDelete={handleDelete} />
         </div>
       </div>
