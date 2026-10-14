@@ -342,9 +342,9 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		oldImages := countMarkdownImages(existing.Content)
 		if shouldPromptDuplicate(newLen, oldLen, newImages, oldImages, req.Force) {
 			if noteSaved && h.backup != nil {
-				h.backup.TriggerAsync()
+				afterCommit(c, h.backup.TriggerAsync)
 			}
-			c.JSON(http.StatusOK, gin.H{
+			jsonAfterCommit(c, http.StatusOK, gin.H{
 				"status":          "duplicate",
 				"note_saved":      noteSaved,
 				"article_id":      existing.ID,
@@ -368,12 +368,16 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		if title != "" && title != existing.Title {
 			if err := articleRepo.UpdateTitle(existing.ID, title); err != nil {
 				log.Printf("bookmarklet: UpdateTitle failed for article=%d: %v", existing.ID, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章失败"})
+				return
 			}
 		}
 		// Clearing summaries forces the worker's backfillSummaries loop to
 		// regenerate them from the new content on its next pass.
 		if err := articleRepo.UpdateSummary(existing.ID, "", ""); err != nil {
 			log.Printf("bookmarklet: clear summary failed for article=%d: %v", existing.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章失败"})
+			return
 		}
 		var mediaURL, mediaType string
 		var mediaDuration int
@@ -382,12 +386,14 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		}
 		if err := articleRepo.UpdateMedia(existing.ID, mediaURL, mediaType, mediaDuration); err != nil {
 			log.Printf("bookmarklet: media refresh failed for article=%d: %v", existing.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章失败"})
+			return
 		}
 		log.Printf("bookmarklet: updated article=%d user=%d url=%s len=%d (force=%v)", existing.ID, user.ID, normalized, newLen, req.Force)
 		if h.backup != nil {
-			h.backup.TriggerAsync()
+			afterCommit(c, h.backup.TriggerAsync)
 		}
-		c.JSON(http.StatusOK, gin.H{
+		jsonAfterCommit(c, http.StatusOK, gin.H{
 			"status":     "updated",
 			"note_saved": noteSaved,
 			"article_id": existing.ID,
@@ -429,9 +435,9 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 	log.Printf("bookmarklet: created article=%d user=%d url=%s len=%d", article.ID, user.ID, normalized, len(content))
 	if h.backup != nil {
-		h.backup.TriggerAsync()
+		afterCommit(c, h.backup.TriggerAsync)
 	}
-	c.JSON(http.StatusCreated, gin.H{
+	jsonAfterCommit(c, http.StatusCreated, gin.H{
 		"status":     "created",
 		"note_saved": noteSaved,
 		"article_id": article.ID,

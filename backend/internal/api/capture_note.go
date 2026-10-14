@@ -83,5 +83,5 @@ func (h *ArticleHandler) UpdateCaptureNote(c *gin.Context) {
 		captureNoteError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"capture_note": saved})
+	jsonAfterCommit(c, http.StatusOK, gin.H{"capture_note": saved})
 }

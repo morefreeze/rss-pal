@@ -111,7 +111,7 @@ func (h *BookmarkletHandler) processPDFCapture(
 			// explicitly skips — that was the previous bug here.) Surfaces
 			// "processing" to the user so they know we accepted the retry.
 			if err := articleRepo.ResetPDFToProcessing(existing.ID); err != nil {
-				log.Printf("pdf: reset existing %d to processing (re-queue): %v", existing.ID, err)
+				return pdfCaptureResult{}, fmt.Errorf("reset processing: %w", err)
 			}
 			return pdfCaptureResult{
 				Status:    "processing",
@@ -128,12 +128,7 @@ func (h *BookmarkletHandler) processPDFCapture(
 		if err := articleRepo.CreatePDFStub(article); err != nil {
 			return pdfCaptureResult{}, fmt.Errorf("create stub: %w", err)
 		}
-		// Best-effort image dump while we have the bytes. Failure to write
-		// images is non-fatal — text will catch up after OCR and figures
-		// can be re-extracted then.
-		if err := pdfextract.WriteImages(imageBaseDir, article.ID, collectImages(r.Pages)); err != nil {
-			log.Printf("pdf: WriteImages for stub article=%d: %v", article.ID, err)
-		}
+		stagePDFImages(c, imageBaseDir, article.ID, collectImages(r.Pages))
 		return pdfCaptureResult{
 			Status:    "processing",
 			ArticleID: article.ID,
@@ -157,12 +152,7 @@ func (h *BookmarkletHandler) processPDFCapture(
 		}
 	}
 
-	// Write images first so the markdown image refs resolve against real
-	// files on disk. Non-fatal — text-only is still useful.
-	imgs := collectImages(r.Pages)
-	if err := pdfextract.WriteImages(imageBaseDir, article.ID, imgs); err != nil {
-		log.Printf("pdf: WriteImages for article=%d: %v", article.ID, err)
-	}
+	stagePDFImages(c, imageBaseDir, article.ID, collectImages(r.Pages))
 
 	pdfextract.BuildMarkdown(&r, article.ID)
 	content := r.Markdown
@@ -177,13 +167,13 @@ func (h *BookmarkletHandler) processPDFCapture(
 	}
 	if title != "" && title != article.Title {
 		if err := articleRepo.UpdateTitle(article.ID, title); err != nil {
-			log.Printf("pdf: UpdateTitle for article=%d: %v", article.ID, err)
+			return pdfCaptureResult{}, fmt.Errorf("update title: %w", err)
 		}
 	}
 	// Clearing the cached summary forces the worker's backfillSummaries
 	// loop to regenerate from the freshly extracted content.
 	if err := articleRepo.UpdateSummary(article.ID, "", ""); err != nil {
-		log.Printf("pdf: clear summary for article=%d: %v", article.ID, err)
+		return pdfCaptureResult{}, fmt.Errorf("clear summary: %w", err)
 	}
 
 	status := "created"
@@ -195,6 +185,17 @@ func (h *BookmarkletHandler) processPDFCapture(
 		ArticleID: article.ID,
 		Message:   "已加入网摘：" + title,
 	}, nil
+}
+
+// Keep the extracted bytes in request memory until the database transaction
+// commits. Validation failures and commit failures never publish or overwrite
+// article assets. Middleware runs this synchronously before the success JSON.
+func stagePDFImages(c *gin.Context, baseDir string, articleID int, imgs []pdfextract.ImageRef) {
+	afterCommit(c, func() {
+		if err := pdfextract.WriteImages(baseDir, articleID, imgs); err != nil {
+			log.Printf("pdf: publish images for article=%d: %v", articleID, err)
+		}
+	})
 }
 
 // collectImages flattens per-page image refs into one slice for
@@ -282,9 +283,9 @@ func (h *BookmarkletHandler) CapturePDF(c *gin.Context) {
 	}
 	res.NoteSaved = noteSaved
 	if h.backup != nil {
-		h.backup.TriggerAsync()
+		afterCommit(c, h.backup.TriggerAsync)
 	}
-	c.JSON(pdfStatusToHTTP(res.Status), res)
+	jsonAfterCommit(c, pdfStatusToHTTP(res.Status), res)
 }
 
 // CapturePDFURL is POST /api/bookmarklet/capture-pdf-url. Body:
@@ -386,9 +387,9 @@ func (h *BookmarkletHandler) CapturePDFURL(c *gin.Context) {
 		return
 	}
 	if h.backup != nil {
-		h.backup.TriggerAsync()
+		afterCommit(c, h.backup.TriggerAsync)
 	}
-	c.JSON(pdfStatusToHTTP(res.Status), res)
+	jsonAfterCommit(c, pdfStatusToHTTP(res.Status), res)
 }
 
 // pdfStatusToHTTP maps the pdfCaptureResult.Status discriminator to the

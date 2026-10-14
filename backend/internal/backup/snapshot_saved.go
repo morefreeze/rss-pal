@@ -16,7 +16,9 @@ import (
 
 // SavedSnapshotVersion is bumped when the on-disk SavedSnapshot shape changes
 // in a way an older reader cannot handle. Independent of SnapshotVersion.
-const SavedSnapshotVersion = 1
+// Version 2 preserves parent identities. Version 1 remains readable; older
+// readers must reject new archives rather than merge distinct child articles.
+const SavedSnapshotVersion = 2
 
 // savedFileSuffix replaces ".json" on the metadata filename to derive the
 // sibling saved-archive path. The chosen suffix encodes both that the file
@@ -39,6 +41,8 @@ type SavedArticleRow struct {
 	ExportID             int        `json:"export_id"`
 	FeedURL              string     `json:"feed_url"`
 	FeedOwnerID          *int       `json:"feed_owner_id,omitempty"`
+	ParentExportID       *int       `json:"parent_export_id,omitempty"`
+	LinksExtendable      *bool      `json:"links_extendable,omitempty"`
 	Title                string     `json:"title"`
 	URL                  string     `json:"url"`
 	Content              string     `json:"content"`
@@ -201,26 +205,24 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 	}
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT a.id, f.url, f.owner_id, COALESCE(a.title, ''), a.url, COALESCE(a.content, ''),
-		       a.published_at,
-		       COALESCE(a.summary_brief, ''), COALESCE(a.summary_detailed, ''),
-		       a.fetched_at, a.word_count, a.reading_minutes,
-		       COALESCE(a.editor_note, ''),
-		       COALESCE(a.media_url, ''), COALESCE(a.media_type, ''), COALESCE(a.media_duration_seconds, 0),
-		       a.is_clip
-		FROM articles a
-		JOIN feeds f ON a.feed_id = f.id
-		WHERE (a.parent_article_id IS NULL
-		  AND (
-		    EXISTS (
-		      SELECT 1 FROM user_preferences p
-		      WHERE p.article_id = a.id AND p.signal_type = 'save'
-		    )
-		    OR f.feed_type = 'saved'
-		    OR a.is_clip
-		  ))
-		  OR EXISTS (SELECT 1 FROM article_capture_notes n WHERE n.article_id=a.id AND n.capture_note <> '')
-		ORDER BY a.id`)
+ WITH RECURSIVE archived(id) AS (
+  SELECT a.id FROM articles a JOIN feeds f ON f.id=a.feed_id
+  WHERE (a.parent_article_id IS NULL AND (
+    EXISTS (SELECT 1 FROM user_preferences p WHERE p.article_id=a.id AND p.signal_type='save')
+    OR f.feed_type='saved' OR a.is_clip))
+   OR EXISTS (SELECT 1 FROM article_capture_notes n WHERE n.article_id=a.id AND n.capture_note<>'')
+  UNION
+  SELECT a.parent_article_id FROM articles a JOIN archived s ON s.id=a.id
+  WHERE a.parent_article_id IS NOT NULL
+ )
+ SELECT a.id, f.url, f.owner_id, a.parent_article_id, a.links_extendable,
+        COALESCE(a.title, ''), a.url, COALESCE(a.content, ''), a.published_at,
+        COALESCE(a.summary_brief, ''), COALESCE(a.summary_detailed, ''),
+        a.fetched_at, a.word_count, a.reading_minutes, COALESCE(a.editor_note, ''),
+        COALESCE(a.media_url, ''), COALESCE(a.media_type, ''), COALESCE(a.media_duration_seconds, 0), a.is_clip
+ FROM articles a JOIN feeds f ON a.feed_id=f.id
+ WHERE a.id IN (SELECT id FROM archived)
+ ORDER BY a.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +231,7 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 	var savedIDs []int
 	for rows.Next() {
 		var r SavedArticleRow
-		if err := rows.Scan(&r.ExportID, &r.FeedURL, &r.FeedOwnerID, &r.Title, &r.URL, &r.Content,
+		if err := rows.Scan(&r.ExportID, &r.FeedURL, &r.FeedOwnerID, &r.ParentExportID, &r.LinksExtendable, &r.Title, &r.URL, &r.Content,
 			&r.PublishedAt,
 			&r.SummaryBrief, &r.SummaryDetailed,
 			&r.FetchedAt, &r.WordCount, &r.ReadingMinutes,

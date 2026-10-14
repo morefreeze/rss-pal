@@ -83,7 +83,11 @@ func PublicTokenMiddleware(db *sql.DB, resolve PublicTokenResolver) gin.HandlerF
 		if err := tx.Commit(); err != nil {
 			log.Printf("CRITICAL: public_token: tx.Commit failed after %d response: %v", c.Writer.Status(), err)
 			_ = c.Error(err)
+			rejectCommittedJSON(c)
+			return
 		}
+		runAfterCommit(c)
+		writeCommittedJSON(c)
 	}
 }
 

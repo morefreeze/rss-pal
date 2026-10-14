@@ -120,8 +120,11 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 		if err != nil {
 			return stats, fmt.Errorf("load feed id map: %w", err)
 		}
-		for i := range ss.SavedArticles {
-			ar := &ss.SavedArticles[i]
+		ordered, err := orderSavedArticles(ss.SavedArticles)
+		if err != nil {
+			return stats, err
+		}
+		for _, ar := range ordered {
 			feedID, ok := legacyFeedIDs[ar.FeedURL]
 			if ar.FeedOwnerID != nil {
 				feedID, ok = feedIDs[feedOwnerKey{URL: ar.FeedURL, OwnerID: *ar.FeedOwnerID}]
@@ -131,6 +134,31 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 				continue
 			}
 			var newID int
+			if ar.ParentExportID != nil {
+				parentID, ok := idMap[*ar.ParentExportID]
+				if !ok {
+					stats.SkippedArticleLink++
+					continue
+				}
+				err := tx.QueryRowContext(ctx, `INSERT INTO articles (
+      feed_id,title,url,content,published_at,summary_brief,summary_detailed,fetched_at,
+      word_count,reading_minutes,editor_note,media_url,media_type,media_duration_seconds,
+      is_clip,parent_article_id,links_extendable)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     ON CONFLICT (parent_article_id,url) WHERE parent_article_id IS NOT NULL
+     DO NOTHING RETURNING id`, feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
+					ar.SummaryBrief, ar.SummaryDetailed, ar.FetchedAt, ar.WordCount, ar.ReadingMinutes,
+					ar.EditorNote, ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.IsClip, parentID, ar.LinksExtendable).Scan(&newID)
+				if err == sql.ErrNoRows {
+					err = tx.QueryRowContext(ctx, `SELECT id FROM articles WHERE parent_article_id=$1 AND url=$2`, parentID, ar.URL).Scan(&newID)
+				}
+				if err != nil {
+					return stats, fmt.Errorf("restore child article %s: %w", ar.URL, err)
+				}
+				idMap[ar.ExportID] = newID
+				stats.SavedArticles++
+				continue
+			}
 			// Clip articles bypass the (feed_id, url) unique constraint by design
 			// (the index excludes is_clip=true rows), so they always insert as a
 			// new row. Use a separate INSERT path to avoid issuing an ON CONFLICT
@@ -142,13 +170,13 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 						summary_brief, summary_detailed, fetched_at,
 						word_count, reading_minutes, editor_note,
 						media_url, media_type, media_duration_seconds,
-						is_clip
-					) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14, TRUE)
+						is_clip,links_extendable
+					) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14, TRUE,$15)
 					RETURNING id`,
 					feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
 					ar.SummaryBrief, ar.SummaryDetailed, ar.FetchedAt,
 					ar.WordCount, ar.ReadingMinutes, ar.EditorNote,
-					ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds,
+					ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.LinksExtendable,
 				).Scan(&newID)
 				if err != nil {
 					return stats, fmt.Errorf("insert saved clip %s: %w", ar.URL, err)
@@ -163,15 +191,15 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 					feed_id, title, url, content, published_at,
 					summary_brief, summary_detailed, fetched_at,
 					word_count, reading_minutes, editor_note,
-					media_url, media_type, media_duration_seconds
-				) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14)
+					media_url, media_type, media_duration_seconds,links_extendable
+				) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14,$15)
 				ON CONFLICT (feed_id, url) WHERE parent_article_id IS NULL AND NOT is_clip
 				DO NOTHING
 				RETURNING id`,
 				feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
 				ar.SummaryBrief, ar.SummaryDetailed, ar.FetchedAt,
 				ar.WordCount, ar.ReadingMinutes, ar.EditorNote,
-				ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds,
+				ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.LinksExtendable,
 			).Scan(&newID)
 			if err == sql.ErrNoRows {
 				// Conflict — row exists; look it up. is_clip filter mirrors
@@ -317,4 +345,46 @@ func ownerOrNil(p *int) interface{} {
 		return nil
 	}
 	return *p
+}
+
+// Validate and sort the archived graph so restores do not depend on JSON array
+// order or on source database IDs. Each child keeps its own parent+URL identity.
+func orderSavedArticles(rows []SavedArticleRow) ([]*SavedArticleRow, error) {
+	byID := make(map[int]*SavedArticleRow, len(rows))
+	for i := range rows {
+		if _, exists := byID[rows[i].ExportID]; exists {
+			return nil, fmt.Errorf("duplicate archived article id %d", rows[i].ExportID)
+		}
+		byID[rows[i].ExportID] = &rows[i]
+	}
+	var ordered []*SavedArticleRow
+	state := make(map[int]int, len(rows))
+	var visit func(*SavedArticleRow) error
+	visit = func(row *SavedArticleRow) error {
+		if state[row.ExportID] == 2 {
+			return nil
+		}
+		if state[row.ExportID] == 1 {
+			return fmt.Errorf("cycle in archived article parents at %d", row.ExportID)
+		}
+		state[row.ExportID] = 1
+		if row.ParentExportID != nil {
+			parent, ok := byID[*row.ParentExportID]
+			if !ok {
+				return fmt.Errorf("missing archived parent %d", *row.ParentExportID)
+			}
+			if err := visit(parent); err != nil {
+				return err
+			}
+		}
+		state[row.ExportID] = 2
+		ordered = append(ordered, row)
+		return nil
+	}
+	for i := range rows {
+		if err := visit(&rows[i]); err != nil {
+			return nil, err
+		}
+	}
+	return ordered, nil
 }

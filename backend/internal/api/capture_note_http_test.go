@@ -220,3 +220,133 @@ func TestCaptureNotePDFOverflowRollsBackContent(t *testing.T) {
 		t.Fatalf("overflow committed partial PDF content=%q err=%v", content, err)
 	}
 }
+
+func rejectCaptureNoteCommit(t *testing.T, f *httpLeakFixture) {
+	t.Helper()
+	_, err := f.privDB.Exec(`CREATE FUNCTION reject_note_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test commit rejected'; END $$;
+ CREATE CONSTRAINT TRIGGER reject_note_commit AFTER INSERT OR UPDATE ON article_capture_notes DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_note_commit();`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCaptureNoteCommitFailureNeverReturnsSuccess(t *testing.T) {
+	for _, path := range []string{"html", "patch", "pdf"} {
+		t.Run(path, func(t *testing.T) {
+			f, token := noteFixture(t)
+			rejectCaptureNoteCommit(t, f)
+			var w *httptest.ResponseRecorder
+			switch path {
+			case "html":
+				w = captureNoteRequest(t, f, token, "must retain draft", false)
+			case "patch":
+				req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/notes-api/articles/%d/note", f.articleA), strings.NewReader(`{"capture_note":"must retain draft"}`))
+				req.Header.Set("Authorization", "Bearer "+signTestJWT(t, httpTestJWTSecret, f.userA, false))
+				req.Header.Set("Content-Type", "application/json")
+				w = httptest.NewRecorder()
+				f.router.ServeHTTP(w, req)
+			case "pdf":
+				w = pdfNoteRequest(t, f, token, "https://example.com/commit.pdf", "must retain draft", "digital.pdf")
+			}
+			if w.Code < 500 || strings.Contains(w.Body.String(), `"note_saved":true`) || strings.Contains(w.Body.String(), `"capture_note":"must retain draft"`) {
+				t.Fatalf("commit failure leaked success status=%d body=%s", w.Code, w.Body.String())
+			}
+			var n int
+			if err := f.privDB.QueryRow(`SELECT count(*) FROM article_capture_notes`).Scan(&n); err != nil || n != 0 {
+				t.Fatalf("rolled back note rows=%d err=%v", n, err)
+			}
+		})
+	}
+}
+
+func pdfNoteRequest(t *testing.T, f *httpLeakFixture, token, url, note, fixture string) *httptest.ResponseRecorder {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "pdfextract", "testdata", fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	form.WriteField("url", url)
+	form.WriteField("capture_note", note)
+	file, err := form.CreateFormFile("file", "note.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.Write(data)
+	form.Close()
+	req := httptest.NewRequest(http.MethodPost, "/capture-pdf", &body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	w := httptest.NewRecorder()
+	f.router.ServeHTTP(w, req)
+	return w
+}
+
+func TestCaptureNoteRejectedPDFPreservesImages(t *testing.T) {
+	for _, cause := range []string{"overflow", "commit", "success"} {
+		t.Run(cause, func(t *testing.T) {
+			f, token := noteFixture(t)
+			imageDir := t.TempDir()
+			h := api.NewBookmarkletHandler(repository.NewUserRepository(f.appDB), repository.NewFeedRepository(f.appDB), repository.NewArticleRepository(f.appDB)).WithCaptureNotes(repository.NewCaptureNoteRepository(f.appDB)).WithImageBaseDir(imageDir)
+			f.router.POST("/images-pdf", api.PublicTokenMiddleware(f.appDB, h.ResolveOwner), h.CapturePDF)
+			if _, err := f.privDB.Exec(`UPDATE articles SET url='https://example.com/images.pdf',content='original body' WHERE id=$1`, f.articleA); err != nil {
+				t.Fatal(err)
+			}
+			originalPath := filepath.Join(imageDir, "article_images", fmt.Sprint(f.articleA), "0.png")
+			if err := os.MkdirAll(filepath.Dir(originalPath), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(originalPath, []byte("original image bytes"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if cause == "overflow" {
+				if _, err := f.privDB.Exec(`INSERT INTO article_capture_notes (user_id,article_id,capture_note) VALUES ($1,$2,$3)`, f.userA, f.articleA, strings.Repeat("字", 10000)); err != nil {
+					t.Fatal(err)
+				}
+			} else if cause == "commit" {
+				rejectCaptureNoteCommit(t, f)
+			}
+			data, err := os.ReadFile(filepath.Join("..", "pdfextract", "testdata", "mixed.pdf"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body bytes.Buffer
+			form := multipart.NewWriter(&body)
+			form.WriteField("url", "https://example.com/images.pdf")
+			form.WriteField("capture_note", "new note")
+			file, err := form.CreateFormFile("file", "images.pdf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			file.Write(data)
+			form.Close()
+			req := httptest.NewRequest(http.MethodPost, "/images-pdf", &body)
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", form.FormDataContentType())
+			w := httptest.NewRecorder()
+			f.router.ServeHTTP(w, req)
+			got, err := os.ReadFile(originalPath)
+			if cause == "success" {
+				if w.Code != 200 || err != nil || string(got) == "original image bytes" || len(got) < 100 {
+					t.Fatalf("successful commit did not publish images: status=%d imageLength=%d err=%v", w.Code, len(got), err)
+				}
+				return
+			}
+			expectedStatus := 400
+			if cause == "commit" {
+				expectedStatus = 500
+			}
+			if w.Code != expectedStatus {
+				t.Fatalf("rejected capture status=%d body=%s", w.Code, w.Body.String())
+			}
+			if err != nil || string(got) != "original image bytes" {
+				t.Fatalf("rejected request overwrote image: length=%d err=%v status=%d", len(got), err, w.Code)
+			}
+			files, err := os.ReadDir(filepath.Dir(originalPath))
+			if err != nil || len(files) != 1 {
+				t.Fatalf("rejected request published new images: %v err=%v", files, err)
+			}
+		})
+	}
+}
