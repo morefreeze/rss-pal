@@ -134,7 +134,8 @@ func main() {
 	authHandler := api.NewAuthHandler(cfg, userRepo, refreshTokenRepo)
 	feedHandler := api.NewFeedHandler(feedRepo, articleRepo, cfg.RSSHub.BaseURL).WithBackupRunner(backupRunner)
 	adminHandler := api.NewAdminHandler(adminDB, backupRunner, cfg)
-	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, hiddenRepo, summarizerService, contentFetcher)
+	captureNoteRepo := repository.NewCaptureNoteRepository(db)
+	articleHandler := api.NewArticleHandler(articleRepo, articleUserTagRepo, progressRepo, prefRepo, hiddenRepo, summarizerService, contentFetcher).WithCaptureNotes(captureNoteRepo)
 	articleHandler.SetTemplateRepo(templateRepo, cfg)
 	articleHandler.SetTranscriptFetcher(transcriptFetcher)
 	prefHandler := api.NewPreferenceHandler(prefRepo, articleRepo)
@@ -157,7 +158,7 @@ func main() {
 	dailyHandler := api.NewDailyHandler(articleRepo, dailyDigestRepo)
 	briefingHandler := api.NewBriefingHandler(userRepo)
 	briefingIndexHandler := api.NewBriefingIndexHandler(dailyDigestRepo, weeklyDigestRepo)
-	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).
+	bookmarkletHandler := api.NewBookmarkletHandler(userRepo, feedRepo, articleRepo).WithCaptureNotes(captureNoteRepo).
 		WithBackupRunner(backupRunner).
 		WithImageBaseDir(cfg.Backup.Dir)
 	playbackHandler := api.NewPlaybackHandler(playbackRepo, prefRepo)
@@ -373,6 +374,7 @@ func main() {
 		apiGroup.GET("/articles/unread-count", articleHandler.GetUnreadCount)
 		apiGroup.POST("/articles/mark-all-read", articleHandler.MarkAllRead)
 		apiGroup.GET("/articles/:id", articleHandler.GetByID)
+		apiGroup.PATCH("/articles/:id/note", articleHandler.UpdateCaptureNote)
 		apiGroup.POST("/articles/:id/youtube-playback", youtubePlaybackHandler.Start)
 		apiGroup.POST("/articles/:id/summary", articleHandler.GenerateSummary)
 		apiGroup.POST("/articles/:id/content", contentHandler.FetchContent)

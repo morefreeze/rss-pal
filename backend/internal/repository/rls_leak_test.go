@@ -223,6 +223,11 @@ func TestRLS_PrivateTablesAreScoped(t *testing.T) {
 			countSQL: `SELECT COUNT(*) FROM explore_batch_sources`,
 		},
 		{
+			name:     "article_capture_notes",
+			seedSQL:  `INSERT INTO article_capture_notes (article_id,user_id,capture_note) VALUES ($1,$2,'private')`,
+			countSQL: `SELECT COUNT(*) FROM article_capture_notes`,
+		},
+		{
 			name: "explore_feedback",
 			seedSQL: `INSERT INTO explore_feedback (user_id, source_id, feedback_type)
 				SELECT $2, id, 'hide_source' FROM recommended_feeds WHERE $1::integer IS NOT NULL ORDER BY id LIMIT 1`,

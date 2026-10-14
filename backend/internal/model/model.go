@@ -211,6 +211,7 @@ type Feed struct {
 }
 
 type Article struct {
+	CaptureNote          string     `json:"capture_note"`
 	ID                   int        `json:"id" db:"id"`
 	FeedID               int        `json:"feed_id" db:"feed_id"`
 	FeedTitle            string     `json:"feed_title,omitempty" db:"feed_title"`

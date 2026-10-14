@@ -910,3 +910,26 @@ func TestRevokeShareHandlesMalformedAndMissingIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicShareNeverIncludesCaptureNotes(t *testing.T) {
+	f := newShareAPIFixture(t)
+	if _, err := f.privDB.Exec(`INSERT INTO article_capture_notes (user_id,article_id,capture_note) VALUES ($1,$2,'capture-note-private-secret')`, f.userA, f.article); err != nil {
+		t.Fatal(err)
+	}
+	share := f.createShare(t, f.userA, `{"expires_at":null}`)
+	code := strings.TrimPrefix(share.URL, shareAPIShortOrigin+"/")
+	w := f.publicRequest(http.MethodGet, "/api/s/"+code)
+	if w.Code != 200 {
+		t.Fatalf("share %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "capture_note") || strings.Contains(w.Body.String(), "capture-note-private-secret") {
+		t.Fatalf("public share leaked note: %s", w.Body.String())
+	}
+	var snapshot string
+	if err := f.privDB.QueryRow(`SELECT snapshot::text FROM article_shares WHERE article_id=$1`, f.article).Scan(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(snapshot, "capture_note") || strings.Contains(snapshot, "capture-note-private-secret") {
+		t.Fatalf("stored snapshot leaked note: %s", snapshot)
+	}
+}

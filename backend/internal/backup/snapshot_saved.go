@@ -38,6 +38,7 @@ const savedFileSuffix = ".saved.json.gz"
 type SavedArticleRow struct {
 	ExportID             int        `json:"export_id"`
 	FeedURL              string     `json:"feed_url"`
+	FeedOwnerID          *int       `json:"feed_owner_id,omitempty"`
 	Title                string     `json:"title"`
 	URL                  string     `json:"url"`
 	Content              string     `json:"content"`
@@ -53,7 +54,7 @@ type SavedArticleRow struct {
 	MediaDurationSeconds int        `json:"media_duration_seconds,omitempty"`
 	// Older backups predate the is_clip column; absence decodes to false,
 	// matching the pre-migration-025 world where all articles were non-clip.
-	IsClip               bool       `json:"is_clip,omitempty"`
+	IsClip bool `json:"is_clip,omitempty"`
 }
 
 // ReadingProgressRow attaches to a SavedArticleRow via ArticleExportID.
@@ -65,6 +66,14 @@ type ReadingProgressRow struct {
 	IsCompleted     bool      `json:"is_completed"`
 }
 
+// CaptureNoteRow preserves private notes separately from article content.
+type CaptureNoteRow struct {
+	UserID          int       `json:"user_id"`
+	ArticleExportID int       `json:"article_export_id"`
+	CaptureNote     string    `json:"capture_note"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
 // SavedSnapshot is the on-disk shape of file ② (the saved-archive sibling).
 // CreatedAt must match the paired metadata snapshot's CreatedAt — pairing is
 // canonically by filename, equality is just a sanity check.
@@ -73,6 +82,7 @@ type SavedSnapshot struct {
 	CreatedAt       time.Time            `json:"created_at"`
 	SavedArticles   []SavedArticleRow    `json:"saved_articles"`
 	ReadingProgress []ReadingProgressRow `json:"reading_progress"`
+	CaptureNotes    []CaptureNoteRow     `json:"capture_notes,omitempty"`
 }
 
 // encodeSavedGzip returns ss serialized as gzipped JSON, the same byte layout
@@ -191,7 +201,7 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 	}
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT a.id, f.url, COALESCE(a.title, ''), a.url, COALESCE(a.content, ''),
+		SELECT a.id, f.url, f.owner_id, COALESCE(a.title, ''), a.url, COALESCE(a.content, ''),
 		       a.published_at,
 		       COALESCE(a.summary_brief, ''), COALESCE(a.summary_detailed, ''),
 		       a.fetched_at, a.word_count, a.reading_minutes,
@@ -200,7 +210,7 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 		       a.is_clip
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
-		WHERE a.parent_article_id IS NULL
+		WHERE (a.parent_article_id IS NULL
 		  AND (
 		    EXISTS (
 		      SELECT 1 FROM user_preferences p
@@ -208,7 +218,8 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 		    )
 		    OR f.feed_type = 'saved'
 		    OR a.is_clip
-		  )
+		  ))
+		  OR EXISTS (SELECT 1 FROM article_capture_notes n WHERE n.article_id=a.id AND n.capture_note <> '')
 		ORDER BY a.id`)
 	if err != nil {
 		return nil, err
@@ -218,7 +229,7 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 	var savedIDs []int
 	for rows.Next() {
 		var r SavedArticleRow
-		if err := rows.Scan(&r.ExportID, &r.FeedURL, &r.Title, &r.URL, &r.Content,
+		if err := rows.Scan(&r.ExportID, &r.FeedURL, &r.FeedOwnerID, &r.Title, &r.URL, &r.Content,
 			&r.PublishedAt,
 			&r.SummaryBrief, &r.SummaryDetailed,
 			&r.FetchedAt, &r.WordCount, &r.ReadingMinutes,
@@ -255,5 +266,21 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 		}
 		ss.ReadingProgress = append(ss.ReadingProgress, p)
 	}
-	return ss, progRows.Err()
+	if err := progRows.Err(); err != nil {
+		return nil, err
+	}
+	noteRows, err := tx.QueryContext(ctx, `SELECT user_id, article_id, capture_note, updated_at
+ FROM article_capture_notes WHERE article_id=ANY($1) ORDER BY user_id,article_id`, pq.Array(savedIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer noteRows.Close()
+	for noteRows.Next() {
+		var n CaptureNoteRow
+		if err := noteRows.Scan(&n.UserID, &n.ArticleExportID, &n.CaptureNote, &n.UpdatedAt); err != nil {
+			return nil, err
+		}
+		ss.CaptureNotes = append(ss.CaptureNotes, n)
+	}
+	return ss, noteRows.Err()
 }

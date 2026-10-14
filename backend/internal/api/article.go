@@ -25,6 +25,7 @@ import (
 )
 
 type ArticleHandler struct {
+	noteRepo          *repository.CaptureNoteRepository
 	articleRepo       *repository.ArticleRepository
 	bindRepo          *repository.ArticleUserTagRepository
 	progressRepo      *repository.ProgressRepository

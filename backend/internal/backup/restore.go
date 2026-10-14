@@ -26,6 +26,7 @@ type RestoreStats struct {
 	InterestTopics     int `json:"interest_topics"`
 	SavedArticles      int `json:"saved_articles"`
 	ReadingProgress    int `json:"reading_progress"`
+	CaptureNotes       int `json:"capture_notes"`
 	ArticleUserTags    int `json:"article_user_tags"`
 	UserPreferences    int `json:"user_preferences"`
 	SkippedArticleLink int `json:"skipped_article_link"`
@@ -115,13 +116,16 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 	// Saved articles + id map for downstream relation restoration.
 	idMap := make(map[int]int)
 	if ss != nil {
-		feedIDByURL, err := loadFeedIDByURL(ctx, tx)
+		feedIDs, legacyFeedIDs, err := loadFeedIDs(ctx, tx)
 		if err != nil {
 			return stats, fmt.Errorf("load feed id map: %w", err)
 		}
 		for i := range ss.SavedArticles {
 			ar := &ss.SavedArticles[i]
-			feedID, ok := feedIDByURL[ar.FeedURL]
+			feedID, ok := legacyFeedIDs[ar.FeedURL]
+			if ar.FeedOwnerID != nil {
+				feedID, ok = feedIDs[feedOwnerKey{URL: ar.FeedURL, OwnerID: *ar.FeedOwnerID}]
+			}
 			if !ok {
 				stats.SkippedMissingFeed++
 				continue
@@ -202,6 +206,24 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 			}
 			stats.ReadingProgress++
 		}
+		for _, n := range ss.CaptureNotes {
+			newAID, ok := idMap[n.ArticleExportID]
+			if !ok {
+				continue
+			}
+			// Restoring through an admin connection still honors the note owner's
+			// article boundary. Legacy ambiguous feed URLs must never attach a note
+			// to another user's subscription.
+			result, err := tx.ExecContext(ctx, `INSERT INTO article_capture_notes (user_id,article_id,capture_note,updated_at)
+   SELECT $1,$2,$3,$4 FROM articles a JOIN feeds f ON f.id=a.feed_id
+   WHERE a.id=$2 AND f.owner_id=$1 ON CONFLICT (user_id,article_id) DO NOTHING`, n.UserID, newAID, n.CaptureNote, n.UpdatedAt)
+			if err != nil {
+				return stats, fmt.Errorf("restore capture note (%d,%d): %w", n.UserID, newAID, err)
+			}
+			if count, err := result.RowsAffected(); err == nil {
+				stats.CaptureNotes += int(count)
+			}
+		}
 	}
 
 	for i := range s.ArticleUserTags {
@@ -256,22 +278,38 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 	return stats, nil
 }
 
-func loadFeedIDByURL(ctx context.Context, tx *sql.Tx) (map[string]int, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, url FROM feeds`)
+type feedOwnerKey struct {
+	URL     string
+	OwnerID int
+}
+
+func loadFeedIDs(ctx context.Context, tx *sql.Tx) (map[feedOwnerKey]int, map[string]int, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id,url,COALESCE(owner_id,0) FROM feeds`)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	m := make(map[string]int)
+	scoped := make(map[feedOwnerKey]int)
+	legacy := make(map[string]int)
+	ambiguous := make(map[string]bool)
 	for rows.Next() {
-		var id int
-		var u string
-		if err := rows.Scan(&id, &u); err != nil {
-			return nil, err
+		var id, owner int
+		var url string
+		if err := rows.Scan(&id, &url, &owner); err != nil {
+			return nil, nil, err
 		}
-		m[u] = id
+		scoped[feedOwnerKey{URL: url, OwnerID: owner}] = id
+		if _, exists := legacy[url]; exists {
+			ambiguous[url] = true
+		}
+		legacy[url] = id
 	}
-	return m, rows.Err()
+	// Old snapshots have only URLs. Preserve those when unique, but refuse to
+	// guess between users when no owner identity was archived.
+	for url := range ambiguous {
+		delete(legacy, url)
+	}
+	return scoped, legacy, rows.Err()
 }
 
 func ownerOrNil(p *int) interface{} {

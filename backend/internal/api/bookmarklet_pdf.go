@@ -37,6 +37,7 @@ const pdfFetchTimeout = 30 * time.Second
 // extracted), "updated" (existing article re-extracted), and "processing"
 // (queued for async OCR — the worker will fill in the content later).
 type pdfCaptureResult struct {
+	NoteSaved bool   `json:"note_saved,omitempty"`
 	Status    string `json:"status"` // "created" | "updated" | "processing"
 	ArticleID int    `json:"article_id"`
 	Message   string `json:"message"`
@@ -243,6 +244,10 @@ func (h *BookmarkletHandler) CapturePDF(c *gin.Context) {
 		return
 	}
 	browserTitle := strings.TrimSpace(c.Request.FormValue("title"))
+	captureNote := c.Request.FormValue("capture_note")
+	if !validateCaptureNote(c, captureNote) {
+		return
+	}
 
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
@@ -271,6 +276,11 @@ func (h *BookmarkletHandler) CapturePDF(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "处理 PDF 失败"})
 		return
 	}
+	noteSaved, ok := h.saveCaptureNote(c, user.ID, res.ArticleID, captureNote)
+	if !ok {
+		return
+	}
+	res.NoteSaved = noteSaved
 	if h.backup != nil {
 		h.backup.TriggerAsync()
 	}

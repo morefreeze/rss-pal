@@ -120,6 +120,7 @@ type BookmarkletHandler struct {
 	userRepo     bookmarkletUserRepo
 	feedRepo     bookmarkletFeedRepo
 	articleRepo  bookmarkletArticleRepo
+	noteRepo     *repository.CaptureNoteRepository
 	backup       *backup.Runner // nil when backup is disabled
 	imageBaseDir string         // root for pdfextract image storage; "" until WithImageBaseDir
 }
@@ -249,11 +250,12 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, captureMaxBodyBytes)
 	var req struct {
-		URL      string `json:"url"`
-		Title    string `json:"title"`
-		HTML     string `json:"html"`
-		Force    bool   `json:"force"`
-		ForceNew bool   `json:"force_new"`
+		URL         string `json:"url"`
+		Title       string `json:"title"`
+		HTML        string `json:"html"`
+		Force       bool   `json:"force"`
+		ForceNew    bool   `json:"force_new"`
+		CaptureNote string `json:"capture_note"`
 	}
 	dec := json.NewDecoder(c.Request.Body)
 	if err := dec.Decode(&req); err != nil {
@@ -267,6 +269,10 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 	if req.URL == "" || req.HTML == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url 和 html 必填"})
+		return
+	}
+
+	if !validateCaptureNote(c, req.CaptureNote) {
 		return
 	}
 
@@ -327,12 +333,20 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	if existing != nil {
+		noteSaved, ok := h.saveCaptureNote(c, user.ID, existing.ID, req.CaptureNote)
+		if !ok {
+			return
+		}
 		newLen, oldLen := len(content), len(existing.Content)
 		newImages := countMarkdownImages(content)
 		oldImages := countMarkdownImages(existing.Content)
 		if shouldPromptDuplicate(newLen, oldLen, newImages, oldImages, req.Force) {
+			if noteSaved && h.backup != nil {
+				h.backup.TriggerAsync()
+			}
 			c.JSON(http.StatusOK, gin.H{
 				"status":          "duplicate",
+				"note_saved":      noteSaved,
 				"article_id":      existing.ID,
 				"existing_length": oldLen,
 				"new_length":      newLen,
@@ -375,6 +389,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":     "updated",
+			"note_saved": noteSaved,
 			"article_id": existing.ID,
 			"message":    "已更新文章: " + title,
 		})
@@ -408,12 +423,17 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "新建文章失败"})
 		return
 	}
+	noteSaved, ok := h.saveCaptureNote(c, user.ID, article.ID, req.CaptureNote)
+	if !ok {
+		return
+	}
 	log.Printf("bookmarklet: created article=%d user=%d url=%s len=%d", article.ID, user.ID, normalized, len(content))
 	if h.backup != nil {
 		h.backup.TriggerAsync()
 	}
 	c.JSON(http.StatusCreated, gin.H{
 		"status":     "created",
+		"note_saved": noteSaved,
 		"article_id": article.ID,
 		"message":    "已加入网摘: " + title,
 	})

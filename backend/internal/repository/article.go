@@ -446,9 +446,10 @@ func decodeImageDimensions(raw []byte) map[string][2]int {
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions, COALESCE(cn.capture_note, '')
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN article_capture_notes cn ON cn.article_id=a.id AND cn.user_id=$2
 		WHERE a.id = $1 AND (f.owner_id = $2)`
 	var a model.Article
 	var content, summaryBrief, summaryDetailed, feedTitle, feedType, mediaURL, mediaType, kind sql.NullString
@@ -463,7 +464,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 		&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
 		&mediaURL, &mediaType, &mediaDuration,
 		&feedTitle, &feedType,
-		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions,
+		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions, &a.CaptureNote,
 	)
 	if err != nil {
 		return nil, "", err
