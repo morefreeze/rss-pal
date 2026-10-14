@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -124,6 +125,9 @@ type BookmarkletHandler struct {
 	noteRepo     *repository.CaptureNoteRepository
 	backup       *backup.Runner // nil when backup is disabled
 	imageBaseDir string         // root for pdfextract image storage; "" until WithImageBaseDir
+	hnFetcher    interface {
+		FetchContentWithMetadata(context.Context, string) (rss.ContentResult, error)
+	}
 }
 
 func NewBookmarkletHandler(
@@ -135,6 +139,7 @@ func NewBookmarkletHandler(
 		userRepo:    bookmarkletUserRepoAdapter{userRepo},
 		feedRepo:    bookmarkletFeedRepoAdapter{feedRepo},
 		articleRepo: bookmarkletArticleRepoAdapter{articleRepo},
+		hnFetcher:   rss.NewContentFetcher(),
 	}
 }
 
@@ -282,6 +287,14 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 	}
 
 	normalized := util.NormalizeURLKeepFragment(req.URL)
+	canonicalHN, isHN := rss.HackerNewsItemURL(req.URL)
+	if isHN {
+		if canonicalHN == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 HN 帖子 ID"})
+			return
+		}
+		normalized = canonicalHN
+	}
 
 	var (
 		content     string
@@ -290,6 +303,22 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		wasTwitter  bool
 		media       *rss.MediaInfo
 	)
+	if isHN {
+		fetcher := h.hnFetcher
+		if fetcher == nil {
+			fetcher = rss.NewContentFetcher()
+		}
+		result, err := fetcher.FetchContentWithMetadata(c.Request.Context(), normalized)
+		if errors.Is(err, rss.ErrHackerNewsUnavailable) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": rss.ErrHackerNewsUnavailable.Error()})
+			return
+		}
+		if err != nil || result.Content == "" {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "无法抓取 HN 帖子及讨论，请稍后重试"})
+			return
+		}
+		content, title = result.Content, result.Title
+	}
 
 	if statusID, ok := rss.IsTwitterStatusURL(normalized); ok {
 		cap, err := rss.ExtractTweet(req.HTML, statusID)
@@ -306,7 +335,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		}
 	}
 
-	if !wasTwitter {
+	if !wasTwitter && !isHN {
 		body, capturedMedia, capturedDate, err := extractArticleWithPublication(req.HTML, req.URL)
 		if err != nil || strings.TrimSpace(body) == "" {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "无法从页面提取正文"})

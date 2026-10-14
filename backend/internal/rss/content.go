@@ -168,6 +168,9 @@ func (f *ContentFetcher) FetchContentWithMetadata(ctx context.Context, url strin
 }
 
 func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url string, noReaderCache bool) (ContentResult, error) {
+	if canonical, ok := HackerNewsItemURL(url); ok {
+		return f.fetchHackerNews(ctx, canonical)
+	}
 	result, status, err := f.fetchDirect(ctx, url)
 	if err == nil && status == http.StatusOK && len(result.Content) >= jinaFallbackMinChars {
 		return result, nil

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -562,8 +563,21 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	// 1. Fetch the page's content (Jina fallback included).
-	content, err := h.contentFetcher.FetchContent(ctx, req.URL)
+	canonicalHN, isHN := rss.HackerNewsItemURL(req.URL)
+	if isHN {
+		if canonicalHN == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 HN 帖子 ID"})
+			return
+		}
+		req.URL, req.Expand = canonicalHN, false
+	}
+	// HN metadata and discussion use the same reader as re-fetch and capture.
+	result, err := h.contentFetcher.FetchContentWithMetadata(ctx, req.URL)
+	if errors.Is(err, rss.ErrHackerNewsUnavailable) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": rss.ErrHackerNewsUnavailable.Error()})
+		return
+	}
+	content := result.Content
 	if err != nil || content == "" {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "无法抓取该页面内容"})
 		return
@@ -571,14 +585,43 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 
 	// 2. Derive a title from the page's <title>.
 	title := req.URL
-	if doc, derr := h.contentFetcher.FetchHTMLDocument(ctx, req.URL); derr == nil && doc != nil {
-		if pageTitle := strings.TrimSpace(doc.Find("title").First().Text()); pageTitle != "" {
-			title = pageTitle
+	if result.Title != "" {
+		title = result.Title
+	}
+	if !isHN {
+		if doc, derr := h.contentFetcher.FetchHTMLDocument(ctx, req.URL); derr == nil && doc != nil {
+			if pageTitle := strings.TrimSpace(doc.Find("title").First().Text()); pageTitle != "" {
+				title = pageTitle
+			}
 		}
 	}
 
 	ownerID := getOwnerID(c)
 	wc, rm := rss.ComputeMetrics(content)
+	if isHN && ownerID != nil {
+		articles := h.articleRepo.WithCtx(c)
+		existing, err := articles.FindByOwnerAndURL(*ownerID, req.URL)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询文章失败"})
+			return
+		}
+		if existing != nil {
+			if err := articles.UpdateContent(existing.ID, content, wc, rm); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新文章失败"})
+				return
+			}
+			if err := articles.UpdateTitle(existing.ID, title); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新标题失败"})
+				return
+			}
+			if err := articles.UpdateSummary(existing.ID, "", ""); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新摘要失败"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"feed_id": existing.FeedID, "parent_article_id": existing.ID})
+			return
+		}
+	}
 
 	var feedID int
 	var article *model.Article
@@ -637,6 +680,9 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 		feedID = saved.ID
 	}
 
+	if isHN {
+		article.IsClip = true
+	}
 	// 5. Insert the article.
 	if err := h.articleRepo.WithCtx(c).Create(article); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存文章失败: " + err.Error()})

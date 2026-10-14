@@ -222,7 +222,7 @@ describe('feed subscription intent', () => {
     const source = 'https://source.example/feed?q=one'
     const firstLoad = renderFeeds(`/feeds?add=1&source=${encodeURIComponent(source)}`)
 
-    const input = await screen.findByPlaceholderText('输入 RSS 地址、网站 URL 或 PDF 链接') as HTMLInputElement
+    const input = await screen.findByPlaceholderText('输入 RSS 地址、网站 URL、HN 帖子或 PDF 链接') as HTMLInputElement
     await waitFor(() => expect(input.value).toBe(source))
     await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
     expect(apiMocks.previewFeed).toHaveBeenCalledWith(source, expect.any(AbortSignal))
@@ -231,7 +231,7 @@ describe('feed subscription intent', () => {
 
     firstLoad.unmount()
     renderFeeds('/feeds')
-    await screen.findByPlaceholderText('输入 RSS 地址、网站 URL 或 PDF 链接')
+    await screen.findByPlaceholderText('输入 RSS 地址、网站 URL、HN 帖子或 PDF 链接')
     expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1)
   })
 
@@ -246,7 +246,7 @@ describe('feed subscription intent', () => {
     const source = 'HTTPS://source.example/post'
     renderFeeds(`/feeds?add=1&source=${encodeURIComponent(source)}`)
 
-    const input = await screen.findByPlaceholderText('输入 RSS 地址、网站 URL 或 PDF 链接') as HTMLInputElement
+    const input = await screen.findByPlaceholderText('输入 RSS 地址、网站 URL、HN 帖子或 PDF 链接') as HTMLInputElement
     await waitFor(() => expect(apiMocks.previewFeed).toHaveBeenCalledTimes(1))
     expect(apiMocks.previewFeed).toHaveBeenCalledWith(source, expect.any(AbortSignal))
     expect(input.value).toBe(source)
@@ -261,7 +261,7 @@ describe('feed subscription intent', () => {
     '/feeds?add=0&source=https%3A%2F%2Fsource.example%2Ffeed',
   ])('cleans an invalid automatic-preview query without fetching it: %s', async path => {
     renderFeeds(path)
-    await screen.findByPlaceholderText('输入 RSS 地址、网站 URL 或 PDF 链接')
+    await screen.findByPlaceholderText('输入 RSS 地址、网站 URL、HN 帖子或 PDF 链接')
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/feeds'))
     expect(apiMocks.previewFeed).not.toHaveBeenCalled()
   })
@@ -271,7 +271,7 @@ describe('feed subscription intent', () => {
     const source = 'https://source.example/feed'
     renderFeeds(`/feeds?add=1&source=${encodeURIComponent(source)}`)
     expect(await screen.findByText('无法获取该地址的内容，请检查 URL 是否正确')).toBeTruthy()
-    const input = screen.getByPlaceholderText('输入 RSS 地址、网站 URL 或 PDF 链接') as HTMLInputElement
+    const input = screen.getByPlaceholderText('输入 RSS 地址、网站 URL、HN 帖子或 PDF 链接') as HTMLInputElement
     expect(input.value).toBe(source)
     expect(input.disabled).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: '预览' }))

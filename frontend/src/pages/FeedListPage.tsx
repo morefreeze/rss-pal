@@ -5,6 +5,7 @@ import { listFeedCatalog, type PublicCatalogItem } from '../api/feedCatalog'
 import { toast } from '../utils/toast'
 import { getInitialPopularFeedsExpanded } from '../utils/popularFeedsVisibility'
 import { parseAuthIntent } from '../utils/authIntent'
+import { hackerNewsItemURL } from '../utils/hackerNews'
 
 // isPDFURL returns true when the user-supplied URL looks like a PDF.
 // Detection is intentionally URL-only (no HEAD probe) — the backend
@@ -40,6 +41,7 @@ export default function FeedListPage() {
   const [previewError, setPreviewError] = useState('')
   const [adding, setAdding] = useState(false)
   const [addSuccess, setAddSuccess] = useState('')
+  const [capturedHNArticleID, setCapturedHNArticleID] = useState<number | null>(null)
   const [importing, setImporting] = useState(false)
   const [popularFeedsExpanded, setPopularFeedsExpanded] = useState(getInitialPopularFeedsExpanded)
   const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
@@ -197,6 +199,22 @@ export default function FeedListPage() {
 
   const handlePreview = async (e: React.FormEvent) => {
     e.preventDefault()
+    const hnURL = hackerNewsItemURL(newUrl)
+    if (hnURL) {
+      setAdding(true)
+      setAddSuccess('')
+      try {
+        const result = await createOneoffLinkSet(hnURL, false)
+        setAddSuccess('已保存 HN 帖子及讨论')
+        setCapturedHNArticleID(result.parent_article_id)
+        setNewUrl('')
+        setPreview(null)
+        setPreviewError('')
+      } catch (err: any) {
+        toast.error(err?.response?.data?.error || 'HN 帖子抓取失败，请重试')
+      } finally { setAdding(false) }
+      return
+    }
     // PDF URLs skip the RSS-preview round-trip and go straight to the
     // bookmarklet PDF-capture pipeline (server fetches + extracts).
     if (isPDFURL(newUrl)) {
@@ -361,18 +379,23 @@ export default function FeedListPage() {
         <form onSubmit={handlePreview} className="flex gap-2 mb-2">
           <input
             type="text"
-            placeholder="输入 RSS 地址、网站 URL 或 PDF 链接"
+            placeholder="输入 RSS 地址、网站 URL、HN 帖子或 PDF 链接"
             value={newUrl}
             onChange={e => { setNewUrl(e.target.value); setPreview(null); setPreviewError('') }}
             style={{ flex: 1 }}
             disabled={previewing || adding}
           />
           <button type="submit" disabled={previewing || adding || !newUrl.trim()}>
-            {isPDFURL(newUrl)
+            {hackerNewsItemURL(newUrl)
+              ? (adding ? '抓取中...' : '抓取 HN 帖子')
+              : isPDFURL(newUrl)
               ? (adding ? '抓取中...' : '抓取 PDF')
               : (previewing ? previewStatus || '获取中...' : '预览')}
           </button>
         </form>
+
+        {hackerNewsItemURL(newUrl) && <p className="text-muted text-sm">提交后保存为单篇网摘，包含帖子正文及热门讨论。</p>}
+        {capturedHNArticleID && <Link to={`/articles/${capturedHNArticleID}`}>查看帖子</Link>}
 
         {/* PDF detection hint — shown instead of preview/error for .pdf URLs */}
         {isPDFURL(newUrl) && !adding && (
