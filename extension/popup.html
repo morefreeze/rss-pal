@@ -40,7 +40,23 @@
         <p id="redditAddStatus" class="sync-status"></p>
       </div>
 
-      <button class="btn btn-primary" id="captureBtn">⭐ 发送到 RSS Pal</button>
+      <p id="captureNoteScope" class="capture-note-encourage" hidden>随手记随下方「发送到 RSS Pal」保存，批量抓取不包含。</p>
+      <section class="capture-note" aria-labelledby="captureNoteLabel">
+        <fieldset id="captureNoteFields" disabled>
+          <div class="capture-note-heading"><label id="captureNoteLabel" for="captureNote">随手记 <span>选填</span></label><span id="captureNoteCount">0 / 2000</span></div>
+          <p class="capture-note-encourage" id="captureNoteHelp">一句话也好，留给未来的自己。</p>
+          <textarea id="captureNote" rows="3" aria-describedby="captureNoteHelp captureNoteIdeas captureNoteDraft" placeholder="为什么想保存？在哪里看到的？
+此刻有什么联想，打算怎么用？"></textarea>
+          <div class="capture-note-prompts" id="captureNoteIdeas" aria-label="帮你开个头">
+            <button type="button" data-note-prompt="我想保存，因为">为什么收藏</button>
+            <button type="button" data-note-prompt="我是在这里看到的：">在哪里看到</button>
+            <button type="button" data-note-prompt="我想到可以用来">想到怎么用</button>
+            <button type="button" id="quoteSelection" hidden>引用选中文字</button>
+          </div>
+          <div class="capture-note-footer"><span id="captureNoteDraft" role="status">选填，仅自己可见</span><span title="在输入框内按 Command 或 Ctrl 加 Enter 保存">⌘ / Ctrl ↵ 保存</span></div>
+        </fieldset>
+      </section>
+      <button class="btn btn-primary" id="captureBtn" disabled>⭐ 发送到 RSS Pal</button>
 
       <div class="status" id="status"></div>
 
@@ -79,6 +95,7 @@
     </div>
   </div>
 
+  <script src="capture-note.js"></script>
   <script src="popup.js"></script>
   <script src="reddit/discovery.js"></script>
   <script src="reddit/popup.js"></script>

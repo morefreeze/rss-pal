@@ -12,6 +12,14 @@ import TagChip from './TagChip'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 import FeedSourceLink from './FeedSourceLink'
 
+function NotePreview({ note }: { note?: string }) {
+  if (!note) return null
+  return <div className="article-note-preview text-sm" title={note}
+    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 5, color: 'var(--accent)' }}>
+    <span aria-hidden="true">✎ </span><span className="text-muted">随手记 · </span>{note}
+  </div>
+}
+
 // MediaIndicator shows a per-article badge for media articles. Audio
 // articles get a clickable ▶ play button (starts inline playback); video
 // articles get a non-interactive 🎬 marker (video must play inside the
@@ -159,6 +167,7 @@ export default function ArticleCard({
         onTouchStart={handlePrefetch}
       >
         <TweetCard article={article} compact />
+        <NotePreview note={article.capture_note} />
       </div>
     )
   }
@@ -184,7 +193,7 @@ export default function ArticleCard({
         {!isRead && (
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />
         )}
-        <div className="article-card-content" style={{ flex: 1 }}>
+        <div className="article-card-content" style={{ flex: 1, minWidth: 0 }}>
           <div className={`article-card-title-row ${isRead ? 'text-muted' : 'text-bold'}`} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
             <span className="article-card-title">{article.title}</span>
@@ -205,6 +214,7 @@ export default function ArticleCard({
               </span>
             )}
           </div>
+          <NotePreview note={article.capture_note} />
           {article.summary_brief && (
             <div className="article-card-summary text-muted text-sm mt-1">
               {stripMarkdown(article.summary_brief).slice(0, 120)}...

@@ -10,6 +10,7 @@ import {
 import type { Article, ArticleDetailResponse, ArticleListItem } from '../src/api/client'
 
 const apiMocks = vi.hoisted(() => ({
+  updateArticleNote: vi.fn(async () => ({ capture_note: '新想法' })),
   dislikeArticle: vi.fn(async () => undefined),
   expandLinkSetChild: vi.fn(async () => undefined),
   exportMarkdown: vi.fn(async () => ''),
@@ -138,6 +139,25 @@ describe('ArticlePage immediate loading', () => {
     vi.clearAllMocks()
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     vi.stubGlobal('ResizeObserver', TestResizeObserver)
+  })
+
+  it('keeps a newly saved note when an older refresh resolves later', async () => {
+    const pending = deferred<ArticleDetailResponse>()
+    apiMocks.getArticle.mockReturnValue(pending.promise)
+    const cached = detail(42)
+    cached.article.capture_note = '旧想法'
+    putArticleDetail(cached)
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '编辑随手记' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '我的随手记' }), { target: { value: '新想法' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存随手记' }))
+    await screen.findByText('新想法')
+    pending.resolve({ ...cached, article: { ...cached.article, title: 'Fresh server title' } })
+    await screen.findByText('Fresh server title')
+    expect(screen.getByText('新想法')).toBeTruthy()
+    expect(screen.queryByText('旧想法')).toBeNull()
   })
 
   it('starts cached unread articles at the top, including same-page navigation', async () => {

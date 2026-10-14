@@ -17,6 +17,7 @@ frontend/dist/
 
 # Extension (smoke-test dev deps only — runtime is plain MV3 JS)
 extension/node_modules/
+extension/_metadata/
 extension/package-lock.json
 
 # Docker volumes

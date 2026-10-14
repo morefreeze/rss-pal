@@ -21,6 +21,8 @@
   const notConfiguredMsg = $('notConfiguredMsg');
 
   let detectedConfig = null;
+  let noteForm = null;
+  let capturing = false;
 
   let currentPage = { url: '', title: '' };
   let lastCapture = null; // stores {url, title, html, serverUrl, token}
@@ -115,6 +117,9 @@
         captureBtn.dataset.mode = 'html';
       }
 
+      noteForm = await window.createCaptureNoteForm({ tab, serverUrl, token, onSubmit: () => captureBtn.click() });
+      captureBtn.disabled = false;
+
       // Probe current tab for an adapter-driven capture opportunity.
       probeAdapterAndShowButton(tab, serverUrl, token);
     }
@@ -136,6 +141,7 @@
     const status = document.getElementById('captureAdapterStatus');
     if (!section || !btn) return;
     section.style.display = 'block';
+    document.getElementById('captureNoteScope').hidden = false;
 
     const count = (probe.items && probe.items.length) || 0;
     const label = probe.sourceName || probe.sourceID || probe.name;
@@ -316,14 +322,14 @@
     return clone.outerHTML;
   }
 
-  async function sendToServer(url, title, html, serverUrl, token, force, forceNew) {
+  async function sendToServer(url, title, html, serverUrl, token, force, forceNew, note = '') {
     const resp = await fetch(serverUrl.replace(/\/+$/, '') + '/api/bookmarklet/capture', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + token,
       },
-      body: JSON.stringify({ url, title, html, force: !!force, force_new: !!forceNew }),
+      body: JSON.stringify({ url, title, html, force: !!force, force_new: !!forceNew, capture_note: note }),
     });
 
     if (!resp.ok) {
@@ -338,25 +344,27 @@
     return await resp.json();
   }
 
-  async function doCaptureHTML(tab, serverUrl, token, force) {
+  async function doCaptureHTML(tab, serverUrl, token, force, note) {
     const html = await captureHtml(tab.id);
 
-    lastCapture = { url: currentPage.url, title: currentPage.title, html, serverUrl, token };
+    lastCapture = { url: tab.url, title: tab.title, html, serverUrl, token, note };
 
-    const result = await sendToServer(currentPage.url, currentPage.title, html, serverUrl, token, force);
+    const result = await sendToServer(tab.url, tab.title, html, serverUrl, token, force, false, note);
+    const noteStatus = await noteForm.finish(result, note);
+    lastCapture.noteSaved = result.note_saved === true;
 
     if (result.status === 'duplicate' && !force) {
       hideStatus();
       const link = buildArticleLink(serverUrl, result.article_id);
-      dupMessage.innerHTML = escapeHtml(result.message || '该文章已存在，是否覆盖？') + link;
+      dupMessage.innerHTML = escapeHtml(result.message || '该文章已存在，是否覆盖？') + escapeHtml(noteStatus) + link;
       duplicatePrompt.style.display = 'block';
     } else {
       const link = buildArticleLink(serverUrl, result.article_id);
-      showStatus('success', '✅ ' + escapeHtml(result.message || '发送成功') + link);
+      showStatus('success', '✅ ' + escapeHtml(result.message || '发送成功') + escapeHtml(noteStatus) + link);
     }
   }
 
-  async function doCapturePDF(tab, serverUrl, token) {
+  async function doCapturePDF(tab, serverUrl, token, note) {
     let resp;
     try {
       resp = await fetch(tab.url);
@@ -375,6 +383,7 @@
     const fd = new FormData();
     fd.append('url', tab.url);
     fd.append('title', tab.title || '');
+    fd.append('capture_note', note);
     fd.append('file', blob, 'capture.pdf');
 
     const send = await fetch(serverUrl.replace(/\/+$/, '') + '/api/bookmarklet/capture-pdf', {
@@ -391,42 +400,49 @@
       throw new Error(msg);
     }
     const result = await send.json();
+    const noteStatus = await noteForm.finish(result, note);
     const link = buildArticleLink(serverUrl, result.article_id);
     if (result.status === 'processing') {
-      showStatus('info', '⏳ ' + escapeHtml(result.message || 'PDF 已入库，OCR 处理中') + link);
+      showStatus('info', '⏳ ' + escapeHtml(result.message || 'PDF 已入库，OCR 处理中') + escapeHtml(noteStatus) + link);
     } else {
-      showStatus('success', '✅ ' + escapeHtml(result.message || 'PDF 已加入网摘') + link);
+      showStatus('success', '✅ ' + escapeHtml(result.message || 'PDF 已加入网摘') + escapeHtml(noteStatus) + link);
     }
   }
 
+  function lockCapture(value) {
+    capturing = value;
+    noteForm.lock(value);
+    captureBtn.disabled = value;
+    overwriteBtn.disabled = value;
+    newBtn.disabled = value;
+    cancelBtn.disabled = value;
+  }
+
   async function doCapture(force) {
+    if (capturing || !noteForm || !noteForm.valid()) return;
+    lockCapture(true);
     hideStatus();
     hideDuplicate();
-
-    const data = await chrome.storage.sync.get(['serverUrl', 'token']);
-    const serverUrl = (data.serverUrl || '').trim();
-    const token = (data.token || '').trim();
-
-    if (!serverUrl || !token) {
-      openOptions();
-      return;
-    }
-
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab) return;
-
-    setLoading(captureBtn, true);
-
+    const note = noteForm.value();
     try {
+      const data = await chrome.storage.sync.get(['serverUrl', 'token']);
+      const serverUrl = (data.serverUrl || '').trim();
+      const token = (data.token || '').trim();
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !noteForm.matches(tab.url, serverUrl, token)) {
+        throw new Error('页面或账号已变化，草稿已保留，请重新打开插件后保存');
+      }
+      setLoading(captureBtn, true);
       if (captureBtn.dataset.mode === 'pdf') {
-        await doCapturePDF(tab, serverUrl, token);
+        await doCapturePDF(tab, serverUrl, token, note);
       } else {
-        await doCaptureHTML(tab, serverUrl, token, force);
+        await doCaptureHTML(tab, serverUrl, token, force, note);
       }
     } catch (err) {
       showStatus('error', '❌ ' + escapeHtml(err.message));
     } finally {
       setLoading(captureBtn, false);
+      lockCapture(false);
     }
   }
 
@@ -439,41 +455,35 @@
     captureAdapterBtn.addEventListener('click', captureAdapter);
   }
 
-  overwriteBtn.addEventListener('click', async () => {
-    if (!lastCapture) return;
-    hideDuplicate();
-    setLoading(overwriteBtn, true);
+  async function resolveDuplicate(forceNew) {
+    if (capturing || !lastCapture || !noteForm.valid()) return;
+    lockCapture(true);
+    const btn = forceNew ? newBtn : overwriteBtn;
+    setLoading(btn, true);
     try {
+      const data = await chrome.storage.sync.get(['serverUrl', 'token']);
+      if ((data.serverUrl || '').trim() !== lastCapture.serverUrl || (data.token || '').trim() !== lastCapture.token) {
+        throw new Error('账号已变化，请重新打开插件');
+      }
+      const note = noteForm.value() || (forceNew || !lastCapture.noteSaved ? lastCapture.note : '');
       const result = await sendToServer(
         lastCapture.url, lastCapture.title, lastCapture.html,
-        lastCapture.serverUrl, lastCapture.token, true
+        lastCapture.serverUrl, lastCapture.token, !forceNew, forceNew, note
       );
+      const noteStatus = await noteForm.finish(result, note);
+      lastCapture.noteSaved = result.note_saved === true || lastCapture.noteSaved;
+      hideDuplicate();
       const link = buildArticleLink(lastCapture.serverUrl, result.article_id);
-      showStatus('success', '✅ ' + escapeHtml(result.message || '覆盖成功') + link);
+      showStatus('success', '✅ ' + escapeHtml(result.message || (forceNew ? '已加入网摘' : '覆盖成功')) + escapeHtml(noteStatus) + link);
     } catch (err) {
       showStatus('error', '❌ ' + escapeHtml(err.message));
     } finally {
-      setLoading(overwriteBtn, false);
+      setLoading(btn, false);
+      lockCapture(false);
     }
-  });
-
-  newBtn.addEventListener('click', async () => {
-    if (!lastCapture) return;
-    hideDuplicate();
-    setLoading(newBtn, true);
-    try {
-      const result = await sendToServer(
-        lastCapture.url, lastCapture.title, lastCapture.html,
-        lastCapture.serverUrl, lastCapture.token, false, true
-      );
-      const link = buildArticleLink(lastCapture.serverUrl, result.article_id);
-      showStatus('success', '✅ ' + escapeHtml(result.message || '已加入网摘') + link);
-    } catch (err) {
-      showStatus('error', '❌ ' + escapeHtml(err.message));
-    } finally {
-      setLoading(newBtn, false);
-    }
-  });
+  }
+  overwriteBtn.addEventListener('click', () => resolveDuplicate(false));
+  newBtn.addEventListener('click', () => resolveDuplicate(true));
 
   cancelBtn.addEventListener('click', () => {
     hideDuplicate();

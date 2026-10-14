@@ -46,6 +46,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import ArticlePlayerCard from '../components/ArticlePlayerCard'
 import { parseStoredEmbedURL } from '../components/parseVideoPlaceholder'
 import TagBar from '../components/TagBar'
+import ArticleNote from '../components/ArticleNote'
 import CollapsibleFab from '../components/CollapsibleFab'
 import { CodeWrapContext } from '../components/CodeWrapContext'
 import ArticleActionsMenu from '../components/ArticleActionsMenu'
@@ -110,6 +111,17 @@ export default function ArticlePage() {
   const [loadError, setLoadError] = useState('')
   const [refreshError, setRefreshError] = useState('')
   const loadGenerationRef = useRef(0)
+  const savedNotesRef = useRef(new Map<number, { note: string }>())
+  // A GET already in flight can contain the pre-edit note. Preserve a local
+  // save that happened while it was pending, while still refreshing the body.
+  const fetchDetailForPage = useCallback(async (articleId: number) => {
+    const before = savedNotesRef.current.get(articleId)
+    const data = await fetchArticleDetail(articleId)
+    const after = savedNotesRef.current.get(articleId)
+    return after && after !== before
+      ? { ...data, article: { ...data.article, capture_note: after.note } }
+      : data
+  }, [])
   const articlePageTitle =
     article?.title
     ?? articlePreview?.title
@@ -391,7 +403,7 @@ export default function ArticlePage() {
     }
 
     try {
-      const data = await fetchArticleDetail(articleID)
+      const data = await fetchDetailForPage(articleID)
       if (!isCurrent()) return
       applyDetailResponse(data)
     } catch (err: any) {
@@ -531,7 +543,7 @@ export default function ArticlePage() {
       intervalId = setInterval(async () => {
         if (cancelled) return
         try {
-          const data = await fetchArticleDetail(article.id)
+          const data = await fetchDetailForPage(article.id)
           if (cancelled) return
           if (data.article.processing_state === 'ready' || data.article.processing_state === 'failed') {
             setArticle(data.article)
@@ -1055,7 +1067,7 @@ export default function ArticlePage() {
     const articleID = article?.id
     if (!articleID) return
     invalidateArticleDetail(articleID)
-    void fetchArticleDetail(articleID)
+    void fetchDetailForPage(articleID)
       .then((data) => {
         if (Number(id) !== articleID) return
         setArticle(data.article)
@@ -1239,6 +1251,13 @@ export default function ArticlePage() {
           {progressDisplay.currentPercent > 0 && <span>· 阅读进度 {progressDisplay.currentPercent}%</span>}
         </div>
 
+        <ArticleNote key={article.id} articleId={article.id} note={article.capture_note || ''}
+          onSaved={note => {
+            savedNotesRef.current.set(article.id, { note })
+            invalidateArticleDetail(article.id)
+            setArticle(current => current?.id === article.id ? { ...current, capture_note: note } : current)
+          }} />
+
         <TagBar articleId={article.id} />
 
         <ArticlePlayerCard article={article} articleAnchorID={primaryVideoAnchorID} />
@@ -1353,7 +1372,7 @@ export default function ArticlePage() {
               try {
                 invalidateArticleDetail(article.id)
                 await expandLinkSetChild(article.id)
-                const data = await fetchArticleDetail(article.id)
+                const data = await fetchDetailForPage(article.id)
                 setArticle(data.article)
                 setLinkSetChildren(data.children ?? null)
                 setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])

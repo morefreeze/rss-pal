@@ -1,0 +1,10 @@
+.article-note { border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--surface); border-radius: var(--radius); padding: 12px 14px; margin: 12px 0; }
+.article-note-heading { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.article-note-heading label { font-weight: 600; }
+.article-note-heading button { margin-left: auto; font-size: 12px; padding: 3px 9px; }
+.article-note-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; line-height: 1.65; }
+.article-note textarea { display: block; width: 100%; min-height: 100px; resize: vertical; padding: 10px; margin: 8px 0; font: inherit; line-height: 1.6; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+.article-note textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.article-note-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.article-note [role="alert"] { color: var(--fg); margin-top: 8px; }
+.article-note-add { font-size: 12px; padding: 4px 10px; margin: 8px 0; }

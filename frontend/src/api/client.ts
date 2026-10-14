@@ -242,6 +242,7 @@ export interface ArticleListItem {
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
   processing_error?: string
   prerank_score?: number | null
+  capture_note?: string
   editor_note?: string
   manual_tags: UserTag[]
   // Transient/derived markers that may decorate list items in other
@@ -279,6 +280,7 @@ export interface Article {
   processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
   processing_error?: string
   prerank_score?: number | null
+  capture_note?: string
   editor_note?: string
   manual_tags: UserTag[]
   kind?: 'article' | 'tweet' | 'tweet_thread'
@@ -1288,3 +1290,6 @@ export const removeRedditSubreddit = (name: string) => api.delete(`/admin/explor
 
 export const updateExploreArticleState = (id: number, state: { saved?: boolean; skipped?: boolean }) =>
   api.put<{ saved: boolean; skipped: boolean; normalized_url?: string }>(`/explore/articles/${id}/state`, state).then(res => res.data)
+
+export const updateArticleNote = (articleId: number, captureNote: string) =>
+  api.patch<{ capture_note: string }>(`/articles/${articleId}/note`, { capture_note: captureNote }).then(res => res.data)
