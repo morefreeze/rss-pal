@@ -861,7 +861,11 @@ export default function ArticlePage() {
     try {
       const result = await fetchContent(article.id)
       invalidateArticleDetail(article.id)
-      setArticle({ ...article, content: result.content })
+      setArticle({
+        ...article,
+        content: result.content,
+        published_at: result.published_at === undefined ? article.published_at : result.published_at,
+      })
     } catch {
       toast.error('获取内容失败')
     } finally {

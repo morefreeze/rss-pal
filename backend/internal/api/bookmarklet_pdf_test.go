@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
@@ -108,6 +109,13 @@ func (s *stubArticleRepo) UpdateContent(id int, content string, wordCount, readi
 
 func (s *stubArticleRepo) UpdateTitle(id int, title string) error {
 	s.titleUpdates[id] = title
+	return nil
+}
+
+func (s *stubArticleRepo) UpdateArticlePublishedAtIfNull(id int, date *time.Time) error {
+	if a := s.byID[id]; a != nil && a.PublishedAt == nil {
+		a.PublishedAt = date
+	}
 	return nil
 }
 

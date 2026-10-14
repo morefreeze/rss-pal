@@ -51,8 +51,9 @@ type ContentFetcher struct {
 }
 
 type ContentResult struct {
-	Content string
-	Title   string
+	Content     string
+	Title       string
+	PublishedAt *time.Time
 }
 
 const articleChromeSelector = `script:not([type^="math/tex"]), style, nav, header, footer, aside, ` +
@@ -155,6 +156,10 @@ func (f *ContentFetcher) FetchContentFresh(ctx context.Context, url string) (str
 	return result.Content, nil
 }
 
+func (f *ContentFetcher) FetchContentFreshWithMetadata(ctx context.Context, url string) (ContentResult, error) {
+	return f.fetchContentWithMetadata(ctx, url, true)
+}
+
 // FetchContentWithMetadata fetches and extracts main content plus lightweight
 // page metadata. The content behavior matches FetchContent; Title is best
 // effort and may be empty when only a fallback reader succeeds.
@@ -172,6 +177,7 @@ func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url strin
 		readerResult, readerErr := f.reader.fetch(ctx, url, noReaderCache)
 		if readerErr == nil {
 			readerResult.Content = normalizeReaderMarkdown(readerResult.Content)
+			readerResult.PublishedAt = result.PublishedAt
 			if readerResult.Title == "" {
 				readerResult.Title = result.Title
 			}
@@ -182,7 +188,7 @@ func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url strin
 
 	// Reader is unavailable or failed — retain Jina as the final fallback.
 	if jc, jerr := f.fetchViaJina(ctx, url); jerr == nil && jc != "" {
-		return ContentResult{Content: jc, Title: result.Title}, nil
+		return ContentResult{Content: jc, Title: result.Title, PublishedAt: result.PublishedAt}, nil
 	} else if jerr != nil {
 		log.Printf("Jina fallback failed for %s: %v", url, jerr)
 	}
@@ -251,6 +257,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentRe
 		return ContentResult{}, resp.StatusCode, err
 	}
 	title := extractDocumentTitle(doc)
+	publishedAt := ExtractPublishedAt(doc, url)
 
 	// Remove unwanted elements. Exclude top-level containers from the
 	// attribute-substring matchers — e.g. WeChat sets
@@ -279,7 +286,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentRe
 
 	content = limitContent(content, 50000)
 
-	return ContentResult{Content: content, Title: title}, http.StatusOK, nil
+	return ContentResult{Content: content, Title: title, PublishedAt: publishedAt}, http.StatusOK, nil
 }
 
 // fetchViaJina retrieves the article via the Jina Reader proxy
@@ -471,6 +478,7 @@ func (f *ContentFetcher) FetchContentWithMetadataFromReader(r io.Reader) (Conten
 		return ContentResult{}, err
 	}
 	title := extractDocumentTitle(doc)
+	publishedAt := ExtractPublishedAt(doc, "")
 
 	RemoveArticleChrome(doc)
 	StripAvatars(doc)
@@ -489,7 +497,7 @@ func (f *ContentFetcher) FetchContentWithMetadataFromReader(r io.Reader) (Conten
 		})
 	}
 
-	return ContentResult{Content: cleanContent(content), Title: title}, nil
+	return ContentResult{Content: cleanContent(content), Title: title, PublishedAt: publishedAt}, nil
 }
 
 func extractDocumentTitle(doc *goquery.Document) string {
