@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -85,9 +86,15 @@ func TestHNBoundsAndOmission(t *testing.T) {
 	}
 	items["/v0/item/1.json"] = `{"id":1,"type":"story","title":"Bounds","kids":[` + strings.Join(roots, ",") + `]}`
 	f := hnTestFetcher(items)
+	var calls atomic.Int32
+	transport := f.client.Transport
+	f.client.Transport = hnTransport(func(r *http.Request) (*http.Response, error) { calls.Add(1); return transport.RoundTrip(r) })
 	got, err := f.FetchContent(context.Background(), "https://news.ycombinator.com/item?id=1")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if calls.Load() != 121 {
+		t.Errorf("requests=%d, want 121", calls.Load())
 	}
 	if n := strings.Count(got, "· [原评论]"); n != 120 {
 		t.Errorf("rendered=%d, want 120", n)

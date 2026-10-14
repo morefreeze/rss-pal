@@ -22,13 +22,12 @@ func (f *hnCaptureFetcher) FetchContentWithMetadata(_ context.Context, target st
 	return rss.ContentResult{Title: "HN title", Content: "HN body and ranked discussion"}, f.err
 }
 func TestCaptureHNUsesAPIForBookmarkAndExtension(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+	for _, failure := range []error{nil, fmt.Errorf("HN unavailable"), rss.ErrHackerNewsUnavailable} {
+		fail := failure != nil
+		t.Run(fmt.Sprint(failure), func(t *testing.T) {
 			h, repo := newTestBookmarkletHandlerForPDF(t)
 			fetcher := &hnCaptureFetcher{}
-			if fail {
-				fetcher.err = fmt.Errorf("HN unavailable")
-			}
+			fetcher.err = failure
 			h.hnFetcher = fetcher
 			router := gin.New()
 			router.POST("/capture", h.Capture)
@@ -38,7 +37,11 @@ func TestCaptureHNUsesAPIForBookmarkAndExtension(t *testing.T) {
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 			if fail {
-				if w.Code != http.StatusBadGateway || len(repo.created) != 0 {
+				status := http.StatusBadGateway
+				if failure == rss.ErrHackerNewsUnavailable {
+					status = http.StatusUnprocessableEntity
+				}
+				if w.Code != status || len(repo.created) != 0 {
 					t.Fatalf("failure persisted: %d %v", w.Code, repo.created)
 				}
 				return
