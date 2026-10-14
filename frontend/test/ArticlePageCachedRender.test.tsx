@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticlePage from '../src/pages/ArticlePage'
@@ -14,7 +14,7 @@ const apiMocks = vi.hoisted(() => ({
   dislikeArticle: vi.fn(async () => undefined),
   expandLinkSetChild: vi.fn(async () => undefined),
   exportMarkdown: vi.fn(async () => ''),
-  fetchContent: vi.fn(async (): Promise<{ content: string; published_at?: string | null }> => ({ content: '' })),
+  fetchContent: vi.fn(async (): Promise<{ content: string; published_at?: string | null; message?: string }> => ({ content: '' })),
   generateSummaryStream: vi.fn(),
   getArticle: vi.fn(),
   getTemplates: vi.fn(async () => []),
@@ -137,6 +137,7 @@ describe('ArticlePage immediate loading', () => {
   beforeEach(() => {
     resetArticleDetailCache()
     vi.clearAllMocks()
+    apiMocks.fetchContent.mockReset().mockResolvedValue({ content: '' })
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     vi.stubGlobal('ResizeObserver', TestResizeObserver)
   })
@@ -179,6 +180,85 @@ describe('ArticlePage immediate loading', () => {
     await screen.findByText('Refetched body')
     expect(screen.getByText('新想法')).toBeTruthy()
     expect(screen.queryByText('旧想法')).toBeNull()
+  })
+
+  function renderClip() {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail({ ...detail(42), from_bookmarklet: true })
+    putArticleDetail({ ...detail(43), from_bookmarklet: true, article: { ...detail(43).article, content: 'Next body' } })
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Link to="/articles/43">Next test article</Link>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+  }
+
+  it('refetches a web clip on the backend without opening the source page', async () => {
+    const pending = deferred<{ content: string; published_at: string }>()
+    apiMocks.fetchContent.mockReturnValueOnce(pending.promise)
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const confirm = vi.spyOn(window, 'confirm')
+    renderClip()
+    const button = screen.getByRole('button', { name: /重新抓取/ })
+    fireEvent.click(button)
+    expect(apiMocks.fetchContent).toHaveBeenCalledWith(42)
+    expect((button as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(button)
+    expect(apiMocks.fetchContent).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('link', { name: '打开原网页手动抓取' })).toBeNull()
+    pending.resolve({ content: 'Refetched clip', published_at: '2026-09-20T08:30:00+08:00' })
+    await screen.findByText('Refetched clip')
+    expect(playerCardMocks.render.mock.calls.at(-1)?.[0].article.published_at).toBe('2026-09-20T08:30:00+08:00')
+    expect(open).not.toHaveBeenCalled()
+    expect(confirm).not.toHaveBeenCalled()
+    expect((button as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it.each(['request error', 'no content found', 'empty content'])('offers manual capture only after %s', async reason => {
+    if (reason === 'request error') apiMocks.fetchContent.mockRejectedValueOnce(new Error('timeout'))
+    else apiMocks.fetchContent.mockResolvedValueOnce(reason === 'no content found'
+      ? { content: 'Cached body', message: 'no content found' }
+      : { content: '  ' })
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderClip()
+    fireEvent.click(screen.getByRole('button', { name: /重新抓取/ }))
+    const manual = await screen.findByRole('link', { name: '打开原网页手动抓取' })
+    expect(screen.getByRole('alert').textContent).toContain('扩展或书签')
+    expect(manual.getAttribute('href')).toBe('https://example.com/42')
+    expect(manual.getAttribute('target')).toBe('_blank')
+    expect(manual.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(screen.getByTestId('article-body').textContent).toBe('Cached body')
+    expect(open).not.toHaveBeenCalled()
+    apiMocks.fetchContent.mockResolvedValueOnce({ content: 'Retry succeeded' })
+    fireEvent.click(screen.getByRole('button', { name: '重新抓取' }))
+    await screen.findByText('Retry succeeded')
+    expect(screen.queryByRole('link', { name: '打开原网页手动抓取' })).toBeNull()
+  })
+
+  it('clears the manual fallback when navigating to another article', async () => {
+    apiMocks.fetchContent.mockRejectedValueOnce(new Error('timeout'))
+    renderClip()
+    fireEvent.click(screen.getByRole('button', { name: /重新抓取/ }))
+    await screen.findByRole('link', { name: '打开原网页手动抓取' })
+    fireEvent.click(screen.getByText('Next test article'))
+    await screen.findByText('Next body')
+    expect(screen.queryByRole('link', { name: '打开原网页手动抓取' })).toBeNull()
+  })
+
+  it.each(['success', 'failure'])('ignores a late refetch %s after navigating away', async outcome => {
+    const pending = deferred<{ content: string }>()
+    apiMocks.fetchContent.mockReturnValueOnce(pending.promise.then(result => {
+      if (outcome === 'failure') throw new Error('timeout')
+      return result
+    }))
+    renderClip()
+    fireEvent.click(screen.getByRole('button', { name: /重新抓取/ }))
+    expect(apiMocks.fetchContent).toHaveBeenCalledWith(42)
+    fireEvent.click(screen.getByText('Next test article'))
+    await screen.findByText('Next body')
+    expect((screen.getByRole('button', { name: '重新抓取' }) as HTMLButtonElement).disabled).toBe(false)
+    await act(async () => pending.resolve({ content: 'Previous article result' }))
+    expect(screen.getByTestId('article-body').textContent).toBe('Next body')
+    expect(screen.queryByRole('link', { name: '打开原网页手动抓取' })).toBeNull()
   })
 
   it('copies a public share directly beside Share without opening the dialog', async () => {
