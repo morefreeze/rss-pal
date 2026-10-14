@@ -728,7 +728,7 @@ export const generateSummary = (id: number) =>
 
 export const fetchContent = (id: number) =>
   // The server allows 45s for extraction plus a bounded media lookup.
-  api.post<{ content: string; published_at?: string | null }>(`/articles/${id}/content`, undefined, { timeout: 60000 }).then(res => res.data)
+  api.post<{ content: string; published_at?: string | null; message?: string }>(`/articles/${id}/content`, undefined, { timeout: 60000 }).then(res => res.data)
 
 export interface YouTubePlayback {
   manifest_url?: string

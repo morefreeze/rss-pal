@@ -207,6 +207,8 @@ export default function ArticlePage() {
     if (prevId) goToArticle(prevId)
   }, [prevId, goToArticle])
   const [fetchingContent, setFetchingContent] = useState(false)
+  const [manualCaptureNeeded, setManualCaptureNeeded] = useState(false)
+  const contentRequestRef = useRef<symbol | null>(null)
   const [liked, setLiked] = useState(() => (initialDetail?.signals?.like ?? 0) > 0)
   const [disliked, setDisliked] = useState(() => (initialDetail?.signals?.dislike ?? 0) > 0)
   const [saved, setSaved] = useState(() => (initialDetail?.signals?.save ?? 0) > 0)
@@ -439,10 +441,13 @@ export default function ArticlePage() {
   useEffect(() => {
     scrollRestoredForRef.current = null
     setCurrentScrollPosition(0)
+    setFetchingContent(false)
+    setManualCaptureNeeded(false)
     void loadArticle()
 
     return () => {
       loadGenerationRef.current += 1
+      contentRequestRef.current = null
       // Record read duration on unmount
       const duration = (Date.now() - readStartTime.current) / 1000
       if (id && duration > 5) {
@@ -868,33 +873,35 @@ export default function ArticlePage() {
   }
 
   const handleFetchContent = async () => {
-    if (!article) return
+    if (!article || contentRequestRef.current) return
+    const request = Symbol()
+    contentRequestRef.current = request
     setFetchingContent(true)
+    setManualCaptureNeeded(false)
     try {
       const result = await fetchContent(article.id)
       invalidateArticleDetail(article.id)
+      if (contentRequestRef.current !== request) return
+      // The endpoint can return the old body with HTTP 200 when extraction
+      // found nothing. Offer the same fallback as a failed request.
+      if (result.message === 'no content found' || !result.content.trim()) {
+        throw new Error('no content found')
+      }
       setArticle(current => current?.id === article.id ? {
         ...current,
         content: result.content,
         published_at: result.published_at === undefined ? current.published_at : result.published_at,
       } : current)
     } catch {
-      toast.error('获取内容失败')
+      if (contentRequestRef.current !== request) return
+      if (fromBookmarklet) setManualCaptureNeeded(true)
+      else toast.error('获取内容失败')
     } finally {
-      setFetchingContent(false)
+      if (contentRequestRef.current === request) {
+        contentRequestRef.current = null
+        setFetchingContent(false)
+      }
     }
-  }
-
-  const handleRescrapeViaBookmarklet = () => {
-    if (!article) return
-    const ok = window.confirm(
-      `重新抓取需要在原网页运行书签。\n` +
-      `会打开 ${article.url}，请到新标签页点你 bookmark bar 上的 RSS Pal 书签来抓取最新内容。\n\n` +
-      `继续？`
-    )
-    if (!ok) return
-    window.open(article.url, '_blank', 'noopener,noreferrer')
-    toast.info('已打开原网页 — 在新标签里点你的 RSS Pal 书签')
   }
 
   const handleLike = async () => {
@@ -1469,16 +1476,18 @@ export default function ArticlePage() {
           <div className="card">
             <div className="flex-between mb-1">
               <h3>{isVideo ? '字幕' : '原文内容'}</h3>
-              {!isVideo && (fromBookmarklet ? (
-                <button onClick={handleRescrapeViaBookmarklet} title="在新标签打开原网页，由你点击书签来更新">
-                  🔁 通过书签重新抓取
-                </button>
-              ) : (
+              {!isVideo && (
                 <button onClick={handleFetchContent} disabled={refetchDisabled} title={refetchTitle}>
                   {fetchingContent ? '获取中...' : '重新抓取'}
                 </button>
-              ))}
+              )}
             </div>
+            {fromBookmarklet && manualCaptureNeeded && (
+              <div role="alert" className="text-muted text-sm mb-1">
+                后端抓取未成功，可打开原网页，使用 RSS Pal 扩展或书签重新抓取。
+                {' '}<a href={article.url} target="_blank" rel="noopener noreferrer">打开原网页手动抓取</a>
+              </div>
+            )}
             {article.content ? (
               article.kind === 'tweet' ? (
                 <TweetCard article={article} />
