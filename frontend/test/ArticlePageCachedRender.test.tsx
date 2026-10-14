@@ -160,6 +160,27 @@ describe('ArticlePage immediate loading', () => {
     expect(screen.queryByText('旧想法')).toBeNull()
   })
 
+  it('keeps a newly saved note when an earlier content refetch completes', async () => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    const pending = deferred<{ content: string }>()
+    apiMocks.fetchContent.mockReturnValueOnce(pending.promise)
+    const cached = detail(42)
+    cached.article.capture_note = '旧想法'
+    putArticleDetail(cached)
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '重新抓取' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑随手记' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '我的随手记' }), { target: { value: '新想法' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存随手记' }))
+    await screen.findByText('新想法')
+    pending.resolve({ content: 'Refetched body' })
+    await screen.findByText('Refetched body')
+    expect(screen.getByText('新想法')).toBeTruthy()
+    expect(screen.queryByText('旧想法')).toBeNull()
+  })
+
   it('starts cached unread articles at the top, including same-page navigation', async () => {
     let scrollY = 1800
     vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY)

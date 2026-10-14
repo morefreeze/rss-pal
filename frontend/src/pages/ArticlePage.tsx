@@ -872,7 +872,7 @@ export default function ArticlePage() {
     try {
       const result = await fetchContent(article.id)
       invalidateArticleDetail(article.id)
-      setArticle({ ...article, content: result.content })
+      setArticle(current => current?.id === article.id ? { ...current, content: result.content } : current)
     } catch {
       toast.error('获取内容失败')
     } finally {
