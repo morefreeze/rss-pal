@@ -22,7 +22,11 @@ FROM alpine:latest
 # poppler-utils + tesseract are required by cmd/worker/pdf_ocr.go for
 # scanned-PDF OCR; without them every queued OCR article fails with
 # "exec: pdftoppm: not found" and gets stranded in 'failed' state.
-RUN apk --no-cache add ca-certificates tzdata \
+# Tencent deployment keeps Alpine signature verification with a nearby mirror.
+# Override for builds elsewhere: --build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org
+ARG ALPINE_MIRROR=mirrors.cloud.tencent.com
+RUN sed -i "s@https://dl-cdn.alpinelinux.org/alpine@https://${ALPINE_MIRROR}/alpine@g" /etc/apk/repositories \
+    && apk --no-cache add ca-certificates tzdata \
     yt-dlp \
     poppler-utils \
     tesseract-ocr \

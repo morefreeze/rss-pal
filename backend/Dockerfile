@@ -22,7 +22,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o backfill_clip_dates ./cmd/backfill_clip
 FROM alpine:latest
 
 # KEEP IN SYNC WITH backend/Dockerfile.worker runtime packages.
-RUN apk --no-cache add ca-certificates tzdata \
+# Tencent deployment keeps Alpine signature verification with a nearby mirror.
+# Override for builds elsewhere: --build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org
+ARG ALPINE_MIRROR=mirrors.cloud.tencent.com
+RUN sed -i "s@https://dl-cdn.alpinelinux.org/alpine@https://${ALPINE_MIRROR}/alpine@g" /etc/apk/repositories \
+    && apk --no-cache add ca-certificates tzdata \
     yt-dlp \
     poppler-utils \
     tesseract-ocr \
