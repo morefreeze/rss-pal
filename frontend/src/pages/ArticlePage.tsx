@@ -1290,6 +1290,7 @@ export default function ArticlePage() {
           >
             📖 阅读模式
           </button>
+          <div className="article-share-shortcuts">
           <button
             className="secondary"
             onClick={() => setShareDialogOpen(true)}
@@ -1298,6 +1299,7 @@ export default function ArticlePage() {
             分享
           </button>
           <CopyPublicLinkButton key={article.id} articleId={article.id} />
+          </div>
           <ArticleActionsMenu onDelete={handleDelete} />
         </div>
       </div>
