@@ -99,6 +99,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-mirrors.cloud.tencent.com}
       network: host
     environment:
       <<: [*task-budget-environment, *monitoring-environment]
@@ -165,6 +167,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.worker
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-mirrors.cloud.tencent.com}
       network: host
     environment:
       SHARE_SECRET: ${SHARE_SECRET:?SHARE_SECRET required in .env}

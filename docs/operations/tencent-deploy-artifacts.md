@@ -43,7 +43,8 @@ bash scripts/tests/auto_deploy_service_selection_test.sh
 ## Runtime dependency downloads
 
 The API and worker runtime stages use the Tencent HTTPS Alpine mirror by default.
-Alpine package and index signature verification remain enabled. Override with
+Alpine package and index signature verification remain enabled. Compose accepts
+`ALPINE_MIRROR` from the deployment environment. Override a standalone build with
 `--build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org` when building elsewhere.
 This avoids long Alpine CDN downloads on the Tencent host without changing the
 installed package set or routing application traffic through a different proxy.
