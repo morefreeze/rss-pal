@@ -512,6 +512,16 @@ function ExtensionSection() {
     )
   }
 
+  const handleInstallExtension = () => {
+    const link = document.createElement('a')
+    link.href = `${apiBase}/rss-pal-extension.zip`
+    link.download = 'rss-pal-extension.zip'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setStep('install')
+  }
+
   return (
     <div className="card mb-2">
       <h3 className="mb-1">🧩 Chrome 扩展</h3>
@@ -522,7 +532,7 @@ function ExtensionSection() {
       {step === 'intro' && (
         <div>
           <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => setStep('install')}>
+            <button type="button" onClick={handleInstallExtension}>
               📦 安装扩展
             </button>
             <button type="button" className="secondary" onClick={() => setStep('configure')}>
@@ -548,9 +558,10 @@ function ExtensionSection() {
             <p className="text-sm" style={{ margin: '0 0 8px' }}><strong>安装步骤：</strong></p>
             <ol className="text-sm" style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
               <li>
+                解压下载的扩展 zip（如果未发起下载，
                 <a href={`${apiBase}/rss-pal-extension.zip`} download style={{ color: 'var(--accent)' }}>
-                  下载扩展 zip
-                </a> 并解压
+                  点击这里下载
+                </a>）
               </li>
               <li>
                 打开 <code style={{ background: 'var(--code-bg)', padding: '1px 6px', borderRadius: 3 }}>chrome://extensions/</code>
