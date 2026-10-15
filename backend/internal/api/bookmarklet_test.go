@@ -515,3 +515,21 @@ func TestCountMarkdownImages(t *testing.T) {
 		})
 	}
 }
+
+func TestCaptureSkipExistingNeverOverwritesLongerContent(t *testing.T) {
+	h, repo := newTestBookmarkletHandlerForPDF(t)
+	repo.byOwnerAndURL["42|https://www.reddit.com/r/test/comments/abc123/title/"] = &model.Article{ID: 77, Content: "original"}
+	router := gin.New()
+	router.POST("/capture", h.Capture)
+	body, _ := json.Marshal(map[string]any{"url": "https://www.reddit.com/r/test/comments/abc123/title/", "title": "Loaded post", "html": "<article><p>" + strings.Repeat("new loaded comment ", 100) + "</p></article>", "skip_existing": true})
+	req := httptest.NewRequest("POST", "/capture", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("expected duplicate: %d %s", w.Code, w.Body.String())
+	}
+	if len(repo.contentUpdates) != 0 {
+		t.Fatal("existing content was overwritten")
+	}
+}

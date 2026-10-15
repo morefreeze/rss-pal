@@ -5,6 +5,7 @@
 // context. Each dependency attaches its API to the service-worker global.
 importScripts(
   'queue.js',
+  'reddit-reminder.js',
   'reddit/discovery.js',
   'englife/connection.js',
   'youtube/protocol.js',
@@ -87,8 +88,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+const redditReminder = globalThis.__rssPalRedditReminder.createHandler({chrome, fetch: (...args) => fetch(...args)});
+
 // Content scripts ask us to flush after pushing new items.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && ['redditReminderTick', 'redditReminderDisable', 'redditReminderSave'].includes(msg.action)) {
+    redditReminder(msg, sender).then(sendResponse, () => sendResponse({ok:false,error:'操作失败，请重试'}));
+    return true;
+  }
   if (['redditDiscoveryRun','redditDiscoveryConfigure','redditDiscoveryAdd','redditDiscoveryRemove','redditDiscoverySync'].includes(msg?.action)) {
     if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) {
       sendResponse({ok:false}); return false;

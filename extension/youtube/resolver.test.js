@@ -1724,6 +1724,7 @@ test('background routes YouTube messages and cleanup through the resolver', asyn
     setTimeout,
   });
   context.globalThis = context;
+  context.__rssPalRedditReminder = { createHandler: () => async () => ({ok:false}) };
   context.__rssPalReddit = { createCollector: () => ({ tick: async () => {}, configure: async () => {}, requestRun: async () => {} }) };
   context.__rssPalEnglife = { createConnection: () => ({ cleanup: async () => {}, handle: async () => ({ ok: false }) }) };
   context.__rssPalYouTubeProtocol = protocolGlobal;
@@ -1739,6 +1740,7 @@ test('background routes YouTube messages and cleanup through the resolver', asyn
 
   assert.deepEqual(imported, [
     'queue.js',
+    'reddit-reminder.js',
     'reddit/discovery.js',
     'englife/connection.js',
     'youtube/protocol.js',

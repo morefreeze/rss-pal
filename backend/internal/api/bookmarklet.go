@@ -260,12 +260,13 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, captureMaxBodyBytes)
 	var req struct {
-		URL         string `json:"url"`
-		Title       string `json:"title"`
-		HTML        string `json:"html"`
-		Force       bool   `json:"force"`
-		ForceNew    bool   `json:"force_new"`
-		CaptureNote string `json:"capture_note"`
+		URL          string `json:"url"`
+		Title        string `json:"title"`
+		HTML         string `json:"html"`
+		Force        bool   `json:"force"`
+		ForceNew     bool   `json:"force_new"`
+		SkipExisting bool   `json:"skip_existing"`
+		CaptureNote  string `json:"capture_note"`
 	}
 	dec := json.NewDecoder(c.Request.Body)
 	if err := dec.Decode(&req); err != nil {
@@ -357,7 +358,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 
 	articleRepo := h.articleRepo.WithCtx(c)
 	var existing *model.Article
-	if !req.ForceNew {
+	if !req.ForceNew || req.SkipExisting {
 		var err error
 		existing, err = articleRepo.FindByOwnerAndURL(user.ID, normalized)
 		if err != nil {
@@ -375,7 +376,7 @@ func (h *BookmarkletHandler) Capture(c *gin.Context) {
 		newLen, oldLen := len(content), len(existing.Content)
 		newImages := countMarkdownImages(content)
 		oldImages := countMarkdownImages(existing.Content)
-		if shouldPromptDuplicate(newLen, oldLen, newImages, oldImages, req.Force) {
+		if req.SkipExisting || shouldPromptDuplicate(newLen, oldLen, newImages, oldImages, req.Force) {
 			if noteSaved && h.backup != nil {
 				afterCommit(c, h.backup.TriggerAsync)
 			}
