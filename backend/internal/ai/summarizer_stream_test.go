@@ -158,8 +158,8 @@ func TestSummarizeWithTemplateStreamDoesNotAddAnchorsWhenDetailedTemplateOmitsCo
 		t.Fatalf("captured %d requests, want 2", len(cap.bodies))
 	}
 	detailedPrompt := requestUserText(t, cap.bodies[1])
-	if detailedPrompt != "STREAM DETAILED ONLY Title" {
-		t.Errorf("detailed prompt = %q, want rendered content-less template unchanged", detailedPrompt)
+	if !strings.HasPrefix(detailedPrompt, "STREAM DETAILED ONLY Title\n\n篇幅要求：") {
+		t.Errorf("detailed prompt = %q, want rendered content-less template plus length instruction", detailedPrompt)
 	}
 	assertTextPromptWithoutArticleAnchors(t, detailedPrompt, "content-less stream template detailed")
 }

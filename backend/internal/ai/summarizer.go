@@ -332,7 +332,7 @@ func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 
 请只输出要点列表，不要其他内容。`, title, content)
 
-	brief, err := s.callStream(ctx, briefPrompt, briefMaxTokens, onBriefDelta)
+	brief, err := s.callStream(ctx, appendSummaryLengthInstruction(briefPrompt, briefMaxCharacters), briefMaxTokens, onBriefDelta)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stream brief: %w", err)
 	}
@@ -346,7 +346,7 @@ func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 %s
 
 请用中文输出详细总结。`, title, detailedContent)
-	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
+	detailedPrompt = appendDetailedArticleAnchorInstruction(appendSummaryLengthInstruction(detailedPrompt, detailedMaxCharacters), anchorInstruction)
 
 	detailed, err := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
 	if err != nil {
@@ -367,7 +367,7 @@ func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, con
 	content = s.truncateArticle(content)
 	briefReplacer := strings.NewReplacer("{title}", title, "{content}", content)
 
-	brief, err := s.callStream(ctx, briefReplacer.Replace(briefPromptTpl), briefMaxTokens, onBriefDelta)
+	brief, err := s.callStream(ctx, appendSummaryLengthInstruction(briefReplacer.Replace(briefPromptTpl), briefMaxCharacters), briefMaxTokens, onBriefDelta)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stream brief with template: %w", err)
 	}
@@ -396,7 +396,7 @@ func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (
 
 请只输出要点列表，不要其他内容。`, title, content)
 
-	return s.call(ctx, prompt, briefMaxTokens)
+	return s.call(ctx, appendSummaryLengthInstruction(prompt, briefMaxCharacters), briefMaxTokens)
 }
 
 func (s *Summarizer) generateDetailed(ctx context.Context, title, content string) (string, error) {
@@ -414,7 +414,7 @@ func (s *Summarizer) generateDetailed(ctx context.Context, title, content string
 %s
 
 请用中文输出详细总结。`, title, content)
-	prompt = appendDetailedArticleAnchorInstruction(prompt, anchorInstruction)
+	prompt = appendDetailedArticleAnchorInstruction(appendSummaryLengthInstruction(prompt, detailedMaxCharacters), anchorInstruction)
 
 	return s.call(ctx, prompt, detailedMaxTokens)
 }
@@ -426,7 +426,7 @@ func buildDetailedTemplatePrompt(title, content, detailedPromptTpl string) strin
 		detailedContent, anchorInstruction = buildDetailedArticlePromptInput(content)
 	}
 	prompt := strings.NewReplacer("{title}", title, "{content}", detailedContent).Replace(detailedPromptTpl)
-	return appendDetailedArticleAnchorInstruction(prompt, anchorInstruction)
+	return appendDetailedArticleAnchorInstruction(appendSummaryLengthInstruction(prompt, detailedMaxCharacters), anchorInstruction)
 }
 
 func (s *Summarizer) ExtractTopics(ctx context.Context, title, content string) ([]string, error) {
@@ -470,7 +470,7 @@ func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, 
 	briefReplacer := strings.NewReplacer("{title}", title, "{content}", content)
 
 	briefPrompt := briefReplacer.Replace(briefPromptTpl)
-	brief, err := s.call(ctx, briefPrompt, briefMaxTokens)
+	brief, err := s.call(ctx, appendSummaryLengthInstruction(briefPrompt, briefMaxCharacters), briefMaxTokens)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate brief with template: %w", err)
 	}
@@ -663,16 +663,16 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 
 func buildVisionBriefPrompt(title, content, urlList string) string {
 	if urlList == "" {
-		return fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
+		return appendSummaryLengthInstruction(fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容：
 
 标题：%s
 
 内容：
 %s
 
-请只输出要点列表，不要其他内容。`, title, content)
+请只输出要点列表，不要其他内容。`, title, content), briefMaxCharacters)
 	}
-	return fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容。
+	return appendSummaryLengthInstruction(fmt.Sprintf(`请为以下文章生成3-5个要点的简短总结，每个要点用一行表示，以"• "开头。结合附带的图片内容。
 
 %s
 
@@ -683,21 +683,21 @@ func buildVisionBriefPrompt(title, content, urlList string) string {
 
 附图 URL 列表（按附图顺序）：
 %s
-请只输出要点列表，不要其他内容；图片引用直接放在相关要点的下一行。`, imageEmbedInstruction, title, content, urlList)
+请只输出要点列表，不要其他内容；图片引用直接放在相关要点的下一行。`, imageEmbedInstruction, title, content, urlList), briefMaxCharacters)
 }
 
 func buildVisionDetailedPrompt(title, content, urlList string) string {
 	if urlList == "" {
-		return fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
+		return appendSummaryLengthInstruction(fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论。结合附带的图片内容：
 
 标题：%s
 
 内容：
 %s
 
-请用中文输出详细总结。`, title, content)
+请用中文输出详细总结。`, title, content), detailedMaxCharacters)
 	}
-	return fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论，使用 Markdown 格式。结合附带的图片内容。
+	return appendSummaryLengthInstruction(fmt.Sprintf(`请为以下文章生成详细的中文总结，包括主要观点、关键信息和结论，使用 Markdown 格式。结合附带的图片内容。
 
 %s
 
@@ -708,7 +708,7 @@ func buildVisionDetailedPrompt(title, content, urlList string) string {
 
 附图 URL 列表（按附图顺序）：
 %s
-请用中文输出详细总结。`, imageEmbedInstruction, title, content, urlList)
+请用中文输出详细总结。`, imageEmbedInstruction, title, content, urlList), detailedMaxCharacters)
 }
 
 // callVisionStream is the streaming companion of callVision. No retry (same
