@@ -744,17 +744,22 @@ func (r *ArticleRepository) GetMediaArticlesWithoutTranscript(limit int) ([]mode
 // Used when transcript fetching succeeds. Clearing the summary is what
 // feeds the article back to backfillSummaries on the next worker cycle.
 func (r *ArticleRepository) UpdateContentAndResetSummary(id int, content string, wordCount, readingMinutes int) error {
+	return r.UpdateTranscriptContent(id, content, wordCount, readingMinutes, 0)
+}
+
+func (r *ArticleRepository) UpdateTranscriptContent(id int, content string, wordCount, readingMinutes, durationSeconds int) error {
 	_, err := r.db.Exec(`
 		UPDATE articles
 		SET content = $1,
 		    word_count = $2,
 		    reading_minutes = $3,
+		    media_duration_seconds = CASE WHEN $5 > 0 THEN $5 ELSE media_duration_seconds END,
 		    summary_brief = NULL,
 		    summary_detailed = NULL,
 		    transcript_fetched_at = NOW(),
 		    refetch_attempts = 0
 		WHERE id = $4
-	`, content, wordCount, readingMinutes, id)
+	`, content, wordCount, readingMinutes, id, durationSeconds)
 	return err
 }
 

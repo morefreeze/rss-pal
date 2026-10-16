@@ -446,7 +446,7 @@ func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRep
 			}
 			newContent := buildContentWithTranscript(article.Content, result)
 			wc, rm := rss.ComputeMetrics(newContent)
-			if err := articleRepo.UpdateContentAndResetSummary(article.ID, newContent, wc, rm); err != nil {
+			if err := articleRepo.UpdateTranscriptContent(article.ID, newContent, wc, rm, result.DurationSeconds); err != nil {
 				log.Printf("Failed to save transcript for article %d: %v", article.ID, err)
 				return
 			}

@@ -22,11 +22,20 @@ func (f *Englife) Fetch(ctx context.Context, a *model.Article) (*Result, error) 
 	if id == "" {
 		return nil, nil
 	}
-	text, err := f.Service.Fetch(ctx, id)
+	var text string
+	var duration int
+	var err error
+	if service, ok := f.Service.(interface {
+		FetchWithDuration(context.Context, string) (string, int, error)
+	}); ok {
+		text, duration, err = service.FetchWithDuration(ctx, id)
+	} else {
+		text, err = f.Service.Fetch(ctx, id)
+	}
 	if err != nil || text == "" {
 		return nil, err
 	}
-	return &Result{Text: text, Source: "englife", Kind: "article"}, nil
+	return &Result{Text: text, Source: "englife", Kind: "article", DurationSeconds: duration}, nil
 }
 func (r *Result) Heading() string {
 	if r.Kind == "article" {

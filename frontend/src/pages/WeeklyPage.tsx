@@ -104,7 +104,7 @@ export default function WeeklyPage() {
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
                     {a.feed_title && <span className="text-muted text-sm">{a.feed_title}</span>}
                     {a.published_at && <span className="text-muted text-sm">{new Date(a.published_at).toLocaleDateString('zh-CN')}</span>}
-                    <ReadingMeta wordCount={a.word_count} readingMinutes={a.reading_minutes} />
+                    <ReadingMeta wordCount={a.word_count} readingMinutes={a.reading_minutes} mediaType={a.media_type} mediaDurationSeconds={a.media_duration_seconds} />
                   </div>
                   {a.summary_brief && (
                     <div className="summary-markdown text-muted" style={{ fontSize: 13 }}>

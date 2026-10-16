@@ -30,7 +30,7 @@ func TestBilibiliCC_FetchesTranscript(t *testing.T) {
 		switch {
 		case strings.Contains(r.URL.Path, "/x/web-interface/view"):
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(viewBytes)
+			w.Write([]byte(strings.Replace(string(viewBytes), `"cid":`, `"duration":97,"cid":`, 1)))
 		case strings.Contains(r.URL.Path, "/x/player/v2"):
 			body := strings.Replace(string(playerBytes), "//PLACEHOLDER/sub.json", subURL, 1)
 			w.Header().Set("Content-Type", "application/json")
@@ -62,6 +62,9 @@ func TestBilibiliCC_FetchesTranscript(t *testing.T) {
 	}
 	if !strings.Contains(got.Text, "你好") || !strings.Contains(got.Text, "世界") {
 		t.Errorf("transcript missing expected lines: %q", got.Text)
+	}
+	if got.DurationSeconds != 97 {
+		t.Errorf("duration=%d, want 97", got.DurationSeconds)
 	}
 	if got.Source == "" {
 		t.Error("source should not be empty")

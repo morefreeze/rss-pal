@@ -142,6 +142,31 @@ describe('ArticlePage immediate loading', () => {
     vi.stubGlobal('ResizeObserver', TestResizeObserver)
   })
 
+  it('offers accessible thumb icons and keeps feedback selection mutually exclusive', async () => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+    const like = screen.getByRole('button', { name: '喜欢', exact: true })
+    const dislike = screen.getByRole('button', { name: '不喜欢', exact: true })
+    expect(like.querySelector('svg')).toBeTruthy()
+    expect(dislike.querySelector('svg')).toBeTruthy()
+    expect(like.textContent).toBe('')
+    expect(dislike.textContent).toBe('')
+    expect(like.getAttribute('aria-pressed')).toBe('false')
+    expect(dislike.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(like)
+    await waitFor(() => expect(like.getAttribute('aria-pressed')).toBe('true'))
+    expect(apiMocks.likeArticle).toHaveBeenCalledWith(42)
+    fireEvent.click(dislike)
+    await waitFor(() => expect(dislike.getAttribute('aria-pressed')).toBe('true'))
+    expect(like.getAttribute('aria-pressed')).toBe('false')
+    expect(apiMocks.dislikeArticle).toHaveBeenCalledWith(42)
+    fireEvent.click(dislike)
+    await waitFor(() => expect(dislike.getAttribute('aria-pressed')).toBe('false'))
+  })
+
   it('keeps a newly saved note when an older refresh resolves later', async () => {
     const pending = deferred<ArticleDetailResponse>()
     apiMocks.getArticle.mockReturnValue(pending.promise)

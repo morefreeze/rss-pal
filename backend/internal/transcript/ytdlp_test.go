@@ -31,6 +31,9 @@ dir=$(dirname "$out")
 cat > "$dir/sub.en.json3" <<'JSON'
 {"events":[{"segs":[{"utf8":"Hello "},{"utf8":"world."}]},{"segs":[{"utf8":"Second line."}]}]}
 JSON
+cat > "$dir/sub.info.json" <<'JSON'
+{"duration":97.0}
+JSON
 exit 1
 `
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
@@ -52,6 +55,9 @@ exit 1
 	}
 	if !strings.Contains(got.Text, "Hello world.") || !strings.Contains(got.Text, "Second line.") {
 		t.Fatalf("unexpected transcript text: %q", got.Text)
+	}
+	if got.DurationSeconds != 97 {
+		t.Errorf("duration=%d, want 97", got.DurationSeconds)
 	}
 	if got.Source != "yt-dlp 字幕" {
 		t.Fatalf("source = %q, want yt-dlp 字幕", got.Source)

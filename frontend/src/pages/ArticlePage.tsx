@@ -1257,7 +1257,7 @@ export default function ArticlePage() {
         <h2>{article.title}</h2>
         <div className="text-muted text-sm mb-2" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           <span>{formatDate(article.published_at)}</span>
-          <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+          <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} mediaType={article.media_type} mediaDurationSeconds={article.media_duration_seconds} />
           <span>·</span>
           <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
           {progressDisplay.currentPercent > 0 && <span>· 阅读进度 {progressDisplay.currentPercent}%</span>}
@@ -1276,17 +1276,28 @@ export default function ArticlePage() {
 
         <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
           <button
+            type="button"
+            className="article-feedback article-feedback--like"
+            aria-label="喜欢"
+            aria-pressed={liked}
+            title={liked ? '取消喜欢' : '喜欢'}
             onClick={handleLike}
-            style={liked ? { backgroundColor: '#22c55e', color: 'white' } : {}}
           >
-            {liked ? '✓ 已喜欢' : '👍 喜欢'}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <path d="M7 10v12H3a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1h4Zm0 0 5-8a3 3 0 0 1 3 3v4h5a2 2 0 0 1 2 2.3l-1.4 8a3 3 0 0 1-3 2.7H7" />
+            </svg>
           </button>
           <button
-            className="secondary"
+            type="button"
+            className="article-feedback article-feedback--dislike"
+            aria-label="不喜欢"
+            aria-pressed={disliked}
+            title={disliked ? '取消不喜欢' : '不喜欢'}
             onClick={handleDislike}
-            style={disliked ? { backgroundColor: '#ef4444', color: 'white', borderColor: '#ef4444' } : {}}
           >
-            {disliked ? '✓ 已不喜欢' : '👎 不喜欢'}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <path d="M7 14V2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4Zm0 0 5 8a3 3 0 0 0 3-3v-4h5a2 2 0 0 0 2-2.3l-1.4-8A3 3 0 0 0 17.6 2H7" />
+            </svg>
           </button>
           <button
             className="secondary"

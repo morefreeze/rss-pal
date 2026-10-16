@@ -48,7 +48,8 @@ func (f *BilibiliCC) Fetch(ctx context.Context, article *model.Article) (*Result
 	var view struct {
 		Code int `json:"code"`
 		Data struct {
-			Cid int64 `json:"cid"`
+			Cid      int64 `json:"cid"`
+			Duration int   `json:"duration"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(body), &view); err != nil || view.Code != 0 || view.Data.Cid == 0 {
@@ -113,7 +114,7 @@ func (f *BilibiliCC) Fetch(ctx context.Context, article *model.Article) (*Result
 	if text == "" {
 		return nil, nil
 	}
-	return &Result{Text: text, Source: "Bilibili CC"}, nil
+	return &Result{Text: text, Source: "Bilibili CC", DurationSeconds: max(0, view.Data.Duration)}, nil
 }
 
 func extractBvid(article *model.Article) string {

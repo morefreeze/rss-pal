@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,7 +83,7 @@ func (f *YouTubeCC) Fetch(ctx context.Context, article *model.Article) (*Result,
 	if strings.TrimSpace(text) == "" {
 		return nil, nil
 	}
-	return &Result{Text: text, Source: sourceLabel(chosen)}, nil
+	return &Result{Text: text, Source: sourceLabel(chosen), DurationSeconds: youtubeDuration(html)}, nil
 }
 
 func extractYouTubeID(article *model.Article) string {
@@ -240,4 +241,29 @@ func fetchString(ctx context.Context, client *http.Client, rawURL string) (strin
 		return "", err
 	}
 	return string(body), nil
+}
+
+func youtubeDuration(html string) int {
+	loc := playerResponseRe.FindStringIndex(html)
+	if loc == nil {
+		return 0
+	}
+	start := loc[1] - 1
+	end := scanBalancedJSON(html, start)
+	if end < 0 {
+		return 0
+	}
+	var data struct {
+		VideoDetails struct {
+			LengthSeconds string `json:"lengthSeconds"`
+		} `json:"videoDetails"`
+	}
+	if json.Unmarshal([]byte(html[start:end]), &data) != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(data.VideoDetails.LengthSeconds)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }

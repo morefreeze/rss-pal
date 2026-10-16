@@ -21,13 +21,14 @@ type Connection struct {
 	Remaining                 *int
 }
 type Job struct {
-	AccountID string    `json:"-"`
-	VideoID   string    `json:"video_id"`
-	RemoteID  string    `json:"-"`
-	Status    string    `json:"status"`
-	Output    string    `json:"-"`
-	NextCheck time.Time `json:"-"`
-	UpdatedAt time.Time `json:"updated_at"`
+	AccountID       string    `json:"-"`
+	VideoID         string    `json:"video_id"`
+	RemoteID        string    `json:"-"`
+	Status          string    `json:"status"`
+	Output          string    `json:"-"`
+	DurationSeconds int       `json:"-"`
+	NextCheck       time.Time `json:"-"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 type Store interface {
 	Lock(context.Context) (func(), error)
@@ -373,12 +374,13 @@ func (s *Service) Fetch(ctx context.Context, video string) (output string, resul
 			return "", ErrPending
 		}
 	}
-	text, e := remote.Document(ctx, j.RemoteID, video)
+	text, duration, e := remote.DocumentWithDuration(ctx, j.RemoteID, video)
 	j.NextCheck = time.Now().Add(time.Minute)
 	switch {
 	case e == nil:
 		j.Status = "ready"
 		j.Output = text
+		j.DurationSeconds = duration
 	case errors.Is(e, ErrPending):
 		j.Status = "pending"
 	case errors.Is(e, ErrFailed):
@@ -431,4 +433,22 @@ func (s *Service) Connected(ctx context.Context) (bool, error) {
 	}
 	c, err := s.store.Connection(ctx)
 	return len(c.Secret) > 0, err
+}
+
+// FetchWithDuration retains metadata alongside cached reading content without
+// another upstream call or generation request.
+func (s *Service) FetchWithDuration(ctx context.Context, video string) (string, int, error) {
+	text, err := s.Fetch(ctx, video)
+	if err != nil || text == "" {
+		return text, 0, err
+	}
+	c, err := s.store.Connection(ctx)
+	if err != nil {
+		return "", 0, err
+	}
+	job, err := s.store.Job(ctx, c.AccountID, video)
+	if err != nil {
+		return "", 0, err
+	}
+	return text, job.DurationSeconds, nil
 }

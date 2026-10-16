@@ -101,11 +101,11 @@ func (s *SQLStore) Job(ctx context.Context, account, video string) (Job, error) 
 	var j Job
 	j.AccountID = account
 	j.VideoID = video
-	err := s.db.QueryRowContext(ctx, `SELECT remote_id,status,output,next_check_at,updated_at FROM englife_jobs WHERE account_id=$1 AND video_id=$2 AND language='zh'`, account, video).Scan(&j.RemoteID, &j.Status, &j.Output, &j.NextCheck, &j.UpdatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT remote_id,status,output,next_check_at,updated_at,duration_seconds FROM englife_jobs WHERE account_id=$1 AND video_id=$2 AND language='zh'`, account, video).Scan(&j.RemoteID, &j.Status, &j.Output, &j.NextCheck, &j.UpdatedAt, &j.DurationSeconds)
 	return j, err
 }
 func (s *SQLStore) SaveJob(ctx context.Context, j Job) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO englife_jobs(account_id,video_id,language,remote_id,status,output,next_check_at,updated_at) VALUES($1,$2,'zh',$3,$4,$5,$6,$7) ON CONFLICT(account_id,video_id,language) DO UPDATE SET remote_id=EXCLUDED.remote_id,status=EXCLUDED.status,output=EXCLUDED.output,next_check_at=EXCLUDED.next_check_at,updated_at=EXCLUDED.updated_at`, j.AccountID, j.VideoID, j.RemoteID, j.Status, j.Output, j.NextCheck, j.UpdatedAt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO englife_jobs(account_id,video_id,language,remote_id,status,output,next_check_at,updated_at,duration_seconds) VALUES($1,$2,'zh',$3,$4,$5,$6,$7,$8) ON CONFLICT(account_id,video_id,language) DO UPDATE SET remote_id=EXCLUDED.remote_id,status=EXCLUDED.status,output=EXCLUDED.output,next_check_at=EXCLUDED.next_check_at,updated_at=EXCLUDED.updated_at,duration_seconds=EXCLUDED.duration_seconds`, j.AccountID, j.VideoID, j.RemoteID, j.Status, j.Output, j.NextCheck, j.UpdatedAt, j.DurationSeconds)
 	return err
 }
 func (s *SQLStore) Jobs(ctx context.Context, account string) ([]Job, error) {

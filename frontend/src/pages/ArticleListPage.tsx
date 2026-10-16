@@ -169,7 +169,7 @@ function SearchArticleRow({
           <div className="flex-between mt-1">
             <div className="flex gap-2" style={{ alignItems: 'center' }}>
               <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
-              <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+              <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} mediaType={article.media_type} mediaDurationSeconds={article.media_duration_seconds} />
             </div>
             {article.feed_title && (
               <FeedSourceLink

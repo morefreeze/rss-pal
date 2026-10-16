@@ -53,3 +53,16 @@ func TestEnglifeDisconnectedPreservesPrimaryDeadline(t *testing.T) {
 		t.Fatal("changed primary behavior while disconnected")
 	}
 }
+
+type durationService struct{ fallbackService }
+
+func (s *durationService) FetchWithDuration(context.Context, string) (string, int, error) {
+	return "complete short", 97, nil
+}
+func TestEnglifePropagatesDuration(t *testing.T) {
+	f := &Englife{Service: &durationService{}}
+	result, err := f.Fetch(context.Background(), &model.Article{MediaType: "video/youtube", URL: "https://www.youtube.com/shorts/abcdefghijk"})
+	if err != nil || result == nil || result.DurationSeconds != 97 {
+		t.Fatalf("duration lost: %+v %v", result, err)
+	}
+}

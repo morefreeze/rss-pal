@@ -109,6 +109,13 @@ afterEach(() => {
 })
 
 describe('SharePage public reader', () => {
+  it('shows short video duration beside reading metrics on a public share', async () => {
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ media_type:'video/youtube', media_duration_seconds:97 }) })
+    renderSharePage()
+    expect(await screen.findByText('视频 1:37')).toBeTruthy()
+    expect(screen.getByText(/1,234 字 · 6 分钟/)).toBeTruthy()
+  })
+
   it('renders source, published and reading metadata, both summaries, full markdown, and safe outbound links', async () => {
     axiosMock.get.mockResolvedValue({ data: sharedSnapshot() })
     renderSharePage()

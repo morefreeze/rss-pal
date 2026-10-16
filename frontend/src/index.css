@@ -1634,3 +1634,20 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
 @media (max-width: 640px) { .article-copy-public-link button { min-height: 44px; } }
 
 .article-share-shortcuts { display: inline-flex; align-items: flex-start; gap: 8px; max-width: 100%; }
+
+/* Icon-only article feedback retains a generous touch target. */
+button.article-feedback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+}
+button.article-feedback:hover { color: var(--fg); opacity: 1; }
+button.article-feedback--like[aria-pressed="true"] { color: #16a34a; }
+button.article-feedback--dislike[aria-pressed="true"] { color: #ef4444; }
+button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opacity: 0.15; }

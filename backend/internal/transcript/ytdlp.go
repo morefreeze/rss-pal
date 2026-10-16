@@ -3,8 +3,10 @@ package transcript
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,6 +95,7 @@ func runYTDLP(ctx context.Context, commandPath, dir, lang, sourceURL string) (er
 		"--no-warnings",
 		"--no-playlist",
 		"--skip-download",
+		"--write-info-json",
 		"--write-subs",
 		"--write-auto-subs",
 		"--sub-langs", lang,
@@ -182,7 +185,14 @@ func (f *YTDLP) firstSubtitleResult(dir string) (*Result, error) {
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
-		return &Result{Text: text, Source: "yt-dlp 字幕"}, nil
+		var info struct {
+			Duration float64 `json:"duration"`
+		}
+		var duration int
+		if data, err := os.ReadFile(filepath.Join(dir, "sub.info.json")); err == nil && json.Unmarshal(data, &info) == nil && info.Duration > 0 && info.Duration < float64(math.MaxInt32) {
+			duration = int(math.Round(info.Duration))
+		}
+		return &Result{Text: text, Source: "yt-dlp 字幕", DurationSeconds: duration}, nil
 	}
 	return nil, nil
 }

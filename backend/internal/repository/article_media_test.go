@@ -65,3 +65,30 @@ func assertStoredMedia(t *testing.T, db *sql.DB, articleID int, wantURL, wantTyp
 		t.Fatalf("transcript_fetched_at valid = %v, want %v", transcriptFetchedAt.Valid, wantTranscriptFetched)
 	}
 }
+
+func TestTranscriptContentPersistsDurationAndPreservesKnownValue(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	var feed, article int
+	if err := db.QueryRow(`INSERT INTO feeds(url,title) VALUES('https://example.com/duration','Duration') RETURNING id`).Scan(&feed); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO articles(feed_id,title,url,content,media_type) VALUES($1,'Short','https://www.youtube.com/shorts/abcdefghijk','old','video/youtube') RETURNING id`, feed).Scan(&article); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewArticleRepository(db)
+	for _, duration := range []int{97, 0, -1} {
+		if err := repo.UpdateTranscriptContent(article, "complete", 10, 1, duration); err != nil {
+			t.Fatal(err)
+		}
+		var got int
+		var content string
+		var fetched bool
+		if err := db.QueryRow(`SELECT media_duration_seconds,content,transcript_fetched_at IS NOT NULL FROM articles WHERE id=$1`, article).Scan(&got, &content, &fetched); err != nil {
+			t.Fatal(err)
+		}
+		if got != 97 || content != "complete" || !fetched {
+			t.Fatalf("duration=%d content=%q fetched=%v", got, content, fetched)
+		}
+	}
+}

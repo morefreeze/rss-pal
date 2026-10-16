@@ -399,7 +399,7 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		}
 	}
 
-	if content, ok, ferr := fetchTranscriptContentForSummary(c.Request.Context(), h.transcriptFetcher, article); ferr != nil {
+	if content, duration, ok, ferr := fetchTranscriptContentForSummary(c.Request.Context(), h.transcriptFetcher, article); ferr != nil {
 		if errors.Is(ferr, englife.ErrPending) || errors.Is(ferr, englife.ErrFailed) || errors.Is(ferr, englife.ErrExpired) || errors.Is(ferr, englife.ErrQuota) || errors.Is(ferr, englife.ErrUnavailable) {
 			c.JSON(http.StatusConflict, gin.H{"error": "视频整理尚未完成；可稍后重试，管理员可在第三方服务查看状态"})
 			return
@@ -407,11 +407,14 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		log.Printf("summary transcript fetch article=%d: %v", article.ID, ferr)
 	} else if ok {
 		wc, rm := rss.ComputeMetrics(content)
-		if err := articleRepo.UpdateContentAndResetSummary(id, content, wc, rm); err != nil {
+		if err := articleRepo.UpdateTranscriptContent(id, content, wc, rm, duration); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		article.Content = content
+		if duration > 0 {
+			article.MediaDurationSeconds = duration
+		}
 	}
 	if lacksSummarizableMediaContent(article) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "未找到可用于总结的字幕或正文"})
@@ -825,18 +828,18 @@ func newUserSummarizerService(aiCfg *model.UserAIConfig, cfg *config.Config) *se
 	return service.NewSummarizerService(userSummarizer)
 }
 
-func fetchTranscriptContentForSummary(ctx context.Context, fetcher transcript.Fetcher, article *model.Article) (string, bool, error) {
+func fetchTranscriptContentForSummary(ctx context.Context, fetcher transcript.Fetcher, article *model.Article) (string, int, bool, error) {
 	if fetcher == nil || article == nil || !isTranscriptBackedMedia(article.MediaType) || articleHasTranscript(article.Content) {
-		return "", false, nil
+		return "", 0, false, nil
 	}
 	result, err := fetcher.Fetch(ctx, article)
 	if err != nil {
-		return "", false, err
+		return "", 0, false, err
 	}
 	if result == nil || strings.TrimSpace(result.Text) == "" {
-		return "", false, nil
+		return "", 0, false, nil
 	}
-	return appendTranscriptToContent(article.Content, result), true, nil
+	return appendTranscriptToContent(article.Content, result), max(0, result.DurationSeconds), true, nil
 }
 
 func isTranscriptBackedMedia(mediaType string) bool {

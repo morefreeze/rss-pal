@@ -233,35 +233,45 @@ func (s *Session) Submit(ctx context.Context, video string) (string, error) {
 	return r.ID, nil
 }
 func (s *Session) Document(ctx context.Context, id, video string) (string, error) {
+	text, _, err := s.DocumentWithDuration(ctx, id, video)
+	return text, err
+}
+func (s *Session) DocumentWithDuration(ctx context.Context, id, video string) (string, int, error) {
 	if !remoteIDPattern.MatchString(id) {
-		return "", ErrFailed
+		return "", 0, ErrFailed
 	}
 	var preview struct {
 		Status string `json:"status"`
 	}
 	path := "/api/documents/" + url.PathEscape(id)
 	if err := s.request(ctx, "GET", path+"/preview", nil, &preview); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	switch preview.Status {
 	case "ready":
 	case "failed":
-		return "", ErrFailed
+		return "", 0, ErrFailed
 	case "":
-		return "", ErrUnavailable
+		return "", 0, ErrUnavailable
 	default:
-		return "", ErrPending
+		return "", 0, ErrPending
 	}
 	var doc Document
 	if err := s.request(ctx, "GET", path, nil, &doc); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return doc.Markdown(video)
+	text, err := doc.Markdown(video)
+	duration := doc.Video.Duration
+	if duration < 0 {
+		duration = 0
+	}
+	return text, duration, err
 }
 
 type Document struct {
 	Video struct {
-		ID string `json:"id"`
+		ID       string `json:"id"`
+		Duration int    `json:"duration"`
 	} `json:"video"`
 	TargetLanguage string `json:"targetLanguage"`
 	OneLine        string `json:"oneLine"`

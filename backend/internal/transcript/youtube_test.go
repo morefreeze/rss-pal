@@ -36,6 +36,7 @@ func TestYouTubeCC_FetchesTranscript(t *testing.T) {
 			html := strings.ReplaceAll(string(htmlBytes), "http://CAPTION_SERVER", r.Host)
 			// reconstruct a usable absolute URL — easier to just use r.Host with scheme
 			html = strings.ReplaceAll(string(htmlBytes), "http://CAPTION_SERVER", "http://"+r.Host)
+			html = strings.Replace(html, `"captions":`, `"videoDetails":{"lengthSeconds":"97"},"captions":`, 1)
 			w.Header().Set("Content-Type", "text/html")
 			w.Write([]byte(html))
 		case strings.Contains(r.URL.Path, "/api/timedtext"):
@@ -68,6 +69,9 @@ func TestYouTubeCC_FetchesTranscript(t *testing.T) {
 	}
 	if !strings.Contains(got.Text, "This is a test.") {
 		t.Errorf("transcript text missing second event: %q", got.Text)
+	}
+	if got.DurationSeconds != 97 {
+		t.Errorf("duration=%d, want 97", got.DurationSeconds)
 	}
 	if got.Source == "" {
 		t.Error("Source should not be empty")

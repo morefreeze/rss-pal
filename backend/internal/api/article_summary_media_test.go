@@ -44,8 +44,9 @@ func TestUserAIConfigSummarizerCarriesVisionModel(t *testing.T) {
 
 func TestFetchTranscriptContentForSummaryAppendsVideoTranscript(t *testing.T) {
 	fetcher := &stubTranscriptFetcher{result: &transcript.Result{
-		Text:   "第一句字幕。\n第二句字幕。",
-		Source: "YouTube CC",
+		Text:            "第一句字幕。\n第二句字幕。",
+		Source:          "YouTube CC",
+		DurationSeconds: 97,
 	}}
 	article := &model.Article{
 		Title:     "Video",
@@ -54,10 +55,13 @@ func TestFetchTranscriptContentForSummaryAppendsVideoTranscript(t *testing.T) {
 		MediaURL:  "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
 	}
 
-	content, ok, err := fetchTranscriptContentForSummary(context.Background(), fetcher, article)
+	content, duration, ok, err := fetchTranscriptContentForSummary(context.Background(), fetcher, article)
 
 	if err != nil {
 		t.Fatalf("fetchTranscriptContentForSummary returned error: %v", err)
+	}
+	if duration != 97 {
+		t.Fatalf("duration=%d, want 97", duration)
 	}
 	if !ok {
 		t.Fatal("expected transcript to be found")
@@ -76,10 +80,13 @@ func TestFetchTranscriptContentForSummarySkipsNonVideo(t *testing.T) {
 	fetcher := &stubTranscriptFetcher{result: &transcript.Result{Text: "ignored", Source: "YouTube CC"}}
 	article := &model.Article{Content: "正文", MediaType: "text/html"}
 
-	content, ok, err := fetchTranscriptContentForSummary(context.Background(), fetcher, article)
+	content, duration, ok, err := fetchTranscriptContentForSummary(context.Background(), fetcher, article)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if duration != 0 {
+		t.Fatalf("non-video duration=%d", duration)
 	}
 	if ok {
 		t.Fatal("non-video article should not report transcript content")

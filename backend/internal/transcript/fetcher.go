@@ -12,9 +12,10 @@ import (
 // they're part of the transcript itself, which is rare). Source is a short
 // human-readable label, e.g. "YouTube CC" or "bbc.co.uk 网页字幕".
 type Result struct {
-	Kind   string // article means generated reading content, not a verbatim transcript
-	Text   string
-	Source string
+	DurationSeconds int    // Source video length; zero means unknown.
+	Kind            string // article means generated reading content, not a verbatim transcript
+	Text            string
+	Source          string
 }
 
 // Fetcher returns a transcript for the given article. The contract is:

@@ -40,12 +40,12 @@ func TestSQLStoreLocksPairingAndPersistentJobs(t *testing.T) {
 	if err = store.CompletePair(ctx, "hash", c); !errors.Is(err, ErrPair) {
 		t.Fatal("replay", err)
 	}
-	j := Job{AccountID: "a", VideoID: "abcdefghijk", RemoteID: "job", Status: "pending", NextCheck: time.Now(), UpdatedAt: time.Now()}
+	j := Job{AccountID: "a", VideoID: "abcdefghijk", RemoteID: "job", Status: "pending", DurationSeconds: 97, NextCheck: time.Now(), UpdatedAt: time.Now()}
 	if err = store.SaveJob(ctx, j); err != nil {
 		t.Fatal(err)
 	}
 	got, err := NewSQLStore(db).Job(ctx, "a", "abcdefghijk")
-	if err != nil || got.RemoteID != "job" {
+	if err != nil || got.RemoteID != "job" || got.DurationSeconds != 97 {
 		t.Fatalf("lost job %+v %v", got, err)
 	}
 	if _, err = store.Job(ctx, "b", "abcdefghijk"); !errors.Is(err, sql.ErrNoRows) {
@@ -77,6 +77,20 @@ func TestMigrationCanBeReapplied(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if _, err := db.Exec(string(migration)); err != nil {
 			t.Fatalf("reapply %d: %v", i, err)
+		}
+	}
+}
+
+func TestDurationMigrationCanBeReapplied(t *testing.T) {
+	db, done := testdb.New(t)
+	defer done()
+	migration, err := os.ReadFile("../../migrations/056_englife_video_duration.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := db.Exec(string(migration)); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

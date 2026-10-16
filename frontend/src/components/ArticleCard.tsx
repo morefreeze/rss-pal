@@ -244,7 +244,7 @@ export default function ArticleCard({
               <span className="text-muted text-sm">
                 {dateField === 'captured' ? `抓 ${formatDate(article.fetched_at)}` : formatDate(article.published_at)}
               </span>
-              <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+              <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} mediaType={article.media_type} mediaDurationSeconds={article.media_duration_seconds} />
             </div>
           </div>
         </div>

@@ -203,7 +203,7 @@ export default function PublicArticleReader({ article, shareURL, shareRef }: Pro
           <div className="public-reader-meta text-muted text-sm">
             {article.feed_title && <span>{article.feed_title}</span>}
             {published && <time dateTime={article.published_at ?? undefined}>{published}</time>}
-            <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} />
+            <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} mediaType={article.media_type} mediaDurationSeconds={article.media_duration_seconds} />
           </div>
         </section>
 

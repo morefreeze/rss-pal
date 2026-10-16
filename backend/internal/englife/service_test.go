@@ -357,3 +357,32 @@ func TestExistingJobRecoveryRestoresConnectionHealth(t *testing.T) {
 		t.Fatal("health did not recover", m.c.State)
 	}
 }
+
+func TestVideoDurationSurvivesFetchAndCachedReuse(t *testing.T) {
+	reads := 0
+	s, m := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		if authFixture(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/api/documents/j1/preview":
+			w.Write([]byte(`{"status":"ready"}`))
+		case "/api/documents/j1":
+			reads++
+			w.Write([]byte(`{"video":{"id":"abcdefghijk","duration":97},"targetLanguage":"zh","chapters":[{"paragraphIds":["p1"]}],"segments":[{"id":"p1","translatedText":"Full short video"}]}`))
+		default:
+			t.Errorf("unexpected endpoint %s", r.URL.Path)
+		}
+	})
+	connectTest(t, s)
+	m.jobs["u1abcdefghijk"] = Job{AccountID: "u1", VideoID: "abcdefghijk", RemoteID: "j1", Status: "pending"}
+	for i := 0; i < 2; i++ {
+		text, seconds, err := s.FetchWithDuration(context.Background(), "abcdefghijk")
+		if err != nil || seconds != 97 || !strings.Contains(text, "Full short video") {
+			t.Fatalf("fetch %d: %q duration=%d err=%v", i, text, seconds, err)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("cached document refetched %d times", reads)
+	}
+}
