@@ -533,3 +533,17 @@ func TestCaptureSkipExistingNeverOverwritesLongerContent(t *testing.T) {
 		t.Fatal("existing content was overwritten")
 	}
 }
+
+func TestCapturedVideoURLDeterminesMediaWithoutHTMLPlayer(t *testing.T) {
+	for _, url := range []string{"https://www.youtube.com/watch?v=8M1gfxdglas", "https://youtu.be/8M1gfxdglas"} {
+		t.Run(url, func(t *testing.T) {
+			_, media, _, err := extractArticleWithPublication("<html><body><article><p>"+strings.Repeat("Video tutorial description. ", 20)+"</p></article></body></html>", url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if media == nil || media.Type != "video/youtube" || !strings.Contains(media.URL, "8M1gfxdglas") {
+				t.Fatalf("media=%+v", media)
+			}
+		})
+	}
+}

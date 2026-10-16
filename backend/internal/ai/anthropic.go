@@ -188,7 +188,7 @@ func (s *Summarizer) doAnthropic(req *http.Request) (*http.Response, error) {
 			text.WriteString(b.Text)
 		}
 	}
-	out := map[string]interface{}{"model": msg.Model, "choices": []interface{}{map[string]interface{}{"message": map[string]string{"content": text.String()}}}}
+	out := map[string]interface{}{"model": msg.Model, "choices": []interface{}{map[string]interface{}{"message": map[string]string{"content": text.String()}, "finish_reason": anthropicFinishReason(msg.StopReason)}}}
 	if usage := msg.Usage.openAI(); usage != nil {
 		out["usage"] = usage
 	}
@@ -223,9 +223,10 @@ func (u anthropicUsage) openAI() interface{} {
 }
 
 type anthropicMessage struct {
-	Type    string `json:"type"`
-	Model   string `json:"model"`
-	Content []struct {
+	StopReason string `json:"stop_reason"`
+	Type       string `json:"type"`
+	Model      string `json:"model"`
+	Content    []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
@@ -294,8 +295,9 @@ func (s *anthropicStream) next() error {
 		Message anthropicMessage `json:"message"`
 		Usage   anthropicUsage   `json:"usage"`
 		Delta   struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type       string `json:"type"`
+			Text       string `json:"text"`
+			StopReason string `json:"stop_reason"`
 		} `json:"delta"`
 		Content struct {
 			Type string `json:"type"`
@@ -321,6 +323,9 @@ func (s *anthropicStream) next() error {
 			return errors.New("anthropic message_delta before message_start")
 		}
 		s.delta = true
+		if event.Delta.StopReason != "" {
+			s.emit(map[string]interface{}{"choices": []interface{}{map[string]interface{}{"delta": map[string]string{}, "finish_reason": anthropicFinishReason(event.Delta.StopReason)}}})
+		}
 		// Usage in message_delta is cumulative. Update only fields supplied by
 		// this event; omitted fields retain the preceding provider counters.
 		if event.Usage.Input != nil {
@@ -360,4 +365,16 @@ func (s *anthropicStream) next() error {
 		s.done = true
 	}
 	return nil
+}
+
+// Preserve native completion status through the OpenAI compatibility layer.
+func anthropicFinishReason(reason string) string {
+	switch reason {
+	case "max_tokens":
+		return "length"
+	case "end_turn", "stop_sequence":
+		return "stop"
+	default:
+		return reason
+	}
 }

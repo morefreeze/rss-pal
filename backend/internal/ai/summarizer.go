@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -92,7 +91,8 @@ type imageURLBlock struct {
 
 type chatResponse struct {
 	Choices []struct {
-		Message struct {
+		FinishReason string `json:"finish_reason"`
+		Message      struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
@@ -108,7 +108,8 @@ type chatStreamRequest struct {
 
 type streamChunk struct {
 	Choices []struct {
-		Delta struct {
+		FinishReason string `json:"finish_reason"`
+		Delta        struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
@@ -163,7 +164,7 @@ func (s *Summarizer) call(ctx context.Context, prompt string, maxTokens int) (st
 		if err == nil {
 			return result, nil
 		}
-		if taskbudget.IsDenied(err) {
+		if taskbudget.IsDenied(err) || isCompletionError(err) {
 			return "", err
 		}
 		lastErr = err
@@ -171,7 +172,7 @@ func (s *Summarizer) call(ctx context.Context, prompt string, maxTokens int) (st
 	return "", lastErr
 }
 
-func (s *Summarizer) doCall(ctx context.Context, body []byte, maxTokens int) (string, error) {
+func (s *Summarizer) doCallOnce(ctx context.Context, body []byte, maxTokens int) (string, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -197,6 +198,9 @@ func (s *Summarizer) doCall(ctx context.Context, body []byte, maxTokens int) (st
 	}
 
 	if len(chatResp.Choices) > 0 {
+		if err := checkFinishReason(chatResp.Choices[0].FinishReason); err != nil {
+			return "", err
+		}
 		return chatResp.Choices[0].Message.Content, nil
 	}
 
@@ -243,48 +247,7 @@ func (s *Summarizer) callStream(ctx context.Context, prompt string, maxTokens in
 		return "", fmt.Errorf("AI API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var full strings.Builder
-	reader := bufio.NewReader(resp.Body)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil && err != io.EOF {
-			return full.String(), err
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			if err == io.EOF {
-				break
-			}
-			continue
-		}
-		if !strings.HasPrefix(line, "data:") {
-			if err == io.EOF {
-				break
-			}
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "[DONE]" {
-			break
-		}
-		var chunk streamChunk
-		if jerr := json.Unmarshal([]byte(payload), &chunk); jerr != nil {
-			if err == io.EOF {
-				break
-			}
-			continue
-		}
-		for _, ch := range chunk.Choices {
-			if ch.Delta.Content != "" {
-				full.WriteString(ch.Delta.Content)
-				onDelta(ch.Delta.Content)
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-	}
-	return full.String(), nil
+	return readCompletionStream(resp.Body, onDelta)
 }
 
 type SummaryResult struct {
@@ -754,48 +717,7 @@ func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imageP
 		return "", fmt.Errorf("vision stream error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var full strings.Builder
-	reader := bufio.NewReader(resp.Body)
-	for {
-		line, rerr := reader.ReadString('\n')
-		if rerr != nil && rerr != io.EOF {
-			return full.String(), rerr
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			if rerr == io.EOF {
-				break
-			}
-			continue
-		}
-		if !strings.HasPrefix(line, "data:") {
-			if rerr == io.EOF {
-				break
-			}
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "[DONE]" {
-			break
-		}
-		var chunk streamChunk
-		if jerr := json.Unmarshal([]byte(payload), &chunk); jerr != nil {
-			if rerr == io.EOF {
-				break
-			}
-			continue
-		}
-		for _, ch := range chunk.Choices {
-			if ch.Delta.Content != "" {
-				full.WriteString(ch.Delta.Content)
-				onDelta(ch.Delta.Content)
-			}
-		}
-		if rerr == io.EOF {
-			break
-		}
-	}
-	return full.String(), nil
+	return readCompletionStream(resp.Body, onDelta)
 }
 
 // SummarizeWithImagesStream is the streaming variant of SummarizeWithImages.
@@ -818,6 +740,9 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 	briefPrompt := buildVisionBriefPrompt(title, content, urlList)
 	brief, err := s.callVisionStream(ctx, briefPrompt, imagePaths, briefMaxTokens, onBriefDelta)
 	if err != nil {
+		if brief != "" {
+			return nil, err
+		}
 		log.Printf("vision stream brief failed, falling back to text stream: %v", err)
 		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
 	}
@@ -827,6 +752,9 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
 	detailed, err := s.callVisionStream(ctx, detailedPrompt, imagePaths, detailedMaxTokens, onDetailedDelta)
 	if err != nil {
+		if detailed != "" {
+			return nil, err
+		}
 		log.Printf("vision stream detailed failed, falling back to text stream detailed: %v", err)
 		dText, derr := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
 		if derr != nil {

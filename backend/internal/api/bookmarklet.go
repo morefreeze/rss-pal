@@ -547,8 +547,8 @@ func extractArticleWithPublication(html, baseURL string) (string, *rss.MediaInfo
 	rss.ResolveURLs(doc, baseURL)
 
 	selection, content := rss.SelectArticleContent(doc, 200)
-	var media *rss.MediaInfo
-	if selection != nil {
+	media := rss.ExtractVideoMedia(baseURL)
+	if media == nil && selection != nil {
 		selectionHTML, _ := selection.Html()
 		media = rss.FindMediaInHTMLBytes([]byte(selectionHTML), baseURL)
 	}
