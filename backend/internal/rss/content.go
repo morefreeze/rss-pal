@@ -106,6 +106,11 @@ func RemoveArticleChrome(doc *goquery.Document) {
 // Markdown clears minChars. If none clears the threshold, the longest
 // candidate is returned so callers retain the existing paragraph fallback.
 func SelectArticleContent(doc *goquery.Document, minChars int) (*goquery.Selection, string) {
+	if selection := bestBlogsNewsletterContent(doc); selection != nil {
+		if markdown := ExtractMarkdown(selection); len(markdown) > minChars {
+			return selection, markdown
+		}
+	}
 	var best *goquery.Selection
 	var bestMarkdown string
 	for _, selector := range articleContentSelectors {
