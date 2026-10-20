@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SettingsPage from '../src/pages/SettingsPage'
 
 vi.mock('../src/api/client', () => ({
+  getShortcutConnections: vi.fn(async () => 0),
   getTemplates: vi.fn(async () => []),
   getAIConfig: vi.fn(async () => null),
   getBookmarkletToken: vi.fn(async () => 'test-token'),

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/bytedance/rss-pal/internal/backup"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -19,11 +20,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type feedContentFetcher interface {
+	FetchContent(context.Context, string) (string, error)
+	FetchContentWithMetadata(context.Context, string) (rss.ContentResult, error)
+	FetchHTMLDocument(context.Context, string) (*goquery.Document, error)
+}
+
 type FeedHandler struct {
 	repo           *repository.FeedRepository
 	articleRepo    *repository.ArticleRepository
 	fetcher        *rss.Fetcher
-	contentFetcher *rss.ContentFetcher
+	contentFetcher feedContentFetcher
 	backup         *backup.Runner // nil when backup is disabled
 }
 
@@ -541,6 +548,17 @@ func extractStatusFromErr(s string) string {
 // When expand=false: saves the URL as a single article into the user's "⭐ 网摘"
 // feed (GetOrCreateClipFeed), with no link expansion.
 func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
+	h.createOneoffLinkSet(c, true)
+}
+
+// CaptureFromShortcut is limited to saving a single private clip. A shortcut
+// credential cannot create expanding feeds, even if expand=true is supplied.
+func (h *FeedHandler) CaptureFromShortcut(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
+	h.createOneoffLinkSet(c, false)
+}
+
+func (h *FeedHandler) createOneoffLinkSet(c *gin.Context, allowExpand bool) {
 	var req struct {
 		URL    string `json:"url"`
 		Expand bool   `json:"expand"`
@@ -549,6 +567,14 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url required"})
 		return
 	}
+	if !allowExpand {
+		parsed, err := url.Parse(req.URL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请共享有效的 http 或 https 网页链接"})
+			return
+		}
+	}
+	req.Expand = req.Expand && allowExpand
 	var err error
 	req.URL, err = normalizeFeedURL(req.URL)
 	if err != nil {
@@ -618,7 +644,7 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新摘要失败"})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"feed_id": existing.FeedID, "parent_article_id": existing.ID})
+			jsonAfterCommit(c, http.StatusOK, gin.H{"feed_id": existing.FeedID, "parent_article_id": existing.ID})
 			return
 		}
 	}
@@ -689,7 +715,7 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
+	jsonAfterCommit(c, http.StatusCreated, gin.H{
 		"feed_id":           feedID,
 		"parent_article_id": article.ID,
 	})

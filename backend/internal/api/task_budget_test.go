@@ -48,7 +48,7 @@ func TestExpensiveTaskRouteCoverage(t *testing.T) {
 	if taskRoute("GET", "/api/articles/:id/candidates") != "fetch" {
 		t.Fatal("live candidate fetching must be metered")
 	}
-	for _, path := range []string{"/api/admin/feed-catalog/:id/check", "/api/admin/feed-catalog/:id/publication", "/api/articles/:id/summary", "/api/settings/polish-prompt", "/api/feeds/:id/fetch", "/api/feeds/preview", "/api/bookmarklet/capture-pdf", "/api/bookmarklet/capture-pdf-url", "/api/bookmarklet/capture", "/api/extension/ingest", "/api/explore/sources/:id/subscribe", "/api/explore/sources/subscribe-batch", "/api/feeds/oneoff_link_set", "/api/interests/generate", "/api/insights/generate"} {
+	for _, path := range []string{"/api/admin/feed-catalog/:id/check", "/api/admin/feed-catalog/:id/publication", "/api/articles/:id/summary", "/api/settings/polish-prompt", "/api/feeds/:id/fetch", "/api/feeds/preview", "/api/bookmarklet/capture-pdf", "/api/bookmarklet/capture-pdf-url", "/api/bookmarklet/capture", "/api/extension/ingest", "/api/explore/sources/:id/subscribe", "/api/explore/sources/subscribe-batch", "/api/feeds/oneoff_link_set", "/api/shortcuts/capture", "/api/interests/generate", "/api/insights/generate"} {
 		if taskRoute("POST", path) == "" {
 			t.Errorf("unmetered %s", path)
 		}

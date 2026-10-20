@@ -1298,3 +1298,11 @@ export const updateExploreArticleState = (id: number, state: { saved?: boolean; 
 
 export const updateArticleNote = (articleId: number, captureNote: string) =>
   api.patch<{ capture_note: string }>(`/articles/${articleId}/note`, { capture_note: captureNote }).then(res => res.data)
+
+// Shortcut pairing shares only a short-lived code with the native app.
+export const getShortcutConnections = () =>
+  api.get<{ connections: number }>('/settings/shortcuts').then(res => res.data.connections)
+export const pairShortcut = () =>
+  api.post<{ code: string; expires_at: string }>('/settings/shortcuts/pair').then(res => res.data)
+export const revokeShortcutConnections = () =>
+  api.delete('/settings/shortcuts').then(() => undefined)

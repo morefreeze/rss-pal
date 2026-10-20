@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Re-export the native workflow published as the one-button installer.
+"""Re-export the credential-free native workflow used by the installer.
 
-Canonical source was exported from Shortcuts.app, executed on macOS and
-retrieved from Apple's published record (signingStatus=APPROVED):
-https://www.icloud.com/shortcuts/bee8c10b751e47a18d87fb75f889b3d3
+Native action formats were exported from Shortcuts.app. The direct-capture
+workflow was imported and executed on macOS against an isolated API. The
+installer's Apple record must match this source before release.
 
 python3 scripts/build_iphone_shortcut.py /tmp/rss-pal-unsigned.shortcut
 shortcuts sign --mode anyone --input /tmp/rss-pal-unsigned.shortcut \

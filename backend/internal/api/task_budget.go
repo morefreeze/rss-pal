@@ -150,7 +150,7 @@ func taskRoute(method, path string) string {
 	switch path {
 	case "/api/bookmarklet/capture-pdf", "/api/bookmarklet/capture-pdf-url":
 		return "pdf"
-	case "/api/bookmarklet/capture", "/api/extension/ingest", "/api/feeds/oneoff_link_set":
+	case "/api/bookmarklet/capture", "/api/extension/ingest", "/api/feeds/oneoff_link_set", "/api/shortcuts/capture":
 		return "capture"
 	case "/api/feeds", "/api/explore/sources/subscribe-batch", "/api/explore/sources/:id/subscribe":
 		return "subscribe"

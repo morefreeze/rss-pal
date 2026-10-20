@@ -267,6 +267,13 @@ func main() {
 	router.GET("/api/s/:short_code", sharePageLimit, shareHandler.GetShortPublic)
 	router.GET("/api/s/:short_code/assets/:asset", shareAssetLimit, shareHandler.GetShortAsset)
 
+	shortcutHandler := api.NewShortcutHandler(repository.NewShortcutRepository(db))
+	router.POST("/api/shortcuts/connect", shortcutHandler.Connect)
+	router.POST("/api/shortcuts/capture",
+		api.PublicTokenMiddleware(db, shortcutHandler.ResolveOwner),
+		api.TaskBudgetMiddleware(taskBudgets, policies),
+		feedHandler.CaptureFromShortcut)
+
 	// Public bookmarklet capture (CORS + per-user token auth, no JWT).
 	// PublicTokenMiddleware resolves the owning user from the bearer
 	// bookmarklet_token, opens a per-request tx, and sets app.user_id so
@@ -445,6 +452,9 @@ func main() {
 		apiGroup.PUT("/settings/ai", settingsHandler.SaveAIConfig)
 		apiGroup.PUT("/settings/template", settingsHandler.SetDefaultTemplate)
 		apiGroup.POST("/settings/polish-prompt", settingsHandler.PolishPrompt)
+		apiGroup.GET("/settings/shortcuts", shortcutHandler.Status)
+		apiGroup.POST("/settings/shortcuts/pair", shortcutHandler.Pair)
+		apiGroup.DELETE("/settings/shortcuts", shortcutHandler.Revoke)
 		apiGroup.GET("/settings/bookmarklet-token", settingsHandler.GetBookmarkletToken)
 		apiGroup.POST("/settings/bookmarklet-token/regenerate", settingsHandler.RegenerateBookmarkletToken)
 
