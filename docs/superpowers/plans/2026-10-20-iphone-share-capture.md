@@ -14,7 +14,7 @@
 - [x] Implement `/capture` with existing capture API; add safe capture auth intent without supporting arbitrary redirects. Add settings install link and clear setup instructions.
 - [x] Generate a credential-free shortcut source and verify its plist round trip. Signing was attempted and blocked by iCloud sign-in; deliver the manual setup guide instead, with no installable-file claim or download link.
 - [x] Run frontend checks (749 tests + 9 legacy checks) and build; independent review fixes verified. Browser fixture at 390px: preserved Selection/focus, two-link action executes, bottom bounds 8px from viewport; desktop menu retains keyboard focus. Physical iPhone execution remains unverified.
-- [ ] Integrate only this change into master while preserving dirty files; push, wait for exact-commit Tencent workflow and prove remote revision, health, public bundle, receiver and shortcut configuration guide.
+- [x] Initial integration: `dc4a2de` fast-forwarded actual remote master and deployed to Tencent; exact remote revision, local/public health, bundle checksum and receiver/guide verified. Original local master remains behind with unrelated dirty files preserved.
 
 ## Acceptance boundaries
 
@@ -23,3 +23,15 @@ The native share sheet normally passes the link rather than source article ident
 ## Signing limitation found during execution
 
 macOS `shortcuts sign --mode anyone` returns `In order to do this, you must be signed into iCloud.` Do not publish an unsigned file as installable or show a dead download link. Ship the explicit manual setup guide as the installation path, retain the credential-free reproducible builder for a future signed export on an authorized signed-in Mac, and report the exact limitation. No iCloud credentials or third-party signing services are requested or used.
+
+## One-button installation correction
+
+The user rejected manual setup as the product flow. After the user completed iCloud sign-in, macOS signing succeeded and Shortcuts.app published the native workflow at:
+
+`https://www.icloud.com/shortcuts/bee8c10b751e47a18d87fb75f889b3d3`
+
+Apple's public record reports `name=加入 RSS Pal`, `signingStatus=APPROVED` and supplies a downloadable signed artifact. The raw published workflow is archived at `shortcuts/rss-pal-capture.plist`; the builder re-exports this actual native source instead of hand-written action identifiers. Its five native actions and variable references were inspected, and native macOS execution opened the receiver with the shared CJK URL, query and fragment intact.
+
+Settings now exposes an “添加到快捷指令” button opening that Apple installer directly. The old `/shortcuts/iphone-setup.html` URL also becomes a direct install button, with no action-construction guide. System confirmation to add remains required. No account identifiers, passwords, tokens, clipboard reads or third-party signing services are involved.
+
+Verification: 755 frontend tests, 9 legacy checks, production build and independent review passed. Physical iPhone addition and native share execution remain device acceptance checks.

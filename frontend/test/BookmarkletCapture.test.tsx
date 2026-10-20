@@ -31,6 +31,13 @@ async function capture(html: string, hostname = 'example.test') {
 beforeEach(() => { window.location.hash = '#tools' })
 
 describe('Settings bookmarklet capture', () => {
+  it('offers the published Apple shortcut installer instead of manual configuration', async () => {
+    render(<MemoryRouter><SettingsPage user={{ is_admin: false }} /></MemoryRouter>)
+    const install = await screen.findByRole('link', { name: '添加到快捷指令' })
+    expect(install.getAttribute('href')).toBe('https://www.icloud.com/shortcuts/bee8c10b751e47a18d87fb75f889b3d3')
+    expect(screen.queryByRole('link', { name: '配置“加入 RSS Pal”快捷指令' })).toBeNull()
+  })
+
   it('preserves publication JSON-LD, full article, lazy images and math without executable scripts', async () => {
     const metadata = { '@type': 'Article', datePublished: '2026-09-20T08:30:00+08:00', dateModified: '2026-10-14' }
     const doc = await capture(`<head><script type="application/ld+json">${JSON.stringify(metadata)}</script>

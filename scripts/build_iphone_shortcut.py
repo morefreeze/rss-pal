@@ -1,60 +1,28 @@
 #!/usr/bin/env python3
-"""Build the token-free share shortcut; sign the resulting plist on macOS.
+"""Re-export the native workflow published as the one-button installer.
+
+Canonical source was exported from Shortcuts.app, executed on macOS and
+retrieved from Apple's published record (signingStatus=APPROVED):
+https://www.icloud.com/shortcuts/bee8c10b751e47a18d87fb75f889b3d3
 
 python3 scripts/build_iphone_shortcut.py /tmp/rss-pal-unsigned.shortcut
 shortcuts sign --mode anyone --input /tmp/rss-pal-unsigned.shortcut \
-  --output frontend/public/shortcuts/加入RSSPal.shortcut
+  --output /tmp/rss-pal-signed.shortcut
+
+A modified file needs a new Apple share link before updating the installer URL.
 """
 import plistlib
 import sys
 from pathlib import Path
 
-ORIGIN = "https://rss.morefreeze.top"
-ENCODE_ID = "DCA5D2A1-1B45-4BBD-B6A9-131228574F20"
-
-
-def action(identifier, **params):
-    return {"WFWorkflowActionIdentifier": f"is.workflow.actions.{identifier}",
-            "WFWorkflowActionParameters": params}
+SOURCE = Path(__file__).resolve().parent.parent / 'shortcuts/rss-pal-capture.plist'
 
 
 def workflow():
-    prefix = f"{ORIGIN}/capture?url="
-    encoded_url = {
-        "WFSerializationType": "WFTextTokenString",
-        "Value": {
-            "string": prefix + "\ufffc",
-            "attachmentsByRange": {
-                f"{{{len(prefix)}, 1}}": {
-                    "Type": "ActionOutput", "OutputUUID": ENCODE_ID,
-                    "OutputName": "URL Encoded Text",
-                },
-            },
-        },
-    }
-    return {
-        "WFWorkflowName": "加入 RSS Pal",
-        "WFWorkflowClientVersion": "900",
-        "WFWorkflowMinimumClientVersion": 900,
-        "WFWorkflowMinimumClientVersionString": "900",
-        "WFWorkflowIcon": {"WFWorkflowIconStartColor": 4282601983, "WFWorkflowIconGlyphNumber": 59511},
-        "WFWorkflowTypes": ["ActionExtension"],
-        "WFWorkflowInputContentItemClasses": ["WFURLContentItem", "WFStringContentItem", "WFSafariWebPageContentItem"],
-        "WFWorkflowOutputContentItemClasses": [],
-        "WFWorkflowHasShortcutInputVariables": True,
-        "WFWorkflowImportQuestions": [],
-        "WFQuickActionSurfaces": [],
-        "WFWorkflowActions": [
-            action("geturls", WFInput={"WFSerializationType": "WFTextTokenAttachment", "Value": {"Type": "ExtensionInput"}}),
-            action("getitemfromlist", WFItemSpecifier="First Item"),
-            action("urlencode", WFEncodeMode="Encode", UUID=ENCODE_ID),
-            action("url", WFURLActionURL=encoded_url),
-            action("openurl"),
-        ],
-    }
+    return plistlib.loads(SOURCE.read_bytes())
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     destination = Path(sys.argv[1])
     destination.write_bytes(plistlib.dumps(workflow(), fmt=plistlib.FMT_BINARY))
-    print(f"Wrote credential-free shortcut: {destination}")
+    print(f'Wrote credential-free shortcut: {destination}')

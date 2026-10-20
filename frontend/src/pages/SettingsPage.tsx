@@ -4,6 +4,7 @@ import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig
 import { toast } from '../utils/toast'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useTheme, type Theme } from '../util/theme'
+import IPhoneShortcutInstall from '../components/IPhoneShortcutInstall'
 
 const STYLE_OPTIONS = [
   { value: 'bullets', label: '要点列表' },
@@ -403,8 +404,8 @@ function BookmarkletSection() {
       <h3 className="mb-1">📌 浏览器抓取</h3>
       <div className="mb-2" style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
         <h4 className="mb-1">iPhone 共享到 RSS Pal</h4>
-        <p className="text-sm mb-2">配置一次快捷指令后，长按链接 → 共享 → 加入 RSS Pal，核对链接后点“加入抓取”。首次使用请在打开的浏览器里登录。</p>
-        <a href="/shortcuts/iphone-setup.html" target="_blank" rel="noopener noreferrer">配置“加入 RSS Pal”快捷指令</a>
+        <p className="text-sm mb-2">添加一次后，长按链接 → 共享 → 加入 RSS Pal，核对链接后点“加入抓取”。首次使用请在打开的浏览器里登录。</p>
+        <IPhoneShortcutInstall />
         <p className="text-muted text-sm" style={{ marginTop: 8 }}>共享链接会保存为独立网摘。圈选后加入当前文章“待抓取”仍通过阅读页底部操作条完成。</p>
       </div>
       <p className="text-muted text-sm mb-2">
