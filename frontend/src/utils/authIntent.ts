@@ -1,6 +1,7 @@
 export type AuthIntent = (
   | { kind: 'use'; returnTo: '/articles' }
   | { kind: 'subscribe'; returnTo: '/feeds'; source: string }
+  | { kind: 'capture'; returnTo: '/capture'; source: string }
 ) & { shareRef?: string }
 
 const USE_INTENT: AuthIntent = { kind: 'use', returnTo: '/articles' }
@@ -83,15 +84,18 @@ function parseNavigationIntent(search: string): AuthIntent {
   }
 
   const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
-  if (params.getAll('intent').length !== 1 || params.get('intent') !== 'subscribe') {
+  const kind = params.get('intent')
+  if (params.getAll('intent').length !== 1 || (kind !== 'subscribe' && kind !== 'capture')) {
     return USE_INTENT
   }
   const sources = params.getAll('source')
   if (sources.length !== 1) return USE_INTENT
 
   const source = safePublicSourceURL(sources[0])
-  if (!source || subscribePostAuthURL(source).length > MAX_URL_LENGTH) return USE_INTENT
-  return { kind: 'subscribe', returnTo: '/feeds', source }
+  if (!source || (kind === 'subscribe' && subscribePostAuthURL(source).length > MAX_URL_LENGTH)) return USE_INTENT
+  return kind === 'capture'
+    ? { kind, returnTo: '/capture', source }
+    : { kind, returnTo: '/feeds', source }
 }
 
 // Shape validation here is only for navigation; the server verifies signature
@@ -110,11 +114,12 @@ export function parseAuthIntent(search: string): AuthIntent {
 }
 
 export function authSearch(intent: AuthIntent): string {
-  const base = intent.kind === 'use' ? '?intent=use' : `?intent=subscribe&source=${encodeURIComponent(intent.source)}`
+  const base = intent.kind === 'use' ? '?intent=use' : `?intent=${intent.kind}&source=${encodeURIComponent(intent.source)}`
   const shareRef = validShareRef(intent.shareRef)
   return shareRef ? `${base}&share=${encodeURIComponent(shareRef)}` : base
 }
 
 export function postAuthURL(intent: AuthIntent): string {
+  if (intent.kind === 'capture') return `/capture?url=${encodeURIComponent(intent.source)}`
   return intent.kind === 'subscribe' ? subscribePostAuthURL(intent.source) : '/articles'
 }

@@ -21,6 +21,7 @@ import DailyPage from './pages/DailyPage'
 import BriefingRedirect from './components/BriefingRedirect'
 import FeedHealthPage from './pages/FeedHealthPage'
 import ClipPage from './pages/ClipPage'
+import ShareCapturePage from './pages/ShareCapturePage'
 import ExtensionConfigPage from './pages/ExtensionConfigPage'
 import ExplorePage from './pages/ExplorePage'
 import ExploreArticlePage from './pages/ExploreArticlePage'
@@ -88,6 +89,7 @@ export function AppRoutes({
       <Route path="/register" element={<RegisterPage onLogin={onLogin} />} />
       <Route path="/share/:token" element={<SharePage />} />
       <Route path="/extension-config" element={<ExtensionConfigPage />} />
+      <Route path="/capture" element={<ShareCapturePage />} />
       <Route element={<RequireAuth user={user} onLogout={onLogout} />}>
         <Route index element={<Navigate to="/articles" replace />} />
         <Route path="feeds" element={<FeedListPage />} />

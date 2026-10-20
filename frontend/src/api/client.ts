@@ -1,5 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { clearAllFabCollapsed } from '../components/CollapsibleFab'
+import { safePublicSourceURL } from '../utils/authIntent'
 
 // Per-request retry counter so the interceptor never retries more than once.
 // __refreshed marks the request as already replayed after a refresh-token
@@ -118,7 +119,11 @@ api.interceptors.response.use(
         }
       }
       clearAuthLocal()
-      window.location.href = '/login'
+      const captureURLs = new URLSearchParams(window.location.search).getAll('url')
+      const captureURL = window.location.pathname === '/capture' && captureURLs.length === 1
+        ? safePublicSourceURL(captureURLs[0]) : null
+      window.location.href = captureURL
+        ? `/login?intent=capture&source=${encodeURIComponent(captureURL)}` : '/login'
     }
     return Promise.reject(err)
   }

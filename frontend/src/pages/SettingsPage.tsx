@@ -401,6 +401,12 @@ function BookmarkletSection() {
   return (
     <div className="card mb-2">
       <h3 className="mb-1">📌 浏览器抓取</h3>
+      <div className="mb-2" style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
+        <h4 className="mb-1">iPhone 共享到 RSS Pal</h4>
+        <p className="text-sm mb-2">配置一次快捷指令后，长按链接 → 共享 → 加入 RSS Pal，核对链接后点“加入抓取”。首次使用请在打开的浏览器里登录。</p>
+        <a href="/shortcuts/iphone-setup.html" target="_blank" rel="noopener noreferrer">配置“加入 RSS Pal”快捷指令</a>
+        <p className="text-muted text-sm" style={{ marginTop: 8 }}>共享链接会保存为独立网摘。圈选后加入当前文章“待抓取”仍通过阅读页底部操作条完成。</p>
+      </div>
       <p className="text-muted text-sm mb-2">
         把下方按钮拖到浏览器书签栏。在任何网页点一下，就把当前页发回 RSS Pal —
         匹配到已有文章则更新内容，否则保存到「⭐ 网摘」feed。结果会在新标签页提示，成功后自动关闭。

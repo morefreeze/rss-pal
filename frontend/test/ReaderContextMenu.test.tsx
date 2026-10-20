@@ -10,6 +10,21 @@ afterEach(() => {
 })
 
 describe('ReaderContextMenu', () => {
+  it.each(['Enter', ' '])('does not execute a capture action when the toolbar close button receives %s', key => {
+    const run = vi.fn()
+    render(<ReaderContextMenu open presentation="bottom-toolbar" anchorRect={rect()}
+      actions={[{ id: 'add', label: '加入待抓取', run }]} onClose={vi.fn()} />)
+    fireEvent.keyDown(screen.getByRole('button', { name: '关闭选中链接操作' }), { key })
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('lets keyboard users Tab between toolbar buttons without dismissing it', () => {
+    const close = vi.fn()
+    render(<ReaderContextMenu open presentation="bottom-toolbar" anchorRect={rect()}
+      actions={[{ id: 'add', label: '加入待抓取', run: vi.fn() }]} onClose={close} />)
+    fireEvent.keyDown(screen.getByRole('button', { name: '加入待抓取' }), { key: 'Tab' })
+    expect(close).not.toHaveBeenCalled()
+  })
   it('portals an accessible menu and focuses its first enabled action', async () => {
     const { container } = render(
       <ReaderContextMenu

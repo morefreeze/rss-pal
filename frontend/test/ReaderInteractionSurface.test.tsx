@@ -44,6 +44,7 @@ function select(start: Node, startOffset: number, end: Node, endOffset: number) 
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
   window.getSelection()?.removeAllRanges()
 })
 
@@ -170,84 +171,70 @@ describe('ReaderInteractionSurface desktop selection', () => {
   })
 })
 
-describe('ReaderInteractionSurface touch long press', () => {
-  it('does not intercept a summary return control after a touch hold', () => {
-    vi.useFakeTimers()
-    const onReturn = vi.fn((event) => event.preventDefault())
-    subject(<p>Text <a className="article-anchor-return-link" href="#summary-source" onClick={onReturn}>↩⌖</a></p>)
-    const back = screen.getByRole('link', { name: '↩⌖' })
-    fireEvent.pointerDown(back, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
-    act(() => vi.advanceTimersByTime(500))
-    expect(screen.queryByRole('menu')).toBeNull()
-    fireEvent.pointerUp(back, { pointerType: 'touch', pointerId: 1 })
-    fireEvent.click(back)
-    expect(onReturn).toHaveBeenCalledTimes(1)
+describe('ReaderInteractionSurface phone selection', () => {
+  it('uses the unfocused toolbar on a landscape touch device wider than 640px', () => {
+    const original = window.matchMedia
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      ...original(query), matches: query === '(pointer: coarse)',
+    }))
+    subject()
+    const anchor = screen.getByRole('link', { name: 'Alpha readable link' })
+    select(anchor.firstChild!, 1, anchor.firstChild!, 4)
+    fireEvent(document, new Event('selectionchange'))
+    expect(screen.getByRole('toolbar')).toBeTruthy()
+    expect(document.activeElement).toBe(document.body)
+    fireEvent.scroll(window)
+    expect(screen.getByRole('toolbar')).toBeTruthy()
   })
+  function phone() {
+    const original = window.matchMedia
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      ...original(query), matches: query === '(max-width: 640px)',
+    }))
+  }
 
-  it('opens at 500ms, then suppresses the generated click and touch contextmenu only', () => {
+  it('leaves link long press and its context menu to the browser', () => {
+    phone()
     vi.useFakeTimers()
     subject()
     const anchor = screen.getByRole('link', { name: 'Alpha readable link' })
-    fireEvent.pointerDown(anchor, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
-    act(() => vi.advanceTimersByTime(499))
+    fireEvent.pointerDown(anchor, { pointerType: 'touch', pointerId: 1 })
+    act(() => vi.advanceTimersByTime(1500))
     expect(screen.queryByRole('menu')).toBeNull()
-    act(() => vi.advanceTimersByTime(1))
-    expect(screen.getByRole('menu')).toBeTruthy()
-    expect(anchor.classList.contains('reader-context-target')).toBe(true)
-    expect(fireEvent.click(anchor)).toBe(false)
-    expect(fireEvent.contextMenu(anchor, { pointerType: 'touch' })).toBe(false)
-    expect(fireEvent.contextMenu(anchor, { pointerType: 'mouse' })).toBe(true)
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    expect(fireEvent.contextMenu(anchor, { pointerType: 'touch' })).toBe(true)
   })
 
-  it('still suppresses the generated click when the user holds past the initial TTL', () => {
-    vi.useFakeTimers()
-    const clicked = vi.fn()
-    subject(<p><a href="/a" onClick={clicked}>Alpha readable link</a></p>)
-    const anchor = screen.getByRole('link')
-    fireEvent.pointerDown(anchor, { pointerType: 'touch', pointerId: 7, clientX: 10, clientY: 20 })
-    act(() => vi.advanceTimersByTime(500 + 801))
-    expect(screen.getByRole('menu')).toBeTruthy()
-    fireEvent.pointerUp(anchor, { pointerType: 'touch', pointerId: 7 })
-    expect(fireEvent.click(anchor)).toBe(false)
-    expect(clicked).not.toHaveBeenCalled()
-  })
-
-  it('does not suppress click or touch contextmenu on another link', () => {
-    vi.useFakeTimers()
-    const secondClick = vi.fn((event: React.MouseEvent) => event.preventDefault())
-    subject(<p><a href="/a">First link</a> <a href="/b" onClick={secondClick}>Second link</a></p>)
+  it('keeps the native selection and focus while showing capture at the bottom', () => {
+    phone()
+    subject()
     const [first, second] = screen.getAllByRole('link')
-    fireEvent.pointerDown(first, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
-    act(() => vi.advanceTimersByTime(500))
-    expect(screen.getByRole('menu')).toBeTruthy()
-    expect(fireEvent.click(second)).toBe(false)
-    expect(secondClick).toHaveBeenCalledTimes(1)
-    expect(fireEvent.contextMenu(second, { pointerType: 'touch' })).toBe(true)
-    expect(fireEvent.contextMenu(first, { pointerType: 'touch' })).toBe(false)
+    select(first.firstChild!, 1, second.firstChild!, 3)
+    const selected = window.getSelection()!.toString()
+    fireEvent(document, new Event('selectionchange'))
+    const toolbar = screen.getByRole('toolbar', { name: '选中链接操作' })
+    expect(toolbar.classList.contains('reader-selection-toolbar')).toBe(true)
+    expect(window.getSelection()!.toString()).toBe(selected)
+    expect(document.activeElement).toBe(document.body)
+    expect(first.classList.contains('reader-context-target')).toBe(true)
+    expect(second.classList.contains('reader-context-target')).toBe(true)
   })
 
-  it.each([
-    ['movement', (anchor: HTMLElement) => fireEvent.pointerMove(anchor, { pointerType: 'touch', pointerId: 1, clientX: 19, clientY: 20 })],
-    ['pointer cancellation', (anchor: HTMLElement) => fireEvent.pointerCancel(anchor, { pointerType: 'touch', pointerId: 1 })],
-    ['early release', (anchor: HTMLElement) => fireEvent.pointerUp(anchor, { pointerType: 'touch', pointerId: 1 })],
-    ['scroll', () => fireEvent.scroll(window)],
-  ])('cancels on %s', (_name, cancel) => {
-    vi.useFakeTimers()
-    subject()
-    const anchor = screen.getByRole('link', { name: 'Alpha readable link' })
-    fireEvent.pointerDown(anchor, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
-    cancel(anchor)
-    act(() => vi.advanceTimersByTime(500))
-    expect(screen.queryByRole('menu')).toBeNull()
-  })
-
-  it('cancels when the touch is released outside the reader surface', () => {
-    vi.useFakeTimers()
-    subject()
-    const anchor = screen.getByRole('link', { name: 'Alpha readable link' })
-    fireEvent.pointerDown(anchor, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 20 })
-    fireEvent.pointerUp(window, { pointerType: 'touch', pointerId: 1 })
-    act(() => vi.advanceTimersByTime(500))
-    expect(screen.queryByRole('menu')).toBeNull()
+  it('allows handle adjustment, uses the new selection and supports explicit dismiss', () => {
+    phone()
+    const run = vi.fn()
+    const getActions = vi.fn<ReaderActionContextValue['getActions']>(() => [{ id: 'add', label: '加入待抓取', run }])
+    subject(undefined, context({ getActions }))
+    const [first, second] = screen.getAllByRole('link')
+    select(first.firstChild!, 0, first.firstChild!, 3)
+    fireEvent(document, new Event('selectionchange'))
+    fireEvent.pointerDown(second, { pointerType: 'touch', pointerId: 2 })
+    expect(screen.getByRole('toolbar')).toBeTruthy()
+    select(first.firstChild!, 0, second.firstChild!, 3)
+    fireEvent(document, new Event('selectionchange'))
+    expect(getActions.mock.lastCall?.[0].links).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: '关闭选中链接操作' }))
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    expect(document.activeElement).toBe(document.body)
   })
 })

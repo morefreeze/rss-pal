@@ -16,6 +16,7 @@ const MENU_GAP = 8
 type Position = { left: number; top: number }
 
 type ReaderContextMenuProps = {
+  presentation?: 'context-menu' | 'bottom-toolbar'
   open: boolean
   anchorRect: DOMRect | null
   actions: ReaderContextAction[]
@@ -37,11 +38,13 @@ function menuPosition(anchor: DOMRect, menuWidth: number, menuHeight: number): P
 }
 
 export function ReaderContextMenu({
+  presentation = 'context-menu',
   open,
   anchorRect,
   actions,
   onClose,
 }: ReaderContextMenuProps) {
+  const bottomToolbar = presentation === 'bottom-toolbar'
   const menuRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const [activeIndex, setActiveIndex] = useState(-1)
@@ -52,10 +55,10 @@ export function ReaderContextMenu({
   const enabledIndices = actions.flatMap((action, index) => action.disabled ? [] : [index])
 
   const updatePosition = useCallback(() => {
-    if (!anchorRect || !menuRef.current) return
+    if (bottomToolbar || !anchorRect || !menuRef.current) return
     const menuRect = menuRef.current.getBoundingClientRect()
     setPosition(menuPosition(anchorRect, menuRect.width, menuRect.height))
-  }, [anchorRect])
+  }, [anchorRect, bottomToolbar])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -81,18 +84,22 @@ export function ReaderContextMenu({
   }, [open, actions]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!open || activeIndex < 0 || busyActionID) return
+    if (!open || bottomToolbar || activeIndex < 0 || busyActionID) return
     itemRefs.current[activeIndex]?.focus()
-  }, [activeIndex, busyActionID, open])
+  }, [activeIndex, bottomToolbar, busyActionID, open])
 
   useEffect(() => {
     if (!open) return
     const handleOutsidePointer = (event: PointerEvent) => {
+      // Selection handles may dispatch a new touch inside the article.
+      // Let selectionchange update or dismiss the toolbar after that gesture.
+      if (bottomToolbar && event.target instanceof Element
+        && event.target.closest('.reader-interaction-surface')) return
       if (!menuRef.current?.contains(event.target as Node)) onClose()
     }
     document.addEventListener('pointerdown', handleOutsidePointer)
     return () => document.removeEventListener('pointerdown', handleOutsidePointer)
-  }, [onClose, open])
+  }, [bottomToolbar, onClose, open])
 
   const execute = useCallback(async (action: ReaderContextAction) => {
     if (action.disabled || busyActionID) return
@@ -118,6 +125,14 @@ export function ReaderContextMenu({
   }
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (bottomToolbar) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+      }
+      // Native button activation and Tab order also cover the close button.
+      return
+    }
     if (event.key === 'Escape' || event.key === 'Tab') {
       if (event.key === 'Escape') event.preventDefault()
       onClose()
@@ -151,18 +166,23 @@ export function ReaderContextMenu({
   return createPortal(
     <div
       ref={menuRef}
-      role="menu"
+      role={bottomToolbar ? 'toolbar' : 'menu'}
+      aria-label={bottomToolbar ? '选中链接操作' : undefined}
       aria-busy={busyActionID !== null}
-      className="reader-context-menu"
+      className={`reader-context-menu${bottomToolbar ? ' reader-selection-toolbar' : ''}`}
       onKeyDown={handleKeyDown}
       onPointerDown={retainSelection}
       style={{
         position: 'fixed',
-        left: position.left,
-        top: position.top,
+        left: bottomToolbar ? 8 : position.left,
+        top: bottomToolbar ? undefined : position.top,
+        right: bottomToolbar ? 8 : undefined,
+        bottom: bottomToolbar ? 'calc(8px + env(safe-area-inset-bottom, 0px))' : undefined,
         zIndex: 2200,
         minWidth: 176,
         padding: 6,
+        display: bottomToolbar ? 'flex' : undefined,
+        flexWrap: bottomToolbar ? 'wrap' : undefined,
         border: '1px solid var(--border, #d8d8d8)',
         borderRadius: 10,
         background: 'var(--surface, #fff)',
@@ -174,14 +194,16 @@ export function ReaderContextMenu({
           key={action.id}
           ref={(node) => { itemRefs.current[index] = node }}
           type="button"
-          role="menuitem"
+          role={bottomToolbar ? undefined : 'menuitem'}
           disabled={Boolean(action.disabled || busyActionID)}
-          tabIndex={index === activeIndex ? 0 : -1}
+          tabIndex={bottomToolbar || index === activeIndex ? 0 : -1}
           onFocus={() => setActiveIndex(index)}
           onClick={() => void execute(action)}
           style={{
             display: 'block',
-            width: '100%',
+            width: bottomToolbar ? 'auto' : '100%',
+            flex: bottomToolbar ? '1 1 auto' : undefined,
+            minHeight: bottomToolbar ? 44 : undefined,
             padding: '9px 12px',
             border: 0,
             borderRadius: 7,
@@ -195,6 +217,13 @@ export function ReaderContextMenu({
           {action.label}
         </button>
       ))}
+      {bottomToolbar && <button
+        type="button"
+        aria-label="关闭选中链接操作"
+        disabled={busyActionID !== null}
+        onClick={onClose}
+        style={{ minWidth: 44, minHeight: 44, background: 'transparent', color: 'var(--fg, #222)', border: 0 }}
+      >×</button>}
       {actionError && (
         <div
           role="alert"

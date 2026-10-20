@@ -55,6 +55,7 @@ function renderAuth(path: string) {
         <Route path="/register" element={<RegisterPage onLogin={onLogin} />} />
         <Route path="/articles" element={<div>articles destination</div>} />
         <Route path="/feeds" element={<div>feeds destination</div>} />
+        <Route path="/capture" element={<div>capture destination</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -106,6 +107,16 @@ beforeEach(() => {
 })
 
 describe('authentication intents', () => {
+  it('returns to the shared capture URL after login without double encoding', async () => {
+    const source = 'https://source.example/文章?a=1&b=2#part'
+    const search = `?intent=capture&source=${encodeURIComponent(source)}`
+    renderAuth(`/login${search}`)
+    expect(screen.getByRole('link', { name: '使用邀请码注册' }).getAttribute('href')).toBe(`/register${search}`)
+    submitLogin()
+    await screen.findByText('capture destination')
+    expect(screen.getByTestId('location').textContent).toBe(`/capture?url=${encodeURIComponent(source)}`)
+  })
+
   it.each([
     '/login?intent=use',
     '/login',
