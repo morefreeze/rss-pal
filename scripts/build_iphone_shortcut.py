@@ -3,7 +3,8 @@
 
 Native action formats were exported from Shortcuts.app. The direct-capture
 workflow was imported and executed on macOS against an isolated API. The
-installer's Apple record must match this source before release.
+installer's Apple record matches this source (signingStatus=APPROVED):
+https://www.icloud.com/shortcuts/fcb8824905304acb9cb0e272f8b7e5c0
 
 python3 scripts/build_iphone_shortcut.py /tmp/rss-pal-unsigned.shortcut
 shortcuts sign --mode anyone --input /tmp/rss-pal-unsigned.shortcut \

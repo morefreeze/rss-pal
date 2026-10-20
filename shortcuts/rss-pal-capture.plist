@@ -924,12 +924,11 @@
 	<integer>900</integer>
 	<key>WFWorkflowMinimumClientVersionString</key>
 	<string>900</string>
-	<key>WFWorkflowName</key>
-	<string>加入 RSS Pal</string>
 	<key>WFWorkflowOutputContentItemClasses</key>
 	<array/>
 	<key>WFWorkflowTypes</key>
 	<array>
+		<string>Watch</string>
 		<string>ActionExtension</string>
 		<string>WFWorkflowTypeShowInSearch</string>
 	</array>
