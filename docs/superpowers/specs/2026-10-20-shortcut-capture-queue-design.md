@@ -1,0 +1,11 @@
+# iPhone shortcut capture queue
+
+The user confirmed that the shortcut should only enqueue the shared article. The API must finish after the queue row commits, without downloading the article, expanding its links, or opening a browser. Keep the paired capture credential and account isolation unchanged.
+
+Use the existing article table as the durable queue: create a private clip with `processing_state=queued`, an empty body, and link expansion disabled. Distinguish this state from the existing PDF OCR and link-set processing queues. Return HTTP 202 with the existing `parent_article_id` field for installed shortcut compatibility. An existing successful clip remains intact; repeated pending captures reuse the same row; sharing a failed URL requeues that row with its retry count reset.
+
+A separate worker loop drains a bounded batch every five seconds, with the existing owner-scoped background budget and HTTP client. Fetch only the article URL, once per attempt, retaining title and publication metadata from that fetch. Store content and readiness atomically, retry up to three attempts, and persist a readable failure. Cancellation leaves the task pending. Queue rows survive API/worker restarts. The established deployment has one worker; serialize this loop within that worker. Rotate through pending IDs so budget denial by one owner cannot monopolize the front of the queue.
+
+The article list shows queued status; the detail page polls until ready/failed. Existing PDF OCR is unaffected. Update the native shortcut notification to “已提交到 RSS Pal。新文章已加入抓取队列，已有文章保留原内容。” and publish a new one-button Apple installer. Existing shortcut versions also enqueue immediately after the API deployment, though their old success wording requires replacement.
+
+Acceptance: an unavailable external fetcher cannot slow or fail enqueue; the owner-scoped row commits before success; duplicate shares do not duplicate articles; only that URL is fetched in the worker; success/failure/retry and existing OCR paths remain distinct. Verify isolated PostgreSQL, UI tests/build, review, master integration, Tencent deployment revision/health, and an actual live enqueue/background completion using a scoped synthetic account.

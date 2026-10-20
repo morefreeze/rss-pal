@@ -7,7 +7,7 @@ describe('one-button shortcut installation', () => {
   it('also gives visitors to the old setup URL a direct Apple install button', () => {
     const doc = new DOMParser().parseFromString(installPage, 'text/html')
     const install = doc.querySelector('a[data-shortcut-install]')
-    expect(install?.getAttribute('href')).toBe('workflow://shortcuts/fcb8824905304acb9cb0e272f8b7e5c0')
+    expect(install?.getAttribute('href')).toBe('workflow://shortcuts/98ef2f6cfbe740e092908ab72ea9240e')
     expect(doc.querySelector('ol')).toBeNull()
   })
   it('opens the Apple shortcut installer directly rather than a setup document', () => {

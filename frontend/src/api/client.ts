@@ -244,7 +244,7 @@ export interface ArticleListItem {
   links_extendable?: boolean | null  // tri-state: null = unchecked, true/false = checked
   link_set_suggested?: boolean | null  // worker thinks article is a link list, awaiting user confirmation
   parent_article_id?: number | null
-  processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
+  processing_state?: 'ready' | 'stub' | 'queued' | 'processing' | 'failed'
   processing_error?: string
   prerank_score?: number | null
   capture_note?: string
@@ -282,7 +282,7 @@ export interface Article {
   parent_article_id?: number | null
   parent_title?: string  // populated only by GET /articles/recommended/link_set
   is_fallback?: boolean  // true = surfaced by quality-fallback (may be already-read)
-  processing_state?: 'ready' | 'stub' | 'processing' | 'failed'
+  processing_state?: 'ready' | 'stub' | 'queued' | 'processing' | 'failed'
   processing_error?: string
   prerank_score?: number | null
   capture_note?: string

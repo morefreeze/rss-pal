@@ -134,6 +134,28 @@ class TestResizeObserver implements ResizeObserver {
 }
 
 describe('ArticlePage immediate loading', () => {
+  it('polls a queued capture until the fetched body arrives', async () => {
+    vi.useFakeTimers()
+    try {
+      const queued = detail(42)
+      queued.article.content = ''
+      queued.article.processing_state = 'queued'
+      putArticleDetail(queued)
+      apiMocks.getArticle.mockResolvedValue(queued)
+      render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+      await act(async () => {})
+      expect(screen.getByText('已加入抓取队列，后台完成后正文会自动显示。')).toBeTruthy()
+      expect(screen.queryByText(/这篇 PDF 正在 OCR/)).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 4000) })
+      const done = detail(42)
+      done.article.processing_state = 'ready'
+      done.article.content = 'Fetched queued article body'
+      apiMocks.getArticle.mockResolvedValue(done)
+      await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
+      expect(screen.getByTestId('article-body').textContent).toBe('Fetched queued article body')
+      expect(apiMocks.expandLinkSetChild).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
   beforeEach(() => {
     resetArticleDetailCache()
     vi.clearAllMocks()

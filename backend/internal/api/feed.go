@@ -555,7 +555,35 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 // credential cannot create expanding feeds, even if expand=true is supplied.
 func (h *FeedHandler) CaptureFromShortcut(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
-	h.createOneoffLinkSet(c, false)
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请共享有效的 http 或 https 网页链接"})
+		return
+	}
+	u, err := url.Parse(strings.TrimSpace(req.URL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请共享有效的 http 或 https 网页链接"})
+		return
+	}
+	normalized, err := normalizeFeedURL(u.String())
+	if err != nil || validatePublicURL(normalized) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请共享有效的公开网页链接"})
+		return
+	}
+	// No external requests: acknowledge only after the private queue row commits.
+	article, err := h.articleRepo.WithCtx(c).EnqueueCapture(getUserID(c), normalized)
+	if err != nil {
+		log.Printf("shortcut enqueue failed for owner=%d: %v", getUserID(c), err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法加入抓取队列"})
+		return
+	}
+	status := http.StatusAccepted
+	if article.ProcessingState == "ready" {
+		status = http.StatusOK
+	}
+	jsonAfterCommit(c, status, gin.H{"feed_id": article.FeedID, "parent_article_id": article.ID, "processing_state": article.ProcessingState})
 }
 
 func (h *FeedHandler) createOneoffLinkSet(c *gin.Context, allowExpand bool) {

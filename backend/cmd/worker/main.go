@@ -202,6 +202,9 @@ func main() {
 	stopBackup := backupRunner.ScheduleDaily(context.Background())
 	defer stopBackup()
 	autoTagger := service.NewAutoTagService(userTagRepo, articleUserTagRepo)
+	captureCtx, cancelCapture := context.WithCancel(context.Background())
+	defer cancelCapture()
+	go runCaptureQueue(captureCtx, articleRepo, contentFetcher)
 
 	// Async PDF OCR loop: runs every 60s, drains up to maxPDFOCRPerCycle
 	// scanned-PDF clip articles per tick. Lives in its own goroutine so a

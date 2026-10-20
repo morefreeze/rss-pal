@@ -9,6 +9,12 @@ vi.mock('../src/hooks/useExposureTracking', () => ({
 }))
 
 describe('ArticleCard detail prefetch', () => {
+  it('shows queued captures as waiting for fetch', () => {
+    const article = { id: 91, feed_id: 1, title: 'Shared link', url: 'https://example.com', published_at: '', fetched_at: '', processing_state: 'queued' as const }
+    render(<ArticleCard article={article} isRead={false} isFocused={false} idx={0} onPlay={vi.fn()} formatDate={() => ''} stripMarkdown={x => x} onOpen={vi.fn()} onFocus={vi.fn()} />)
+    expect(screen.getByText('⏳ 等待抓取')).toBeTruthy()
+    expect(screen.queryByTitle('PDF OCR 处理中')).toBeNull()
+  })
   it('promotes pointer, focus, and touch interactions', () => {
     const article: ArticleListItem = {
       id: 9,

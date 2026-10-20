@@ -540,7 +540,7 @@ export default function ArticlePage() {
   useEffect(() => {
     if (!article) return
     const state = article.processing_state
-    if (state !== 'stub' && state !== 'processing') return
+    if (state !== 'stub' && state !== 'processing' && state !== 'queued') return
 
     let cancelled = false
     let intervalId: ReturnType<typeof setInterval> | null = null
@@ -575,8 +575,9 @@ export default function ArticlePage() {
       startPolling()
     }
 
-    // 5-minute safety cap
-    const safetyTimer = setTimeout(() => {
+    // Durable captures may wait for an owner budget to reset; keep polling
+    // their detail page until completion instead of silently stopping at 5m.
+    const safetyTimer = state === 'queued' ? null : setTimeout(() => {
       cancelled = true
       if (intervalId) clearInterval(intervalId)
     }, 5 * 60 * 1000)
@@ -584,7 +585,7 @@ export default function ArticlePage() {
     return () => {
       cancelled = true
       if (intervalId) clearInterval(intervalId)
-      clearTimeout(safetyTimer)
+      if (safetyTimer) clearTimeout(safetyTimer)
     }
   }, [article?.id, article?.processing_state])
 
@@ -1361,6 +1362,11 @@ export default function ArticlePage() {
         }
         return null
       })()}
+      {article.processing_state === 'queued' && (
+        <div role="status" className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', color: 'var(--fg-muted)' }}>
+          已加入抓取队列，后台完成后正文会自动显示。
+        </div>
+      )}
       {article.processing_state === 'processing' && (
         <div
           style={{
@@ -1384,7 +1390,7 @@ export default function ArticlePage() {
             marginBottom: '16px',
           }}
         >
-          ❌ PDF 处理失败：{article.processing_error}
+          ❌ 处理失败：{article.processing_error}
         </div>
       )}
       {article.processing_state === 'failed' && !article.processing_error && (
@@ -1480,7 +1486,7 @@ export default function ArticlePage() {
         if (isVideo && !article.content) return null
         const state = article.processing_state
         const hasContent = !!article.content && article.content.length > 0
-        const workerFetching = state === 'stub' || (state === 'processing' && !hasContent)
+        const workerFetching = state === 'stub' || state === 'queued' || (state === 'processing' && !hasContent)
         const refetchDisabled = fetchingContent || workerFetching
         const refetchTitle = workerFetching ? '正在抓取' : undefined
         return (

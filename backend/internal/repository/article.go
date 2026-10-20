@@ -674,7 +674,10 @@ func (r *ArticleRepository) UpdateSummaryIfContentUnchanged(id int, expectedCont
 }
 
 func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, readingMinutes int) error {
-	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0 WHERE id = $4`, content, wordCount, readingMinutes, id)
+	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0,
+		processing_state = CASE WHEN processing_state IN ('queued','failed') AND $1<>'' THEN 'ready' ELSE processing_state END,
+		processing_error = CASE WHEN processing_state IN ('queued','failed') AND $1<>'' THEN '' ELSE processing_error END
+		WHERE id = $4`, content, wordCount, readingMinutes, id)
 	return err
 }
 
@@ -876,7 +879,7 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 		WHERE a.url != '' AND a.refetch_attempts < 5
 		  AND f.feed_type NOT IN ('youtube', 'podcast')
 		  AND (a.media_type IS NULL OR (a.media_type NOT LIKE 'video/%' AND a.media_type NOT LIKE 'audio/%'))
-		  AND COALESCE(a.processing_state, 'ready') NOT IN ('stub', 'processing', 'failed')
+		  AND COALESCE(a.processing_state, 'ready') NOT IN ('stub', 'queued', 'processing', 'failed')
 		  AND ((LENGTH(a.content) < $1 OR a.content IS NULL AND a.fetched_at > NOW() - INTERVAL '7 days')
 		       OR (a.content LIKE '%<%>%' AND a.fetched_at > NOW() - INTERVAL '30 days'))
 		ORDER BY a.fetched_at DESC

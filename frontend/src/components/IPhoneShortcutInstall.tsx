@@ -1,5 +1,5 @@
 /** The URL must be an actual published Apple installer, never a setup guide. */
-export const IPHONE_SHORTCUT_INSTALL_URL = 'https://www.icloud.com/shortcuts/fcb8824905304acb9cb0e272f8b7e5c0'
+export const IPHONE_SHORTCUT_INSTALL_URL = 'https://www.icloud.com/shortcuts/98ef2f6cfbe740e092908ab72ea9240e'
 
 export default function IPhoneShortcutInstall({ url = IPHONE_SHORTCUT_INSTALL_URL }: { url?: string } = {}) {
   if (!/^https:\/\/www\.icloud\.com\/shortcuts\/[a-f0-9]{32}$/i.test(url)) {

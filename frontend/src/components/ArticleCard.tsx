@@ -197,6 +197,11 @@ export default function ArticleCard({
           <div className={`article-card-title-row ${isRead ? 'text-muted' : 'text-bold'}`} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
             <span className="article-card-title">{article.title}</span>
+            {article.processing_state === 'queued' && (
+              <span style={{ marginLeft: 8, fontSize: '0.85em', color: 'var(--fg-muted)' }}>
+                ⏳ 等待抓取
+              </span>
+            )}
             {article.processing_state === 'processing' && (
               <span
                 style={{ marginLeft: 8, fontSize: '0.85em', color: 'var(--fg-muted)' }}
