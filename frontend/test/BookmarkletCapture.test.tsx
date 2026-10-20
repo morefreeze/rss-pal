@@ -34,7 +34,7 @@ describe('Settings bookmarklet capture', () => {
   it('offers the published Apple shortcut installer instead of manual configuration', async () => {
     render(<MemoryRouter><SettingsPage user={{ is_admin: false }} /></MemoryRouter>)
     const install = await screen.findByRole('link', { name: '添加到快捷指令' })
-    expect(install.getAttribute('href')).toBe('https://www.icloud.com/shortcuts/bee8c10b751e47a18d87fb75f889b3d3')
+    expect(install.getAttribute('href')).toBe('workflow://shortcuts/bee8c10b751e47a18d87fb75f889b3d3')
     expect(screen.queryByRole('link', { name: '配置“加入 RSS Pal”快捷指令' })).toBeNull()
   })
 

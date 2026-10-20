@@ -5,9 +5,11 @@ export default function IPhoneShortcutInstall({ url = IPHONE_SHORTCUT_INSTALL_UR
   if (!/^https:\/\/www\.icloud\.com\/shortcuts\/[a-f0-9]{32}$/i.test(url)) {
     throw new Error('需要有效的 iCloud 快捷指令安装链接')
   }
+  // Apple's own Get Shortcut handler uses this scheme for current iOS/macOS.
+  const nativeURL = `workflow://shortcuts/${url.slice(url.lastIndexOf('/') + 1)}`
 
   return <div className="mb-2">
-    <a href={url} style={{
+    <a href={nativeURL} style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       minHeight: 44, padding: '8px 16px', borderRadius: 8,
       background: 'var(--fg, #222)', color: 'var(--surface, #fff)',
@@ -16,5 +18,6 @@ export default function IPhoneShortcutInstall({ url = IPHONE_SHORTCUT_INSTALL_UR
     <p className="text-muted text-sm" style={{ marginTop: 8 }}>
       在系统页面确认添加后，即可通过“共享 → 加入 RSS Pal”抓取链接。
     </p>
+    <a href={url} className="text-sm">使用 Apple 安装页</a>
   </div>
 }
