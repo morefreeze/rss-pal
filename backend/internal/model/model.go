@@ -298,6 +298,7 @@ type ReadingProgress struct {
 // Request/Response types
 
 type AddFeedRequest struct {
+	Title       string `json:"title"`
 	URL         string `json:"url"`
 	FeedType    string `json:"feed_type"` // "rss" or "html", defaults to "rss"
 	ExpandLinks bool   `json:"expand_links"`

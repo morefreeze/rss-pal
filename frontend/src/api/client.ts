@@ -599,8 +599,8 @@ export const getFeeds = () =>
 export const previewFeed = (url: string, signal?: AbortSignal) =>
   api.post<FeedPreview>('/feeds/preview', { url }, { signal }).then(res => res.data)
 
-export const addFeed = (url: string, feedType?: string, expandLinks: boolean = false) =>
-  api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss', expand_links: expandLinks }).then(res => res.data)
+export const addFeed = (url: string, feedType?: string, expandLinks: boolean = false, title?: string) =>
+  api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss', expand_links: expandLinks, title }).then(res => res.data)
 
 // PDF capture — server-side fetch of a PDF URL routed through the
 // bookmarklet capture pipeline. Auth is the bookmarklet token (NOT a

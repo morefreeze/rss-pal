@@ -1,6 +1,7 @@
+import OPMLTransfer from '../components/OPMLTransfer'
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, exportOPML, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
+import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
 import { listFeedCatalog, type PublicCatalogItem } from '../api/feedCatalog'
 import { toast } from '../utils/toast'
 import { getInitialPopularFeedsExpanded } from '../utils/popularFeedsVisibility'
@@ -42,7 +43,6 @@ export default function FeedListPage() {
   const [adding, setAdding] = useState(false)
   const [addSuccess, setAddSuccess] = useState('')
   const [capturedHNArticleID, setCapturedHNArticleID] = useState<number | null>(null)
-  const [importing, setImporting] = useState(false)
   const [popularFeedsExpanded, setPopularFeedsExpanded] = useState(getInitialPopularFeedsExpanded)
   const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -287,48 +287,6 @@ export default function FeedListPage() {
     }
   }
 
-  const handleExportOPML = async () => {
-    try {
-      const blob = await exportOPML()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = 'rss-pal-subscriptions.opml'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(a.href)
-    } catch {
-      toast.error('导出失败')
-    }
-  }
-
-  const handleImportOPML = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setImporting(true)
-    try {
-      const text = await file.text()
-      const parser = new DOMParser()
-      const doc = parser.parseFromString(text, 'text/xml')
-      const outlines = doc.querySelectorAll('outline[xmlUrl]')
-      const entries = Array.from(outlines)
-        .map(o => ({ url: o.getAttribute('xmlUrl') || '', type: o.getAttribute('type') || 'rss' }))
-        .filter(e => !!e.url)
-      if (entries.length === 0) { toast.error('未找到有效的订阅地址'); return }
-      let added = 0, skipped = 0
-      for (const entry of entries) {
-        try { await addFeed(entry.url, entry.type === 'html' ? 'html' : 'rss'); added++ } catch { skipped++ }
-      }
-      await loadFeeds()
-      toast.success(`导入完成：${added} 个订阅添加成功${skipped > 0 ? `，${skipped} 个已存在或失败` : ''}`)
-    } catch {
-      toast.error('OPML 文件解析失败')
-    } finally {
-      setImporting(false)
-    }
-  }
-
   const handleCardClick = (feedId: number) => {
     try { sessionStorage.setItem('selectedFeed', JSON.stringify(feedId)) } catch {}
     navigate('/articles')
@@ -346,18 +304,11 @@ export default function FeedListPage() {
       <div style={{ marginBottom: 12 }}>
         <Link to="/feeds/health">健康度面板 →</Link>
       </div>
-      <div className="flex-between mb-2">
+      <div className="mb-2">
         <h2>订阅管理</h2>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input id="opml-import" type="file" accept=".opml,.xml" style={{ display: 'none' }} onChange={handleImportOPML} />
-          <button className="secondary" style={{ fontSize: 12, padding: '3px 10px' }} disabled={importing} onClick={() => (document.getElementById('opml-import') as HTMLInputElement)?.click()}>
-            {importing ? '导入中...' : '导入 OPML'}
-          </button>
-          <button className="secondary" style={{ fontSize: 12, padding: '3px 10px' }} onClick={handleExportOPML}>
-            导出 OPML
-          </button>
-        </div>
       </div>
+
+      <OPMLTransfer onImported={loadFeeds} />
 
       <div className="card mb-2" aria-label="订阅可见范围">
         <strong>订阅可见范围</strong>

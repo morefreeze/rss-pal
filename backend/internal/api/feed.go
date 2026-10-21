@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"log"
@@ -133,6 +134,7 @@ func (h *FeedHandler) Create(c *gin.Context) {
 
 	feed := &model.Feed{
 		URL:              req.URL,
+		Title:            strings.TrimSpace(req.Title),
 		FetchIntervalMin: 60,
 		IsActive:         true,
 		OwnerID:          getOwnerID(c),
@@ -401,12 +403,19 @@ func (h *FeedHandler) ExportOPML(c *gin.Context) {
 		return
 	}
 
-	var sb strings.Builder
-	sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
-	sb.WriteString(`<opml version="2.0">` + "\n")
-	sb.WriteString(`  <head><title>RSS Pal Subscriptions</title></head>` + "\n")
-	sb.WriteString(`  <body>` + "\n")
+	document := opmlDocument{Version: "2.0"}
+	document.Head.Title = "RSS Pal Subscriptions"
+	document.Body.Outlines = make([]opmlFeed, 0, len(feeds))
 	for _, feed := range feeds {
+		parsed, err := url.Parse(feed.URL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil {
+			continue
+		}
+		switch feed.FeedType {
+		case "", "rss", "html", "youtube", "podcast":
+		default:
+			continue
+		}
 		title := feed.Title
 		if title == "" {
 			title = feed.URL
@@ -415,23 +424,33 @@ func (h *FeedHandler) ExportOPML(c *gin.Context) {
 		if feed.FeedType == "html" {
 			feedType = "html"
 		}
-		sb.WriteString(`    <outline type="` + feedType + `" text="` + xmlEscape(title) + `" title="` + xmlEscape(title) + `" xmlUrl="` + xmlEscape(feed.URL) + `"/>` + "\n")
+		document.Body.Outlines = append(document.Body.Outlines, opmlFeed{Type: feedType, Text: title, Title: title, URL: feed.URL})
 	}
-	sb.WriteString(`  </body>` + "\n")
-	sb.WriteString(`</opml>` + "\n")
-
-	c.Header("Content-Type", "text/xml; charset=utf-8")
+	body, err := xml.MarshalIndent(document, "", "  ")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法生成 OPML 文件"})
+		return
+	}
 	c.Header("Content-Disposition", "attachment; filename=rss-pal-subscriptions.opml")
-	c.String(http.StatusOK, sb.String())
+	c.Data(http.StatusOK, "application/xml; charset=utf-8", append([]byte(xml.Header), body...))
 }
 
-func xmlEscape(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, `"`, "&quot;")
-	s = strings.ReplaceAll(s, "'", "&#39;")
-	return s
+type opmlDocument struct {
+	XMLName xml.Name `xml:"opml"`
+	Version string   `xml:"version,attr"`
+	Head    struct {
+		Title string `xml:"title"`
+	} `xml:"head"`
+	Body struct {
+		Outlines []opmlFeed `xml:"outline"`
+	} `xml:"body"`
+}
+
+type opmlFeed struct {
+	Type  string `xml:"type,attr"`
+	Text  string `xml:"text,attr"`
+	Title string `xml:"title,attr"`
+	URL   string `xml:"xmlUrl,attr"`
 }
 
 // UpdateStatus PATCH /api/feeds/:id/status
