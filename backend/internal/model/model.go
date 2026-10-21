@@ -191,6 +191,10 @@ type ExploreArticleEvent struct {
 }
 
 type Feed struct {
+	LastAttemptAt    *time.Time `json:"last_attempt_at"`
+	NextAttemptAt    *time.Time `json:"next_attempt_at"`
+	FetchError       string     `json:"fetch_error"`
+	FetchFailures    int        `json:"fetch_failures"`
 	ID               int        `json:"id" db:"id"`
 	URL              string     `json:"url" db:"url"`
 	Title            string     `json:"title" db:"title"`

@@ -240,6 +240,10 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 		return
 	}
 
+	if !rss.IsNetworkFeedURL(feed.URL) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "订阅地址无效，请重新添加有效的 http/https RSS 地址"})
+		return
+	}
 	log.Printf("Manual fetch triggered for feed: %s", feed.URL)
 	articleRepo := h.articleRepo.WithCtx(c)
 
@@ -250,24 +254,27 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "fetch failed: " + err.Error()})
 			return
 		}
-		if err := feedRepo.UpdateFetchInfo(feed.ID, "", "", time.Now()); err != nil {
-			log.Printf("Failed to update feed info: %v", err)
-		}
 		if htmlFeed.Title != "" {
 			bestEffort(c, "feed auto-title", func() error { return feedRepo.UpdateTitle(feed.ID, htmlFeed.Title) })
 		}
 		newCount := 0
+		pending := false
 		attempts := 0
 		for _, item := range htmlFeed.Items {
-			if attempts >= 10 {
-				break
-			}
 			if item.Link == "" {
 				continue
 			}
-			exists, _ := articleRepo.Exists(feed.ID, item.Link)
+			exists, err := articleRepo.Exists(feed.ID, item.Link)
+			if err != nil {
+				c.JSON(500, gin.H{"error": "无法检查文章入库状态"})
+				return
+			}
 			if exists {
 				continue
+			}
+			if attempts >= 10 {
+				pending = true
+				break
 			}
 			attempts++
 			content, _ := h.contentFetcher.FetchContent(c.Request.Context(), item.Link)
@@ -279,16 +286,22 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 				PublishedAt: publishedTime(item.PublishedParsed, item.UpdatedParsed),
 			}
 			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
-			if err := articleRepo.Create(article); err != nil {
-				log.Printf("Failed to create article: %v", err)
-			} else {
+			if created, err := articleRepo.CreateSubscriptionArticle(article); err != nil {
+				c.JSON(500, gin.H{"error": "文章入库失败"})
+				return
+			} else if created {
 				newCount++
 			}
 		}
+		if err := feedRepo.CompleteFetch(feed.ID, "", "", pending); err != nil {
+			c.JSON(500, gin.H{"error": "无法记录订阅检查结果"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"message":      "fetch completed",
-			"new_articles": newCount,
-			"feed_title":   htmlFeed.Title,
+			"pending_articles": pending,
+			"message":          "fetch completed",
+			"new_articles":     newCount,
+			"feed_title":       htmlFeed.Title,
 		})
 		return
 	}
@@ -300,13 +313,14 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 	}
 
 	if result == nil {
+		if err := feedRepo.UpdateFetchInfo(feed.ID, feed.ETag, feed.LastModified, time.Now().UTC()); err != nil {
+			c.JSON(500, gin.H{"error": "无法记录订阅检查结果"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "not modified", "new_articles": 0})
 		return
 	}
 
-	if err := feedRepo.UpdateFetchInfo(feed.ID, result.ETag, result.LastModified, time.Now()); err != nil {
-		log.Printf("Failed to update feed info: %v", err)
-	}
 	if result.Feed != nil && result.Feed.Title != "" {
 		if err := feedRepo.UpdateTitle(feed.ID, result.Feed.Title); err != nil {
 			log.Printf("Failed to update feed title: %v", err)
@@ -314,12 +328,18 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 	}
 
 	newCount := 0
+	pending := false
+	attempts := 0
 	for _, item := range result.Feed.Items {
-		if newCount >= 10 {
-			break
+		if item.Link == "" {
+			continue
 		}
 
-		exists, _ := articleRepo.Exists(feed.ID, item.Link)
+		exists, err := articleRepo.Exists(feed.ID, item.Link)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "无法检查文章入库状态"})
+			return
+		}
 		mediaInfo := rss.ExtractVideoMedia(item.Link)
 		if mediaInfo == nil {
 			mediaInfo = rss.ExtractMedia(item)
@@ -347,6 +367,11 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			continue
 		}
 
+		if attempts >= 10 {
+			pending = true
+			break
+		}
+		attempts++
 		content, _ := rss.BuildItemContent(item.Description, item.Content, item.Link)
 		mediaType := ""
 		if mediaInfo != nil {
@@ -374,17 +399,23 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 			article.MediaDurationSeconds = mediaInfo.Duration
 		}
 
-		if err := articleRepo.Create(article); err != nil {
-			log.Printf("Failed to create article: %v", err)
-		} else {
+		if created, err := articleRepo.CreateSubscriptionArticle(article); err != nil {
+			c.JSON(500, gin.H{"error": "文章入库失败"})
+			return
+		} else if created {
 			newCount++
 		}
 	}
 
+	if err := feedRepo.CompleteFetch(feed.ID, result.ETag, result.LastModified, pending); err != nil {
+		c.JSON(500, gin.H{"error": "无法记录订阅检查结果"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"message":      "fetch completed",
-		"new_articles": newCount,
-		"feed_title":   result.Feed.Title,
+		"pending_articles": pending,
+		"message":          "fetch completed",
+		"new_articles":     newCount,
+		"feed_title":       result.Feed.Title,
 	})
 }
 
@@ -775,6 +806,9 @@ func normalizeFeedURL(rawURL string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("empty URL")
 	}
+	if strings.Contains(value, "://") && !strings.HasPrefix(strings.ToLower(value), "http://") && !strings.HasPrefix(strings.ToLower(value), "https://") {
+		return "", fmt.Errorf("only http/https URLs are supported")
+	}
 	if !strings.HasPrefix(strings.ToLower(value), "http://") && !strings.HasPrefix(strings.ToLower(value), "https://") {
 		value = "https://" + value
 	}
@@ -783,6 +817,9 @@ func normalizeFeedURL(rawURL string) (string, error) {
 		return "", err
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
+	if !rss.IsNetworkFeedURL(u.String()) {
+		return "", fmt.Errorf("invalid feed URL")
+	}
 	return u.String(), nil
 }
 

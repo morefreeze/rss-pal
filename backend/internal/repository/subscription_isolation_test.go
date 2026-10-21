@@ -81,6 +81,12 @@ func TestSubscriptionMigrationPreservesLegacyIDsAndPausedState(t *testing.T) {
 	if owned != 5 || paused != 2 || articles != 5 || progress != 5 {
 		t.Fatalf("owned=%d paused=%d preserved articles=%d progress=%d", owned, paused, articles, progress)
 	}
+	// Current repository reads the retry columns added after this legacy migration.
+	for i := 0; i < 2; i++ {
+		if err := testdb.ExecuteMigrationFile(db, "058_feed_fetch_retry.sql"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	feeds, err := NewFeedRepository(db).GetVisibleByUser(2)
 	if err != nil || len(feeds) != 0 {
 		t.Fatalf("reader inherited feeds=%v err=%v", feeds, err)

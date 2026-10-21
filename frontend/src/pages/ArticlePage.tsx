@@ -891,12 +891,15 @@ export default function ArticlePage() {
       setArticle(current => current?.id === article.id ? {
         ...current,
         content: result.content,
+        ...(result.processing_state ? { processing_state: result.processing_state, processing_error: '' } : {}),
+        ...(result.content_changed ? { summary_brief: '', summary_detailed: '' } : {}),
         published_at: result.published_at === undefined ? current.published_at : result.published_at,
       } : current)
-    } catch {
+    } catch (error: any) {
       if (contentRequestRef.current !== request) return
-      if (fromBookmarklet) setManualCaptureNeeded(true)
-      else toast.error('获取内容失败')
+      if (fromBookmarklet && ![409, 422].includes(error?.response?.status)) setManualCaptureNeeded(true)
+      if (error?.response?.data?.error) toast.error(error.response.data.error)
+      else if (!fromBookmarklet) toast.error('获取内容失败')
     } finally {
       if (contentRequestRef.current === request) {
         contentRequestRef.current = null

@@ -14,7 +14,7 @@ const apiMocks = vi.hoisted(() => ({
   dislikeArticle: vi.fn(async () => undefined),
   expandLinkSetChild: vi.fn(async () => undefined),
   exportMarkdown: vi.fn(async () => ''),
-  fetchContent: vi.fn(async (): Promise<{ content: string; published_at?: string | null; message?: string }> => ({ content: '' })),
+  fetchContent: vi.fn(async (): Promise<{ content: string; content_changed?: boolean; published_at?: string | null; message?: string }> => ({ content: '' })),
   generateSummaryStream: vi.fn(),
   getArticle: vi.fn(),
   getTemplates: vi.fn(async () => []),
@@ -206,6 +206,17 @@ describe('ArticlePage immediate loading', () => {
     await screen.findByText('Fresh server title')
     expect(screen.getByText('新想法')).toBeTruthy()
     expect(screen.queryByText('旧想法')).toBeNull()
+  })
+
+  it.each([true, false])('updates visible summaries when content_changed=%s', async changed => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    apiMocks.fetchContent.mockResolvedValueOnce({ content: changed ? 'Refetched body' : 'Cached body', content_changed: changed })
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+    expect(screen.getByText('Cached brief')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '重新抓取' }))
+    await waitFor(() => expect(playerCardMocks.render.mock.calls.at(-1)?.[0].article.summary_brief).toBe(changed ? '' : 'Cached brief'))
+    if (changed) expect(screen.queryByText('Cached brief')).toBeNull()
   })
 
   it('keeps a newly saved note when an earlier content refetch completes', async () => {

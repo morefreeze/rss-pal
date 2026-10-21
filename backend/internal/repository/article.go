@@ -501,7 +501,19 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 }
 
 func (r *ArticleRepository) Create(article *model.Article) error {
+	_, err := r.createArticle(article, false)
+	return err
+}
+
+func (r *ArticleRepository) CreateSubscriptionArticle(article *model.Article) (bool, error) {
+	return r.createArticle(article, true)
+}
+
+func (r *ArticleRepository) createArticle(article *model.Article, ignoreDuplicate bool) (bool, error) {
 	query := `INSERT INTO articles (feed_id, title, url, content, published_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, parent_article_id, processing_state, prerank_score, editor_note, is_clip, kind) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id, fetched_at`
+	if ignoreDuplicate {
+		query = strings.Replace(query, " RETURNING", " ON CONFLICT DO NOTHING RETURNING", 1)
+	}
 	mediaURL := nullableString(article.MediaURL)
 	mediaType := nullableString(article.MediaType)
 	mediaDuration := nullableInt(article.MediaDurationSeconds)
@@ -521,7 +533,11 @@ func (r *ArticleRepository) Create(article *model.Article) error {
 	if kind == "" {
 		kind = "article"
 	}
-	return r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration, parentArticleID, state, prerankScore, article.EditorNote, article.IsClip, kind).Scan(&article.ID, &article.FetchedAt)
+	err := r.db.QueryRow(query, article.FeedID, article.Title, article.URL, article.Content, article.PublishedAt, article.WordCount, article.ReadingMinutes, mediaURL, mediaType, mediaDuration, parentArticleID, state, prerankScore, article.EditorNote, article.IsClip, kind).Scan(&article.ID, &article.FetchedAt)
+	if ignoreDuplicate && err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // nullableString returns a sql.NullString that's NULL when s is empty.
@@ -675,6 +691,8 @@ func (r *ArticleRepository) UpdateSummaryIfContentUnchanged(id int, expectedCont
 
 func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, readingMinutes int) error {
 	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0,
+        summary_brief = CASE WHEN content IS DISTINCT FROM $1 THEN NULL ELSE summary_brief END,
+        summary_detailed = CASE WHEN content IS DISTINCT FROM $1 THEN NULL ELSE summary_detailed END,
 		processing_state = CASE WHEN processing_state IN ('queued','failed') AND $1<>'' THEN 'ready' ELSE processing_state END,
 		processing_error = CASE WHEN processing_state IN ('queued','failed') AND $1<>'' THEN '' ELSE processing_error END
 		WHERE id = $4`, content, wordCount, readingMinutes, id)
@@ -2046,4 +2064,21 @@ func (r *ArticleRepository) querier() Querier { return r.db }
 func (r *ArticleRepository) DeferTranscriptRetry(id int) error {
 	_, err := r.db.Exec(`UPDATE articles SET transcript_next_attempt_at=NOW()+INTERVAL '2 minutes' WHERE id=$1`, id)
 	return err
+}
+
+// ReplaceFetchedContent is a compare-and-swap so a slow fetch cannot overwrite
+// another capture or transcript. Changed bodies invalidate both old summaries.
+func (r *ArticleRepository) ReplaceFetchedContent(id int, expected, content string, wordCount, readingMinutes int) (bool, error) {
+	result, err := r.db.Exec(`UPDATE articles SET content=$3, word_count=$4, reading_minutes=$5,
+ summary_brief=CASE WHEN content IS DISTINCT FROM $3 THEN NULL ELSE summary_brief END,
+ summary_detailed=CASE WHEN content IS DISTINCT FROM $3 THEN NULL ELSE summary_detailed END,
+ refetch_attempts=0,
+ processing_state=CASE WHEN processing_state IN ('queued','failed') AND $3<>'' THEN 'ready' ELSE processing_state END,
+ processing_error=CASE WHEN processing_state IN ('queued','failed') AND $3<>'' THEN '' ELSE processing_error END
+ WHERE id=$1 AND COALESCE(content,'')=$2`, id, expected, content, wordCount, readingMinutes)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
 }

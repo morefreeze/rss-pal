@@ -39,7 +39,7 @@ func (r *FeedRepository) scanFeed(row *sql.Row) (*model.Feed, error) {
 	var title, etag, lastModified, feedType, status, providerSourceID sql.NullString
 	var ownerID sql.NullInt64
 	var expandLinks sql.NullBool
-	err := row.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID)
+	err := row.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID, &f.LastAttemptAt, &f.NextAttemptAt, &f.FetchError, &f.FetchFailures)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (r *FeedRepository) scanFeeds(rows *sql.Rows) ([]model.Feed, error) {
 		var title, etag, lastModified, feedType, status, providerSourceID sql.NullString
 		var ownerID sql.NullInt64
 		var expandLinks sql.NullBool
-		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID)
+		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID, &f.LastAttemptAt, &f.NextAttemptAt, &f.FetchError, &f.FetchFailures)
 		if err != nil {
 			return nil, err
 		}
@@ -103,7 +103,7 @@ func (r *FeedRepository) scanFeeds(rows *sql.Rows) ([]model.Feed, error) {
 }
 
 func (r *FeedRepository) GetAll() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id FROM feeds ORDER BY created_at DESC`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id, last_attempt_at, next_attempt_at, fetch_error, fetch_failures FROM feeds ORDER BY created_at DESC`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -114,13 +114,13 @@ func (r *FeedRepository) GetAll() ([]model.Feed, error) {
 }
 
 func (r *FeedRepository) GetByID(id int) (*model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id FROM feeds WHERE id = $1`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id, last_attempt_at, next_attempt_at, fetch_error, fetch_failures FROM feeds WHERE id = $1`
 	return r.scanFeed(r.db.QueryRow(query, id))
 }
 
 func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 	query := `
-		SELECT f.id, f.url, f.title, f.last_fetched_at, f.fetch_interval_minutes, f.etag, f.last_modified, f.is_active, f.owner_id, f.feed_type, f.status, f.priority_weight, f.created_at, f.expand_links, f.provider_source_id,
+		SELECT f.id, f.url, f.title, f.last_fetched_at, f.fetch_interval_minutes, f.etag, f.last_modified, f.is_active, f.owner_id, f.feed_type, f.status, f.priority_weight, f.created_at, f.expand_links, f.provider_source_id, f.last_attempt_at, f.next_attempt_at, f.fetch_error, f.fetch_failures,
 		       COUNT(a.id) AS article_count,
 		       COUNT(CASE WHEN COALESCE(rp.is_completed, false) = false THEN 1 END) AS unread_count
 		FROM feeds f
@@ -142,7 +142,7 @@ func (r *FeedRepository) GetVisibleByUser(userID int) ([]model.Feed, error) {
 		var title, etag, lastModified, feedType, status, providerSourceID sql.NullString
 		var ownerID sql.NullInt64
 		var expandLinks sql.NullBool
-		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID, &f.ArticleCount, &f.UnreadCount)
+		err := rows.Scan(&f.ID, &f.URL, &title, &f.LastFetchedAt, &f.FetchIntervalMin, &etag, &lastModified, &f.IsActive, &ownerID, &feedType, &status, &f.PriorityWeight, &f.CreatedAt, &expandLinks, &providerSourceID, &f.LastAttemptAt, &f.NextAttemptAt, &f.FetchError, &f.FetchFailures, &f.ArticleCount, &f.UnreadCount)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +207,7 @@ func (r *FeedRepository) Delete(id int) error {
 }
 
 func (r *FeedRepository) UpdateFetchInfo(id int, etag, lastModified string, fetchedAt time.Time) error {
-	query := `UPDATE feeds SET etag = $1, last_modified = $2, last_fetched_at = $3 WHERE id = $4`
+	query := `UPDATE feeds SET etag = $1, last_modified = $2, last_fetched_at = $3::timestamptz AT TIME ZONE 'UTC', last_attempt_at = $3::timestamptz, next_attempt_at = NULL, fetch_error = '', fetch_failures = 0 WHERE id = $4`
 	_, err := r.db.Exec(query, etag, lastModified, fetchedAt, id)
 	return err
 }
@@ -222,7 +222,7 @@ func (r *FeedRepository) UpdateTitle(id int, title string) error {
 }
 
 func (r *FeedRepository) GetAllActive() ([]model.Feed, error) {
-	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id FROM feeds WHERE status = 'active' AND feed_type IN ('rss', 'html', 'youtube', 'podcast')`
+	query := `SELECT id, url, title, last_fetched_at, fetch_interval_minutes, etag, last_modified, is_active, owner_id, feed_type, status, priority_weight, created_at, expand_links, provider_source_id, last_attempt_at, next_attempt_at, fetch_error, fetch_failures FROM feeds WHERE status = 'active' AND feed_type IN ('rss', 'html', 'youtube', 'podcast')`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -414,4 +414,24 @@ func (r *FeedRepository) GetOrCreateByKindAndSource(
 		return nil, insertErr
 	}
 	return newFeed, nil
+}
+
+// RecordFetchFailure preserves the last successful check and cached validators.
+// Retry after 5, 10, 20... minutes, capped at 6 hours, across worker restarts.
+func (r *FeedRepository) RecordFetchFailure(id int, reason string) error {
+	_, err := r.db.Exec(`UPDATE feeds SET last_attempt_at=NOW(),
+  next_attempt_at=NOW()+make_interval(secs => LEAST(21600, 300 * power(2, LEAST(fetch_failures,7)))::int),
+  fetch_failures=LEAST(fetch_failures+1,100), fetch_error=$2 WHERE id=$1`, id, reason)
+	return err
+}
+
+// CompleteFetch acknowledges validators only after the bounded batch drains.
+func (r *FeedRepository) CompleteFetch(id int, etag, modified string, pending bool) error {
+	if pending {
+		etag, modified = "", ""
+	}
+	_, err := r.db.Exec(`UPDATE feeds SET etag=$2,last_modified=$3,last_fetched_at=NOW() AT TIME ZONE 'UTC',
+  last_attempt_at=NOW(),fetch_error='',fetch_failures=0,
+  next_attempt_at=CASE WHEN $4 THEN NOW()+interval '1 minute' ELSE NULL END WHERE id=$1`, id, etag, modified, pending)
+	return err
 }

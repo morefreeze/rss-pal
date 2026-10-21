@@ -238,7 +238,7 @@ export default function FeedListPage() {
       try {
         const result = await fetchFeedNow(feed.id)
         await loadFeeds()
-        setAddSuccess(`已添加「${result.feed_title || feed.url}」，抓取到 ${result.new_articles} 篇新文章`)
+        setAddSuccess(`已添加「${result.feed_title || feed.url}」，抓取到 ${result.new_articles} 篇新文章${result.pending_articles ? '，其余文章将在后台继续获取' : ''}`)
       } catch {
         setAddSuccess('订阅已添加，后台将自动抓取文章')
       }
@@ -279,7 +279,7 @@ export default function FeedListPage() {
     try {
       const result = await fetchFeedNow(id)
       await loadFeeds()
-      toast.success(`${result.feed_title || '订阅源'}：抓取完成，${result.new_articles} 篇新文章`)
+      toast.success(`${result.feed_title || '订阅源'}：已获取 ${result.new_articles} 篇新文章${result.pending_articles ? '，其余文章将在后台继续获取' : ''}`)
     } catch (err: any) {
       toast.error('抓取失败：' + (err?.response?.data?.error || err?.message || '未知错误'))
     } finally {
@@ -569,7 +569,7 @@ export default function FeedListPage() {
                 <div className="text-muted text-sm mt-1">
                   个人订阅 · 仅自己可见 · {feed.article_count} 篇
                   {feed.unread_count > 0 && <span style={{ color: 'var(--accent)', fontWeight: 500 }}> · {feed.unread_count} 未读</span>}
-                  {' '}· 上次抓取：{formatDate(feed.last_fetched_at)}
+                  {' '}· 上次成功检查：{formatDate(feed.last_fetched_at)}
                 </div>
               </Link>
               <div className="flex gap-1">
@@ -595,6 +595,10 @@ export default function FeedListPage() {
                 >删除</button>
               </div>
             </div>
+            {feed.fetch_error && <div className="text-sm" role="status" style={{ color: 'var(--fg-muted)', marginTop: 8, overflowWrap: 'anywhere' }}>
+              {feed.fetch_error}
+              {feed.next_attempt_at && ` · 下次重试：${formatDate(feed.next_attempt_at)}`}
+            </div>}
           </div>
         ))
       )}

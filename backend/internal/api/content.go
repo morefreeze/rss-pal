@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -77,24 +78,39 @@ func (h *ContentHandler) FetchContent(c *gin.Context) {
 		article.PublishedAt = result.PublishedAt
 	}
 	content := result.Content
-	if content == "" {
+	if strings.TrimSpace(content) == "" {
 		c.JSON(http.StatusOK, gin.H{"content": article.Content, "published_at": article.PublishedAt, "message": "no content found"})
 		return
 	}
 
-	// Update article content
+	// A much shorter extraction may be a login/paywall/challenge page.
+	// This is a conservative regression guard, not a claim of completeness.
+	oldChars, newChars := utf8.RuneCountInString(strings.TrimSpace(article.Content)), utf8.RuneCountInString(strings.TrimSpace(content))
+	if oldChars >= 300 && (newChars < 300 || newChars*2 < oldChars) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "新抓取内容明显短于已有正文，已保留原内容"})
+		return
+	}
 	wc, rm := rss.ComputeMetrics(content)
-	if err := articleRepo.UpdateContent(id, content, wc, rm); err != nil {
+	replaced, err := articleRepo.ReplaceFetchedContent(id, article.Content, content, wc, rm)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	if !replaced {
+		c.JSON(http.StatusConflict, gin.H{"error": "文章已更新，请刷新后重试"})
+		return
+	}
 	// Best-effort: re-read the parent feed's RSS to backfill media_url for
 	// audio/video enclosures. Failures are logged and swallowed — the content
 	// update is what the user really asked for.
 	h.tryBackfillMedia(c, article)
 
-	c.JSON(http.StatusOK, gin.H{"content": content, "published_at": article.PublishedAt})
+	state := article.ProcessingState
+	if state == "queued" || state == "failed" {
+		state = "ready"
+	}
+	c.JSON(http.StatusOK, gin.H{"content": content, "published_at": article.PublishedAt, "content_changed": content != article.Content, "processing_state": state})
 }
 
 func (h *ContentHandler) fetchFreshContent(ctx context.Context, target string) (rss.ContentResult, error) {

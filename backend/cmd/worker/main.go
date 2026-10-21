@@ -519,6 +519,10 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 		return
 	}
 	defer release()
+	if !rss.IsNetworkFeedURL(feed.URL) {
+		_ = feedRepo.RecordFetchFailure(feed.ID, "订阅地址无效，请删除后重新添加有效的 http/https RSS 地址")
+		return
+	}
 	log.Printf("Fetching feed: %s", feed.URL)
 
 	if feed.FeedType == "html" {
@@ -529,6 +533,7 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 	result, err := fetcher.Fetch(ctx, feed.URL, feed.ETag, feed.LastModified)
 	if err != nil {
 		log.Printf("Failed to fetch feed %s: %v", feed.URL, err)
+		_ = feedRepo.RecordFetchFailure(feed.ID, "订阅请求失败："+err.Error())
 		return
 	}
 
@@ -541,9 +546,6 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 		return
 	}
 
-	if err := feedRepo.UpdateFetchInfo(feed.ID, result.ETag, result.LastModified, time.Now()); err != nil {
-		log.Printf("Failed to update feed info: %v", err)
-	}
 	if result.Feed != nil && result.Feed.Title != "" {
 		if err := feedRepo.UpdateTitle(feed.ID, result.Feed.Title); err != nil {
 			log.Printf("Failed to update feed title: %v", err)
@@ -551,18 +553,23 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 	}
 
 	var (
-		wg          sync.WaitGroup
-		sem         = make(chan struct{}, maxConcurrentContent)
-		newCount    int64
-		queuedCount int
+		wg            sync.WaitGroup
+		sem           = make(chan struct{}, maxConcurrentContent)
+		newCount      int64
+		queuedCount   int
+		pending       bool
+		storageFailed atomic.Bool
 	)
 
 	for _, item := range result.Feed.Items {
-		if queuedCount >= maxNewArticlesPerFeed {
+		if item.Link == "" {
+			continue
+		}
+		exists, existsErr := articleRepo.Exists(feed.ID, item.Link)
+		if existsErr != nil {
+			storageFailed.Store(true)
 			break
 		}
-
-		exists, _ := articleRepo.Exists(feed.ID, item.Link)
 		mediaInfo := rss.ExtractVideoMedia(item.Link)
 		if mediaInfo == nil {
 			mediaInfo = rss.ExtractMedia(item)
@@ -587,6 +594,10 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 			continue
 		}
 
+		if queuedCount >= maxNewArticlesPerFeed {
+			pending = true
+			break
+		}
 		queuedCount++
 
 		wg.Add(1)
@@ -633,9 +644,10 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 				}
 			}
 
-			if err := articleRepo.Create(article); err != nil {
+			if created, err := articleRepo.CreateSubscriptionArticle(article); err != nil {
+				storageFailed.Store(true)
 				log.Printf("Failed to create article: %v", err)
-			} else {
+			} else if created {
 				atomic.AddInt64(&newCount, 1)
 				if summarizer != nil && shouldAsyncSummarizeAfterCreate(article.MediaType) {
 					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
@@ -645,6 +657,11 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 	}
 
 	wg.Wait()
+	if storageFailed.Load() {
+		_ = feedRepo.RecordFetchFailure(feed.ID, "文章入库失败，稍后重试")
+	} else if err := feedRepo.CompleteFetch(feed.ID, result.ETag, result.LastModified, pending); err != nil {
+		log.Printf("Failed to acknowledge feed: %v", err)
+	}
 	log.Printf("Feed %s fetched, %d new articles", feed.URL, newCount)
 }
 
@@ -656,31 +673,39 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 	htmlFeed, err := fetcher.FetchHTML(ctx, feed.URL)
 	if err != nil {
 		log.Printf("Failed to scrape HTML feed %s: %v", feed.URL, err)
+		_ = feedRepo.RecordFetchFailure(feed.ID, "网页订阅请求失败："+err.Error())
 		return
 	}
 
-	if err := feedRepo.UpdateFetchInfo(feed.ID, "", "", time.Now()); err != nil {
-		log.Printf("Failed to update feed info: %v", err)
-	}
 	if htmlFeed.Title != "" {
 		_ = feedRepo.UpdateTitle(feed.ID, htmlFeed.Title)
 	}
 
 	var (
-		wg          sync.WaitGroup
-		sem         = make(chan struct{}, maxConcurrentContent)
-		newCount    int64
-		queuedCount int
+		wg            sync.WaitGroup
+		sem           = make(chan struct{}, maxConcurrentContent)
+		newCount      int64
+		queuedCount   int
+		pending       bool
+		storageFailed atomic.Bool
 	)
 
 	for _, item := range htmlFeed.Items {
-		if queuedCount >= maxNewArticlesPerFeed || item.Link == "" {
+		if item.Link == "" {
+			continue
+		}
+		exists, existsErr := articleRepo.Exists(feed.ID, item.Link)
+		if existsErr != nil {
+			storageFailed.Store(true)
 			break
 		}
-		exists, _ := articleRepo.Exists(feed.ID, item.Link)
 		if exists {
 			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, item.PublishedParsed)
 			continue
+		}
+		if queuedCount >= maxNewArticlesPerFeed {
+			pending = true
+			break
 		}
 		queuedCount++
 		wg.Add(1)
@@ -697,9 +722,10 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 				PublishedAt: pubAt,
 			}
 			article.WordCount, article.ReadingMinutes = rss.ComputeMetrics(content)
-			if err := articleRepo.Create(article); err != nil {
+			if created, err := articleRepo.CreateSubscriptionArticle(article); err != nil {
+				storageFailed.Store(true)
 				log.Printf("Failed to create HTML article: %v", err)
-			} else {
+			} else if created {
 				atomic.AddInt64(&newCount, 1)
 				if summarizer != nil {
 					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
@@ -709,6 +735,11 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 	}
 
 	wg.Wait()
+	if storageFailed.Load() {
+		_ = feedRepo.RecordFetchFailure(feed.ID, "文章入库失败，稍后重试")
+	} else if err := feedRepo.CompleteFetch(feed.ID, "", "", pending); err != nil {
+		log.Printf("Failed to acknowledge HTML feed: %v", err)
+	}
 	log.Printf("HTML feed %s scraped, %d new articles", feed.URL, newCount)
 }
 
@@ -796,6 +827,9 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 }
 
 func shouldFetch(feed *model.Feed) bool {
+	if feed.NextAttemptAt != nil {
+		return !time.Now().Before(*feed.NextAttemptAt)
+	}
 	if feed.LastFetchedAt == nil {
 		return true
 	}

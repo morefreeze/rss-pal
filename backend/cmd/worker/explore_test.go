@@ -568,7 +568,11 @@ func TestExploreCycleLogsOnlyIdentifiersAndContinuesAfterFailures(t *testing.T) 
 	cycle := newExploreCycleForTest(now, registry, queue, handler, &fakeExploreSnapshotRunner{}, log.New(&output, "", 0))
 
 	cycle.Run(context.Background())
-	waitExplore(t, func() bool { return handler.done.Load() == 3 && queue.finishCount() == 1 })
+	// Provider synchronization and queue draining run independently. Wait for
+	// both before asserting logs, rather than depending on goroutine scheduling.
+	waitExplore(t, func() bool {
+		return handler.done.Load() == 3 && queue.finishCount() == 1 && strings.Contains(output.String(), "provider_id=9")
+	})
 	logs := output.String()
 	for _, secret := range []string{"PRIVATE-BODY", "SECRET-PROFILE"} {
 		if strings.Contains(logs, secret) {

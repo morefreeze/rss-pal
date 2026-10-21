@@ -211,6 +211,10 @@ export interface Feed {
   url: string
   title: string
   last_fetched_at: string | null
+  last_attempt_at?: string | null
+  next_attempt_at?: string | null
+  fetch_error?: string
+  fetch_failures?: number
   fetch_interval_minutes: number
   is_active: boolean
   owner_id: number | null
@@ -643,7 +647,7 @@ export const toggleFeedActive = (id: number, isActive: boolean, title: string) =
   api.put<Feed>(`/feeds/${id}`, { is_active: isActive, title }).then(res => res.data)
 
 export const fetchFeedNow = (id: number) =>
-  api.post<{ message: string; new_articles: number; feed_title: string }>(`/feeds/${id}/fetch`).then(res => res.data)
+  api.post<{ message: string; new_articles: number; pending_articles?: boolean; feed_title: string }>(`/feeds/${id}/fetch`).then(res => res.data)
 
 export const exportOPML = () =>
   api.get('/feeds/export/opml', { responseType: 'blob' }).then(res => res.data as Blob)
@@ -733,7 +737,7 @@ export const generateSummary = (id: number) =>
 
 export const fetchContent = (id: number) =>
   // The server allows 45s for extraction plus a bounded media lookup.
-  api.post<{ content: string; published_at?: string | null; message?: string }>(`/articles/${id}/content`, undefined, { timeout: 60000 }).then(res => res.data)
+  api.post<{ content: string; content_changed?: boolean; processing_state?: Article['processing_state']; published_at?: string | null; message?: string }>(`/articles/${id}/content`, undefined, { timeout: 60000 }).then(res => res.data)
 
 export interface YouTubePlayback {
   manifest_url?: string
