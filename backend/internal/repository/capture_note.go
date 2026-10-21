@@ -51,6 +51,15 @@ func (r *CaptureNoteRepository) Append(userID, articleID int, note string) (stri
 	if utf8.RuneCountInString(note) > CaptureNoteInputLimit {
 		return "", ErrCaptureNoteTooLong
 	}
+	return r.appendStored(userID, articleID, note)
+}
+
+// appendStored transfers accumulated server-side draft text, which may contain
+// several valid inputs. Public capture APIs continue to enforce the input limit.
+func (r *CaptureNoteRepository) appendStored(userID, articleID int, note string) (string, error) {
+	if utf8.RuneCountInString(note) > CaptureNoteTotalLimit {
+		return "", ErrCaptureNoteTooLong
+	}
 	note = strings.TrimSpace(note)
 	if note == "" {
 		return "", nil

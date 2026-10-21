@@ -267,6 +267,14 @@ export function BatchFetchConfirmDialog({
                       }}>
                         {draft.title || '(无标题)'}
                       </div>
+                      {draft.capture_note?.trim() && (
+                        <div style={{ marginTop: 6, marginBottom: 4, color: 'var(--fg-muted)' }}>
+                          <div style={{ fontSize: 11, marginBottom: 2 }}>随手记</div>
+                          <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.5 }}>
+                            {draft.capture_note}
+                          </div>
+                        </div>
+                      )}
                       <div style={{
                         fontSize: 11,
                         color: 'var(--fg-muted)',

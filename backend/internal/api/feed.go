@@ -604,10 +604,11 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 // CaptureFromShortcut stages a link in its original article's private pending
 // list. Only an explicit reader batch confirmation can create/fetch children.
 func (h *FeedHandler) CaptureFromShortcut(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32768)
 	var req struct {
 		URL             string `json:"url"`
 		SourceArticleID int    `json:"source_article_id"`
+		CaptureNote     string `json:"capture_note"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "请共享有效的 http 或 https 网页链接"})
@@ -622,7 +623,14 @@ func (h *FeedHandler) CaptureFromShortcut(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "请共享有效的公开网页链接"})
 		return
 	}
-	result, err := h.articleRepo.WithCtx(c).AddShortcutCaptureDraft(getUserID(c), req.SourceArticleID, u.String())
+	if !validateCaptureNote(c, req.CaptureNote) {
+		return
+	}
+	result, err := h.articleRepo.WithCtx(c).AddShortcutCaptureDraftWithNote(getUserID(c), req.SourceArticleID, u.String(), req.CaptureNote)
+	if errors.Is(err, repository.ErrCaptureNoteTooLong) {
+		captureNoteError(c, err)
+		return
+	}
 	if errors.Is(err, repository.ErrCaptureSourceNotFound) {
 		c.JSON(422, gin.H{"error": err.Error()})
 		return
@@ -640,7 +648,14 @@ func (h *FeedHandler) CaptureFromShortcut(c *gin.Context) {
 	if result.AlreadyFetched {
 		status, state, message = 200, "already_fetched", fmt.Sprintf("该链接已在《%s》中抓取，无需重复添加。", result.SourceTitle)
 	}
-	jsonAfterCommit(c, status, gin.H{"parent_article_id": result.ParentArticleID, "status": state, "message": message})
+	if result.NoteSaved {
+		if result.AlreadyFetched {
+			message = fmt.Sprintf("该链接已在《%s》中抓取，随手记已保存到该链接文章。", result.SourceTitle)
+		} else {
+			message += "随手记已保存，确认抓取后会保留到该链接文章。"
+		}
+	}
+	jsonAfterCommit(c, status, gin.H{"parent_article_id": result.ParentArticleID, "status": state, "message": message, "note_saved": result.NoteSaved})
 }
 
 func (h *FeedHandler) createOneoffLinkSet(c *gin.Context, allowExpand bool) {

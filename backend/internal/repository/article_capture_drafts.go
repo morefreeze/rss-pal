@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"errors"
 	"html"
 	"net/url"
@@ -18,15 +19,17 @@ var (
 )
 
 type ArticleCaptureDraft struct {
-	URL     string `json:"url"`
-	Title   string `json:"title"`
-	AddedAt int64  `json:"addedAt"`
+	URL         string `json:"url"`
+	Title       string `json:"title"`
+	AddedAt     int64  `json:"addedAt"`
+	CaptureNote string `json:"capture_note,omitempty"`
 }
 
 type CaptureDraftResult struct {
 	ParentArticleID int
 	SourceTitle     string
 	AlreadyFetched  bool
+	NoteSaved       bool
 }
 
 // Normalize links by the same rule as the existing reader and batch-fetch
@@ -85,6 +88,14 @@ func captureLinkTitle(body, target string) (string, bool) {
 // This transaction never fetches a URL or creates a child/standalone article.
 // The source row lock serializes enqueue against explicit batch confirmation.
 func (r *ArticleRepository) AddShortcutCaptureDraft(userID, sourceID int, pageURL string) (*CaptureDraftResult, error) {
+	return r.AddShortcutCaptureDraftWithNote(userID, sourceID, pageURL, "")
+}
+
+func (r *ArticleRepository) AddShortcutCaptureDraftWithNote(userID, sourceID int, pageURL, note string) (*CaptureDraftResult, error) {
+	if utf8.RuneCountInString(note) > CaptureNoteInputLimit {
+		return nil, ErrCaptureNoteTooLong
+	}
+	note = strings.TrimSpace(note)
 	canonical, err := normalizeCaptureDraftURL(pageURL)
 	if err != nil {
 		return nil, err
@@ -138,17 +149,33 @@ func (r *ArticleRepository) AddShortcutCaptureDraft(userID, sourceID int, pageUR
 		return nil, ErrCaptureSourceNotFound
 	}
 	result := &CaptureDraftResult{ParentArticleID: parentID, SourceTitle: sourceTitle}
-	aliases := []string{canonical}
-	if parsed.Path == "/" {
-		legacy := *parsed
-		legacy.Path = ""
-		aliases = append(aliases, legacy.String())
-	}
-	if err = q.QueryRow(`SELECT EXISTS(SELECT 1 FROM articles WHERE parent_article_id=$1 AND url=ANY($2))`, parentID, pq.Array(aliases)).Scan(&result.AlreadyFetched); err != nil {
+	var childID int
+	err = q.QueryRow(`SELECT a.id FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.parent_article_id=$1 AND a.url=ANY($2) AND f.owner_id=$3 ORDER BY a.id LIMIT 1`, parentID, pq.Array(captureDraftURLAliases(canonical)), userID).Scan(&childID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if !result.AlreadyFetched {
-		_, err = q.Exec(`INSERT INTO article_capture_drafts(user_id,article_id,url,title) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,article_id,url) DO NOTHING`, userID, parentID, canonical, title)
+	result.AlreadyFetched = childID != 0
+	if result.AlreadyFetched {
+		if note != "" {
+			_, err = (&CaptureNoteRepository{db: q}).Append(userID, childID, note)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		const merged = `CASE WHEN EXCLUDED.capture_note='' THEN article_capture_drafts.capture_note
+ WHEN article_capture_drafts.capture_note='' THEN EXCLUDED.capture_note
+ WHEN article_capture_drafts.capture_note=EXCLUDED.capture_note
+ OR right(article_capture_drafts.capture_note,char_length(EXCLUDED.capture_note)+2)=E'\n\n'||EXCLUDED.capture_note
+ THEN article_capture_drafts.capture_note
+ ELSE article_capture_drafts.capture_note||E'\n\n'||EXCLUDED.capture_note END`
+		var saved string
+		err = q.QueryRow(`INSERT INTO article_capture_drafts(user_id,article_id,url,title,capture_note) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(user_id,article_id,url) DO UPDATE SET capture_note=`+merged+`
+ WHERE char_length(`+merged+`)<=10000 RETURNING capture_note`, userID, parentID, canonical, title, note).Scan(&saved)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrCaptureNoteTooLong
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +183,18 @@ func (r *ArticleRepository) AddShortcutCaptureDraft(userID, sourceID int, pageUR
 	if err = commit(); err != nil {
 		return nil, err
 	}
+	result.NoteSaved = note != ""
 	return result, nil
+}
+
+func captureDraftURLAliases(canonical string) []string {
+	aliases := []string{canonical}
+	u, err := url.Parse(canonical)
+	if err == nil && u.Path == "/" {
+		u.Path = ""
+		aliases = append(aliases, u.String())
+	}
+	return aliases
 }
 
 func authorizeCaptureDrafts(q Querier, userID, articleID int) error {
@@ -168,7 +206,7 @@ func (r *ArticleRepository) ListCaptureDrafts(userID, articleID int) ([]ArticleC
 	if err := authorizeCaptureDrafts(r.db, userID, articleID); err != nil {
 		return nil, nil, err
 	}
-	rows, err := r.db.Query(`SELECT url,title,(extract(epoch from added_at)*1000)::bigint FROM article_capture_drafts
+	rows, err := r.db.Query(`SELECT url,title,(extract(epoch from added_at)*1000)::bigint,capture_note FROM article_capture_drafts
  WHERE user_id=$1 AND article_id=$2
  ORDER BY added_at,url`, userID, articleID)
 	if err != nil {
@@ -177,7 +215,7 @@ func (r *ArticleRepository) ListCaptureDrafts(userID, articleID int) ([]ArticleC
 	drafts := []ArticleCaptureDraft{}
 	for rows.Next() {
 		var d ArticleCaptureDraft
-		if err = rows.Scan(&d.URL, &d.Title, &d.AddedAt); err != nil {
+		if err = rows.Scan(&d.URL, &d.Title, &d.AddedAt, &d.CaptureNote); err != nil {
 			break
 		}
 		drafts = append(drafts, d)

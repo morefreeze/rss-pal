@@ -810,6 +810,10 @@ func (h *ArticleHandler) BatchFetch(c *gin.Context) {
 	inputs := linkSetChildInputs(parent, candidates)
 	n, err := articleRepo.EnableAndInsertLinkSetChildren(parent.ID, inputs)
 	if err != nil {
+		if errors.Is(err, repository.ErrCaptureNoteTooLong) {
+			captureNoteError(c, err)
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
