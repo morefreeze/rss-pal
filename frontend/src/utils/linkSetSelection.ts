@@ -2,10 +2,9 @@
 // Extracted from the legacy BatchFetchModal so both the article page (writer)
 // and the confirm dialog (reader, indirectly via the page) share one path.
 //
-// Why localStorage with TTL instead of server-side: selection is a per-device
-// scratchpad — the user can mark candidates over several reading sessions
-// then submit a batch. Cross-device sync isn't worth a new API surface for
-// this. 1-day TTL keeps abandoned selections from accumulating forever.
+// Manual selections remain a per-device scratchpad with a 1-day TTL.
+// Shortcut imports are stored separately on the server and merged by
+// useArticleCaptureDrafts; they are not expired or persisted here.
 
 import { normalizeHTTPURL } from './url'
 

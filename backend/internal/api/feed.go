@@ -601,39 +601,46 @@ func (h *FeedHandler) CreateOneoffLinkSet(c *gin.Context) {
 	h.createOneoffLinkSet(c, true)
 }
 
-// CaptureFromShortcut is limited to saving a single private clip. A shortcut
-// credential cannot create expanding feeds, even if expand=true is supplied.
+// CaptureFromShortcut stages a link in its original article's private pending
+// list. Only an explicit reader batch confirmation can create/fetch children.
 func (h *FeedHandler) CaptureFromShortcut(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
 	var req struct {
-		URL string `json:"url"`
+		URL             string `json:"url"`
+		SourceArticleID int    `json:"source_article_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请共享有效的 http 或 https 网页链接"})
+		c.JSON(400, gin.H{"error": "请共享有效的 http 或 https 网页链接"})
 		return
 	}
 	u, err := url.Parse(strings.TrimSpace(req.URL))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请共享有效的 http 或 https 网页链接"})
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || len(req.URL) > 4096 || req.SourceArticleID < 0 {
+		c.JSON(400, gin.H{"error": "请共享有效的 http 或 https 网页链接"})
 		return
 	}
-	normalized, err := normalizeFeedURL(u.String())
-	if err != nil || validatePublicURL(normalized) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请共享有效的公开网页链接"})
+	if err = validatePublicURL(u.String()); err != nil {
+		c.JSON(400, gin.H{"error": "请共享有效的公开网页链接"})
 		return
 	}
-	// No external requests: acknowledge only after the private queue row commits.
-	article, err := h.articleRepo.WithCtx(c).EnqueueCapture(getUserID(c), normalized)
+	result, err := h.articleRepo.WithCtx(c).AddShortcutCaptureDraft(getUserID(c), req.SourceArticleID, u.String())
+	if errors.Is(err, repository.ErrCaptureSourceNotFound) {
+		c.JSON(422, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, repository.ErrCaptureSourceAmbiguous) {
+		c.JSON(409, gin.H{"error": err.Error()})
+		return
+	}
 	if err != nil {
-		log.Printf("shortcut enqueue failed for owner=%d: %v", getUserID(c), err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法加入抓取队列"})
+		log.Printf("shortcut draft failed for owner=%d: %v", getUserID(c), err)
+		c.JSON(500, gin.H{"error": "无法加入待抓取列表"})
 		return
 	}
-	status := http.StatusAccepted
-	if article.ProcessingState == "ready" {
-		status = http.StatusOK
+	status, state, message := 202, "drafted", fmt.Sprintf("已加入《%s》的待抓取列表，回到原文章确认后再开始抓取。", result.SourceTitle)
+	if result.AlreadyFetched {
+		status, state, message = 200, "already_fetched", fmt.Sprintf("该链接已在《%s》中抓取，无需重复添加。", result.SourceTitle)
 	}
-	jsonAfterCommit(c, status, gin.H{"feed_id": article.FeedID, "parent_article_id": article.ID, "processing_state": article.ProcessingState})
+	jsonAfterCommit(c, status, gin.H{"parent_article_id": result.ParentArticleID, "status": state, "message": message})
 }
 
 func (h *FeedHandler) createOneoffLinkSet(c *gin.Context, allowExpand bool) {

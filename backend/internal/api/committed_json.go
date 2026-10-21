@@ -33,6 +33,6 @@ func writeCommittedJSON(c *gin.Context) {
 
 func rejectCommittedJSON(c *gin.Context) {
 	if _, ok := c.Get(committedJSONKey); ok && !c.Writer.Written() {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失败，请重试；随手记尚未确认保存"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失败，请重试；更改尚未确认保存"})
 	}
 }

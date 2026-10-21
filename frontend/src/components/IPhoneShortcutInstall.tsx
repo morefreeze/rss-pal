@@ -16,7 +16,7 @@ export default function IPhoneShortcutInstall({ url = IPHONE_SHORTCUT_INSTALL_UR
       textDecoration: 'none', fontWeight: 600,
     }}>添加到快捷指令</a>
     <p className="text-muted text-sm" style={{ marginTop: 8 }}>
-      在系统页面确认添加后，返回这里连接当前账号。已有旧版快捷指令时，请替换为新版。
+      在系统页面确认添加后，返回这里连接当前账号。共享链接后，回原文章确认并点“开始抓取”。已有旧版快捷指令时，请替换为新版。
     </p>
     <a href={url} className="text-sm">使用 Apple 安装页</a>
   </div>

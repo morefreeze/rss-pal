@@ -3,7 +3,8 @@
 
 Native action formats were exported from Shortcuts.app. The direct-capture
 workflow was imported and executed on macOS against an isolated API. The
-installer's Apple record matches this source (signingStatus=APPROVED):
+pending-list notification update requires a new Apple share record after Mac
+unlock. The current installer retains the previously published compatible link:
 https://www.icloud.com/shortcuts/98ef2f6cfbe740e092908ab72ea9240e
 
 python3 scripts/build_iphone_shortcut.py /tmp/rss-pal-unsigned.shortcut

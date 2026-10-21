@@ -772,7 +772,7 @@ func (h *ArticleHandler) BatchFetch(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"inserted": n})
+	jsonAfterCommit(c, http.StatusOK, gin.H{"inserted": n})
 }
 
 // ConfirmLinkSetSuggestion is called when the user accepts the

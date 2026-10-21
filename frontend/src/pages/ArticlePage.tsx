@@ -22,14 +22,8 @@ import { createLinkSetActions } from '../reader/linkSetActions'
 import type { ReaderActionContextValue } from '../reader/types'
 import { normalizeHTTPURL } from '../utils/url'
 import {
-  addDraftTargets,
   buildFetchedURLSet,
-  enrichDraftLinks,
-  loadDraftLinks,
   mergeFetchedLinkURLs,
-  removeDraftURLs,
-  saveDraftLinks,
-  type DraftLink,
 } from '../utils/linkSetSelection'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle, { findStandaloneVideoAnchorID } from '../components/MarkdownArticle'
@@ -40,6 +34,7 @@ import BackToTopButton from '../components/BackToTopButton'
 import BackFab from '../components/BackFab'
 import { ArticleDetailSkeleton } from '../components/ArticleDetailSkeleton'
 import ArticleDetailPreview from '../components/ArticleDetailPreview'
+import { useArticleCaptureDrafts } from '../hooks/useArticleCaptureDrafts'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
@@ -257,7 +252,6 @@ export default function ArticlePage() {
 
   // Ordered per-article scratchpad used by both reader modes. It is available
   // for every article; the first successful batch implicitly enables link_set.
-  const [draftLinks, setDraftLinks] = useState<DraftLink[]>([])
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const articleURL = article?.url
@@ -280,46 +274,32 @@ export default function ArticlePage() {
     [articleURL],
   )
 
+  const detailFetchedURLSet = useMemo(
+    () => buildFetchedURLSet(article?.id === Number(id) ? fetchedLinkURLs : [], articleURL),
+    [article?.id, articleURL, fetchedLinkURLs, id],
+  )
+  const {
+    draftLinks, fetchedURLSet, addDrafts: addCaptureDrafts,
+    removeDrafts, enrichDrafts, markFetched, error: draftError,
+  } = useArticleCaptureDrafts(Number(id), detailFetchedURLSet)
   const draftURLSet = useMemo(
     () => new Set(draftLinks.map((draft) => draft.url)),
     [draftLinks],
   )
 
-  const fetchedURLSet = useMemo(
-    () => buildFetchedURLSet(fetchedLinkURLs, articleURL),
-    [articleURL, fetchedLinkURLs],
-  )
-
-  // Load drafts for the route immediately, regardless of link_set state.
   useEffect(() => {
-    const articleID = Number(id)
     setConfirmOpen(false)
     setFetchedLinkURLs([])
-    setDraftLinks(Number.isFinite(articleID) ? loadDraftLinks(articleID) : [])
   }, [id])
 
-  // Never write old-article state under a newly navigated route key.
   useEffect(() => {
-    if (!article?.id || article.id !== Number(id)) return
-    saveDraftLinks(article.id, draftLinks)
-  }, [article?.id, draftLinks, id])
-
-  // Server children win over local scratch state after any detail refresh.
-  useEffect(() => {
-    if (!article?.id || article.id !== Number(id) || fetchedURLSet.size === 0) return
-    setDraftLinks((current) => removeDraftURLs(current, fetchedURLSet))
-  }, [article?.id, fetchedURLSet, id])
+    if (draftError) toast.error(draftError)
+  }, [draftError])
 
   const addDrafts = useCallback((links: Array<{ url: string; title: string }>) => {
-    const next = addDraftTargets(draftLinks, links, fetchedURLSet)
-    if (next === draftLinks) return
-    setDraftLinks(next)
-    toast.success(`已加入待抓取（${next.length - draftLinks.length}）`)
-  }, [draftLinks, fetchedURLSet])
-
-  const removeDrafts = useCallback((urls: string[]) => {
-    setDraftLinks((current) => removeDraftURLs(current, new Set(urls)))
-  }, [])
+    const count = addCaptureDrafts(links)
+    if (count > 0) toast.success(`已加入待抓取（${count}）`)
+  }, [addCaptureDrafts])
 
   const openReaderLink = useCallback((url: string) => {
     window.open(url, '_blank', 'noopener,noreferrer')
@@ -336,8 +316,8 @@ export default function ArticlePage() {
   }, [])
 
   const discoverReaderLink = useCallback((link: { url: string; title: string }) => {
-    setDraftLinks((current) => enrichDraftLinks(current, [link]))
-  }, [])
+    enrichDrafts([link])
+  }, [enrichDrafts])
 
   const readerActionContext = useMemo<ReaderActionContextValue>(() => ({
     normalizeLink: normalize,
@@ -1078,23 +1058,25 @@ export default function ArticlePage() {
   })
 
   const handleDraftsFetched = useCallback((submittedURLs: string[], insertedCount: number) => {
-    setDraftLinks((current) => removeDraftURLs(current, new Set(submittedURLs)))
+    if (!markFetched(submittedURLs)) return
+    const generation = loadGenerationRef.current
     toast.success(`已提交 ${submittedURLs.length} 条链接${insertedCount < submittedURLs.length ? `，新增 ${insertedCount} 条` : ''}`)
     const articleID = article?.id
     if (!articleID) return
     invalidateArticleDetail(articleID)
     void fetchDetailForPage(articleID)
       .then((data) => {
-        if (Number(id) !== articleID) return
+        if (loadGenerationRef.current !== generation) return
         setArticle(data.article)
         setLinkSetChildren(data.children ?? null)
         setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
       })
       .catch((error) => {
+        if (loadGenerationRef.current !== generation) return
         console.warn('refresh after batch_fetch failed', error)
         toast.error('链接已提交，但详情刷新失败，请手动刷新')
       })
-  }, [article?.id, id])
+  }, [article?.id, id, markFetched])
 
   if (loadError && (!article || article.id !== articleID)) return (
     <div className="card" style={{ textAlign: 'center' }}>
@@ -1137,7 +1119,7 @@ export default function ArticlePage() {
         articleId={article.id}
         drafts={draftLinks}
         fetchedURLs={fetchedURLSet}
-        onRemove={(url) => removeDrafts([url])}
+        onRemove={(url) => void removeDrafts([url])}
         onClose={() => setConfirmOpen(false)}
         onFetched={handleDraftsFetched}
       />

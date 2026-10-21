@@ -9,6 +9,8 @@ describe('one-button shortcut installation', () => {
     const install = doc.querySelector('a[data-shortcut-install]')
     expect(install?.getAttribute('href')).toBe('workflow://shortcuts/98ef2f6cfbe740e092908ab72ea9240e')
     expect(doc.querySelector('ol')).toBeNull()
+    expect(doc.body.textContent).toContain('把链接加入原文章的待抓取列表')
+    expect(doc.body.textContent).toContain('再回原文章确认并点“开始抓取”')
   })
   it('opens the Apple shortcut installer directly rather than a setup document', () => {
     const url = 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef'
@@ -18,6 +20,7 @@ describe('one-button shortcut installation', () => {
     expect(screen.getByRole('link', { name: '使用 Apple 安装页' }).getAttribute('href')).toBe(url)
     expect(install.getAttribute('target')).not.toBe('_blank')
     expect(screen.queryByText('手动配置')).toBeNull()
+    expect(screen.getByText(/共享链接后，回原文章确认并点“开始抓取”/)).toBeTruthy()
   })
 
   it.each(['/shortcuts/unsigned.shortcut', '/shortcuts/iphone-setup.html', 'https://example.com/install'])('rejects an unsigned file or documentation link: %s', url => {

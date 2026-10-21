@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"github.com/lib/pq"
 	"strings"
 	"time"
 )
@@ -152,6 +153,17 @@ func (r *ArticleRepository) EnableAndInsertLinkSetChildren(parentID int, childre
 	}
 	inserted, err := insertLinkSetChildren(tx, children)
 	if err != nil {
+		return 0, err
+	}
+	urls := make([]string, 0, len(children))
+	for _, child := range children {
+		canonical, err := normalizeCaptureDraftURL(child.URL)
+		if err != nil {
+			return 0, err
+		}
+		urls = append(urls, canonical)
+	}
+	if _, err := tx.Exec(`DELETE FROM article_capture_drafts WHERE article_id=$1 AND url=ANY($2)`, parentID, pq.Array(urls)); err != nil {
 		return 0, err
 	}
 	if err := commit(); err != nil {

@@ -244,7 +244,7 @@
 				<key>UUID</key>
 				<string>B07F17F0-CF92-49E7-BA80-199D5B12EA9B</string>
 				<key>WFNotificationActionBody</key>
-				<string>已连接 RSS Pal。以后通过“共享 → 加入 RSS Pal”即可保存到网摘。</string>
+				<string>已连接 RSS Pal。通过“共享 → 加入 RSS Pal”把链接加入原文章待抓取列表，再回原文章点“开始抓取”。</string>
 			</dict>
 		</dict>
 		<dict>
@@ -645,7 +645,7 @@
 				<key>UUID</key>
 				<string>C1EDB752-88D1-45F3-A696-FA11D2F32B24</string>
 				<key>WFDictionaryKey</key>
-				<string>parent_article_id</string>
+				<string>message</string>
 				<key>WFInput</key>
 				<dict>
 					<key>Value</key>
@@ -702,7 +702,27 @@
 				<key>UUID</key>
 				<string>BB2113DC-76A3-4CE2-AF1F-9CC4A37B6DAC</string>
 				<key>WFNotificationActionBody</key>
-				<string>已提交到 RSS Pal。新文章已加入抓取队列，已有文章保留原内容。</string>
+				<dict>
+					<key>Value</key>
+					<dict>
+						<key>attachmentsByRange</key>
+						<dict>
+							<key>{0, 1}</key>
+							<dict>
+								<key>OutputName</key>
+								<string>Result</string>
+								<key>OutputUUID</key>
+								<string>C1EDB752-88D1-45F3-A696-FA11D2F32B24</string>
+								<key>Type</key>
+								<string>ActionOutput</string>
+							</dict>
+						</dict>
+						<key>string</key>
+						<string>￼</string>
+					</dict>
+					<key>WFSerializationType</key>
+					<string>WFTextTokenString</string>
+				</dict>
 			</dict>
 		</dict>
 		<dict>
@@ -765,7 +785,7 @@
 					<dict>
 						<key>attachmentsByRange</key>
 						<dict>
-							<key>{31, 1}</key>
+							<key>{8, 1}</key>
 							<dict>
 								<key>OutputName</key>
 								<string>Result</string>
@@ -776,7 +796,7 @@
 							</dict>
 						</dict>
 						<key>string</key>
-						<string>抓取未完成（连接失效时请回到 RSS Pal 设置重新连接）：￼</string>
+						<string>未能加入待抓取：￼</string>
 					</dict>
 					<key>WFSerializationType</key>
 					<string>WFTextTokenString</string>

@@ -311,6 +311,20 @@ export async function getArticleCandidates(articleId: number): Promise<Candidate
   return data.candidates ?? []
 }
 
+export interface ArticleCaptureDrafts {
+  drafts: Array<{ url: string; title: string; addedAt: number }>
+  fetched_link_urls: string[]
+}
+
+export async function getArticleCaptureDrafts(articleId: number): Promise<ArticleCaptureDrafts> {
+  const { data } = await api.get<ArticleCaptureDrafts>(`/articles/${articleId}/capture-drafts`)
+  return data
+}
+
+export async function removeArticleCaptureDrafts(articleId: number, urls: string[]): Promise<void> {
+  await api.delete(`/articles/${articleId}/capture-drafts`, { data: { urls } })
+}
+
 export async function batchFetchCandidates(
   articleId: number,
   candidates: Array<{ title: string; url: string; editor_note?: string }>

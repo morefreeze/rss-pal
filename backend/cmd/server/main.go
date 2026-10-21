@@ -381,6 +381,8 @@ func main() {
 		apiGroup.GET("/articles/unread-count", articleHandler.GetUnreadCount)
 		apiGroup.POST("/articles/mark-all-read", articleHandler.MarkAllRead)
 		apiGroup.GET("/articles/:id", articleHandler.GetByID)
+		apiGroup.GET("/articles/:id/capture-drafts", articleHandler.CaptureDrafts)
+		apiGroup.DELETE("/articles/:id/capture-drafts", articleHandler.DeleteCaptureDrafts)
 		apiGroup.PATCH("/articles/:id/note", articleHandler.UpdateCaptureNote)
 		apiGroup.POST("/articles/:id/youtube-playback", youtubePlaybackHandler.Start)
 		apiGroup.POST("/articles/:id/summary", articleHandler.GenerateSummary)

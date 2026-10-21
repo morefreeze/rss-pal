@@ -7,9 +7,13 @@ import {
   putArticleDetail,
   resetArticleDetailCache,
 } from '../src/api/articleDetailCache'
+import { saveDraftLinks } from '../src/utils/linkSetSelection'
 import type { Article, ArticleDetailResponse, ArticleListItem } from '../src/api/client'
 
 const apiMocks = vi.hoisted(() => ({
+  getArticleCaptureDrafts: vi.fn(async (): Promise<{drafts: Array<{url:string;title:string;addedAt:number}>; fetched_link_urls: string[]}> => ({drafts:[], fetched_link_urls:[]})),
+  removeArticleCaptureDrafts: vi.fn(async () => undefined),
+  batchFetchCandidates: vi.fn(async () => ({inserted:2})),
   updateArticleNote: vi.fn(async () => ({ capture_note: '新想法' })),
   dislikeArticle: vi.fn(async () => undefined),
   expandLinkSetChild: vi.fn(async () => undefined),
@@ -66,13 +70,9 @@ vi.mock('../src/components/ArticlePlayerCard', () => ({
 }))
 vi.mock('../src/components/ArticleActionsMenu', () => ({ default: () => null }))
 vi.mock('../src/components/ArticleProgressBar', () => ({ default: () => null }))
-vi.mock('../src/components/BatchFetchConfirmDialog', () => ({
-  BatchFetchConfirmDialog: () => null,
-}))
 vi.mock('../src/components/LinkSetChildren', () => ({
   LinkSetChildren: () => null,
 }))
-vi.mock('../src/components/CollapsibleFab', () => ({ default: () => null }))
 vi.mock('../src/components/BackFab', () => ({ default: () => null }))
 vi.mock('../src/components/BackToTopButton', () => ({ default: () => null }))
 vi.mock('../src/components/ReadingLayout', () => ({ default: () => null }))
@@ -158,10 +158,76 @@ describe('ArticlePage immediate loading', () => {
   })
   beforeEach(() => {
     resetArticleDetailCache()
+    localStorage.clear()
     vi.clearAllMocks()
+    apiMocks.getArticleCaptureDrafts.mockResolvedValue({drafts:[], fetched_link_urls:[]})
     apiMocks.fetchContent.mockReset().mockResolvedValue({ content: '' })
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     vi.stubGlobal('ResizeObserver', TestResizeObserver)
+  })
+
+  it('imports shortcut rows into the existing pending badge and waits for explicit Start Fetch', async () => {
+    const imported = {url:'https://example.com/shortcut',title:'Shortcut link',addedAt:123}
+    const manual = {url:'https://example.com/manual',title:'Manual link',addedAt:100}
+    saveDraftLinks(42, [manual])
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+    await screen.findByTitle('1 条链接待确认抓取')
+    apiMocks.getArticleCaptureDrafts.mockResolvedValue({drafts:[imported],fetched_link_urls:[]})
+    await act(async () => { window.dispatchEvent(new Event('focus')) })
+    fireEvent.click(await screen.findByTitle('2 条链接待确认抓取'))
+    expect(screen.getByRole('dialog').textContent).toContain('Shortcut link')
+    expect(screen.getByRole('dialog').textContent).toContain('Manual link')
+    expect(apiMocks.batchFetchCandidates).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', {name:'开始抓取（2）'}))
+    await waitFor(() => expect(apiMocks.batchFetchCandidates).toHaveBeenCalledWith(42, [
+      {url:manual.url,title:manual.title},{url:imported.url,title:imported.title},
+    ]))
+    await waitFor(() => expect(screen.queryByTitle('2 条链接待确认抓取')).toBeNull())
+    await act(async () => { window.dispatchEvent(new Event('focus')) })
+    expect(screen.queryByTitle('2 条链接待确认抓取')).toBeNull()
+    expect(apiMocks.batchFetchCandidates).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores a submitted batch completion after navigation to another article', async () => {
+    const pending = deferred<{inserted:number}>()
+    apiMocks.batchFetchCandidates.mockReturnValueOnce(pending.promise)
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    saveDraftLinks(42, [{url:'https://example.com/shared',title:'Share',addedAt:123}])
+    putArticleDetail(detail(42))
+    putArticleDetail({...detail(43),article:{...detail(43).article,title:'Next article'}})
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Link to="/articles/43">Next test article</Link>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+    fireEvent.click(await screen.findByTitle('1 条链接待确认抓取'))
+    fireEvent.click(screen.getByRole('button', {name:'开始抓取（1）'}))
+    fireEvent.click(screen.getByText('Next test article'))
+    await screen.findByText('Next article')
+    const requestsBefore = apiMocks.getArticle.mock.calls.length
+    await act(async () => { pending.resolve({inserted:1}) })
+    expect(apiMocks.getArticle.mock.calls.length).toBe(requestsBefore)
+    expect(screen.getByText('Next article')).toBeTruthy()
+  })
+
+  it('keeps an imported row visible and reports a failed remote removal', async () => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    apiMocks.getArticleCaptureDrafts.mockResolvedValue({drafts:[{url:'https://example.com/shared',title:'Shortcut link',addedAt:123}],fetched_link_urls:[]})
+    apiMocks.removeArticleCaptureDrafts.mockRejectedValueOnce(new Error('offline'))
+    putArticleDetail(detail(42))
+    const messages: string[] = []
+    const listener = (event: Event) => { messages.push((event as CustomEvent).detail.msg) }
+    window.addEventListener('show-toast', listener)
+    try {
+      render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+      fireEvent.click(await screen.findByTitle('1 条链接待确认抓取'))
+      fireEvent.click(screen.getByRole('button', {name:'从草稿移除 Shortcut link'}))
+      await waitFor(() => expect(messages).toContain('移除失败，请联网后重试'))
+      expect(screen.getByRole('dialog').textContent).toContain('Shortcut link')
+      expect(apiMocks.removeArticleCaptureDrafts).toHaveBeenCalledWith(42, ['https://example.com/shared'])
+      expect(apiMocks.batchFetchCandidates).not.toHaveBeenCalled()
+    } finally { window.removeEventListener('show-toast', listener) }
   })
 
   it('offers accessible thumb icons and keeps feedback selection mutually exclusive', async () => {
