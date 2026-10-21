@@ -105,7 +105,7 @@ export default function ExploreArticleCard({
     <article
       ref={assignRef}
       aria-label={article.title}
-      className="card explore-article-card"
+      className={`card explore-article-card${thumbnailSrc ? ' explore-article-card--with-thumbnail' : ''}`}
     >
       <div className="explore-article-card__body">
         <div className="explore-article-card__content">
