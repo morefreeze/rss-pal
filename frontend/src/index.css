@@ -1651,3 +1651,16 @@ button.article-feedback:hover { color: var(--fg); opacity: 1; }
 button.article-feedback--like[aria-pressed="true"] { color: #16a34a; }
 button.article-feedback--dislike[aria-pressed="true"] { color: #ef4444; }
 button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opacity: 0.15; }
+
+/* Wide article tables scroll locally instead of expanding the phone page. */
+.markdown-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+@media (max-width: 600px) {
+  .summary-controls { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+  .summary-controls h3 { margin: 0; }
+  .summary-controls select, .summary-controls button { min-height: 44px; max-width: 100%; }
+}

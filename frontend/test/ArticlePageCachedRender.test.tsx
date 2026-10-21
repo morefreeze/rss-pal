@@ -166,6 +166,49 @@ describe('ArticlePage immediate loading', () => {
     vi.stubGlobal('ResizeObserver', TestResizeObserver)
   })
 
+  it('clears a disconnected stream warning when persisted completion is confirmed', async () => {
+    const initial = detail(42)
+    putArticleDetail(initial)
+    apiMocks.getArticle.mockResolvedValue(initial)
+    render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.getArticle).toHaveBeenCalled())
+    const completed = { ...detail(42), summary_job: { state: 'done' as const } }
+    completed.article.summary_brief = 'Persisted completed summary'
+    apiMocks.getArticle.mockResolvedValue(completed)
+    apiMocks.generateSummaryStream.mockImplementationOnce(async (_id, _template, handlers) => { handlers.onError('连接中断') })
+    fireEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+    await screen.findByText('Persisted completed summary')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('ignores summary callbacks from an article after navigating away', async () => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    const pending = deferred<void>()
+    let handlers: any
+    apiMocks.generateSummaryStream.mockImplementationOnce((_id, _template, callbacks) => {
+      handlers = callbacks
+      return pending.promise
+    })
+    putArticleDetail(detail(42))
+    putArticleDetail({ ...detail(43), article: { ...detail(43).article, title: 'Next summary article' } })
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Link to="/articles/43">Next test article</Link>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+    expect((screen.getByRole('button', { name: '生成中...' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByText('Next test article'))
+    await screen.findByText('Next summary article')
+    await act(async () => {
+      handlers.onBriefDone('Wrong article summary')
+      handlers.onDetailedDone('Wrong detailed summary')
+      handlers.onDone()
+      pending.resolve()
+    })
+    expect(screen.queryByText('Wrong article summary')).toBeNull()
+    expect((screen.getByRole('button', { name: '重新生成' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('imports shortcut rows into the existing pending badge and waits for explicit Start Fetch', async () => {
     const imported = {url:'https://example.com/shortcut',title:'Shortcut link',addedAt:123}
     const manual = {url:'https://example.com/manual',title:'Manual link',addedAt:100}

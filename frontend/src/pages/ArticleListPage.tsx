@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getArticles, getGroupedArticles, searchArticles, getDailyDigest, markAllRead, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, getTagSidebar, TagSidebarData } from '../api/client'
 import { writeNav, type NavContext } from '../utils/articleNav'
@@ -18,6 +18,7 @@ import { useBreakpoint } from '../hooks/useBreakpoint'
 import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
 import { useArticleDetailPrefetch } from '../hooks/useArticleDetailPrefetch'
 import FeedSourceLink from '../components/FeedSourceLink'
+import { saveListReturn, takeListReturn } from '../utils/articleListReturn'
 import { pinyinSearchIncludes } from '../utils/pinyinSearch'
 
 const PAGE_SIZE = 20
@@ -321,6 +322,10 @@ export default function ArticleListPage() {
   const [feeds, setFeeds] = useState<Feed[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [listError, setListError] = useState('')
+  const failedPageRef = useRef<{ offset: number; reset: boolean; restoreThrough?: number }>({ offset: 0, reset: true })
+  const restoreScrollRef = useRef<number | null>(null)
+  const restoredListRef = useRef<ReturnType<typeof takeListReturn>>(null)
   const [selectedFeed, setSelectedFeed] = useState<number | null>(() => {
     // URL ?feed_id=<n> wins on initial mount (deep link from extension popup, etc.)
     try {
@@ -392,6 +397,13 @@ export default function ArticleListPage() {
     try { return localStorage.getItem('tagSidebarOpen') === 'true' } catch { return false }
   })
   const [tagFilter, setTagFilter] = useState<TagFilter>(readTagFilter)
+  const listReturnKey = JSON.stringify([selectedFeed, unreadOnly, savedOnly, sortField, sortDir, tagFilter, articleEntryPath])
+  useLayoutEffect(() => {
+    if (restoreScrollRef.current === null || loading) return
+    const scrollY = restoreScrollRef.current
+    restoreScrollRef.current = null
+    window.scrollTo(0, scrollY)
+  }, [articles, loading])
   // Save state together so automatically unticked filters cannot return later.
   useEffect(() => {
     try {
@@ -524,8 +536,10 @@ export default function ArticleListPage() {
     // ClipPage component owns its own data fetching when in clipping
     // mode, so skip the regular /api/articles call to avoid a wasted
     // request and to keep the flicker out.
-    if (isClippingMode) return
+    if (isClippingMode) { restoredListRef.current = null; restoreScrollRef.current = null; return }
     if (grouped) {
+      restoredListRef.current = null
+      restoreScrollRef.current = null
       // Grouped mode fetches its own payload — single shot, no pagination.
       setGroupedLoading(true)
       getGroupedArticles({
@@ -535,6 +549,20 @@ export default function ArticleListPage() {
       })
         .then(setGroupedData)
         .finally(() => setGroupedLoading(false))
+      return
+    }
+    if (restoredListRef.current?.key !== listReturnKey) restoredListRef.current = takeListReturn(listReturnKey)
+    const restored = restoredListRef.current
+    if (restored) {
+      requestGenerationRef.current += 1
+      setArticles(restored.articles)
+      setOffset(restored.offset)
+      setHasMore(restored.hasMore)
+      restoreScrollRef.current = restored.scrollY
+      setLoading(false)
+      setLoadingMore(false)
+      setListError('')
+      void loadArticles(0, true, restored.offset)
       return
     }
     setOffset(0)
@@ -556,13 +584,14 @@ export default function ArticleListPage() {
     setFeeds(data || [])
   }
 
-  const loadArticles = useCallback(async (off: number, reset: boolean) => {
+  const loadArticles = useCallback(async (off: number, reset: boolean, restoreThrough?: number) => {
     const generation = reset
       ? ++requestGenerationRef.current
       : requestGenerationRef.current
 
+    setListError('')
     if (reset) {
-      setLoading(true)
+      setLoading(restoreThrough === undefined)
       setLoadingMore(false)
       setHasMore(false)
     } else {
@@ -570,7 +599,7 @@ export default function ArticleListPage() {
     }
 
     try {
-      const raw = await getArticles({
+      const params = {
         feed_id: selectedFeed || undefined,
         unread: unreadOnly || undefined,
         saved: savedOnly || undefined,
@@ -580,30 +609,32 @@ export default function ArticleListPage() {
         offset: off,
         sort: sortField,
         order: sortDir,
-      })
+      }
+      let data: ArticleListItem[] = []
+      let lastOffset = off
+      let lastPageLength = 0
+      for (let cursor = off; cursor <= (restoreThrough ?? off); cursor += PAGE_SIZE) {
+        const page = await getArticles({ ...params, offset: cursor }) || []
+        if (generation !== requestGenerationRef.current) return
+        data.push(...page)
+        lastOffset = cursor
+        lastPageLength = page.length
+        if (page.length < PAGE_SIZE) break
+      }
       if (generation !== requestGenerationRef.current) return
 
-      const data = raw || []
       if (reset) {
         setArticles(data)
-        // Restore scroll position when navigating back from article page
-        try {
-          const savedScroll = sessionStorage.getItem('articleListScroll')
-          if (savedScroll) {
-            sessionStorage.removeItem('articleListScroll')
-            setTimeout(() => {
-              if (generation === requestGenerationRef.current) {
-                window.scrollTo(0, Number(savedScroll))
-              }
-            }, 50)
-          }
-        } catch {}
+
       } else {
         setArticles(prev => [...prev, ...data])
       }
-      setHasMore(data.length === PAGE_SIZE)
-      setOffset(off)
+      setHasMore(lastPageLength === PAGE_SIZE)
+      setOffset(lastOffset)
     } catch {
+      if (generation !== requestGenerationRef.current) return
+      failedPageRef.current = { offset: off, reset, restoreThrough }
+      setListError(reset ? '文章加载失败，请检查网络后重试。' : '更多文章加载失败，请重试。')
       // Keep the current list in place. Reset requests already gated
       // pagination at start and only a later successful page zero reopens it.
     } finally {
@@ -792,6 +823,8 @@ export default function ArticleListPage() {
           }
         : null
       writeNav(ids.slice(start, end), context)
+      sessionStorage.removeItem('articleListReturn')
+      if (!grouped && !searchQuery) saveListReturn({ key: listReturnKey, articles, offset, hasMore, scrollY: window.scrollY })
       sessionStorage.setItem('articleListScroll', String(window.scrollY))
       sessionStorage.setItem('articleEntryPath', articleEntryPath)
     } catch {}
@@ -1106,6 +1139,8 @@ export default function ArticleListPage() {
         )
       ) : !isClippingMode && !searchQuery && loading && articles.length === 0 ? (
         <ArticleListSkeleton rows={8} />
+      ) : !isClippingMode && !searchQuery && listError && articles.length === 0 ? (
+        <div className="card" role="alert">{listError} <button onClick={() => loadArticles(failedPageRef.current.offset, failedPageRef.current.reset, failedPageRef.current.restoreThrough)}>重试</button></div>
       ) : !isClippingMode && !searchQuery && articles.length === 0 && feeds.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📰</div>
@@ -1150,7 +1185,8 @@ export default function ArticleListPage() {
               onSourceFilter={handleSourceFilter}
             />
           ))}
-          {hasMore ? (
+          {listError && <div className="card" role="alert">{listError} <button onClick={() => loadArticles(failedPageRef.current.offset, failedPageRef.current.reset, failedPageRef.current.restoreThrough)}>重试</button></div>}
+          {hasMore && !listError ? (
             <div style={{ textAlign: 'center', padding: '12px' }}>
               {loadingMore ? (
                 <span style={{ color: 'var(--fg-muted)', fontSize: 13 }}>加载中...</span>
@@ -1165,7 +1201,7 @@ export default function ArticleListPage() {
                 </button>
               )}
             </div>
-          ) : articles.length > 0 ? (
+          ) : articles.length > 0 && !listError ? (
             <div style={{ textAlign: 'center', padding: '16px', color: 'var(--fg-muted)', fontSize: 13 }}>
               — 已加载全部文章 —
             </div>

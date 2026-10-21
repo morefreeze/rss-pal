@@ -59,6 +59,13 @@ func RLSTxMiddleware(db *sql.DB) gin.HandlerFunc {
 
 		c.Set(CtxKeyTx, tx)
 
+		committed := false
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+				runAfterRollback(c)
+			}
+		}()
 		defer func() {
 			if rec := recover(); rec != nil {
 				_ = tx.Rollback()
@@ -82,6 +89,7 @@ func RLSTxMiddleware(db *sql.DB) gin.HandlerFunc {
 			rejectCommittedJSON(c)
 			return
 		}
+		committed = true
 		runAfterCommit(c)
 		writeCommittedJSON(c)
 	}

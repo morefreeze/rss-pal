@@ -52,13 +52,13 @@ func assertArticleSummaryCASCalls(t *testing.T, body *ast.BlockStmt, want int) [
 	if got := articleSelectorUseCount(body, "", "UpdateSummary"); got != 0 {
 		t.Fatalf("generated summary function has %d unconditional UpdateSummary calls, want 0", got)
 	}
-	calls := articleSelectorCalls(body, "UpdateSummaryIfContentUnchanged")
+	calls := articleSelectorCalls(body, "CompleteSummary")
 	if len(calls) != want {
-		t.Fatalf("UpdateSummaryIfContentUnchanged calls = %d, want %d", len(calls), want)
+		t.Fatalf("CompleteSummary calls = %d, want %d", len(calls), want)
 	}
 	for _, call := range calls {
-		if len(call.Args) < 2 || !isArticleContentSelector(call.Args[1]) {
-			t.Fatal("UpdateSummaryIfContentUnchanged does not receive article.Content")
+		if len(call.Args) < 3 || !isArticleContentSelector(call.Args[2]) {
+			t.Fatal("CompleteSummary does not receive article.Content")
 		}
 	}
 	return calls

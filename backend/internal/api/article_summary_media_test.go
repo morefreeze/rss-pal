@@ -121,9 +121,9 @@ func TestLacksSummarizableMediaContent(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "empty text article is not handled by media guard",
+			name:    "empty text article needs body",
 			article: &model.Article{MediaType: "text/html"},
-			want:    false,
+			want:    true,
 		},
 	}
 	for _, tt := range tests {

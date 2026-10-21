@@ -201,6 +201,9 @@ func (s *Summarizer) doCallOnce(ctx context.Context, body []byte, maxTokens int)
 		if err := checkFinishReason(chatResp.Choices[0].FinishReason); err != nil {
 			return "", err
 		}
+		if strings.TrimSpace(chatResp.Choices[0].Message.Content) == "" {
+			return "", &completionError{reason: "empty_output"}
+		}
 		return chatResp.Choices[0].Message.Content, nil
 	}
 
@@ -603,6 +606,9 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 	briefPrompt := buildVisionBriefPrompt(title, content, urlList)
 	brief, err := s.callVision(ctx, briefPrompt, imagePaths, briefMaxTokens)
 	if err != nil {
+		if terminalSummaryError(err) {
+			return nil, err
+		}
 		log.Printf("vision summary failed, falling back to text: %v", err)
 		return s.Summarize(ctx, title, content)
 	}
@@ -612,11 +618,14 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
 	detailed, err := s.callVision(ctx, detailedPrompt, imagePaths, detailedMaxTokens)
 	if err != nil {
+		if terminalSummaryError(err) {
+			return nil, err
+		}
 		// Brief already succeeded; fall back only the detailed half.
 		log.Printf("vision detailed failed, falling back to text detailed: %v", err)
 		detText, derr := s.generateDetailed(ctx, title, content)
 		if derr != nil {
-			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%v text=%v", err, derr)
+			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%w text=%w", err, derr)
 		}
 		detailed = detText
 	}
@@ -740,7 +749,7 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 	briefPrompt := buildVisionBriefPrompt(title, content, urlList)
 	brief, err := s.callVisionStream(ctx, briefPrompt, imagePaths, briefMaxTokens, onBriefDelta)
 	if err != nil {
-		if brief != "" {
+		if brief != "" || terminalSummaryError(err) {
 			return nil, err
 		}
 		log.Printf("vision stream brief failed, falling back to text stream: %v", err)
@@ -752,13 +761,13 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 	detailedPrompt = appendDetailedArticleAnchorInstruction(detailedPrompt, anchorInstruction)
 	detailed, err := s.callVisionStream(ctx, detailedPrompt, imagePaths, detailedMaxTokens, onDetailedDelta)
 	if err != nil {
-		if detailed != "" {
+		if detailed != "" || terminalSummaryError(err) {
 			return nil, err
 		}
 		log.Printf("vision stream detailed failed, falling back to text stream detailed: %v", err)
 		dText, derr := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
 		if derr != nil {
-			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%v text=%v", err, derr)
+			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%w text=%w", err, derr)
 		}
 		detailed = dText
 	}
@@ -862,4 +871,8 @@ func (s *Summarizer) GenerateInterests(ctx context.Context, topics []string, rec
 4. 阅读建议`, strings.Join(topics, "\n"), recentArticles)
 
 	return s.call(ctx, prompt, 1000)
+}
+
+func terminalSummaryError(err error) bool {
+	return taskbudget.IsDenied(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || isCompletionError(err)
 }

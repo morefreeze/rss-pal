@@ -227,6 +227,7 @@ func TestAnthropicStreamMergesCumulativeUsageFields(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := `data: {"type":"message_start","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":2679,"cache_creation_input_tokens":20,"cache_read_input_tokens":30,"output_tokens":1}}}` + "\n\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"summary"}}` + "\n\n" +
 				`data: {"type":"message_delta","usage":` + tc.usage + "}\n\n" +
 				`data: {"type":"message_delta","usage":{"output_tokens":12}}` + "\n\n" +
 				`data: {"type":"message_stop"}` + "\n\n"

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"github.com/bytedance/rss-pal/internal/airouting"
 	"github.com/bytedance/rss-pal/internal/aiusage"
 	"log"
@@ -280,12 +281,19 @@ func asyncSummarize(summarizer *ai.Summarizer, articleRepo *repository.ArticleRe
 		}
 		sCtx, cancel := context.WithTimeout(ownerCtx, 6*time.Minute)
 		defer cancel()
+		token, claimErr := articleRepo.ClaimSummary(sCtx, articleID, false)
+		if claimErr != nil {
+			return
+		}
+		failure := errors.New("总结未完成，请重试")
+		defer func() { _ = articleRepo.FailSummary(articleID, token, failure) }()
 		result, err := summarizer.Summarize(sCtx, title, content)
 		if err != nil {
+			failure = err
 			log.Printf("Failed to summarize article %d: %v", articleID, err)
 			return
 		}
-		updated, err := articleRepo.UpdateSummaryIfContentUnchanged(articleID, content, result.Brief, result.Detailed)
+		updated, err := articleRepo.CompleteSummary(articleID, token, content, result.Brief, result.Detailed)
 		if err != nil {
 			log.Printf("Failed to save summary for article %d: %v", articleID, err)
 		} else if !updated {
@@ -327,6 +335,12 @@ func backfillSummaries(ctx context.Context, cfg *config.Config, articleRepo *rep
 			sCtx, cancel := context.WithTimeout(ownerCtx, 6*time.Minute)
 			defer cancel()
 
+			token, claimErr := articleRepo.ClaimSummary(sCtx, article.ID, false)
+			if claimErr != nil {
+				return
+			}
+			failure := errors.New("总结未完成，请重试")
+			defer func() { _ = articleRepo.FailSummary(article.ID, token, failure) }()
 			var result *ai.SummaryResult
 			var err error
 
@@ -348,14 +362,15 @@ func backfillSummaries(ctx context.Context, cfg *config.Config, articleRepo *rep
 					}
 				}
 			}
-			if result == nil {
+			if result == nil && err == nil {
 				result, err = summarizer.Summarize(sCtx, article.Title, article.Content)
 			}
 			if err != nil {
+				failure = err
 				log.Printf("Failed to backfill summary for article %d: %v", article.ID, err)
 				return
 			}
-			updated, err := articleRepo.UpdateSummaryIfContentUnchanged(article.ID, article.Content, result.Brief, result.Detailed)
+			updated, err := articleRepo.CompleteSummary(article.ID, token, article.Content, result.Brief, result.Detailed)
 			if err != nil {
 				log.Printf("Failed to save backfill summary for article %d: %v", article.ID, err)
 			} else if !updated {

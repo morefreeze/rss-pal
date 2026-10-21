@@ -21,3 +21,23 @@ func runAfterCommit(c *gin.Context) {
 		fn()
 	}
 }
+
+const afterRollbackKey = "rss:after-rollback"
+
+// afterRollback runs only after a transaction has been rolled back or failed
+// commit. It also handles streams, whose HTTP headers are already sent.
+func afterRollback(c *gin.Context, fn func()) {
+	if _, ok := c.Get(CtxKeyTx); !ok {
+		return
+	}
+	raw, _ := c.Get(afterRollbackKey)
+	callbacks, _ := raw.([]func())
+	c.Set(afterRollbackKey, append(callbacks, fn))
+}
+func runAfterRollback(c *gin.Context) {
+	raw, _ := c.Get(afterRollbackKey)
+	callbacks, _ := raw.([]func())
+	for _, fn := range callbacks {
+		fn()
+	}
+}
