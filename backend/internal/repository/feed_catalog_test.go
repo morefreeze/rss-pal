@@ -41,3 +41,40 @@ func TestFeedCatalogMigrationPreservesPersonalSubscriptions(t *testing.T) {
 		t.Fatalf("reader changed: %v %v", active, err)
 	}
 }
+
+func TestFoloCatalogSeedsAreReplayableDraftsAndPreserveAdminEdits(t *testing.T) {
+	db, done := testdb.NewThroughMigration(t, "061_shortcut_capture_notes.sql")
+	defer done()
+	_, err := db.Exec(`UPDATE public_feed_catalog SET title='管理员修改',description='保留内容',revision=4,published=true WHERE seed_key='popular-25'; INSERT INTO users(username,password_hash) VALUES('private-reader','x'); INSERT INTO feeds(url,title,owner_id,is_active,status) SELECT 'https://private.example/rss','个人源',id,false,'paused' FROM users WHERE username='private-reader'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile("../../migrations/062_folo_feed_catalog.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err = db.Exec(string(script)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seeds, drafts, personal int
+	if err = db.QueryRow(`SELECT count(*),count(*) FILTER(WHERE NOT published AND check_status='unchecked' AND revision=1 AND last_checked_at IS NULL) FROM public_feed_catalog WHERE seed_key LIKE 'folo-20261021-%'`).Scan(&seeds, &drafts); err != nil {
+		t.Fatal(err)
+	}
+	if seeds != 49 || drafts != seeds {
+		t.Fatalf("seeds=%d unchecked drafts=%d", seeds, drafts)
+	}
+	var title, description string
+	var revision int
+	var published bool
+	if err = db.QueryRow(`SELECT title,description,revision,published FROM public_feed_catalog WHERE seed_key='popular-25'`).Scan(&title, &description, &revision, &published); err != nil {
+		t.Fatal(err)
+	}
+	if title != "管理员修改" || description != "保留内容" || revision != 4 || !published {
+		t.Fatalf("admin entry changed: %q %q %d %v", title, description, revision, published)
+	}
+	if err = db.QueryRow(`SELECT count(*) FROM feeds WHERE url='https://private.example/rss' AND NOT is_active AND status='paused'`).Scan(&personal); err != nil || personal != 1 {
+		t.Fatalf("personal changed: %d %v", personal, err)
+	}
+}

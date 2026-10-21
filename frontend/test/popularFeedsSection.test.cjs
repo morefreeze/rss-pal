@@ -29,11 +29,11 @@ for (const [expected, label] of [
     'category groups should render only while the whole section is expanded',
   ],
   [
-    'setFoldedGroups(s => ({ ...s, [group.category]: !folded }))',
-    'existing per-category folding should remain wired',
+    '<SourceDirectory items={catalog}',
+    'public catalog should feed the directory',
   ],
   [
-    'onClick={() => { setNewUrl(f.url); doPreview(f.url) }}',
+    'onPreview={url => { void doPreview(url) }}',
     'existing recommendation preview action should remain wired',
   ],
 ]) {
