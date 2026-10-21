@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -13,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/bytedance/rss-pal/internal/taskbudget"
 )
 
 // captureRequests starts a fake OpenAI-compatible chat server that records
@@ -307,4 +311,44 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func TestVisionTerminalErrorsDoNotFallback(t *testing.T) {
+	imagePath := filepath.Join(t.TempDir(), "test.jpg")
+	writeTestJPEG(t, imagePath)
+	for _, stream := range []bool{false, true} {
+		for _, phase := range []int{1, 2} {
+			for _, terminal := range []error{taskbudget.ErrExceeded, context.Canceled} {
+				t.Run(fmt.Sprintf("stream=%v/phase=%d/%v", stream, phase, terminal), func(t *testing.T) {
+					srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if stream {
+							fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"valid\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+						} else {
+							fmt.Fprint(w, `{"choices":[{"message":{"content":"valid"},"finish_reason":"stop"}]}`)
+						}
+					}))
+					defer srv.Close()
+					s := NewSummarizerWithModel("k", srv.URL, "text")
+					s.SetVisionModel("vision")
+					calls := 0
+					s.SetAdmission(func(context.Context) (func(), error) {
+						calls++
+						if calls >= phase {
+							return nil, terminal
+						}
+						return func() {}, nil
+					})
+					var err error
+					if stream {
+						_, err = s.SummarizeWithImagesStream(context.Background(), "title", "body", []string{imagePath}, nil, func(string) {}, func(string) {})
+					} else {
+						_, err = s.SummarizeWithImages(context.Background(), "title", "body", []string{imagePath}, nil)
+					}
+					if !errors.Is(err, terminal) || calls != phase {
+						t.Fatalf("err=%v calls=%d want=%d", err, calls, phase)
+					}
+				})
+			}
+		}
+	}
 }

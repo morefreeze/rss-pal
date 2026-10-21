@@ -92,7 +92,8 @@ LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.use
 }
 
 type ArticleRepository struct {
-	db Querier
+	db        Querier
+	summaryDB *sql.DB
 	// imageBaseDir is the root for PDF clip image storage. Callers that
 	// need Delete() to clean image dirs MUST call SetImageBaseDir at
 	// startup. Forgetting silently turns image cleanup into a no-op.
@@ -100,7 +101,7 @@ type ArticleRepository struct {
 }
 
 func NewArticleRepository(db *sql.DB) *ArticleRepository {
-	return &ArticleRepository{db: db}
+	return &ArticleRepository{db: db, summaryDB: db}
 }
 
 // WithCtx returns a repository view bound to the per-request transaction
@@ -111,7 +112,7 @@ func NewArticleRepository(db *sql.DB) *ArticleRepository {
 func (r *ArticleRepository) WithCtx(c ctxkey.CtxGetter) *ArticleRepository {
 	if v, ok := c.Get(ctxkey.Tx); ok {
 		if q, ok := v.(Querier); ok {
-			return &ArticleRepository{db: q, imageBaseDir: r.imageBaseDir}
+			return &ArticleRepository{db: q, summaryDB: r.summaryDB, imageBaseDir: r.imageBaseDir}
 		}
 	}
 	return r
@@ -873,6 +874,7 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 		WHERE EXISTS (SELECT 1 FROM feeds f WHERE f.id=articles.feed_id AND f.status='active' AND f.is_active)
  AND (summary_brief IS NULL OR summary_brief = '')
 		AND LENGTH(content) > 100
+ AND NOT EXISTS (SELECT 1 FROM article_summary_jobs j WHERE j.article_id=articles.id AND ((j.state='running' AND j.lease_expires_at>clock_timestamp()) OR (j.state='failed' AND j.retry_at>clock_timestamp())))
 		AND NOT (
 		    media_type IS NOT NULL
 		    AND (media_type LIKE 'video/%' OR media_type LIKE 'audio/%')

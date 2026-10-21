@@ -44,7 +44,7 @@ assertIncludes(
 )
 assertIncludes(
   articlePage,
-  '<div ref={summaryRef} className="card">\n        <div className="flex-between mb-2">\n          <h3>AI 总结</h3>',
+  '<div ref={summaryRef} className="card">',
   'ArticlePage should attach summaryRef to the AI summary card',
 )
 assertIncludes(

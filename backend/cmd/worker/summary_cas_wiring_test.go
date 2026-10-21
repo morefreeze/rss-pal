@@ -31,12 +31,12 @@ func assertGeneratedSummaryUsesCAS(t *testing.T, body *ast.BlockStmt, matchesExp
 	if got := selectorCallCount(body, "", "UpdateSummary"); got != 0 {
 		t.Fatalf("generated summary function has %d unconditional UpdateSummary calls, want 0", got)
 	}
-	calls := selectorCalls(body, "UpdateSummaryIfContentUnchanged")
+	calls := selectorCalls(body, "CompleteSummary")
 	if len(calls) != 1 {
-		t.Fatalf("UpdateSummaryIfContentUnchanged calls = %d, want 1", len(calls))
+		t.Fatalf("CompleteSummary calls = %d, want 1", len(calls))
 	}
-	if len(calls[0].Args) < 2 || !matchesExpectedContent(calls[0].Args[1]) {
-		t.Fatal("UpdateSummaryIfContentUnchanged does not receive the generated content snapshot")
+	if len(calls[0].Args) < 3 || !matchesExpectedContent(calls[0].Args[2]) {
+		t.Fatal("CompleteSummary does not receive the generated content snapshot")
 	}
 }
 

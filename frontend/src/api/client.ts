@@ -185,6 +185,7 @@ export const logout = () => {
   sessionStorage.removeItem('articleNavList')
   sessionStorage.removeItem('articleNavContext')
   sessionStorage.removeItem('articleListScroll')
+  sessionStorage.removeItem('articleListReturn')
   sessionStorage.removeItem('selectedFeed')
   sessionStorage.removeItem('unreadOnly')
   sessionStorage.removeItem('savedOnly')
@@ -425,7 +426,15 @@ export interface FeedPreview {
   discovered_rss_url?: string
 }
 
+export interface SummaryJob {
+  state: 'running' | 'failed' | 'done'
+  last_error?: string
+  retry_at?: string
+  lease_expires_at?: string
+}
+
 export interface ArticleDetailResponse {
+  summary_job?: SummaryJob
   article: Article
   progress?: any
   signals?: any
@@ -973,15 +982,22 @@ export async function generateSummaryStream(
 
   if (!resp.ok || !resp.body) {
     const text = await resp.text().catch(() => '')
-    handlers.onError?.(text || `HTTP ${resp.status}`)
+    let message = text || `HTTP ${resp.status}`
+    try { const error = JSON.parse(text); message = error.message || error.error || message } catch {}
+    if (!signal?.aborted) handlers.onError?.(message)
     return
   }
 
   const reader = resp.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
+  let terminal = false
+  const dispatch = (line: string) => {
+    if (terminal || signal?.aborted) return
+    terminal = dispatchSummaryFrame(line, handlers)
+  }
   try {
-    while (true) {
+    while (!terminal && !signal?.aborted) {
       const { value, done } = await reader.read()
       if (done) break
       buf += decoder.decode(value, { stream: true })
@@ -989,29 +1005,38 @@ export async function generateSummaryStream(
       while (nl !== -1) {
         const line = buf.slice(0, nl).trim()
         buf = buf.slice(nl + 1)
-        if (line) dispatchSummaryFrame(line, handlers)
+        if (line) dispatch(line)
         nl = buf.indexOf('\n')
       }
     }
-    if (buf.trim()) dispatchSummaryFrame(buf.trim(), handlers)
+    buf += decoder.decode()
+    if (buf.trim()) dispatch(buf.trim())
+    if (!terminal && !signal?.aborted) {
+      terminal = true
+      handlers.onError?.('连接已中断，请重试或刷新查看总结状态')
+    }
   } catch (e: any) {
     if (e?.name === 'AbortError') return
-    handlers.onError?.(e?.message || 'stream error')
+    if (!terminal && !signal?.aborted) handlers.onError?.(e?.message || '总结连接中断，请重试')
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
 }
 
 function dispatchSummaryFrame(line: string, h: SummaryStreamHandlers) {
   let frame: any
-  try { frame = JSON.parse(line) } catch { return }
+  try { frame = JSON.parse(line) } catch { return false }
   switch (frame.type) {
     case 'brief_delta': h.onBriefDelta?.(frame.text || ''); break
     case 'brief_phase_done': h.onBriefPhaseDone?.(); break
     case 'brief_done': h.onBriefDone?.(frame.text || ''); break
     case 'detailed_delta': h.onDetailedDelta?.(frame.text || ''); break
     case 'detailed_done': h.onDetailedDone?.(frame.text || ''); break
-    case 'error': h.onError?.(frame.msg || 'unknown error'); break
-    case 'done': h.onDone?.(); break
+    case 'error': h.onError?.(frame.msg || frame.message || '生成失败，请重试'); return true
+    case 'done': h.onDone?.(); return true
   }
+  return false
 }
 
 export const exportMarkdown = (articleId: number) =>

@@ -115,3 +115,19 @@ func TestAnthropicLengthFinishIsPreserved(t *testing.T) {
 		})
 	}
 }
+
+func TestCompletionRejectsEmptyModelOutput(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"choices":[{"message":{"content":" \n\t"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	s := NewSummarizerWithModel("k", srv.URL, "m")
+	if _, err := s.call(context.Background(), "p", 4000); err == nil {
+		t.Fatal("empty completion accepted")
+	}
+	for _, body := range []string{"data: [DONE]\n\n", "data: {\"choices\":[{\"delta\":{\"content\":\"  \"},\"finish_reason\":\"stop\"}]}\n\n"} {
+		if _, err := readCompletionStream(strings.NewReader(body), func(string) {}); err == nil {
+			t.Fatal("empty stream accepted")
+		}
+	}
+}

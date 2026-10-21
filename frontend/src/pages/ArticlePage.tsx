@@ -14,6 +14,7 @@ import {
   peekArticleDetail,
   isArticleAccessDenied,
 } from '../api/articleDetailCache'
+import { ProgressSaveQueue } from '../utils/progressSaveQueue'
 import { toast } from '../utils/toast'
 import { LinkSetChildren } from '../components/LinkSetChildren'
 import { BatchFetchConfirmDialog } from '../components/BatchFetchConfirmDialog'
@@ -230,6 +231,11 @@ export default function ArticlePage() {
   const [streamingDetailed, setStreamingDetailed] = useState('')
   const [streamPhase, setStreamPhase] = useState<'idle' | 'brief' | 'detailed'>('idle')
   const streamAbortRef = useRef<AbortController | null>(null)
+  const summaryGenerationRef = useRef(0)
+  const currentArticleIDRef = useRef(articleID)
+  currentArticleIDRef.current = articleID
+  const [summaryJob, setSummaryJob] = useState<ArticleDetailResponse['summary_job']>(initialDetail?.summary_job)
+  const [summaryError, setSummaryError] = useState('')
 
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
 
@@ -345,6 +351,7 @@ export default function ArticlePage() {
 
   const applyDetailResponse = useCallback((data: ArticleDetailResponse) => {
     setArticle(data.article)
+    setSummaryJob(data.summary_job)
     setProgress(data.progress ?? null)
     // Clamp historical rows written before progress was bounded to 0..1.
     const savedScrollPosition = Math.min(1, data.progress?.scroll_position ?? 0)
@@ -423,6 +430,11 @@ export default function ArticlePage() {
     setCurrentScrollPosition(0)
     setFetchingContent(false)
     setManualCaptureNeeded(false)
+    setStreamPhase('idle')
+    setStreamingBrief('')
+    setStreamingDetailed('')
+    setSummaryJob(undefined)
+    setSummaryError('')
     void loadArticle()
 
     return () => {
@@ -433,7 +445,9 @@ export default function ArticlePage() {
       if (id && duration > 5) {
         recordReadDuration(Number(id), duration)
       }
+      summaryGenerationRef.current += 1
       streamAbortRef.current?.abort()
+      streamAbortRef.current = null
     }
   }, [id])
 
@@ -601,56 +615,44 @@ export default function ArticlePage() {
   // Accumulates active (visible) seconds on this page for the stay-time gate.
   const activeReadSecondsRef = useRef(0)
 
-  const pendingProgressRef = useRef<{ scrollPosition: number; isCompleted: boolean } | null>(null)
-  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const progressQueueRef = useRef<ProgressSaveQueue<ReadingProgress> | null>(null)
+  if (!progressQueueRef.current) {
+    const owner = localStorage.getItem('user')
+    const loggedIn = Boolean(localStorage.getItem('token'))
+    progressQueueRef.current = new ProgressSaveQueue(
+      entry => updateProgress(entry.articleId, entry.scrollPosition, entry.isCompleted),
+      () => localStorage.getItem('user') === owner && Boolean(localStorage.getItem('token')) === loggedIn,
+      (savedArticleID, newProgress) => {
+        invalidateArticleDetail(savedArticleID)
+        if (currentArticleIDRef.current !== savedArticleID) return
+        const highWaterPosition = deriveHistoricalHighWater(newProgress.scroll_position, maxScrollRef.current)
+        maxScrollRef.current = highWaterPosition
+        setProgress(previous => ({ ...newProgress, scroll_position: highWaterPosition,
+          is_completed: Boolean(previous?.is_completed || newProgress.is_completed) }))
+      },
+    )
+  }
+  const flushProgress = useCallback(() => progressQueueRef.current!.flush(), [])
+  const scheduleProgressFlush = useCallback(() => progressQueueRef.current!.schedule(), [])
 
-  const flushProgress = useCallback(async () => {
-    if (!article) return
-    const pending = pendingProgressRef.current
-    if (!pending) return
-    pendingProgressRef.current = null
-    if (progressTimerRef.current) {
-      clearTimeout(progressTimerRef.current)
-      progressTimerRef.current = null
-    }
-    try {
-      const newProgress = await updateProgress(article.id, pending.scrollPosition, pending.isCompleted)
-      invalidateArticleDetail(article.id)
-      const highWaterPosition = deriveHistoricalHighWater(newProgress.scroll_position, maxScrollRef.current)
-      maxScrollRef.current = highWaterPosition
-      setProgress({ ...newProgress, scroll_position: highWaterPosition })
-    } catch {
-      // network blip — let the next scroll re-schedule
-    }
-  }, [article])
-
-  const scheduleProgressFlush = useCallback(() => {
-    if (progressTimerRef.current) clearTimeout(progressTimerRef.current)
-    progressTimerRef.current = setTimeout(() => {
-      flushProgress()
-    }, 500) // was 1500ms — too long; fast scroll → unmount lost the save
-  }, [flushProgress])
-
-  // Flush pending progress on page hide / tab switch / component unmount so a
-  // fast scroll then immediate navigation away still persists the new position.
-  // visibilitychange covers iOS Safari and mobile-tab-switch where beforeunload
-  // doesn't fire; pagehide is the modern unload-equivalent for SPAs.
   useEffect(() => {
-    const onHide = () => {
-      if (pendingProgressRef.current) flushProgress()
-    }
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') onHide()
-    })
+    progressQueueRef.current!.activate()
+    const onVisibility = () => { void flushProgress() }
+    const onHide = () => { void flushProgress() }
+    document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pagehide', onHide)
+    window.addEventListener('online', onHide)
     return () => {
-      document.removeEventListener('visibilitychange', onHide)
+      document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onHide)
-      // Component-unmount flush: covers in-app navigation (router replaces
-      // ArticlePage with another page), where pagehide does NOT fire.
-      if (pendingProgressRef.current) flushProgress()
+      window.removeEventListener('online', onHide)
+      progressQueueRef.current!.detach()
     }
   }, [flushProgress])
+  useEffect(() => {
+    activeReadSecondsRef.current = 0
+    return () => { void flushProgress() }
+  }, [id, flushProgress])
 
   // Counts active seconds and acts as the completion backstop. handleScroll
   // only re-evaluates is_completed on scroll events, so if the user reaches
@@ -671,7 +673,7 @@ export default function ArticlePage() {
       setProgress(prev => prev
         ? { ...prev, scroll_position: scrollPosition, is_completed: true }
         : { id: 0, article_id: article.id, scroll_position: scrollPosition, last_read_at: new Date().toISOString(), is_completed: true })
-      pendingProgressRef.current = { scrollPosition, isCompleted: true }
+      progressQueueRef.current!.enqueue({ articleId: article.id, scrollPosition, isCompleted: true })
       try {
         const read = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
         if (!read.includes(article.id)) {
@@ -719,7 +721,7 @@ export default function ArticlePage() {
       ? { ...prev, scroll_position: nextReadingProgress.highWaterPosition, is_completed: isCompleted }
       : { id: 0, article_id: article.id, scroll_position: nextReadingProgress.highWaterPosition, last_read_at: new Date().toISOString(), is_completed: isCompleted })
 
-    pendingProgressRef.current = { scrollPosition: nextReadingProgress.highWaterPosition, isCompleted }
+    progressQueueRef.current!.enqueue({ articleId: article.id, scrollPosition: nextReadingProgress.highWaterPosition, isCompleted })
 
     if (isCompleted && !wasCompleted) {
       try {
@@ -804,54 +806,75 @@ export default function ArticlePage() {
   }, [flushProgress])
 
   const handleRegenerateWithTemplate = async () => {
-    if (!article) return
-    streamAbortRef.current?.abort()
+    if (!article || article.id !== articleID || streamAbortRef.current || summaryJob?.state === 'running') return
+    const requestedID = article.id
+    const generation = ++summaryGenerationRef.current
     const ctrl = new AbortController()
     streamAbortRef.current = ctrl
-
+    const isCurrent = () => !ctrl.signal.aborted && currentArticleIDRef.current === requestedID && streamAbortRef.current === ctrl
     setStreamingBrief('')
     setStreamingDetailed('')
+    setSummaryError('')
     setStreamPhase('brief')
-
     let finalBrief = ''
     let finalDetailed = ''
-
-    await generateSummaryStream(
-      article.id,
-      selectedTemplateId,
-      {
-        onBriefDelta: (t) => setStreamingBrief(prev => prev + t),
-        onBriefPhaseDone: () => setStreamPhase('detailed'),
-        onBriefDone: (full) => {
-          finalBrief = full
-          setStreamingBrief(full)
-        },
-        onDetailedDelta: (t) => {
-          setStreamPhase(prev => prev === 'brief' ? 'detailed' : prev)
-          setStreamingDetailed(prev => prev + t)
-        },
-        onDetailedDone: (full) => {
-          finalDetailed = full
-          setStreamingDetailed(full)
-        },
+    try {
+      await generateSummaryStream(requestedID, selectedTemplateId, {
+        onBriefDelta: t => { if (isCurrent()) setStreamingBrief(prev => prev + t) },
+        onBriefPhaseDone: () => { if (isCurrent()) setStreamPhase('detailed') },
+        onBriefDone: full => { if (isCurrent()) { finalBrief = full; setStreamingBrief(full) } },
+        onDetailedDelta: t => { if (isCurrent()) { setStreamPhase('detailed'); setStreamingDetailed(prev => prev + t) } },
+        onDetailedDone: full => { if (isCurrent()) { finalDetailed = full; setStreamingDetailed(full) } },
         onDone: () => {
-          invalidateArticleDetail(article.id)
-          setArticle(a => a ? { ...a, summary_brief: finalBrief, summary_detailed: finalDetailed } : a)
-          setStreamPhase('idle')
-          setStreamingBrief('')
-          setStreamingDetailed('')
+          if (!isCurrent()) return
+          invalidateArticleDetail(requestedID)
+          setArticle(a => a?.id === requestedID ? { ...a, summary_brief: finalBrief, summary_detailed: finalDetailed } : a)
+          setSummaryJob({ state: 'done' })
         },
-        onError: (msg) => {
+        onError: msg => {
+          if (!isCurrent()) return
+          setSummaryError(msg)
           toast.error('生成总结失败：' + msg)
-          setStreamPhase('idle')
-          setStreamingBrief('')
-          setStreamingDetailed('')
         },
-      },
-      ctrl.signal,
-      { forceVision: true },
-    )
+      }, ctrl.signal, { forceVision: true })
+    } finally {
+      if (isCurrent()) {
+        setStreamPhase('idle')
+        setStreamingBrief('')
+        setStreamingDetailed('')
+        // Reconcile with persisted state after disconnect, conflict or success.
+        invalidateArticleDetail(requestedID)
+        void fetchDetailForPage(requestedID).then(data => {
+          if (currentArticleIDRef.current !== requestedID || ctrl.signal.aborted || summaryGenerationRef.current !== generation) return
+          setSummaryJob(data.summary_job)
+          if (data.summary_job?.state === 'done') setSummaryError('')
+          setArticle(a => a?.id === requestedID ? { ...a, summary_brief: data.article.summary_brief, summary_detailed: data.article.summary_detailed } : a)
+        }).catch(() => {})
+        streamAbortRef.current = null
+      }
+    }
   }
+
+  useEffect(() => {
+    if (summaryJob?.state !== 'running' || streamPhase !== 'idle') return
+    let canceled = false
+    let inFlight = false
+    const poll = async () => {
+      if (inFlight) return
+      inFlight = true
+      const generation = summaryGenerationRef.current
+      try {
+        invalidateArticleDetail(articleID)
+        const data = await fetchDetailForPage(articleID)
+        if (canceled || currentArticleIDRef.current !== articleID || summaryGenerationRef.current !== generation) return
+        setSummaryJob(data.summary_job)
+        if (data.summary_job?.state === 'done') setSummaryError('')
+        setArticle(a => a?.id === articleID ? { ...a, summary_brief: data.article.summary_brief, summary_detailed: data.article.summary_detailed } : a)
+      } catch { /* retain running state and retry on the next poll */ } finally { inFlight = false }
+    }
+    const timer = setInterval(() => { if (!document.hidden) void poll() }, 3000)
+    return () => { canceled = true; clearInterval(timer) }
+  }, [articleID, summaryJob?.state, streamPhase, fetchDetailForPage])
 
   const handleFetchContent = async () => {
     if (!article || contentRequestRef.current) return
@@ -987,7 +1010,8 @@ export default function ArticlePage() {
 
   const handleMarkRead = async () => {
     if (!article) return
-    const newProgress = await updateProgress(article.id, 1.0, true)
+    const newProgress = await progressQueueRef.current!.replace(article.id, () => updateProgress(article.id, 1.0, true))
+    if (currentArticleIDRef.current !== article.id) return
     invalidateArticleDetail(article.id)
     setProgress(newProgress)
     maxScrollRef.current = 1.0
@@ -1004,7 +1028,8 @@ export default function ArticlePage() {
 
   const handleMarkUnread = async () => {
     if (!article) return
-    await resetProgress(article.id)
+    await progressQueueRef.current!.replace(article.id, () => resetProgress(article.id))
+    if (currentArticleIDRef.current !== article.id) return
     invalidateArticleDetail(article.id)
     setProgress(null)
     maxScrollRef.current = 0
@@ -1405,7 +1430,7 @@ export default function ArticlePage() {
 
       {/* Summary section — shown before content */}
       <div ref={summaryRef} className="card">
-        <div className="flex-between mb-2">
+        <div className="flex-between mb-2 summary-controls">
           <h3>AI 总结</h3>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select
@@ -1421,14 +1446,16 @@ export default function ArticlePage() {
             <button
               className={article.summary_brief || article.summary_detailed ? 'secondary' : ''}
               onClick={handleRegenerateWithTemplate}
-              disabled={streamPhase !== 'idle'}
+              disabled={streamPhase !== 'idle' || summaryJob?.state === 'running'}
               style={{ fontSize: 13, padding: '4px 12px' }}
             >
-              {streamPhase !== 'idle' ? '生成中...' : (article.summary_brief || article.summary_detailed) ? '重新生成' : '生成总结'}
+              {streamPhase !== 'idle' || summaryJob?.state === 'running' ? '生成中...' : (article.summary_brief || article.summary_detailed) ? '重新生成' : '生成总结'}
             </button>
           </div>
         </div>
 
+        {streamPhase === 'idle' && summaryJob?.state === 'running' && <p role="status" className="text-muted text-sm">总结正在生成，完成后会自动更新。</p>}
+        {streamPhase === 'idle' && (summaryError || summaryJob?.state === 'failed') && <p role="alert" className="text-sm">{summaryError || summaryJob?.last_error || '上次生成失败，可以重试。'}</p>}
         {streamPhase !== 'idle' ? (
           <div className="markdown-body">
             {streamingBrief && (

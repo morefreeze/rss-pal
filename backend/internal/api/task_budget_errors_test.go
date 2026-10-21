@@ -11,6 +11,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/ai"
 	"github.com/bytedance/rss-pal/internal/model"
+	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/bytedance/rss-pal/internal/repository/testdb"
 	"github.com/bytedance/rss-pal/internal/service"
 	"github.com/bytedance/rss-pal/internal/taskbudget"
@@ -50,7 +51,7 @@ func TestBudgetDenialsReachJSONAndSummaryStream(t *testing.T) {
 				if stream {
 					summarizer := ai.NewSummarizerWithModel("unused", "http://127.0.0.1:1", "test")
 					summarizer.SetAdmission(func(context.Context) (func(), error) { return nil, denied })
-					(&ArticleHandler{}).streamSummary(c, 2925, &model.Article{Title: "video", Content: "## 字幕\nExisting transcript"}, service.NewSummarizerService(summarizer), 0)
+					(&ArticleHandler{articleRepo: repository.NewArticleRepository(db)}).streamSummary(c, 2925, &model.Article{Title: "video", Content: "## 字幕\nExisting transcript"}, service.NewSummarizerService(summarizer), 0, "")
 				} else if !writeTaskBudgetError(c, fmt.Errorf("failed to stream brief: %w", denied)) {
 					t.Fatal("not handled")
 				}

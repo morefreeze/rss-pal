@@ -67,6 +67,13 @@ func PublicTokenMiddleware(db *sql.DB, resolve PublicTokenResolver) gin.HandlerF
 		c.Set(CtxKeyTx, tx)
 		c.Set("userID", uid)
 
+		committed := false
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+				runAfterRollback(c)
+			}
+		}()
 		defer func() {
 			if rec := recover(); rec != nil {
 				_ = tx.Rollback()
@@ -86,6 +93,7 @@ func PublicTokenMiddleware(db *sql.DB, resolve PublicTokenResolver) gin.HandlerF
 			rejectCommittedJSON(c)
 			return
 		}
+		committed = true
 		runAfterCommit(c)
 		writeCommittedJSON(c)
 	}

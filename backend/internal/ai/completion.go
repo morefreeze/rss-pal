@@ -92,5 +92,8 @@ func readCompletionStream(body io.Reader, onDelta func(string)) (string, error) 
 	if !finished {
 		return full.String(), &completionError{reason: "interrupted_stream"}
 	}
+	if strings.TrimSpace(full.String()) == "" {
+		return "", &completionError{reason: "empty_output"}
+	}
 	return full.String(), nil
 }

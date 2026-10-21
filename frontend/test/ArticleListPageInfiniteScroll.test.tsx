@@ -1,3 +1,5 @@
+import { StrictMode } from 'react'
+import { saveListReturn } from '../src/utils/articleListReturn'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -181,6 +183,24 @@ describe('ArticleListPage automatic pagination', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('keeps a deep return snapshot across StrictMode effects and revalidates every loaded page', async () => {
+    const pages = [...makeArticles(1), ...makeArticles(21), ...makeArticles(41)]
+    const key = JSON.stringify([null, false, false, 'published', 'desc', { kind: 'all' }, '/articles'])
+    saveListReturn({ key, articles: pages, offset: 40, hasMore: true, scrollY: 3200 })
+    sessionStorage.setItem('articleListScroll', '3200')
+    const pendingFirst = deferred<ArticleListItem[]>()
+    apiMocks.getArticles.mockImplementation(({ offset }: { offset: number }) => {
+      if (offset === 0) return pendingFirst.promise
+      return Promise.resolve(offset === 20 ? makeArticles(21) : makeArticles(41))
+    })
+    render(<StrictMode><MemoryRouter><ArticleListPage /></MemoryRouter></StrictMode>)
+    expect(await screen.findByTestId('article-60')).toBeTruthy()
+    await act(async () => { pendingFirst.resolve(makeArticles(1).filter(a => a.id !== 1).concat(makeArticles(21).slice(0, 1))) })
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalledWith(expect.objectContaining({ offset: 40 })))
+    expect(screen.queryByTestId('article-1')).toBeNull()
+    expect(screen.getByTestId('article-60')).toBeTruthy()
   })
 
   const flushAnimationFrames = () => {

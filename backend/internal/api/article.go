@@ -258,6 +258,11 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 		return
 	}
 
+	job, jobErr := h.articleRepo.GetSummaryJob(c.Request.Context(), id)
+	if jobErr != nil {
+		c.JSON(500, gin.H{"error": jobErr.Error()})
+		return
+	}
 	userID := getUserID(c)
 
 	progress, _ := h.progressRepo.WithCtx(c).GetByArticleAndUser(id, userID)
@@ -266,6 +271,7 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 
 	response := gin.H{
 		"article":          article,
+		"summary_job":      job,
 		"progress":         progress,
 		"signals":          signals,
 		"from_bookmarklet": feedType == "clip",
@@ -378,6 +384,30 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		return
 	}
 
+	summaryCtx, cancelSummary := context.WithTimeout(c.Request.Context(), 6*time.Minute)
+	defer cancelSummary()
+	c.Request = c.Request.WithContext(summaryCtx)
+	token, claimErr := h.articleRepo.ClaimSummary(c.Request.Context(), id, true)
+	if claimErr != nil {
+		if errors.Is(claimErr, repository.ErrSummaryInProgress) {
+			c.JSON(http.StatusConflict, gin.H{"code": "summary_in_progress", "error": "文章正在生成总结，请稍候"})
+		} else {
+			c.JSON(500, gin.H{"error": claimErr.Error()})
+		}
+		return
+	}
+	settled := false
+	failUnsettled := func() {
+		if !settled {
+			_ = h.articleRepo.FailSummary(id, token, errors.New("总结未完成，请重试"))
+		}
+	}
+	if _, hasTx := c.Get(CtxKeyTx); hasTx {
+		afterCommit(c, failUnsettled)
+	} else {
+		defer failUnsettled()
+	}
+	afterRollback(c, func() { _ = h.articleRepo.FailSummary(id, token, errors.New("保存总结失败，请重试")) })
 	// Determine which summarizer to use (user-custom or global)
 	summarizerToUse := h.summarizer
 
@@ -422,7 +452,7 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	}
 
 	if c.Query("stream") == "1" {
-		h.streamSummary(c, id, article, summarizerToUse, bodyReq.TemplateID)
+		settled = h.streamSummary(c, id, article, summarizerToUse, bodyReq.TemplateID, token)
 		return
 	}
 
@@ -435,13 +465,15 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 				c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt,
 			)
 			if err != nil {
+				_ = h.articleRepo.FailSummary(id, token, err)
+				settled = true
 				if writeTaskBudgetError(c, err) {
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			updated, err := articleRepo.UpdateSummaryIfContentUnchanged(id, article.Content, brief, detailed)
+			updated, err := articleRepo.CompleteSummary(id, token, article.Content, brief, detailed)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
@@ -450,7 +482,8 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 				c.JSON(http.StatusConflict, gin.H{"error": staleSummaryRetryMessage})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{
+			settled = true
+			jsonAfterCommit(c, http.StatusOK, gin.H{
 				"summary_brief":    brief,
 				"summary_detailed": detailed,
 			})
@@ -461,6 +494,8 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 	// Default summarization
 	brief, detailed, err = summarizerToUse.Summarize(c.Request.Context(), article)
 	if err != nil {
+		_ = h.articleRepo.FailSummary(id, token, err)
+		settled = true
 		if writeTaskBudgetError(c, err) {
 			return
 		}
@@ -468,7 +503,7 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		return
 	}
 
-	updated, err := articleRepo.UpdateSummaryIfContentUnchanged(id, article.Content, brief, detailed)
+	updated, err := articleRepo.CompleteSummary(id, token, article.Content, brief, detailed)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -478,13 +513,14 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	settled = true
+	jsonAfterCommit(c, http.StatusOK, gin.H{
 		"summary_brief":    brief,
 		"summary_detailed": detailed,
 	})
 }
 
-func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Article, summarizerToUse *service.SummarizerService, templateID int) {
+func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Article, summarizerToUse *service.SummarizerService, templateID int, token string) bool {
 	c.Writer.Header().Set("Content-Type", "application/x-ndjson")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
@@ -494,7 +530,7 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		writeFrame(c, map[string]any{"type": "error", "msg": "streaming unsupported"})
-		return
+		return false
 	}
 
 	writeAndFlush := func(frame map[string]any) {
@@ -558,6 +594,7 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 	}
 
 	if serr != nil {
+		_ = h.articleRepo.FailSummary(id, token, serr)
 		if payload, denied := taskBudgetErrorPayload(serr); denied {
 			payload["type"] = "error"
 			payload["msg"] = payload["error"]
@@ -566,23 +603,27 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 		} else {
 			writeAndFlush(map[string]any{"type": "error", "msg": serr.Error()})
 		}
-		return
+		return false
 	}
 
-	updated, err := h.articleRepo.WithCtx(c).UpdateSummaryIfContentUnchanged(id, article.Content, brief, detailed)
+	updated, err := h.articleRepo.WithCtx(c).CompleteSummary(id, token, article.Content, brief, detailed)
 	if err != nil {
 		writeAndFlush(map[string]any{"type": "error", "msg": err.Error()})
-		return
+		return false
 	}
 	if !updated {
 		writeAndFlush(map[string]any{"type": "error", "msg": staleSummaryRetryMessage})
-		return
+		return false
 	}
 
-	writeAndFlush(map[string]any{"type": "brief_done", "text": brief})
-	writeAndFlush(map[string]any{"type": "detailed_done", "text": detailed})
+	afterRollback(c, func() { writeAndFlush(map[string]any{"type": "error", "msg": "保存总结失败，请重试"}) })
+	afterCommit(c, func() {
+		writeAndFlush(map[string]any{"type": "brief_done", "text": brief})
+		writeAndFlush(map[string]any{"type": "detailed_done", "text": detailed})
 
-	writeAndFlush(map[string]any{"type": "done"})
+		writeAndFlush(map[string]any{"type": "done"})
+	})
+	return true
 }
 
 func writeFrame(c *gin.Context, frame map[string]any) {
@@ -851,7 +892,7 @@ func isTranscriptBackedMedia(mediaType string) bool {
 }
 
 func lacksSummarizableMediaContent(article *model.Article) bool {
-	return article != nil && isTranscriptBackedMedia(article.MediaType) && strings.TrimSpace(article.Content) == ""
+	return article == nil || strings.TrimSpace(article.Content) == ""
 }
 
 func articleHasTranscript(content string) bool {
