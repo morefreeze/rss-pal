@@ -51,7 +51,8 @@ it('creates drafts and edits with revision, searches and filters', async () => {
 it('loads public catalog and previews before subscribing', async () => {
   client.previewFeed.mockResolvedValue({ feed_title: '预览结果', actual_url: item.url, feed_type: 'rss', items: [] })
   render(<MemoryRouter><FeedListPage /></MemoryRouter>)
-  fireEvent.click(await screen.findByRole('button', { name: item.title }))
+  fireEvent.click(await screen.findByRole('button', { name: /^传统媒体.*1 个源$/ }))
+  fireEvent.click(screen.getByRole('button', { name: `预览 ${item.title}` }))
   await screen.findByText('预览结果')
   expect(client.previewFeed).toHaveBeenCalledWith(item.url, expect.any(AbortSignal))
   expect(client.addFeed).not.toHaveBeenCalled()

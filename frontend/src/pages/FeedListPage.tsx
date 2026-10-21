@@ -1,3 +1,4 @@
+import SourceDirectory from '../components/SourceDirectory'
 import OPMLTransfer from '../components/OPMLTransfer'
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
@@ -27,9 +28,6 @@ export default function FeedListPage() {
     finally { setCatalogLoading(false) }
   }
   useEffect(() => { void loadCatalog() }, [])
-  const catalogGroups = Array.from(new Set(catalog.map(item => item.category || '未分类'))).map(category => ({
-    category, items: catalog.filter(item => (item.category || '未分类') === category),
-  }))
   const navigate = useNavigate()
   const location = useLocation()
   const [feeds, setFeeds] = useState<Feed[]>([])
@@ -44,7 +42,6 @@ export default function FeedListPage() {
   const [addSuccess, setAddSuccess] = useState('')
   const [capturedHNArticleID, setCapturedHNArticleID] = useState<number | null>(null)
   const [popularFeedsExpanded, setPopularFeedsExpanded] = useState(getInitialPopularFeedsExpanded)
-  const [foldedGroups, setFoldedGroups] = useState<Record<string, boolean>>({})
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const consumedSubscribeIntents = useRef(new Set<string>())
   const previewGeneration = useRef(0)
@@ -467,7 +464,7 @@ export default function FeedListPage() {
           </div>
         )}
 
-        {/* Popular feeds — whole section auto-collapses after 3 days; groups remain independently collapsible */}
+        {/* Popular feeds — whole section auto-collapses after 3 days; directory preserves the preview flow */}
         <div className="mb-2">
           <button
             type="button"
@@ -486,44 +483,7 @@ export default function FeedListPage() {
                 {catalogLoading && <p role="status">正在加载推荐…</p>}
                 {catalogError && <div role="alert">推荐目录加载失败 <button type="button" className="secondary" onClick={() => void loadCatalog()}>重试加载推荐</button></div>}
                 {!catalogLoading && !catalogError && catalog.length === 0 && <p className="text-muted">暂无已上架的推荐</p>}
-                {!catalogError && catalogGroups.map(group => {
-                  const folded = foldedGroups[group.category] === true
-                  return (
-                    <div key={group.category} style={{ marginBottom: 6 }}>
-                      <button
-                        type="button"
-                        onClick={() => setFoldedGroups(s => ({ ...s, [group.category]: !folded }))}
-                        className="btn-text btn-sm"
-                        style={{
-                          padding: '2px 0',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 4,
-                        }}
-                      >
-                        <span aria-hidden="true">📡</span>
-                        <span>{group.category}</span>
-                        <span style={{ fontSize: 10 }}>{folded ? '▸' : '▾'}</span>
-                      </button>
-                      {!folded && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
-                          {group.items.map(f => (
-                            <button
-                              key={f.url}
-                              type="button"
-                              className="secondary"
-                              style={{ fontSize: 12, padding: '3px 10px' }}
-                              title={f.description}
-                              onClick={() => { setNewUrl(f.url); doPreview(f.url) }}
-                            >
-                              {f.title}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                {!catalogLoading && !catalogError && <SourceDirectory items={catalog} onPreview={url => { void doPreview(url) }} />}
               </>
             )}
           </div>
@@ -536,7 +496,6 @@ export default function FeedListPage() {
           <p className="text-muted">你还没有订阅。可以从热门推荐中选择，也可以在上方输入订阅地址。</p>
           <button type="button" className="secondary mt-1" onClick={() => {
             setPopularFeedsExpanded(true)
-            setFoldedGroups({})
             document.getElementById('popular-feeds-groups')?.scrollIntoView?.({ block: 'nearest' })
           }}>查看热门推荐</button>
         </div>
