@@ -68,12 +68,13 @@ func (r *ExploreRepository) WithCtx(c ctxkey.CtxGetter) *ExploreRepository {
 }
 
 type ExploreListParams struct {
-	Limit  int
-	Offset int
-	Sort   SortMode
-	Dir    SortDir
-	Topic  string
-	View   string
+	Limit   int
+	Offset  int
+	Sort    SortMode
+	Dir     SortDir
+	Topic   string
+	Channel string
+	View    string
 }
 
 type ExploreSnapshotStatus struct {
@@ -88,28 +89,30 @@ type ExploreSnapshotStatus struct {
 }
 
 type ExploreArticleListItem struct {
-	ID            int        `json:"id"`
-	SourceID      int        `json:"source_id"`
-	SourceTitle   string     `json:"source_title"`
-	Title         string     `json:"title"`
-	URL           string     `json:"url"`
-	NormalizedURL string     `json:"normalized_url"`
-	Excerpt       string     `json:"excerpt"`
-	ThumbnailURL  *string    `json:"thumbnail_url,omitempty"`
-	PublishedAt   *time.Time `json:"published_at"`
-	FetchedAt     time.Time  `json:"fetched_at"`
-	Topic         string     `json:"topic"`
-	Reason        string     `json:"reason"`
-	IsSubscribed  bool       `json:"is_subscribed"`
-	Saved         bool       `json:"saved"`
-	Skipped       bool       `json:"skipped"`
+	DiscoveryChannels []ExploreDiscoveryChannel `json:"discovery_channels"`
+	ID                int                       `json:"id"`
+	SourceID          int                       `json:"source_id"`
+	SourceTitle       string                    `json:"source_title"`
+	Title             string                    `json:"title"`
+	URL               string                    `json:"url"`
+	NormalizedURL     string                    `json:"normalized_url"`
+	Excerpt           string                    `json:"excerpt"`
+	ThumbnailURL      *string                   `json:"thumbnail_url,omitempty"`
+	PublishedAt       *time.Time                `json:"published_at"`
+	FetchedAt         time.Time                 `json:"fetched_at"`
+	Topic             string                    `json:"topic"`
+	Reason            string                    `json:"reason"`
+	IsSubscribed      bool                      `json:"is_subscribed"`
+	Saved             bool                      `json:"saved"`
+	Skipped           bool                      `json:"skipped"`
 }
 
 type ExplorePage struct {
-	Snapshot  ExploreSnapshotStatus    `json:"snapshot"`
-	Articles  []ExploreArticleListItem `json:"articles"`
-	HasMore   bool                     `json:"has_more"`
-	Interests []string                 `json:"interests"`
+	DiscoveryChannels []ExploreDiscoveryChannel `json:"discovery_channels"`
+	Snapshot          ExploreSnapshotStatus     `json:"snapshot"`
+	Articles          []ExploreArticleListItem  `json:"articles"`
+	HasMore           bool                      `json:"has_more"`
+	Interests         []string                  `json:"interests"`
 }
 
 type ExploreSourceItem struct {
@@ -223,7 +226,14 @@ func (r *ExploreRepository) GetPage(userID int, params ExploreListParams) (*Expl
 		return nil, err
 	}
 	rows.Close()
-	articles = stableDiversifyExploreArticles(articles)
+	if err := enrichExploreDiscovery(tx, articles); err != nil {
+		return nil, err
+	}
+	page.DiscoveryChannels, err = readExploreDiscoveryChoices(tx)
+	if err != nil {
+		return nil, err
+	}
+	articles = stableDiversifyExploreArticles(filterExploreDiscovery(articles, params.Channel))
 	if params.Offset < len(articles) {
 		end := params.Offset + params.Limit
 		if end > len(articles) {
@@ -432,6 +442,7 @@ func normalizeExploreListParams(params ExploreListParams) ExploreListParams {
 	if params.Dir != SortAsc {
 		params.Dir = SortDesc
 	}
+	params.Channel = strings.TrimSpace(params.Channel)
 	params.Topic = strings.TrimSpace(params.Topic)
 	return params
 }

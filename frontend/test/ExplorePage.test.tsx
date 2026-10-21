@@ -391,3 +391,18 @@ describe('ExplorePage', () => {
     expect(await screen.findByText('Article 10')).toBeTruthy()
   })
 })
+
+it('persists channel and topic filters and resets pagination when the channel changes', async () => {
+  vi.clearAllMocks()
+  api.getExploreSources.mockResolvedValue([])
+  api.getExplore.mockResolvedValue(response({discovery_channels:[
+    {key:'reddit',kind:'reddit',label:'Reddit'},
+    {key:'reddit:programming',kind:'reddit',label:'Reddit · r/programming'},
+  ]}))
+  renderPage('/explore?topic=programming&channel=reddit&sort=captured&order=asc')
+  await waitFor(()=>expect(api.getExplore).toHaveBeenCalledWith(expect.objectContaining({channel:'reddit',topic:'programming',offset:0})))
+  fireEvent.change(screen.getByLabelText('发现渠道筛选'),{target:{value:'reddit:programming'}})
+  await waitFor(()=>expect(api.getExplore).toHaveBeenLastCalledWith(expect.objectContaining({channel:'reddit:programming',topic:'programming',offset:0,sort:'captured',order:'asc'})))
+  fireEvent.change(screen.getByLabelText('发现渠道筛选'),{target:{value:''}})
+  await waitFor(()=>expect(api.getExplore).toHaveBeenLastCalledWith(expect.not.objectContaining({channel:expect.anything()})))
+})

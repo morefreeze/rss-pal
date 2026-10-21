@@ -453,7 +453,14 @@ export type ExploreValidationStatus = 'pending' | 'valid' | 'invalid'
 export type ExploreFeedbackType = 'hide_source' | 'dampen_topic' | 'boost_topic'
 export type ExploreArticleEventType = 'exposure' | 'click' | 'completed_read'
 
+export interface ExploreDiscoveryChannel {
+  key: string
+  kind: string
+  label: string
+}
+
 export interface ExploreListParams {
+  channel?: string
   view?: 'later'
   limit?: number
   offset?: number
@@ -473,6 +480,7 @@ export interface ExploreSnapshotStatus {
 }
 
 export interface ExploreArticleListItem {
+  discovery_channels?: ExploreDiscoveryChannel[]
   normalized_url?: string
   saved?: boolean
   skipped?: boolean
@@ -492,6 +500,7 @@ export interface ExploreArticleListItem {
 }
 
 export interface ExploreListResponse {
+  discovery_channels?: ExploreDiscoveryChannel[]
   snapshot: ExploreSnapshotStatus
   articles: ExploreArticleListItem[]
   has_more: boolean

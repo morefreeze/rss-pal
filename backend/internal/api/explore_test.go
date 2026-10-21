@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -411,5 +412,22 @@ func TestExploreArticleStateHandler(t *testing.T) {
 	w = performExploreRequest(router, http.MethodGet, "/api/explore?view=unknown", nil)
 	if w.Code != 400 {
 		t.Fatalf("invalid view: %d", w.Code)
+	}
+}
+
+func TestExploreDiscoveryFilterValidation(t *testing.T) {
+	store := &fakeExploreStore{}
+	router := exploreTestRouter(newExploreHandlerWithStore(store, time.Now))
+	for _, channel := range []string{"reddit", "reddit:programming", "opml:chinese-independent"} {
+		w := performExploreRequest(router, http.MethodGet, "/api/explore?channel="+channel, nil)
+		if w.Code != http.StatusOK || store.lastParams.Channel != channel {
+			t.Fatalf("channel=%s status=%d params=%+v", channel, w.Code, store.lastParams)
+		}
+	}
+	for _, channel := range []string{"bad%20channel", "%27OR%201=1", strings.Repeat("a", 151)} {
+		w := performExploreRequest(router, http.MethodGet, "/api/explore?channel="+channel, nil)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("invalid channel accepted: %s status=%d", channel, w.Code)
+		}
 	}
 }

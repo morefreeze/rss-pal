@@ -143,3 +143,16 @@ describe('explicit exploration feedback targets',()=>{
   expect(screen.getByRole('menuitem',{name:'隐藏来源「Source 3」'})).toBeTruthy();
  });
 });
+
+it('separates content topic from multiple discovery channels', () => {
+  const view = render(<ExploreArticleCard article={{...article, topic:'chinese-independent', reason:'来自持续更新的 chinese-independent 目录', discovery_channels:[
+    {key:'opml:chinese-independent',kind:'opml',label:'目录 · 中文独立博客'},
+    {key:'reddit:programming',kind:'reddit',label:'Reddit · r/programming'},
+  ]}} sort="published" onOpen={vi.fn()} onExposure={vi.fn()} onHideSource={vi.fn()} onDampenTopic={vi.fn()} />)
+  expect(screen.getByLabelText('内容主题').textContent).toBe('主题：综合')
+  const channels=screen.getByLabelText('发现渠道')
+  expect(channels.textContent).toContain('目录 · 中文独立博客')
+  expect(channels.textContent).toContain('Reddit · r/programming')
+  expect(screen.queryByText('来自持续更新的 chinese-independent 目录')).toBeNull()
+  view.unmount()
+})

@@ -16,3 +16,8 @@ export function feedbackTopicLabel(topic:string):string|null {
  const value=(topic||'').trim()
  return !value || nonContentTopics.has(topicKey(value)) ? null : exploreTopicLabel(value)
 }
+
+// Registry names describe discovery provenance rather than article subject.
+export function exploreContentTopicLabel(topic: string): string {
+ return ['chinese-independent','recently-added'].includes(topicKey((topic || '').trim())) ? '综合' : exploreTopicLabel(topic)
+}

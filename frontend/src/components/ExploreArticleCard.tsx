@@ -2,7 +2,7 @@ import ExploreArticleActions from './ExploreArticleActions'
 import { useExploreArticleActions } from '../hooks/useExploreArticleActions'
 import { useArticleImageSource } from '../util/useArticleImageSource'
 import { useEffect, useRef, useState } from 'react'
-import { exploreTopicLabel, feedbackTopicLabel } from './exploreTopicLabels'
+import { exploreContentTopicLabel, feedbackTopicLabel } from './exploreTopicLabels'
 import type { ExploreArticleListItem, ExploreSort } from '../api/client'
 
 interface Props {
@@ -100,6 +100,9 @@ export default function ExploreArticleCard({
 
   const open = () => onOpen(article)
   const shownDate = sort === 'captured' ? article.fetched_at : article.published_at
+  const hasDiscoveryChannels = (article.discovery_channels?.length ?? 0) > 0
+  const reasonIsDiscovery = article.reason.startsWith('来自持续更新的 ') && article.reason.endsWith(' 目录')
+  const recommendationReason = hasDiscoveryChannels && reasonIsDiscovery ? '' : article.reason
 
   return (
     <article
@@ -123,9 +126,13 @@ export default function ExploreArticleCard({
           </h3>
           {article.excerpt && <p className="explore-article-card__excerpt">{article.excerpt}</p>}
           <div className="explore-article-card__recommendation">
-            <span>{exploreTopicLabel(article.topic)}</span>
-            <span>{article.reason}</span>
+            <span aria-label="内容主题">主题：{exploreContentTopicLabel(article.topic)}</span>
+            {recommendationReason && <span>{recommendationReason}</span>}
           </div>
+          {hasDiscoveryChannels && <div className="explore-discovery-channels" aria-label="发现渠道">
+            <span className="text-muted text-sm">发现渠道</span>
+            {article.discovery_channels!.map(channel => <span key={channel.key} className="explore-discovery-chip">{channel.label}</span>)}
+          </div>}
         </div>
         {thumbnailSrc && (
           <img

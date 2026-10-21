@@ -51,6 +51,7 @@ function ExplorePageContent() {
   const [searchParams, setSearchParams] = useSearchParams()
   const initialSort: ExploreSort = searchParams.get('sort') === 'captured' ? 'captured' : 'published'
   const initialOrder: ExploreOrder = searchParams.get('order') === 'asc' ? 'asc' : 'desc'
+  const initialChannel = searchParams.get('channel') || undefined
   const initialTopic = searchParams.get('topic') || undefined
   const view = searchParams.get('view') === 'later' ? 'later' : undefined
   const alternateViewParams = new URLSearchParams(searchParams)
@@ -60,7 +61,7 @@ function ExplorePageContent() {
     alternateViewParams.delete('topic')
   }
   const alternateViewPath = `/explore?${alternateViewParams}`
-  const feed = useExploreFeed({ view, pageSize: PAGE_SIZE, initialSort, initialOrder, initialTopic })
+  const feed = useExploreFeed({ view, pageSize: PAGE_SIZE, initialSort, initialOrder, initialTopic, initialChannel })
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [feedbackError, setFeedbackError] = useState<string | null>(null)
   const [feedbackUndos, setFeedbackUndos] = useState<UndoFeedback[]>([])
@@ -87,13 +88,17 @@ function ExplorePageContent() {
     onLoadMore: feed.loadMore,
   })
 
-  const updateQuery = useCallback((changes: Partial<{ sort: ExploreSort; order: ExploreOrder; topic: string }>) => {
+  const updateQuery = useCallback((changes: Partial<{ sort: ExploreSort; order: ExploreOrder; topic: string; channel: string }>) => {
     const next = new URLSearchParams(searchParams)
     if (changes.sort !== undefined) next.set('sort', changes.sort)
     if (changes.order !== undefined) next.set('order', changes.order)
     if (changes.topic !== undefined) {
       if (changes.topic) next.set('topic', changes.topic)
       else next.delete('topic')
+    }
+    if (changes.channel !== undefined) {
+      if (changes.channel) next.set('channel', changes.channel)
+      else next.delete('channel')
     }
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
@@ -112,6 +117,17 @@ function ExplorePageContent() {
   const pickTopic = (nextTopic: string) => {
     feed.setTopic(nextTopic)
     updateQuery({ topic: nextTopic })
+  }
+
+  const pickChannel = (nextChannel: string) => {
+    feed.setChannel(nextChannel)
+    updateQuery({ channel: nextChannel })
+  }
+
+  const clearFilters = () => {
+    feed.setTopic('')
+    feed.setChannel('')
+    updateQuery({ topic: '', channel: '' })
   }
 
   const openArticle = (article: ExploreArticleListItem) => {
@@ -211,7 +227,7 @@ function ExplorePageContent() {
   const topics = useMemo(() => {
     const items = new Set(feed.topics)
     if (feed.topic) items.add(feed.topic)
-    return Array.from(items)
+    return Array.from(items).filter(topic => topic === feed.topic || !['chinese-independent', 'recently-added'].includes(topic))
   }, [feed.topic, feed.topics])
   const latestUndo: UndoFeedback | undefined = feedbackUndos.length > 0
     ? feedbackUndos[feedbackUndos.length - 1]
@@ -231,6 +247,14 @@ function ExplorePageContent() {
             <select className="toolbar-control" aria-label="主题筛选" value={feed.topic} onChange={event => pickTopic(event.target.value)}>
               <option value="">全部主题</option>
               {topics.map(topic => <option key={topic} value={topic}>{exploreTopicLabel(topic)}</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="sr-only">发现渠道筛选</span>
+            <select className="toolbar-control" aria-label="发现渠道筛选" value={feed.channel} onChange={event => pickChannel(event.target.value)}>
+              <option value="">全部发现渠道</option>
+              {feed.channel && !feed.discoveryChannels.some(channel => channel.key === feed.channel) && <option value={feed.channel}>{feed.channel}</option>}
+              {feed.discoveryChannels.map(channel => <option key={channel.key} value={channel.key}>{channel.label}</option>)}
             </select>
           </label>
           <div className="explore-sort-buttons" aria-label="排序方式">
@@ -291,17 +315,17 @@ function ExplorePageContent() {
           <div className="card text-muted">正在加载探索内容…</div>
         ) : feed.articles.length === 0 && view ? (
           <div className="card explore-empty-state">
-            <strong>{feed.topic ? '当前主题没有稍后读文章' : '还没有稍后读文章'}</strong>
+            <strong>{(feed.topic || feed.channel) ? '当前筛选没有稍后读文章' : '还没有稍后读文章'}</strong>
             <span>在探索文章上点击「稍后读」，即可保存在这里。</span>
-            {feed.topic && <button type="button" className="secondary" onClick={() => pickTopic('')}>清除筛选</button>}
+            {(feed.topic || feed.channel) && <button type="button" className="secondary" onClick={clearFilters}>清除筛选</button>}
             {feed.error && <button type="button" onClick={() => void feed.reload()}>重试加载</button>}
           </div>
-        ) : feed.articles.length === 0 && feed.topic ? (
+        ) : feed.articles.length === 0 && (feed.topic || feed.channel) ? (
           <div className="card explore-empty-state">
-            <strong>当前主题没有候选文章</strong>
+            <strong>{feed.channel ? '当前发现渠道没有候选文章' : '当前主题没有候选文章'}</strong>
             <span>可能被筛选或反馈隐藏了。</span>
             {feed.error && <button type="button" className="secondary" onClick={() => void feed.reload()}>重试加载</button>}
-            <button type="button" className="secondary" aria-label="清除主题筛选" onClick={() => pickTopic('')}>清除筛选</button>
+            <button type="button" className="secondary" aria-label={feed.channel ? "清除筛选" : "清除主题筛选"} onClick={clearFilters}>清除筛选</button>
           </div>
         ) : feed.articles.length === 0 && !feed.topic ? (
           <div className="card explore-empty-state">

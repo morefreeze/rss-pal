@@ -7,6 +7,7 @@ import {
   getUser,
   recordExploreArticleEvent,
   type ExploreArticleListItem,
+  type ExploreDiscoveryChannel,
   type ExploreOrder,
   type ExploreSnapshotStatus,
   type ExploreSort,
@@ -47,6 +48,7 @@ interface ExploreFeedOptions {
   pageSize?: number
   initialSort?: ExploreSort
   initialOrder?: ExploreOrder
+  initialChannel?: string
   initialTopic?: string
 }
 
@@ -69,10 +71,13 @@ export function useExploreFeed({
   pageSize = DEFAULT_PAGE_SIZE,
   initialSort = 'published',
   initialOrder = 'desc',
+  initialChannel,
   initialTopic,
 }: ExploreFeedOptions = {}) {
   const [sort, setSort] = useState<ExploreSort>(initialSort)
   const [order, setOrder] = useState<ExploreOrder>(initialOrder)
+  const [channel, setChannelState] = useState(initialChannel ?? '')
+  const [discoveryChannels, setDiscoveryChannels] = useState<ExploreDiscoveryChannel[]>([])
   const [topic, setTopicState] = useState(initialTopic ?? '')
   const [baseArticles, setBaseArticles] = useState<ExploreArticleListItem[]>([])
   const [snapshot, setSnapshot] = useState<ExploreSnapshotStatus | null>(null)
@@ -114,8 +119,10 @@ export function useExploreFeed({
         sort,
         order,
         ...(topic ? { topic } : {}),
+        ...(channel ? { channel } : {}),
       })
       if (requestGeneration !== requestGenerationRef.current) return
+      setDiscoveryChannels(page.discovery_channels ?? [])
       setSnapshot(page.snapshot)
       setInterests(Array.isArray(page.interests) ? page.interests : [])
       setBaseArticles(current => reset ? mergeByID([], page.articles) : mergeByID(current, page.articles))
@@ -136,7 +143,7 @@ export function useExploreFeed({
         else setLoadingMore(false)
       }
     }
-  }, [order, pageSize, sort, topic, view])
+  }, [channel, order, pageSize, sort, topic, view])
 
   const reload = useCallback(async () => {
     const nextGeneration = ++requestGenerationRef.current
@@ -214,6 +221,12 @@ export function useExploreFeed({
     invalidateQuery()
     setOrder(value)
   }, [invalidateQuery, order])
+
+  const changeChannel = useCallback((value: string) => {
+    if (value === channel) return
+    invalidateQuery()
+    setChannelState(value)
+  }, [invalidateQuery, channel])
 
   const changeTopic = useCallback((value: string) => {
     if (value === topic) return
@@ -328,6 +341,8 @@ export function useExploreFeed({
     order,
     topic,
     topics: knownTopics,
+    channel,
+    discoveryChannels,
     interests,
     loading,
     loadingMore,
@@ -338,6 +353,7 @@ export function useExploreFeed({
     setSort: changeSort,
     setOrder: changeOrder,
     setTopic: changeTopic,
+    setChannel: changeChannel,
     loadMore,
     continueLoading,
     reload,

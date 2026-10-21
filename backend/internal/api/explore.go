@@ -83,6 +83,9 @@ func (h *ExploreHandler) GetExplore(c *gin.Context) {
 	if page.Interests == nil {
 		page.Interests = []string{}
 	}
+	if page.DiscoveryChannels == nil {
+		page.DiscoveryChannels = []repository.ExploreDiscoveryChannel{}
+	}
 	next := explorelogic.ExploreScheduleAt(h.now()).NextSlotAt
 	page.Snapshot.NextRefreshAt = &next
 	c.Header("Cache-Control", "private, no-cache")
@@ -150,6 +153,11 @@ func parseExploreListParams(c *gin.Context) (repository.ExploreListParams, bool)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "order must be asc or desc"})
 			return params, false
 		}
+	}
+	params.Channel = strings.TrimSpace(c.Query("channel"))
+	if !repository.ValidExploreDiscoveryFilter(params.Channel) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid discovery channel"})
+		return params, false
 	}
 	params.Topic = strings.TrimSpace(c.Query("topic"))
 	if len([]rune(params.Topic)) > 100 {

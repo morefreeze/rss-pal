@@ -88,8 +88,8 @@ func (r *ExploreRepository) getSavedPage(userID int, params ExploreListParams) (
  ORDER BY item.last_seen_at DESC,item.id DESC LIMIT 1
  ) observation ON true
  WHERE state.user_id=$1 AND state.saved AND ($3='' OR COALESCE(NULLIF(topic.topic,''),NULLIF(source.category,''),observation.topic,'')=$3)
- ` + ArticleOrderClause(ArticleAliasExplore, params.Sort, params.Dir) + `, explore_articles.id ` + params.Dir.sql() + ` LIMIT $4 OFFSET $5`
-	rows, err := r.db.Query(query, userID, pq.Array(formalURLs), params.Topic, params.Limit+1, params.Offset)
+ ` + ` AND ($4='' OR ` + exploreDiscoverySQLFilter("source.id", "$4") + `) ` + ArticleOrderClause(ArticleAliasExplore, params.Sort, params.Dir) + `, explore_articles.id ` + params.Dir.sql() + ` LIMIT $5 OFFSET $6`
+	rows, err := r.db.Query(query, userID, pq.Array(formalURLs), params.Topic, params.Channel, params.Limit+1, params.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +102,14 @@ func (r *ExploreRepository) getSavedPage(userID int, params ExploreListParams) (
 		page.Articles = append(page.Articles, normalizeExploreArticleListItem(item))
 	}
 	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := enrichExploreDiscovery(r.db, page.Articles); err != nil {
+		return nil, err
+	}
+	page.DiscoveryChannels, err = readExploreDiscoveryChoices(r.db)
+	if err != nil {
 		return nil, err
 	}
 	if len(page.Articles) > params.Limit {
