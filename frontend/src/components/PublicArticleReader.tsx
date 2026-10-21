@@ -220,7 +220,7 @@ export default function PublicArticleReader({ article, shareURL, shareRef }: Pro
 
         {article.content && (
           <section className="card public-reader-content">
-            <MarkdownArticle source={article.content} imageDimensions={article.image_dimensions} readOnly />
+            <MarkdownArticle source={article.content} originalUrl={article.url} imageDimensions={article.image_dimensions} readOnly />
           </section>
         )}
 

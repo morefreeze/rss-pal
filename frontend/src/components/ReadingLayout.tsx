@@ -97,12 +97,12 @@ export default function ReadingLayout(props: Props) {
           ? (props.readerActionContext ? (
             <ReaderActionContext.Provider value={props.readerActionContext}>
               <CodeWrapContext.Provider value={codeWrap}>
-                <MarkdownArticle source={article.content} />
+                <MarkdownArticle source={article.content} originalUrl={article.url} />
               </CodeWrapContext.Provider>
             </ReaderActionContext.Provider>
           ) : (
             <CodeWrapContext.Provider value={codeWrap}>
-              <MarkdownArticle source={article.content} />
+              <MarkdownArticle source={article.content} originalUrl={article.url} />
             </CodeWrapContext.Provider>
           ))
           : <div className="text-muted">暂无内容</div>

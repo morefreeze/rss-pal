@@ -13,6 +13,72 @@ const readerContext: ReaderActionContextValue = {
 }
 
 describe('MarkdownArticle article anchors', () => {
+  it('keeps same-article TOC jumps inside the current reader and preserves fallback links', () => {
+    const url = 'https://simonwillison.net/2026/Oct/20/battledrones/'
+    const source = `- [Jump](${url}#v1-the-initial-prototype)
+- [Missing](${url}#missing)
+- [Other](https://other.example/post#v1-the-initial-prototype)
+
+#### v1: the *initial* prototype
+
+Body`
+    const onLinkDiscovered = vi.fn()
+    const { container } = render(
+      <ReaderActionContext.Provider value={{ ...readerContext, onLinkDiscovered }}>
+        <MarkdownArticle source={source} originalUrl={url} />
+      </ReaderActionContext.Provider>,
+    )
+    const heading = screen.getByRole('heading', { name: 'v1: the initial prototype' })
+    const scroll = vi.fn()
+    heading.scrollIntoView = scroll
+    const link = screen.getByRole('link', { name: 'Jump' })
+    expect(link.getAttribute('href')).toBe(`#${heading.id}`)
+    expect(link.getAttribute('target')).toBeNull()
+    fireEvent.click(link)
+    expect(scroll).toHaveBeenCalled()
+    expect(screen.getByRole('link', { name: 'Missing' }).getAttribute('href')).toBe(`${url}#missing`)
+    expect(screen.getByRole('link', { name: 'Other' }).getAttribute('target')).toBe('_blank')
+    expect(onLinkDiscovered.mock.calls.some(([link]) => link.url.startsWith('#'))).toBe(false)
+    expect(container.querySelectorAll(`#${heading.id}`)).toHaveLength(1)
+  })
+
+  it('resolves encoded fragments and repeated headings in read-only content', () => {
+    const url = 'https://example.com/article?version=2'
+    const { container } = render(<MarkdownArticle originalUrl={url} readOnly source={`[First](#%E4%B8%AD%E6%96%87-title)
+
+[Second](#中文-title-1)
+
+[Missing](#gone)
+
+[Different query](https://example.com/article?version=3#中文-title)
+
+## 中文 Title
+
+## 中文 Title`} />)
+    const headings = [...container.querySelectorAll('h2')]
+    expect(screen.getByRole('link', { name: 'First' }).getAttribute('href')).toBe(`#${headings[0].id}`)
+    expect(screen.getByRole('link', { name: 'Second' }).getAttribute('href')).toBe(`#${headings[1].id}`)
+    expect(screen.getByRole('link', { name: 'Missing' }).getAttribute('href')).toBe(`${url}#gone`)
+    expect(screen.getByRole('link', { name: 'Different query' }).getAttribute('href')).toBe('https://example.com/article?version=3#%E4%B8%AD%E6%96%87-title')
+  })
+
+  it('resolves reference-style TOCs and scopes clicks to their own reader', () => {
+    const source = '[Jump][toc]\n\n[toc]: https://example.com/post#heading\n\n## Heading'
+    const first = render(<MarkdownArticle source={source} originalUrl="https://example.com/post" readOnly />)
+    const second = render(<MarkdownArticle source={source} originalUrl="https://example.com/post" readOnly />)
+    const firstHeading = first.container.querySelector('h2')!
+    const secondHeading = second.container.querySelector('h2')!
+    const firstScroll = vi.fn()
+    const secondScroll = vi.fn()
+    firstHeading.scrollIntoView = firstScroll
+    secondHeading.scrollIntoView = secondScroll
+    expect(second.container.querySelector('a')?.getAttribute('href')).toBe(`#${secondHeading.id}`)
+    fireEvent.click(second.container.querySelector('a')!, { button: 0 })
+    expect(secondScroll).toHaveBeenCalledOnce()
+    expect(firstScroll).not.toHaveBeenCalled()
+    expect(first.container.querySelector('a')?.getAttribute('href')).toBe(`#${firstHeading.id}`)
+  })
+
   it('keeps only a precisely shaped public share asset on the same-origin path', () => {
     const token = 'v1_00000000000000000000000000000001_kVCen8vHGjySlZF_mC5N22Bs13LHqfgxBbnHY7Botcg'
     const valid = `/api/share/${token}/assets/3.jpeg`

@@ -1501,7 +1501,7 @@ export default function ArticlePage() {
                   <CodeWrapContext.Provider value={reader.codeWrap}>
                     <ReaderActionContext.Provider value={readerActionContext}>
                       <MarkdownArticle
-                        source={article.content}
+                        source={article.content} originalUrl={article.url}
                         imageDimensions={article.image_dimensions}
                         suppressVideo={primaryVideo}
                       />

@@ -165,6 +165,8 @@ export function annotateArticleMarkdown(source: string): string {
 
 type MarkdownNode = {
   type?: string
+  value?: string
+  url?: string
   position?: { start?: { line?: number }, end?: { line?: number } }
   children?: MarkdownNode[]
   data?: { hProperties?: Record<string, unknown> }
@@ -194,6 +196,42 @@ export function createArticleAnchorRemarkPlugin(anchors: ArticleAnchor[]) {
       used.add(node)
       node.data ??= {}
       node.data.hProperties = { ...node.data.hProperties, id: anchor.id, className: 'article-section-anchor' }
+    }
+  }
+}
+
+// Resolve legacy source-page fragments against rendered headings without
+// changing the stored Markdown or the canonical IDs used by AI summaries.
+export function createSourceTOCRemarkPlugin(originalUrl?: string) {
+  return () => (tree: MarkdownNode) => {
+    const headings = new Map<string, string>()
+    const usedSlugs = new Set<string>()
+    const links: MarkdownNode[] = []
+    const text = (node: MarkdownNode): string => node.value ?? node.children?.map(text).join('') ?? ''
+    const visit = (node: MarkdownNode) => {
+      if (node.type === 'heading') {
+        const base = text(node).toLowerCase().replace(/[^\p{L}\p{N}\p{M}_\- ]/gu, '').replace(/ /g, '-')
+        let slug = base
+        let suffix = 0
+        while (usedSlugs.has(slug)) slug = `${base}-${++suffix}`
+        usedSlugs.add(slug)
+        const id = node.data?.hProperties?.id
+        if (slug && typeof id === 'string') headings.set(slug, id)
+      }
+      if (node.type === 'link' || node.type === 'definition') links.push(node)
+      node.children?.forEach(visit)
+    }
+    visit(tree)
+    for (const node of links) {
+      if (!node.url) continue
+      try {
+        const target = new URL(node.url, originalUrl ?? 'https://reader.invalid/')
+        const source = originalUrl ? new URL(originalUrl) : null
+        if (!node.url.startsWith('#') && (!source || target.origin !== source.origin || target.pathname !== source.pathname || target.search !== source.search)) continue
+        const id = headings.get(decodeURIComponent(target.hash.slice(1)))
+        if (id) node.url = `#${id}`
+        else if (source && node.url.startsWith('#') && !parseArticleAnchor(node.url)) node.url = target.href
+      } catch { /* Invalid or unknown fragments keep their original destination. */ }
     }
   }
 }
