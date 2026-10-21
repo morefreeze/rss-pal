@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   getExploreArticle,
+  fetchExploreArticleContent,
   recordExploreArticleEvent,
   subscribeExploreSource,
   type ExploreArticleDetail,
@@ -54,6 +55,12 @@ export default function ExploreArticlePage() {
   const [article, setArticle] = useState<ExploreArticleDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [contentLoading, setContentLoading] = useState(false)
+  const [contentError, setContentError] = useState('')
+  const contentGenerationRef = useRef(0)
+  const contentRequestRef = useRef<AbortController | null>(null)
+  const currentArticleIDRef = useRef(articleID)
+  currentArticleIDRef.current = articleID
   const [subscribed, setSubscribed] = useState(Boolean(preview?.is_subscribed))
   const [subscribing, setSubscribing] = useState(false)
   const [subscribeError, setSubscribeError] = useState('')
@@ -105,6 +112,8 @@ export default function ExploreArticlePage() {
     subscribingRef.current = false
     setSubscribing(false)
     setArticle(null)
+    setContentLoading(false)
+    setContentError('')
     setSubscribed(Boolean(preview?.is_subscribed))
     // React Router preserves window scroll across client-side navigation.
     // A list's scroll offset must never become this article's read progress.
@@ -112,10 +121,66 @@ export default function ExploreArticlePage() {
     void loadArticle()
     return () => {
       loadGenerationRef.current += 1
+      contentGenerationRef.current += 1
+      contentRequestRef.current?.abort()
+      contentRequestRef.current = null
       subscribeGenerationRef.current += 1
       subscribingRef.current = false
     }
   }, [loadArticle, preview?.is_subscribed])
+
+  const fetchOriginal = useCallback(async () => {
+    if (contentRequestRef.current) return
+    const controller = new AbortController()
+    const generation = ++contentGenerationRef.current
+    contentRequestRef.current = controller
+    const isCurrent = () => !controller.signal.aborted && currentArticleIDRef.current === articleID
+      && contentGenerationRef.current === generation
+    setContentLoading(true)
+    setContentError('')
+    try {
+      const loaded = await fetchExploreArticleContent(articleID, controller.signal)
+      if (isCurrent() && loaded.id === articleID) {
+        // Preserve local save/skip state while replacing only reading content.
+        setArticle(current => current?.id === articleID ? { ...current,
+          content: loaded.content, content_status: loaded.content_status,
+          content_error: loaded.content_error, content_retry_at: loaded.content_retry_at,
+        } : current)
+      }
+    } catch (error: any) {
+      if (isCurrent()) setContentError(error?.response?.data?.error || '获取原文失败，请检查网络后重试。')
+    } finally {
+      if (isCurrent()) setContentLoading(false)
+      if (contentRequestRef.current === controller) contentRequestRef.current = null
+    }
+  }, [articleID])
+
+  useEffect(() => {
+    if (article?.id === articleID && article.content_status === 'feed') void fetchOriginal()
+  }, [article?.id, article?.content_status, articleID, fetchOriginal])
+
+  useEffect(() => {
+    if (article?.content_status !== 'fetching') return
+    let canceled = false
+    let inFlight = false
+    const generation = contentGenerationRef.current
+    const poll = async () => {
+      if (inFlight || document.hidden) return
+      inFlight = true
+      try {
+        const loaded = await getExploreArticle(articleID)
+        if (canceled || currentArticleIDRef.current !== articleID || contentGenerationRef.current !== generation) return
+        setContentError('')
+        setArticle(current => current?.id === articleID ? { ...current,
+          content: loaded.content, content_status: loaded.content_status,
+          content_error: loaded.content_error, content_retry_at: loaded.content_retry_at,
+        } : current)
+      } catch { /* retain preview and retry the shared task status */ }
+      finally { inFlight = false }
+    }
+    const timer = setInterval(() => { void poll() }, 3000)
+    return () => { canceled = true; clearInterval(timer) }
+  }, [article?.content_status, articleID])
 
   // ExplorePage records click before it navigates. A matching route preview is
   // the hand-off marker, so only direct/deep-link entries need a detail click.
@@ -126,7 +191,7 @@ export default function ExploreArticlePage() {
   }, [article, preview])
 
   useEffect(() => {
-    if (!article) return
+    if (!article || contentLoading || (article.content_status && article.content_status !== 'fetched')) return
     const articleIDAtMount = article.id
     let disposed = false
     let animationFrameID: number | null = null
@@ -194,7 +259,7 @@ export default function ExploreArticlePage() {
       window.removeEventListener('resize', onViewportInteraction)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [article])
+  }, [article, contentLoading])
 
   const handleSubscribe = async () => {
     if (!article || subscribed || subscribingRef.current) return
@@ -282,6 +347,17 @@ export default function ExploreArticlePage() {
           <span> · </span>
           <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
         </div>
+
+        {(contentLoading || article.content_status === 'fetching') && (
+          <div role="status" className="explore-notice">正在获取原文，先显示订阅源提供的内容…</div>
+        )}
+        {!contentLoading && (contentError || article.content_status === 'failed') && (
+          <div className="explore-inline-error" role="alert">
+            <p>{contentError || article.content_error || '暂未获取到更多正文，已保留订阅源提供的内容。'}</p>
+            {article.content_retry_at && <p className="text-muted text-sm">下次可重试：{new Date(article.content_retry_at).toLocaleString('zh-CN')}</p>}
+            <button type="button" className="secondary" onClick={() => void fetchOriginal()}>重试获取原文</button>
+          </div>
+        )}
 
         {article.content ? (
           <CodeWrapContext.Provider value={reader.codeWrap}>

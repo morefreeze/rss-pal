@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,8 +12,10 @@ import (
 	"time"
 
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
+	"github.com/bytedance/rss-pal/internal/explorecontent"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,9 +37,11 @@ type exploreSubscriber interface {
 }
 
 type ExploreHandler struct {
-	storeFor      func(*gin.Context) exploreStore
-	subscriberFor func(*gin.Context) exploreSubscriber
-	now           func() time.Time
+	contentService *explorecontent.ArticleContentService
+	contentCharge  func(context.Context, int) (func(), error)
+	storeFor       func(*gin.Context) exploreStore
+	subscriberFor  func(*gin.Context) exploreSubscriber
+	now            func() time.Time
 }
 
 func NewExploreHandler(repo *repository.ExploreRepository) *ExploreHandler {
@@ -181,6 +187,14 @@ func (h *ExploreHandler) GetSources(c *gin.Context) {
 	c.JSON(http.StatusOK, items)
 }
 
+func (h *ExploreHandler) WithContentService(service *explorecontent.ArticleContentService, budgets *taskbudget.Store, policies taskbudget.Policies) *ExploreHandler {
+	h.contentService = service
+	h.contentCharge = func(ctx context.Context, uid int) (func(), error) {
+		return budgets.Acquire(ctx, uid, "fetch", 1, policies["fetch"])
+	}
+	return h
+}
+
 func (h *ExploreHandler) GetArticle(c *gin.Context) {
 	id, ok := positiveExploreID(c, "id")
 	if !ok {
@@ -189,6 +203,59 @@ func (h *ExploreHandler) GetArticle(c *gin.Context) {
 	article, err := h.storeFor(c).GetVisibleArticle(getUserID(c), id)
 	if err != nil {
 		writeExploreError(c, err)
+		return
+	}
+	if article.ContentStatus == "" {
+		article.ContentStatus = "feed"
+	}
+	if h.contentService != nil {
+		if err := h.contentService.Overlay(c.Request.Context(), article); err != nil {
+			writeExploreError(c, err)
+			return
+		}
+	}
+	c.Header("Cache-Control", "private, no-cache")
+	c.JSON(http.StatusOK, article)
+}
+
+// FetchArticleContent authorizes with the request RLS connection before touching shared cache.
+func (h *ExploreHandler) FetchArticleContent(c *gin.Context) {
+	id, ok := positiveExploreID(c, "id")
+	if !ok {
+		return
+	}
+	article, err := h.storeFor(c).GetVisibleArticle(getUserID(c), id)
+	if err != nil {
+		writeExploreError(c, err)
+		return
+	}
+	if h.contentService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "正文抓取暂不可用"})
+		return
+	}
+	// This route performs no user writes. Release its authorization snapshot before network I/O.
+	if raw, exists := c.Get(CtxKeyTx); exists {
+		tx, ok := raw.(*sql.Tx)
+		if !ok {
+			c.JSON(500, gin.H{"error": "正文授权验证失败，请重试"})
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			c.JSON(500, gin.H{"error": "正文授权验证失败，请重试"})
+			return
+		}
+		c.Set(readAuthorizationCommittedKey, true)
+	}
+	charge := func() (func(), error) {
+		if h.contentCharge == nil {
+			return func() {}, nil
+		}
+		return h.contentCharge(c.Request.Context(), getUserID(c))
+	}
+	if err = h.contentService.Fetch(c.Request.Context(), article, charge); err != nil {
+		if !writeTaskBudgetError(c, err) {
+			writeExploreError(c, err)
+		}
 		return
 	}
 	c.Header("Cache-Control", "private, no-cache")

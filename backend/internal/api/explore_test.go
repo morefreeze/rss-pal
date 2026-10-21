@@ -2,8 +2,12 @@ package api
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -12,8 +16,10 @@ import (
 	"time"
 
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
+	"github.com/bytedance/rss-pal/internal/explorecontent"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository"
+	"github.com/bytedance/rss-pal/internal/repository/testdb"
 	"github.com/gin-gonic/gin"
 )
 
@@ -429,5 +435,60 @@ func TestExploreDiscoveryFilterValidation(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("invalid channel accepted: %s status=%d", channel, w.Code)
 		}
+	}
+}
+
+func TestExploreContentAuthorizationPrecedesCache(t *testing.T) {
+	store := &fakeExploreStore{err: repository.ErrExploreNotFound}
+	handler := newExploreHandlerWithStore(store, time.Now)
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", 7) })
+	router.POST("/api/explore/articles/:id/content", handler.FetchArticleContent)
+	w := performExploreRequest(router, http.MethodPost, "/api/explore/articles/23/content", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("invisible article reached unavailable cache: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if store.lastArticleID != 23 || store.lastUserID != 7 {
+		t.Fatalf("authorization not called: %+v", store)
+	}
+}
+
+func TestExploreContentHTTPReleasesAuthorizationTransactionAndReadsCache(t *testing.T) {
+	db, done := testdb.New(t)
+	defer done()
+	var sid, id int
+	if err := db.QueryRow(`INSERT INTO recommended_feeds(url,title,normalized_url,category,language) VALUES ('https://8.8.8.8/feed','test','https://8.8.8.8/feed','test','en') RETURNING id`).Scan(&sid); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO explore_articles(source_id,url,normalized_url,title,content,fetched_at) VALUES ($1,'https://8.8.8.8/page','https://8.8.8.8/page','test','intro',NOW()) RETURNING id`, sid).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	var requestTx *sql.Tx
+	calls, charges := 0, 0
+	client := &http.Client{Transport: captchaRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if err := requestTx.QueryRow(`SELECT 1`).Scan(new(int)); !errors.Is(err, sql.ErrTxDone) {
+			t.Errorf("network held auth transaction: %v", err)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`<article><p>` + strings.Repeat("Full original text. ", 30) + `</p></article>`)), Request: r}, nil
+	})}
+	intro := "intro"
+	store := &fakeExploreStore{detail: &repository.ExploreArticleDetail{ID: id, URL: "https://8.8.8.8/page", Content: &intro}}
+	handler := newExploreHandlerWithStore(store, time.Now)
+	handler.contentService = explorecontent.NewArticleContentService(db, client)
+	handler.contentCharge = func(context.Context, int) (func(), error) { charges++; return func() {}, nil }
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", 7) }, RLSTxMiddleware(db), func(c *gin.Context) { requestTx = c.MustGet(CtxKeyTx).(*sql.Tx) })
+	router.POST("/api/explore/articles/:id/content", handler.FetchArticleContent)
+	router.GET("/api/explore/articles/:id", handler.GetArticle)
+	path := fmt.Sprintf("/api/explore/articles/%d", id)
+	for _, req := range []struct{ method, path string }{{http.MethodPost, path + "/content"}, {http.MethodGet, path}, {http.MethodPost, path + "/content"}} {
+		w := performExploreRequest(router, req.method, req.path, nil)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"content_status":"fetched"`) {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+	if calls != 1 || charges != 1 {
+		t.Fatalf("calls=%d charges=%d", calls, charges)
 	}
 }

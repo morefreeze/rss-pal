@@ -16,6 +16,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/englife"
 	explorelogic "github.com/bytedance/rss-pal/internal/explore"
+	"github.com/bytedance/rss-pal/internal/explorecontent"
 	"github.com/bytedance/rss-pal/internal/feedcatalog"
 	"github.com/bytedance/rss-pal/internal/opsmonitor"
 	"github.com/bytedance/rss-pal/internal/registrationpolicy"
@@ -154,7 +155,7 @@ func main() {
 	interestsHandler := api.NewInterestsHandler(prefRepo, articleRepo, templateRepo, userInterestsRepo, summarizer, cfg)
 	exploreRepo := repository.NewExploreRepository(db)
 	exploreSubscriber := explorelogic.NewSubscribeService(db)
-	exploreHandler := api.NewExploreHandlerWithSubscriber(exploreRepo, exploreSubscriber)
+	exploreHandler := api.NewExploreHandlerWithSubscriber(exploreRepo, exploreSubscriber).WithContentService(explorecontent.NewArticleContentService(adminDB, nil), taskBudgets, policies)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo)
 	dailyHandler := api.NewDailyHandler(articleRepo, dailyDigestRepo)
 	briefingHandler := api.NewBriefingHandler(userRepo)

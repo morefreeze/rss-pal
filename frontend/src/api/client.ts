@@ -526,6 +526,9 @@ export interface ExploreSource {
 }
 
 export interface ExploreArticleDetail {
+  content_status?: 'feed' | 'fetching' | 'fetched' | 'failed'
+  content_error?: string
+  content_retry_at?: string
   normalized_url?: string
   saved?: boolean
   skipped?: boolean
@@ -602,6 +605,9 @@ export const getExploreSources = () =>
 
 export const getExploreArticle = (id: number) =>
   api.get<ExploreArticleDetail>(`/explore/articles/${id}`).then(res => res.data)
+
+export const fetchExploreArticleContent = (id: number, signal?: AbortSignal) =>
+  api.post<ExploreArticleDetail>(`/explore/articles/${id}/content`, {}, { timeout: 35000, signal }).then(res => res.data)
 
 export const createExploreFeedback = (input: ExploreFeedbackInput) =>
   api.post<ExploreFeedback>('/explore/feedback', input).then(res => res.data)

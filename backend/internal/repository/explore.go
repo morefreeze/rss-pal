@@ -8,6 +8,7 @@ import (
 
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/repository/ctxkey"
+	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/util"
 	"github.com/lib/pq"
 )
@@ -134,22 +135,25 @@ type ExploreSourceItem struct {
 }
 
 type ExploreArticleDetail struct {
-	ID            int        `json:"id"`
-	SourceID      int        `json:"source_id"`
-	SourceTitle   string     `json:"source_title"`
-	SourceURL     string     `json:"source_url"`
-	SiteURL       *string    `json:"site_url,omitempty"`
-	Title         string     `json:"title"`
-	URL           string     `json:"url"`
-	NormalizedURL string     `json:"normalized_url"`
-	Content       *string    `json:"content"`
-	Excerpt       *string    `json:"excerpt,omitempty"`
-	ThumbnailURL  *string    `json:"thumbnail_url,omitempty"`
-	PublishedAt   *time.Time `json:"published_at"`
-	FetchedAt     time.Time  `json:"fetched_at"`
-	IsSubscribed  bool       `json:"is_subscribed"`
-	Saved         bool       `json:"saved"`
-	Skipped       bool       `json:"skipped"`
+	ContentStatus  string     `json:"content_status"`
+	ContentError   string     `json:"content_error,omitempty"`
+	ContentRetryAt *time.Time `json:"content_retry_at,omitempty"`
+	ID             int        `json:"id"`
+	SourceID       int        `json:"source_id"`
+	SourceTitle    string     `json:"source_title"`
+	SourceURL      string     `json:"source_url"`
+	SiteURL        *string    `json:"site_url,omitempty"`
+	Title          string     `json:"title"`
+	URL            string     `json:"url"`
+	NormalizedURL  string     `json:"normalized_url"`
+	Content        *string    `json:"content"`
+	Excerpt        *string    `json:"excerpt,omitempty"`
+	ThumbnailURL   *string    `json:"thumbnail_url,omitempty"`
+	PublishedAt    *time.Time `json:"published_at"`
+	FetchedAt      time.Time  `json:"fetched_at"`
+	IsSubscribed   bool       `json:"is_subscribed"`
+	Saved          bool       `json:"saved"`
+	Skipped        bool       `json:"skipped"`
 }
 
 type ExploreFeedbackInput struct {
@@ -298,7 +302,8 @@ func visibleFormalNormalizedURLs(db Querier, userID int) ([]string, error) {
 }
 
 func normalizeExploreArticleListItem(item ExploreArticleListItem) ExploreArticleListItem {
-	runes := []rune(item.Excerpt)
+	runes := []rune(rss.PlainExcerpt(item.Excerpt))
+	item.Excerpt = string(runes)
 	if len(runes) > MaxExploreListExcerptRunes {
 		item.Excerpt = string(runes[:MaxExploreListExcerptRunes])
 	}
@@ -609,6 +614,11 @@ func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreAr
 	if err != nil {
 		return nil, err
 	}
+	if detail.Excerpt != nil {
+		value := rss.PlainExcerpt(*detail.Excerpt)
+		detail.Excerpt = &value
+	}
+	detail.ContentStatus = "feed"
 	return &detail, nil
 }
 

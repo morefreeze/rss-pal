@@ -804,3 +804,10 @@ func TestExploreExhaustedSnapshotFallsBackWithoutWaitingForNextSlot(t *testing.T
 		t.Fatalf("all hidden page=%+v err=%v", page, err)
 	}
 }
+
+func TestExploreExcerptNormalizesMarkupBeforeClipping(t *testing.T) {
+	item := normalizeExploreArticleListItem(ExploreArticleListItem{Excerpt: `<p>` + strings.Repeat("界", 500) + `</p><p>tail<script>danger()</script></p>`})
+	if item.Excerpt != strings.Repeat("界", 500) {
+		t.Fatalf("markup leaked or clipping lost body prefix: %q", item.Excerpt)
+	}
+}

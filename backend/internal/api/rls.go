@@ -13,6 +13,7 @@ import (
 // stored. Aliases ctxkey.Tx so the api package and repository WithCtx
 // helpers share a single source of truth for the string literal.
 const CtxKeyTx = ctxkey.Tx
+const readAuthorizationCommittedKey = "rss:read-authorization-committed"
 
 // RLSTxMiddleware opens a per-request transaction, sets app.user_id (and
 // app.is_admin if applicable) via SET LOCAL, and exposes the tx via the gin
@@ -74,6 +75,13 @@ func RLSTxMiddleware(db *sql.DB) gin.HandlerFunc {
 		}()
 
 		c.Next()
+
+		if c.GetBool(readAuthorizationCommittedKey) {
+			committed = true
+			runAfterCommit(c)
+			writeCommittedJSON(c)
+			return
+		}
 
 		// Treat any handler-recorded error as a rollback signal. Handlers in this
 		// codebase do not use c.Error() for telemetry or validation logging — only

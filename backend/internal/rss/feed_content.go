@@ -36,18 +36,26 @@ func NormalizeFeedContent(raw, articleURL string) string {
 
 func feedContainsHTML(raw string) bool {
 	candidate := markdownCodeForHTMLDetection.ReplaceAllString(raw, "")
+	candidate = strings.ReplaceAll(candidate, "< ", "&lt; ")
 	tokenizer := html.NewTokenizer(strings.NewReader(candidate))
 	for {
 		switch tokenizer.Next() {
 		case html.ErrorToken:
 			return false
 		case html.StartTagToken, html.SelfClosingTagToken:
+			rawToken := string(tokenizer.Raw())
+			if len(rawToken) < 2 || rawToken[1] == ' ' {
+				continue
+			}
 			token := tokenizer.Token()
 			// Known HTML elements only: Markdown autolinks and literal <Type>
 			// placeholders must not turn otherwise plain Markdown into HTML.
-			if token.DataAtom != 0 {
+			if token.DataAtom != 0 && strings.Contains(feedElementNames, "|"+token.Data+"|") {
 				return true
 			}
 		}
 	}
 }
+
+// HTML atoms also include attribute names such as type; only element names indicate markup.
+const feedElementNames = "|a|abbr|address|article|aside|audio|b|blockquote|body|br|button|caption|cite|code|col|colgroup|data|dd|del|details|dfn|dialog|div|dl|dt|em|embed|fieldset|figcaption|figure|footer|form|h1|h2|h3|h4|h5|h6|head|header|hgroup|hr|html|i|iframe|img|input|ins|kbd|label|legend|li|link|main|mark|menu|meta|nav|noscript|object|ol|option|p|picture|pre|q|rp|rt|ruby|s|samp|script|section|select|small|source|span|strong|style|sub|summary|sup|table|tbody|td|template|textarea|tfoot|th|thead|time|title|tr|track|u|ul|var|video|wbr|"

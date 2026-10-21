@@ -481,17 +481,23 @@ func (f *ContentFetcher) FetchContentFromReader(r io.Reader) (string, error) {
 // FetchContentWithMetadataFromReader extracts content and page metadata from
 // an io.Reader (for testing or reuse).
 func (f *ContentFetcher) FetchContentWithMetadataFromReader(r io.Reader) (ContentResult, error) {
+	return f.FetchContentWithMetadataFromReaderURL(r, "")
+}
+
+// FetchContentWithMetadataFromReaderURL resolves document references against the final public URL.
+func (f *ContentFetcher) FetchContentWithMetadataFromReaderURL(r io.Reader, baseURL string) (ContentResult, error) {
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
 		return ContentResult{}, err
 	}
 	title := extractDocumentTitle(doc)
-	publishedAt := ExtractPublishedAt(doc, "")
+	publishedAt := ExtractPublishedAt(doc, baseURL)
 
 	RemoveArticleChrome(doc)
 	StripAvatars(doc)
 	PromoteLazyImages(doc)
 	RemovePresentationImagePlaceholders(doc)
+	ResolveURLs(doc, baseURL)
 
 	_, content := SelectArticleContent(doc, 50)
 

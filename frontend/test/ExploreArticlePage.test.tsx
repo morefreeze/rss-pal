@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +7,7 @@ import type { ExploreArticleDetail, ExploreArticleListItem } from '../src/api/cl
 
 const api = vi.hoisted(() => ({
   getExploreArticle: vi.fn(),
+  fetchExploreArticleContent: vi.fn(),
   updateExploreArticleState: vi.fn(),
   recordExploreArticleEvent: vi.fn(),
   subscribeExploreSource: vi.fn(),
@@ -136,6 +138,83 @@ describe('ExploreArticlePage', () => {
     api.getExploreArticle.mockResolvedValue(detail)
     api.recordExploreArticleEvent.mockResolvedValue({ recorded: true })
     api.subscribeExploreSource.mockResolvedValue({ feed_id: 70, created: true, copied_articles: 4 })
+  })
+
+  it('keeps the feed preview visible while fetching the original and does not count it as completed', async () => {
+    const pending = deferred<ExploreArticleDetail>()
+    api.getExploreArticle.mockResolvedValue({ ...detail, content: 'Short RSS preview', content_status: 'feed' })
+    api.fetchExploreArticleContent.mockReturnValue(pending.promise)
+    renderPage()
+    await screen.findByText('Short RSS preview')
+    await waitFor(() => expect(api.fetchExploreArticleContent).toHaveBeenCalledWith(23, expect.any(AbortSignal)))
+    settleArticleLayout()
+    expect(api.recordExploreArticleEvent.mock.calls.filter(call => call[1] === 'completed_read')).toHaveLength(0)
+    await act(async () => { pending.resolve({ ...detail, content: 'Original body including its final paragraph', content_status: 'fetched' }) })
+    await screen.findByText('Original body including its final paragraph')
+    expect(screen.queryByText('Short RSS preview')).toBeNull()
+  })
+
+  it('starts only one original request under StrictMode replay', async () => {
+    api.getExploreArticle.mockResolvedValue({ ...detail, content: 'Strict preview', content_status: 'feed' })
+    api.fetchExploreArticleContent.mockReturnValue(new Promise(() => {}))
+    render(<StrictMode><MemoryRouter initialEntries={['/explore/articles/23']}><Routes>
+      <Route path="/explore/articles/:id" element={<ExploreArticlePage />} />
+    </Routes></MemoryRouter></StrictMode>)
+    await screen.findByText('Strict preview')
+    await waitFor(() => expect(api.fetchExploreArticleContent).toHaveBeenCalledTimes(1))
+  })
+
+  it('does not automatically retry a failed original fetch in cooldown', async () => {
+    const failed = { ...detail, content: 'Cooldown preview', content_status: 'failed' as const,
+      content_error: '原文暂时无法读取', content_retry_at: '2099-01-01T00:00:00Z' }
+    api.getExploreArticle.mockResolvedValue(failed)
+    api.fetchExploreArticleContent.mockResolvedValue(failed)
+    renderPage()
+    await screen.findByText('Cooldown preview')
+    expect(api.fetchExploreArticleContent).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '重试获取原文' }))
+    await waitFor(() => expect(api.fetchExploreArticleContent).toHaveBeenCalledTimes(1))
+    expect(screen.getByText('Cooldown preview')).toBeTruthy()
+  })
+
+  it('recovers an in-progress original fetch after reopening the article without starting another request', async () => {
+    vi.useFakeTimers()
+    try {
+      api.getExploreArticle.mockResolvedValueOnce({ ...detail, content: 'Shared preview', content_status: 'fetching' })
+        .mockResolvedValueOnce({ ...detail, content: 'Shared fetched body', content_status: 'fetched' })
+      renderPage()
+      await act(async () => {})
+      expect(screen.getByText('Shared preview')).toBeTruthy()
+      expect(api.fetchExploreArticleContent).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(screen.getByText('Shared fetched body')).toBeTruthy()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('retains the preview and offers retry when the original cannot be fetched', async () => {
+    api.getExploreArticle.mockResolvedValue({ ...detail, content: 'Preserved RSS preview', content_status: 'feed' })
+    api.fetchExploreArticleContent.mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ ...detail, content: 'Recovered original content', content_status: 'fetched' })
+    renderPage()
+    await screen.findByText('Preserved RSS preview')
+    fireEvent.click(await screen.findByRole('button', { name: '重试获取原文' }))
+    await screen.findByText('Recovered original content')
+    expect(api.fetchExploreArticleContent).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores original-content results from a previous article', async () => {
+    const pending = deferred<ExploreArticleDetail>()
+    api.getExploreArticle.mockImplementation(async (id: number) => id === 23
+      ? { ...detail, content: 'First preview', content_status: 'feed' }
+      : { ...detail, id: 24, title: 'Next original article', content: 'Next body', content_status: 'fetched' })
+    api.fetchExploreArticleContent.mockReturnValue(pending.promise)
+    renderPage()
+    await waitFor(() => expect(api.fetchExploreArticleContent).toHaveBeenCalled())
+    fireEvent.click(screen.getByTestId('switch-detail'))
+    await screen.findByText('Next original article')
+    await act(async () => { pending.resolve({ ...detail, content: 'Wrong previous original body', content_status: 'fetched' }) })
+    expect(screen.queryByText('Wrong previous original body')).toBeNull()
+    expect(screen.getByText('Next body')).toBeTruthy()
   })
 
   it('shows an already skipped saved article without allowing another skip', async () => {

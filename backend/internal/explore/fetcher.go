@@ -501,7 +501,8 @@ func exploreArticleFromItem(item *gofeed.Item, base *url.URL, fetchedAt time.Tim
 		article.Content = &content
 	}
 	if excerpt := strings.TrimSpace(item.Description); excerpt != "" {
-		article.Excerpt = &excerpt
+		plainExcerpt := rss.PlainExcerpt(excerpt)
+		article.Excerpt = &plainExcerpt
 		if article.Content == nil {
 			article.Content = &excerpt
 		}
