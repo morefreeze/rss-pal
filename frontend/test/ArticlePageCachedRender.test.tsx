@@ -575,6 +575,7 @@ describe('ArticlePage immediate loading', () => {
 
     expect(markdownMocks.render).toHaveBeenCalledWith({
       source: '[[video:youtube:dQw4w9WgXcQ?start=90]]',
+      originalUrl: 'https://example.com/42',
       imageDimensions: undefined,
       suppressVideo: {
         platform: 'youtube',

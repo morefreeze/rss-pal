@@ -285,7 +285,7 @@ export default function ExploreArticlePage() {
 
         {article.content ? (
           <CodeWrapContext.Provider value={reader.codeWrap}>
-            <MarkdownArticle source={article.content} />
+            <MarkdownArticle source={article.content} originalUrl={article.url} />
           </CodeWrapContext.Provider>
         ) : (
           <div className="text-muted">{article.excerpt || '暂无正文'}</div>

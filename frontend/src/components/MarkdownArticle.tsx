@@ -9,7 +9,7 @@ import rehypeKatex from 'rehype-katex'
 import 'highlight.js/styles/github.css'
 import 'katex/dist/katex.min.css'
 import { stripMathShadow, escapeAmbiguousMathDollars } from '../util/mathShadow'
-import { annotateArticleMarkdown, createArticleAnchorRemarkPlugin, findArticleAnchors, normalizeArticleAnchorSource } from '../util/articleAnchors'
+import { createSourceTOCRemarkPlugin, parseArticleAnchor, annotateArticleMarkdown, createArticleAnchorRemarkPlugin, findArticleAnchors, normalizeArticleAnchorSource } from '../util/articleAnchors'
 import VideoEmbed from './VideoEmbed'
 import { useArticleImageSource } from '../util/useArticleImageSource'
 import { parsePlaceholder, type VideoEmbedData } from './parseVideoPlaceholder'
@@ -21,6 +21,7 @@ type VideoIdentity = Pick<VideoEmbedData, 'platform' | 'id'>
 
 type Props = {
   source: string
+  originalUrl?: string
   readOnly?: boolean
   // Optional map of original-URL → [width, height]. When present, the
   // matching <img> renders with explicit dimensions so the browser reserves
@@ -183,7 +184,8 @@ type ArticleLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraPro
 function ArticleLink({ href, children, className, node: _node, ...rest }: ArticleLinkProps) {
   const actionContext = useContext(ReaderActionContext)
   const anchorRef = useRef<HTMLAnchorElement>(null)
-  const normalized = href && actionContext ? actionContext.normalizeLink(href) : null
+  const localId = parseArticleAnchor(href)
+  const normalized = href && !localId && actionContext ? actionContext.normalizeLink(href) : null
   const state = normalized && actionContext ? actionContext.getLinkState(normalized) : null
 
   useEffect(() => {
@@ -196,8 +198,15 @@ function ArticleLink({ href, children, className, node: _node, ...rest }: Articl
     <a
       ref={anchorRef}
       href={href}
-      target="_blank"
+      target={localId ? undefined : '_blank'}
       rel="noopener noreferrer"
+      onClick={localId ? (event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+        const target = anchorRef.current?.closest('.markdown-body')?.querySelector<HTMLElement>(`[id="${localId}"]`)
+        if (!target) return
+        event.preventDefault()
+        target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      } : undefined}
       className={[className, state === 'draft' ? 'reader-link-draft' : null].filter(Boolean).join(' ') || undefined}
       data-reader-link-state={state ?? undefined}
       {...rest}
@@ -256,7 +265,7 @@ const COMPONENTS: Components = {
 // Wrapped in React.memo so the parent (ArticlePage) re-rendering on every
 // scroll-progress / activity-tick state change doesn't force a full
 // markdown re-parse and image remount.
-function MarkdownArticle({ source, imageDimensions, suppressVideo, readOnly = false }: Props) {
+function MarkdownArticle({ source, imageDimensions, suppressVideo, originalUrl, readOnly = false }: Props) {
   const cleaned = useMemo(
     () => prepareArticleMarkdown(source),
     [source],
@@ -266,9 +275,10 @@ function MarkdownArticle({ source, imageDimensions, suppressVideo, readOnly = fa
     () => createArticleAnchorRemarkPlugin(articleAnchors),
     [articleAnchors],
   )
+  const sourceTOCRemarkPlugin = useMemo(() => createSourceTOCRemarkPlugin(originalUrl), [originalUrl])
   const remarkPlugins = useMemo(
-    () => [...REMARK_PLUGINS, articleAnchorRemarkPlugin],
-    [articleAnchorRemarkPlugin],
+    () => [...REMARK_PLUGINS, articleAnchorRemarkPlugin, sourceTOCRemarkPlugin],
+    [articleAnchorRemarkPlugin, sourceTOCRemarkPlugin],
   )
   const articleLang = useMemo(() => detectArticleLang(cleaned), [cleaned])
   const dims = imageDimensions ?? null
