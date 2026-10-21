@@ -12,6 +12,6 @@ Architecture: preserve the independent subscription loop and budgets already shi
 - [x] Persist retry state, expose failure/next retry in subscriptions, atomically deduplicate concurrent ingestion, drain uncached bounded batches.
 - [x] Preserve existing content on suspicious shrink/empty/error; conditional replacement to avoid concurrent overwrite; update frontend summaries consistently.
 - [x] Run fixed representative extraction samples (long text, newsletter, code/math, table/images), API/worker/repository regressions and frontend tests/build.
-- [ ] Independent code review; incorporate concurrent master; push master and verify Actions exact revision, migration, containers, public health, >=2 subscription ticks and failure backoff.
+- [x] Independent code review; incorporate concurrent master; push master and verify Actions exact revision, migration, containers, public health, >=2 subscription ticks and failure backoff.
 
 Baseline test environment: isolated PostgreSQL 15 on 127.0.0.1:55441, tmpfs PGDATA, serial database tests. Initial disk-backed run failed because Docker VM disk was full; removed only this task's disposable test container/volume and switched test DB storage to tmpfs. This is infrastructure failure, not product test evidence.
