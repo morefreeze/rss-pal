@@ -350,6 +350,9 @@ select.toolbar-control { padding-right: 28px; }
 .article-list-heading h2 {
   min-width: 0;
 }
+.overflow-menu-root { position: relative; display: inline-block; }
+.overflow-menu-panel { min-width: 240px; max-width: min(320px, 90vw); }
+
 .article-list-toolbar {
   display: flex;
   align-items: center;
@@ -1280,9 +1283,20 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
     flex-direction: column;
   }
   .article-list-toolbar--compact {
+    position: relative;
     width: 100%;
     justify-content: flex-start;
   }
+  /* Anchor to the toolbar even when the trigger wraps onto a new line.
+     Nested pickers must use the panel width, not the viewport width. */
+  .article-list-toolbar--compact .overflow-menu-root { position: static; }
+  .article-list-toolbar--compact .overflow-menu-panel {
+    width: min(320px, 100%);
+    min-width: 0;
+    max-width: 100%;
+  }
+  .article-list-toolbar--compact .feed-picker-popover { width: 100%; max-width: 100%; }
+  .article-list-toolbar--compact input.toolbar-control { font-size: 16px; }
   .article-list-toolbar--compact .toolbar-checkbox {
     flex: 0 0 auto;
     white-space: nowrap;

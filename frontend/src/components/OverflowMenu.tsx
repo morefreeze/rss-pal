@@ -31,7 +31,7 @@ export default function OverflowMenu({ children, title = '更多' }: Props) {
   }, [open])
 
   return (
-    <div ref={rootRef} style={{ position: 'relative', display: 'inline-block' }}>
+    <div ref={rootRef} className="overflow-menu-root">
       <button
         type="button"
         className="btn-ghost"
@@ -46,12 +46,11 @@ export default function OverflowMenu({ children, title = '更多' }: Props) {
       {open && (
         <div
           role="menu"
+          className="overflow-menu-panel"
           style={{
             position: 'absolute',
             top: 'calc(100% + 6px)',
             right: 0,
-            minWidth: 240,
-            maxWidth: 'min(320px, 90vw)',
             background: 'var(--bg-elevated, var(--surface, white))',
             border: '1px solid var(--border, #e5e5e5)',
             borderRadius: 8,
