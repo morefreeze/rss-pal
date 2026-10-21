@@ -106,3 +106,30 @@ describe('BatchFetchConfirmDialog drafts', () => {
     expect(screen.getByRole('dialog')).toBeTruthy()
   })
 })
+
+
+it('renders multiline private notes as escaped wrapping text and omits empty notes', () => {
+  const note = 'A thought\n<script>alert("private")</script> ' + 'long'.repeat(40)
+  const { container } = renderDialog({ drafts: [
+    { ...drafts[0], capture_note: note },
+    { ...drafts[1], capture_note: '   ' },
+    drafts[2],
+  ] })
+  const row = screen.getAllByTestId('draft-row')[0]
+  const noteText = within(row).getByText((_, element) => element?.textContent === note)
+  expect(noteText.textContent).toBe(note)
+  expect(noteText.style.whiteSpace).toBe('pre-wrap')
+  expect(noteText.style.overflowWrap).toBe('anywhere')
+  expect(screen.getAllByText('随手记')).toHaveLength(1)
+  expect(container.querySelector('script')).toBeNull()
+  expect(within(row).queryByRole('textbox')).toBeNull()
+})
+
+it('submits only title and URL so the server can transfer the latest private note', async () => {
+  mockedBatchFetch.mockResolvedValue({ inserted: 1 })
+  renderDialog({ drafts: [{ ...drafts[0], capture_note: 'Potentially stale private thought' }] })
+  fireEvent.click(screen.getByRole('button', { name: '开始抓取（1）' }))
+  await waitFor(() => expect(mockedBatchFetch).toHaveBeenCalledWith(7, [
+    { title: 'A title', url: 'https://a.example/' },
+  ]))
+})

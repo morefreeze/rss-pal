@@ -27,7 +27,14 @@ export function useArticleCaptureDrafts(articleId: number, fetchedURLs: Readonly
     for (const draft of current?.remote ?? []) {
       merged = addDraftTargets(merged, [draft], fetchedURLSet, draft.addedAt)
     }
-    return removeDraftURLs(merged, fetchedURLSet)
+    // addDraftTargets deliberately keeps the local scratchpad's title/order and
+    // strips server properties. Overlay notes only in this derived view so a
+    // duplicate receives every fresh server note without persisting private text.
+    const remoteByURL = new Map((current?.remote ?? []).map(draft => [draft.url, draft]))
+    return removeDraftURLs(merged, fetchedURLSet).map(draft => {
+      const remote = remoteByURL.get(draft.url)
+      return remote?.capture_note !== undefined ? { ...draft, capture_note: remote.capture_note } : draft
+    })
   }, [current, fetchedURLSet])
 
   useEffect(() => {

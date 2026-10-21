@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/lib/pq"
 	"strings"
@@ -151,20 +153,53 @@ func (r *ArticleRepository) EnableAndInsertLinkSetChildren(parentID int, childre
 	if affected != 1 {
 		return 0, fmt.Errorf("parent article %d not found", parentID)
 	}
-	inserted, err := insertLinkSetChildren(tx, children)
-	if err != nil {
-		return 0, err
-	}
-	urls := make([]string, 0, len(children))
+	inserted := 0
+	seen := make(map[string]bool, len(children))
 	for _, child := range children {
+		if child.ParentArticleID != parentID {
+			return 0, fmt.Errorf("child does not belong to parent article %d", parentID)
+		}
 		canonical, err := normalizeCaptureDraftURL(child.URL)
 		if err != nil {
 			return 0, err
 		}
-		urls = append(urls, canonical)
-	}
-	if _, err := tx.Exec(`DELETE FROM article_capture_drafts WHERE article_id=$1 AND url=ANY($2)`, parentID, pq.Array(urls)); err != nil {
-		return 0, err
+		if seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		aliases := captureDraftURLAliases(canonical)
+		// A root origin may have been stored with or without its slash. Resolve
+		// the existing child before inserting so both forms share the same note.
+		var childID int
+		err = tx.QueryRow(`SELECT id FROM articles WHERE parent_article_id=$1 AND url=ANY($2) ORDER BY id LIMIT 1`, parentID, pq.Array(aliases)).Scan(&childID)
+		if errors.Is(err, sql.ErrNoRows) {
+			n, insertErr := insertLinkSetChildren(tx, []LinkSetChildInput{child})
+			if insertErr != nil {
+				return 0, insertErr
+			}
+			inserted += n
+			err = tx.QueryRow(`SELECT id FROM articles WHERE parent_article_id=$1 AND url=ANY($2) ORDER BY id LIMIT 1`, parentID, pq.Array(aliases)).Scan(&childID)
+		}
+		if err != nil {
+			return 0, err
+		}
+		var userID int
+		var note string
+		// Read the latest server draft under the parent lock held by UPDATE.
+		// Only the parent's owner can transfer a draft to their own child.
+		err = tx.QueryRow(`DELETE FROM article_capture_drafts d WHERE d.article_id=$1 AND d.url=$2
+ AND d.user_id=(SELECT f.owner_id FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.id=$1)
+ AND EXISTS(SELECT 1 FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.id=$3 AND f.owner_id=d.user_id)
+ RETURNING d.user_id,d.capture_note`, parentID, canonical, childID).Scan(&userID, &note)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if _, err := (&CaptureNoteRepository{db: tx}).appendStored(userID, childID, note); err != nil {
+			return 0, err
+		}
 	}
 	if err := commit(); err != nil {
 		return 0, err

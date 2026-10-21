@@ -18,8 +18,34 @@ add_deploy_service() {
   DEPLOY_SERVICES+=("$candidate")
 }
 
+normalize_status_migrate_command() {
+  # Only the existing migration service's one-line psql command may differ.
+  # Any other Compose change retains the conservative full-service rollout.
+  awk '
+    /^  [^ ]/ { in_migrate = ($0 == "  status-migrate:") }
+    in_migrate && /^    command: \["sh", "-ec", "psql -v ON_ERROR_STOP=1 -f \/migrations\// {
+      commands++
+      print "    command: <ordered migrations>"
+      next
+    }
+    { print }
+    END { if (commands != 1) exit 1 }
+  '
+}
+
+only_status_migrate_command_changed() {
+  local file="$1" before="$2" after="$3"
+  local previous current previous_normalized current_normalized
+  [ "$file" = docker-compose.yml ] && [ -n "$before" ] && [ -n "$after" ] || return 1
+  previous=$(git show "$before:$file" 2>/dev/null) || return 1
+  current=$(git show "$after:$file" 2>/dev/null) || return 1
+  previous_normalized=$(printf '%s\n' "$previous" | normalize_status_migrate_command) || return 1
+  current_normalized=$(printf '%s\n' "$current" | normalize_status_migrate_command) || return 1
+  [ "$previous_normalized" = "$current_normalized" ]
+}
+
 select_deploy_services() {
-  local changed_files="$1" file
+  local changed_files="$1" before="${2:-}" after="${3:-}" file
   DEPLOY_ALL=false
   DEPLOY_BACKEND=false
   DEPLOY_SERVICES=()
@@ -28,8 +54,13 @@ select_deploy_services() {
     [ -z "$file" ] && continue
     case "$file" in
       docker-compose*.yml)
-        DEPLOY_ALL=true
         DEPLOY_BACKEND=true
+        if only_status_migrate_command_changed "$file" "$before" "$after"; then
+          add_deploy_service api
+          add_deploy_service worker
+        else
+          DEPLOY_ALL=true
+        fi
         ;;
       backend/*)
         DEPLOY_BACKEND=true
@@ -324,7 +355,7 @@ else
 fi
 
 configure_compose_files
-select_deploy_services "$CHANGED_FILES"
+select_deploy_services "$CHANGED_FILES" "$PREV_COMMIT" "$(git rev-parse HEAD)"
 RUNTIME_CHANGED=false
 if [ "$DEPLOY_ALL" = "true" ] || [ "${#DEPLOY_SERVICES[@]}" -gt 0 ]; then
   RUNTIME_CHANGED=true

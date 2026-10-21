@@ -15,6 +15,8 @@ export type DraftLink = {
   url: string
   title: string
   addedAt: number
+  // Private server draft metadata, used only for the merged reader view.
+  capture_note?: string
 }
 
 export type DraftTarget = Pick<DraftLink, 'url' | 'title'>

@@ -312,7 +312,7 @@ export async function getArticleCandidates(articleId: number): Promise<Candidate
 }
 
 export interface ArticleCaptureDrafts {
-  drafts: Array<{ url: string; title: string; addedAt: number }>
+  drafts: Array<{ url: string; title: string; addedAt: number; capture_note?: string }>
   fetched_link_urls: string[]
 }
 

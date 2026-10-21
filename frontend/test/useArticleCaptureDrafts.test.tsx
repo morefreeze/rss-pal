@@ -179,3 +179,51 @@ it('clears the original persisted duplicate after a remote removal finishes on a
   rerender({id:42})
   expect(result.current.draftLinks).toEqual([])
 })
+
+
+it('shows the remote private note on a normalized local duplicate without mirroring it to local storage', async () => {
+  saveDraftLinks(42, [local])
+  const imported = { ...local, url: 'https://EXAMPLE.com/manual/?utm_source=shortcut', capture_note: 'Private thought\nSecond line' }
+  vi.mocked(getArticleCaptureDrafts).mockResolvedValue({ drafts: [remote, imported], fetched_link_urls: [] })
+  const { result } = renderHook(() => useArticleCaptureDrafts(42, emptyFetched))
+  await act(async () => {})
+  expect(result.current.draftLinks).toEqual([{ ...local, capture_note: imported.capture_note }, remote])
+  act(() => { result.current.addDrafts([{ url: 'https://example.com/extra', title: 'Extra' }]) })
+  act(() => { result.current.enrichDrafts([{ url: local.url, title: 'Discovered title' }]) })
+  const saved = JSON.parse(localStorage.getItem('rsspal_batch_sel_42')!)
+  expect(saved.links).toEqual([local, expect.objectContaining({url: 'https://example.com/extra', title: 'Extra'})])
+  expect(JSON.stringify(saved)).not.toContain('capture_note')
+  expect(JSON.stringify(saved)).not.toContain('Private thought')
+})
+
+it('refreshes changed remote notes on focus and polling even when the URL and title stay the same', async () => {
+  vi.useFakeTimers()
+  saveDraftLinks(42, [local])
+  const imported = { ...local, capture_note: 'First thought' }
+  vi.mocked(getArticleCaptureDrafts).mockResolvedValue({ drafts: [imported], fetched_link_urls: [] })
+  const { result } = renderHook(() => useArticleCaptureDrafts(42, emptyFetched))
+  await act(async () => {})
+  expect(result.current.draftLinks[0]).toEqual({ ...local, capture_note: 'First thought' })
+  vi.mocked(getArticleCaptureDrafts).mockResolvedValue({ drafts: [{ ...imported, capture_note: 'Latest thought' }], fetched_link_urls: [] })
+  await act(async () => { window.dispatchEvent(new Event('focus')) })
+  expect(result.current.draftLinks[0]).toEqual({ ...local, capture_note: 'Latest thought' })
+  vi.mocked(getArticleCaptureDrafts).mockResolvedValue({ drafts: [{ ...imported, capture_note: '' }], fetched_link_urls: [] })
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+  expect(result.current.draftLinks[0]).toEqual({ ...local, capture_note: '' })
+  expect(JSON.parse(localStorage.getItem('rsspal_batch_sel_42')!).links).toEqual([local])
+})
+
+it('retains a remote note while deletion is pending until deletion succeeds', async () => {
+  const imported = { ...remote, capture_note: 'Keep until confirmed' }
+  vi.mocked(getArticleCaptureDrafts).mockResolvedValue({ drafts: [imported], fetched_link_urls: [] })
+  const { result } = renderHook(() => useArticleCaptureDrafts(42, emptyFetched))
+  await act(async () => {})
+  const pending = deferred<void>()
+  vi.mocked(removeArticleCaptureDrafts).mockReturnValueOnce(pending.promise)
+  let removal!: Promise<void>
+  act(() => { removal = result.current.removeDrafts([remote.url]) })
+  expect(result.current.draftLinks).toEqual([imported])
+  await act(async () => { pending.resolve(); await removal })
+  expect(result.current.draftLinks).toEqual([])
+  expect(localStorage.getItem('rsspal_batch_sel_42')).toBeNull()
+})

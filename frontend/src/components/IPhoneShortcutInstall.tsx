@@ -1,5 +1,7 @@
 /** The URL must be an actual published Apple installer, never a setup guide. */
 export const IPHONE_SHORTCUT_INSTALL_URL = 'https://www.icloud.com/shortcuts/98ef2f6cfbe740e092908ab72ea9240e'
+// Change only after downloading and inspecting the published Apple archive.
+export const IPHONE_SHORTCUT_SUPPORTS_CAPTURE_NOTES = false
 
 export default function IPhoneShortcutInstall({ url = IPHONE_SHORTCUT_INSTALL_URL }: { url?: string } = {}) {
   if (!/^https:\/\/www\.icloud\.com\/shortcuts\/[a-f0-9]{32}$/i.test(url)) {
@@ -18,6 +20,7 @@ export default function IPhoneShortcutInstall({ url = IPHONE_SHORTCUT_INSTALL_UR
     <p className="text-muted text-sm" style={{ marginTop: 8 }}>
       在系统页面确认添加后，返回这里连接当前账号。共享链接后，回原文章确认并点“开始抓取”。已有旧版快捷指令时，请替换为新版。
     </p>
+    {!IPHONE_SHORTCUT_SUPPORTS_CAPTURE_NOTES && <p className="text-muted text-sm">当前安装版只保存链接；每次共享填写想法的新版尚未发布。</p>}
     <a href={url} className="text-sm">使用 Apple 安装页</a>
   </div>
 }

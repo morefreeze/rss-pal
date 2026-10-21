@@ -19,6 +19,17 @@ describe('link set draft persistence', () => {
     expect(loadDraftLinks(7, localStorage, 2_000)).toEqual(links)
   })
 
+  it('never persists private remote note properties into the offline scratchpad', () => {
+    const draft = { url: 'https://example.com/a', title: 'A', addedAt: 100, capture_note: 'Private thought' }
+    saveDraftLinks(7, [draft], localStorage, 1_000)
+    expect(JSON.parse(localStorage.getItem('rsspal_batch_sel_7')!).links).toEqual([
+      { url: draft.url, title: draft.title, addedAt: draft.addedAt },
+    ])
+    expect(loadDraftLinks(7, localStorage, 2_000)).toEqual([
+      { url: draft.url, title: draft.title, addedAt: draft.addedAt },
+    ])
+  })
+
   it('migrates v1 URL arrays into normalized ordered drafts', () => {
     localStorage.setItem('rsspal_batch_sel_7', JSON.stringify({
       urls: [

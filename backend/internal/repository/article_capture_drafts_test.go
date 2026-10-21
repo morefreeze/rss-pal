@@ -1,9 +1,45 @@
 package repository
 
 import (
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/bytedance/rss-pal/internal/repository/testdb"
 )
+
+func TestShortcutDraftNoteMigrationPreservesPending(t *testing.T) {
+	db, cleanup := testdb.NewThroughMigration(t, "059_article_capture_drafts.sql")
+	defer cleanup()
+	var owner, feed, article int
+	if err := db.QueryRow(`INSERT INTO users(username,password_hash) VALUES('note-upgrade','x') RETURNING id`).Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO feeds(url,title,owner_id) VALUES('https://upgrade.example','Upgrade',$1) RETURNING id`, owner).Scan(&feed); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`INSERT INTO articles(feed_id,url,title,content) VALUES($1,'https://upgrade.example/post','Source','[Link](https://example.com/upgrade)') RETURNING id`, feed).Scan(&article); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO article_capture_drafts(user_id,article_id,url,title) VALUES($1,$2,'https://example.com/upgrade','Link')`, owner, article); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := testdb.ExecuteMigrationFile(db, "061_shortcut_capture_notes.sql"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var note, title string
+	if err := db.QueryRow(`SELECT capture_note,title FROM article_capture_drafts WHERE article_id=$1`, article).Scan(&note, &title); err != nil {
+		t.Fatal(err)
+	}
+	if note != "" || title != "Link" {
+		t.Fatalf("migration changed legacy draft note=%q title=%q", note, title)
+	}
+	if _, err := db.Exec(`UPDATE article_capture_drafts SET capture_note=$1 WHERE article_id=$2`, strings.Repeat("字", 10001), article); err == nil {
+		t.Fatal("database accepted draft note over total limit")
+	}
+}
 
 func TestCaptureLinkTitleMatchesReaderURLIdentity(t *testing.T) {
 	for _, tc := range []struct {
@@ -44,7 +80,7 @@ func TestShortcutDraftConcurrentSharesAndConfirmation(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := repo.AddShortcutCaptureDraft(owner, 0, "https://example.com/pending#section")
+			_, err := repo.AddShortcutCaptureDraftWithNote(owner, 0, "https://example.com/pending#section", "concurrent thought")
 			failures <- err
 		}()
 	}
@@ -67,7 +103,7 @@ func TestShortcutDraftConcurrentSharesAndConfirmation(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := repo.AddShortcutCaptureDraft(owner, 0, "https://example.com/pending")
+			_, err := repo.AddShortcutCaptureDraftWithNote(owner, 0, "https://example.com/pending", "concurrent thought")
 			failures <- err
 		}()
 	}
@@ -95,5 +131,12 @@ func TestShortcutDraftConcurrentSharesAndConfirmation(t *testing.T) {
 	}
 	if drafts != 0 || children != 1 {
 		t.Fatalf("concurrent share resurrected draft: drafts=%d children=%d", drafts, children)
+	}
+	var note string
+	if err := db.QueryRow(`SELECT n.capture_note FROM article_capture_notes n JOIN articles a ON a.id=n.article_id WHERE a.parent_article_id=$1 AND n.user_id=$2`, parent, owner).Scan(&note); err != nil {
+		t.Fatal(err)
+	}
+	if note != "concurrent thought" {
+		t.Fatalf("concurrent notes lost or duplicated: %q", note)
 	}
 }
