@@ -154,7 +154,7 @@ func main() {
 	userInterestsRepo := repository.NewUserInterestRepository(db)
 	interestsHandler := api.NewInterestsHandler(prefRepo, articleRepo, templateRepo, userInterestsRepo, summarizer, cfg)
 	exploreRepo := repository.NewExploreRepository(db)
-	exploreSubscriber := explorelogic.NewSubscribeService(db)
+	exploreSubscriber := explorelogic.NewSubscribeService(db).WithContentCache(adminDB)
 	exploreHandler := api.NewExploreHandlerWithSubscriber(exploreRepo, exploreSubscriber).WithContentService(explorecontent.NewArticleContentService(adminDB, nil), taskBudgets, policies)
 	weeklyHandler := api.NewWeeklyHandler(articleRepo, weeklyDigestRepo)
 	dailyHandler := api.NewDailyHandler(articleRepo, dailyDigestRepo)

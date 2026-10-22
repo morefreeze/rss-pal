@@ -18,8 +18,8 @@ func TestCopyExploreArticlesSQLMatchesArticleNaturalKeyAndRefreshesDerivedData(t
 		"target.owner_id=$3",
 		"summary_brief=CASE WHEN",
 		"summary_detailed=CASE WHEN",
-		"word_count=EXCLUDED.word_count",
-		"reading_minutes=EXCLUDED.reading_minutes",
+		"ELSE articles.word_count END",
+		"ELSE articles.reading_minutes END",
 	} {
 		if !strings.Contains(sqlText, required) {
 			t.Errorf("copy SQL missing %q", required)

@@ -45,8 +45,9 @@ type SubscribeResult struct {
 }
 
 type SubscribeService struct {
-	db  Querier
-	now func() time.Time
+	db           Querier
+	contentCache Querier
+	now          func() time.Time
 }
 
 func NewSubscribeService(db Querier, clocks ...func() time.Time) *SubscribeService {
@@ -61,7 +62,7 @@ func (s *SubscribeService) WithQuerier(db Querier) *SubscribeService {
 	if s == nil {
 		return nil
 	}
-	return &SubscribeService{db: db, now: s.now}
+	return &SubscribeService{db: db, contentCache: s.contentCache, now: s.now}
 }
 
 func (s *SubscribeService) WithCtx(c interface{ Get(string) (any, bool) }) *SubscribeService {
@@ -127,7 +128,7 @@ func (s *SubscribeService) Subscribe(userID int, sourceIDs []int) ([]SubscribeRe
 		// Copy public candidate cache only into an owned subscription. Never
 		// use a personal subscription action to mutate unowned source content.
 		if feed.OwnerID != nil {
-			copied, err = copyExploreArticles(tx, userID, source.ID, feed.ID)
+			copied, err = copyExploreArticles(tx, s.contentCache, userID, source.ID, feed.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -246,7 +247,7 @@ func loadPromotableSources(db Querier, userID int, sourceIDs []int, now time.Tim
 }
 
 const copyExploreArticleCandidatesSQL = `
-	SELECT article.title,article.url,article.content,article.published_at,article.fetched_at,article.content_version
+	SELECT article.id,article.title,article.url,article.content,article.published_at,article.fetched_at,article.content_version
 	FROM explore_articles article
 	JOIN feeds target ON target.id=$2
 	WHERE article.source_id=$1
@@ -254,24 +255,25 @@ const copyExploreArticleCandidatesSQL = `
 	ORDER BY article.id
 	FOR SHARE OF target`
 
+// Only a nonempty body at least as long as the current body may replace it.
+// The condition is evaluated under the upsert row lock, including concurrent worker updates.
+const copyExploreBodyAcceptedSQL = `btrim(COALESCE(EXCLUDED.content,''))<>'' AND char_length(COALESCE(EXCLUDED.content,''))>=char_length(COALESCE(articles.content,''))`
 const copyExploreArticleUpsertSQL = `
-	INSERT INTO articles
-		(feed_id,title,url,content,published_at,fetched_at,word_count,reading_minutes)
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-	ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL AND NOT is_clip
-	DO UPDATE SET
-		summary_brief=CASE WHEN articles.content IS DISTINCT FROM EXCLUDED.content
-			THEN NULL ELSE articles.summary_brief END,
-		summary_detailed=CASE WHEN articles.content IS DISTINCT FROM EXCLUDED.content
-			THEN NULL ELSE articles.summary_detailed END,
-		title=EXCLUDED.title,
-		content=EXCLUDED.content,
-		published_at=EXCLUDED.published_at,
-		fetched_at=EXCLUDED.fetched_at,
-		word_count=EXCLUDED.word_count,
-		reading_minutes=EXCLUDED.reading_minutes`
+ INSERT INTO articles(feed_id,title,url,content,published_at,fetched_at,word_count,reading_minutes)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+ ON CONFLICT (feed_id,url) WHERE parent_article_id IS NULL AND NOT is_clip
+ DO UPDATE SET
+ summary_brief=CASE WHEN articles.content IS DISTINCT FROM EXCLUDED.content AND ` + copyExploreBodyAcceptedSQL + ` THEN NULL ELSE articles.summary_brief END,
+ summary_detailed=CASE WHEN articles.content IS DISTINCT FROM EXCLUDED.content AND ` + copyExploreBodyAcceptedSQL + ` THEN NULL ELSE articles.summary_detailed END,
+ title=EXCLUDED.title,
+ content=CASE WHEN ` + copyExploreBodyAcceptedSQL + ` THEN EXCLUDED.content ELSE articles.content END,
+ published_at=EXCLUDED.published_at,
+ fetched_at=GREATEST(articles.fetched_at,EXCLUDED.fetched_at),
+ word_count=CASE WHEN ` + copyExploreBodyAcceptedSQL + ` THEN EXCLUDED.word_count ELSE articles.word_count END,
+ reading_minutes=CASE WHEN ` + copyExploreBodyAcceptedSQL + ` THEN EXCLUDED.reading_minutes ELSE articles.reading_minutes END`
 
 type exploreArticleCopyCandidate struct {
+	id             int
 	contentVersion int
 	title          string
 	url            string
@@ -280,7 +282,7 @@ type exploreArticleCopyCandidate struct {
 	fetchedAt      time.Time
 }
 
-func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) {
+func copyExploreArticles(db Querier, cache Querier, userID, sourceID, feedID int) (int, error) {
 	rows, err := db.Query(copyExploreArticleCandidatesSQL, sourceID, feedID, userID)
 	if err != nil {
 		return 0, err
@@ -289,7 +291,7 @@ func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) 
 	for rows.Next() {
 		var candidate exploreArticleCopyCandidate
 		if err := rows.Scan(
-			&candidate.title, &candidate.url, &candidate.content,
+			&candidate.id, &candidate.title, &candidate.url, &candidate.content,
 			&candidate.publishedAt, &candidate.fetchedAt, &candidate.contentVersion,
 		); err != nil {
 			rows.Close()
@@ -305,10 +307,17 @@ func copyExploreArticles(db Querier, userID, sourceID, feedID int) (int, error) 
 		return 0, err
 	}
 
+	originals, err := loadCopiedOriginals(cache, candidates)
+	if err != nil {
+		return 0, err
+	}
 	copied := 0
 	for _, candidate := range candidates {
 		if candidate.content.Valid && candidate.contentVersion < rss.FeedContentVersion {
 			candidate.content.String = rss.NormalizeFeedContent(candidate.content.String, candidate.url)
+		}
+		if body, ok := originals[candidate.id]; ok && body.url == candidate.url && len([]rune(body.content)) > len([]rune(candidate.content.String)) {
+			candidate.content = sql.NullString{String: body.content, Valid: true}
 		}
 		wordCount, readingMinutes := rss.ComputeMetrics(candidate.content.String)
 		var content interface{}
