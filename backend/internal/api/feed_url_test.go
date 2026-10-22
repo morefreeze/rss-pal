@@ -16,6 +16,14 @@ func TestNormalizeFeedURLCanonicalizesUppercaseHTTPS(t *testing.T) {
 	}
 }
 
+func TestNormalizeFeedURLRejectsInternalSourceSchemes(t *testing.T) {
+	for _, raw := range []string{"extension://twitter:user/1/alice", "bookmarklet://user/1", "https://extension://twitter:user/1/alice", "https://bookmarklet://user/1"} {
+		if normalized, err := normalizeFeedURL(raw); err == nil {
+			t.Errorf("accepted internal source %q as %q", raw, normalized)
+		}
+	}
+}
+
 func TestFeedHandlerUsesPublicFetcher(t *testing.T) {
 	handler := NewFeedHandler(nil, nil, "http://rsshub.internal:1200")
 	_, err := handler.fetcher.Fetch(context.Background(), "http://127.0.0.1:8080/feed", "", "")

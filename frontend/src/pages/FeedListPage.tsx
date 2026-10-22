@@ -8,6 +8,7 @@ import { getSourceDirectory, type FullSourceDirectory } from '../api/sourceDirec
 import { toast } from '../utils/toast'
 import { parseAuthIntent } from '../utils/authIntent'
 import { hackerNewsItemURL } from '../utils/hackerNews'
+import { feedTypeLabel } from '../utils/feedTypeLabel'
 
 // isPDFURL returns true when the user-supplied URL looks like a PDF.
 // Detection is intentionally URL-only (no HEAD probe) — the backend
@@ -528,9 +529,9 @@ export default function FeedListPage() {
                 style={{ display: 'block', color: 'inherit', textDecoration: 'none', flex: 1, minWidth: 0 }}
               >
                 <div className="text-bold" style={!feed.is_active ? { color: 'var(--fg-muted)' } : {}}>
-                  {feed.title || feed.url}
-                  {feed.feed_type === 'html' && (
-                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#fef9c3', borderRadius: 4, color: '#854d0e' }}>网页</span>
+                  {feed.title?.trim() || feed.url}
+                  {feed.feed_type && feed.feed_type !== 'rss' && (
+                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>{feedTypeLabel(feed.feed_type)}</span>
                   )}
                   {!feed.is_active && (
                     <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>已暂停</span>

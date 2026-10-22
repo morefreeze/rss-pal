@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { FeedHealthRow, updateFeedStatus, updateFeedWeight } from '../api/client'
+import { feedTypeLabel } from '../utils/feedTypeLabel'
 
 type SortKey = 'feed_title' | 'produced' | 'ctr' | 'read_completion' | 'avg_duration_min' | 'last_active_at' | 'value_score'
 
@@ -94,10 +95,12 @@ export default function FeedHealthTable({ rows, onChange }: Props) {
         {sorted.map(r => (
           <tr key={r.feed_id} style={{ borderBottom: '1px solid var(--border)' }}>
             <td style={labelCell}>
-              {r.feed_title}
+              <span>{r.feed_title.trim() || r.feed_url || `Feed #${r.feed_id}`}</span>
+              {r.feed_type && <span className="text-muted text-sm" style={{ marginLeft: 6 }}>{feedTypeLabel(r.feed_type)}</span>}
               {r.status !== 'active' && (
                 <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--fg-muted)' }}>[{r.status}]</span>
               )}
+              {r.feed_url && <div className="text-muted text-sm" style={{ maxWidth: 420, overflowWrap: 'anywhere', marginTop: 3 }}>{r.feed_url}</div>}
             </td>
             <td style={numCell}>{r.produced}</td>
             <td style={numCell}>{pct(r.ctr)}</td>
@@ -106,12 +109,12 @@ export default function FeedHealthTable({ rows, onChange }: Props) {
             <td style={numCell}>{relativeTime(r.last_active_at)}</td>
             <td style={numCell}>{score(r.value_score)}</td>
             <td style={numCell}>{r.priority_weight.toFixed(2)}</td>
-            <td style={labelCell}>
+            <td style={{ ...labelCell, whiteSpace: 'nowrap' }}>
               <button className="btn-ghost btn-sm" onClick={() => handleStatus(r.feed_id, 'paused')} disabled={r.status !== 'active'}>暂停</button>
               <button className="btn-ghost btn-sm" onClick={() => handleStatus(r.feed_id, 'archived')} style={{ marginLeft: 4 }}>归档</button>
               <button className="btn-ghost btn-sm" onClick={() => handleWeight(r.feed_id)} style={{ marginLeft: 4 }}>降权</button>
             </td>
-            <td style={labelCell}>
+            <td style={{ ...labelCell, whiteSpace: 'nowrap' }}>
               {r.pruning_rule && (
                 <span title={r.pruning_rule.reason} style={{ color: '#c33', cursor: 'help' }}>
                   ⚠ {r.pruning_rule.label}
