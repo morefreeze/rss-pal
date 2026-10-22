@@ -4,10 +4,11 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
 import { listFeedCatalog, type PublicCatalogItem } from '../api/feedCatalog'
+import { getSourceDirectory, type FullSourceDirectory } from '../api/sourceDirectory'
 import { toast } from '../utils/toast'
-import { getInitialPopularFeedsExpanded } from '../utils/popularFeedsVisibility'
 import { parseAuthIntent } from '../utils/authIntent'
 import { hackerNewsItemURL } from '../utils/hackerNews'
+import { feedTypeLabel } from '../utils/feedTypeLabel'
 
 // isPDFURL returns true when the user-supplied URL looks like a PDF.
 // Detection is intentionally URL-only (no HEAD probe) — the backend
@@ -28,6 +29,29 @@ export default function FeedListPage() {
     finally { setCatalogLoading(false) }
   }
   useEffect(() => { void loadCatalog() }, [])
+  const [directory, setDirectory] = useState<FullSourceDirectory>()
+  const [directoryLoading, setDirectoryLoading] = useState(true)
+  const [directoryError, setDirectoryError] = useState(false)
+  const directoryRequest = useRef<AbortController | null>(null)
+  const loadDirectory = async () => {
+    directoryRequest.current?.abort()
+    const controller = new AbortController()
+    directoryRequest.current = controller
+    setDirectoryLoading(true)
+    setDirectoryError(false)
+    try {
+      const data = await getSourceDirectory(controller.signal)
+      if (!controller.signal.aborted) setDirectory(data || undefined)
+    } catch {
+      if (!controller.signal.aborted) setDirectoryError(true)
+    } finally {
+      if (!controller.signal.aborted) setDirectoryLoading(false)
+    }
+  }
+  useEffect(() => {
+    void loadDirectory()
+    return () => directoryRequest.current?.abort()
+  }, [])
   const navigate = useNavigate()
   const location = useLocation()
   const [feeds, setFeeds] = useState<Feed[]>([])
@@ -41,7 +65,6 @@ export default function FeedListPage() {
   const [adding, setAdding] = useState(false)
   const [addSuccess, setAddSuccess] = useState('')
   const [capturedHNArticleID, setCapturedHNArticleID] = useState<number | null>(null)
-  const [popularFeedsExpanded, setPopularFeedsExpanded] = useState(getInitialPopularFeedsExpanded)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const consumedSubscribeIntents = useRef(new Set<string>())
   const previewGeneration = useRef(0)
@@ -327,6 +350,7 @@ export default function FeedListPage() {
         <form onSubmit={handlePreview} className="flex gap-2 mb-2">
           <input
             type="text"
+            id="feed-source-url"
             placeholder="输入 RSS 地址、网站 URL、HN 帖子或 PDF 链接"
             value={newUrl}
             onChange={e => { setNewUrl(e.target.value); setPreview(null); setPreviewError('') }}
@@ -464,40 +488,29 @@ export default function FeedListPage() {
           </div>
         )}
 
-        {/* Popular feeds — whole section auto-collapses after 3 days; directory preserves the preview flow */}
-        <div className="mb-2">
-          <button
-            type="button"
-            onClick={() => setPopularFeedsExpanded(expanded => !expanded)}
-            className="btn-text btn-sm text-muted mb-1"
-            aria-expanded={popularFeedsExpanded}
-            aria-controls="popular-feeds-groups"
-            style={{ padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}
-          >
-            <span aria-hidden="true" style={{ fontSize: 10 }}>{popularFeedsExpanded ? '▾' : '▸'}</span>
-            <span>热门推荐：</span>
-          </button>
-          <div id="popular-feeds-groups">
-            {popularFeedsExpanded && (
-              <>
-                {catalogLoading && <p role="status">正在加载推荐…</p>}
-                {catalogError && <div role="alert">推荐目录加载失败 <button type="button" className="secondary" onClick={() => void loadCatalog()}>重试加载推荐</button></div>}
-                {!catalogLoading && !catalogError && catalog.length === 0 && <p className="text-muted">暂无已上架的推荐</p>}
-                {!catalogLoading && !catalogError && <SourceDirectory items={catalog} onPreview={url => { void doPreview(url) }} />}
-              </>
-            )}
-          </div>
-        </div>
       </div>
+
+      <section className="card mb-2" aria-labelledby="source-directory-title">
+        <h3 id="source-directory-title">推荐源分类目录</h3>
+        <p className="text-sm text-muted mt-1">按 Folo 的 17 个分类浏览完整平台与订阅项，也可查看精选推荐。</p>
+        <div id="popular-feeds-groups">
+          {catalogLoading && <p role="status">正在加载推荐…</p>}
+          {catalogError && <div role="alert">推荐目录加载失败 <button type="button" className="secondary" onClick={() => void loadCatalog()}>重试加载推荐</button></div>}
+          {!catalogLoading && !catalogError && catalog.length === 0 && <p className="text-muted">暂无已上架的推荐</p>}
+          <SourceDirectory items={catalog} directory={directory} directoryLoading={directoryLoading} directoryError={directoryError} onReloadDirectory={() => void loadDirectory()} onPreview={url => {
+            void doPreview(url)
+            document.getElementById('feed-source-url')?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+          }} />
+        </div>
+      </section>
 
       {/* Existing feeds list */}
       {feeds.length === 0 ? (
         <div className="card">
-          <p className="text-muted">你还没有订阅。可以从热门推荐中选择，也可以在上方输入订阅地址。</p>
+          <p className="text-muted">你还没有订阅。可以从推荐源分类目录中选择，也可以在上方输入订阅地址。</p>
           <button type="button" className="secondary mt-1" onClick={() => {
-            setPopularFeedsExpanded(true)
             document.getElementById('popular-feeds-groups')?.scrollIntoView?.({ block: 'nearest' })
-          }}>查看热门推荐</button>
+          }}>查看推荐目录</button>
         </div>
       ) : (
         feeds.map(feed => (
@@ -516,9 +529,9 @@ export default function FeedListPage() {
                 style={{ display: 'block', color: 'inherit', textDecoration: 'none', flex: 1, minWidth: 0 }}
               >
                 <div className="text-bold" style={!feed.is_active ? { color: 'var(--fg-muted)' } : {}}>
-                  {feed.title || feed.url}
-                  {feed.feed_type === 'html' && (
-                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: '#fef9c3', borderRadius: 4, color: '#854d0e' }}>网页</span>
+                  {feed.title?.trim() || feed.url}
+                  {feed.feed_type && feed.feed_type !== 'rss' && (
+                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>{feedTypeLabel(feed.feed_type)}</span>
                   )}
                   {!feed.is_active && (
                     <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>已暂停</span>

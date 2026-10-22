@@ -22,3 +22,13 @@
   .source-directory-category { padding: 12px; }
   .source-directory-category-name { flex-wrap: wrap; gap: 4px; }
 }
+.source-directory-metadata { margin-bottom: 6px; overflow-wrap: anywhere; }
+.source-directory-platforms, .source-directory-routes { display: grid; gap: 10px; margin-top: 14px; }
+.source-directory-platform { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.source-directory-platform > div { min-width: 0; overflow-wrap: anywhere; }
+.source-directory-platform h4 { margin: 0; }
+.source-directory-platform p { margin: 6px 0 0; }
+.source-directory-platform button { flex-shrink: 0; }
+.source-directory-more, .source-directory-back { margin: 12px 0; }
+.source-directory-badge { display: inline-block; margin: 4px 8px 0 0; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+@media (max-width: 480px) { .source-directory-platform { flex-wrap: wrap; } }

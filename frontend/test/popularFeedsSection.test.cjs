@@ -1,55 +1,10 @@
 const { readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
-
-const feedListPage = readFileSync(resolve('src/pages/FeedListPage.tsx'), 'utf8')
-
-for (const [expected, label] of [
-  [
-    "import { getInitialPopularFeedsExpanded } from '../utils/popularFeedsVisibility'",
-    'page should import the visibility initializer',
-  ],
-  [
-    'useState(getInitialPopularFeedsExpanded)',
-    'page should lazily derive the initial whole-section state',
-  ],
-  [
-    'aria-expanded={popularFeedsExpanded}',
-    'whole-section button should expose its expanded state',
-  ],
-  [
-    `<span aria-hidden="true" style={{ fontSize: 10 }}>{popularFeedsExpanded ? '▾' : '▸'}</span>`,
-    'whole-section disclosure glyph should be hidden from the accessible name',
-  ],
-  [
-    'setPopularFeedsExpanded(expanded => !expanded)',
-    'whole-section button should toggle only session state',
-  ],
-  [
-    '{popularFeedsExpanded && (',
-    'category groups should render only while the whole section is expanded',
-  ],
-  [
-    '<SourceDirectory items={catalog}',
-    'public catalog should feed the directory',
-  ],
-  [
-    'onPreview={url => { void doPreview(url) }}',
-    'existing recommendation preview action should remain wired',
-  ],
-]) {
-  if (!feedListPage.includes(expected)) {
-    throw new Error(label)
-  }
+const page = readFileSync(resolve('src/pages/FeedListPage.tsx'), 'utf8')
+if (!page.includes('<SourceDirectory items={catalog}') || !page.includes('void doPreview(url)')) {
+  throw new Error('public catalog must retain the existing preview action')
 }
-
-const popularFeedsContainerIndex = feedListPage.indexOf('<div id="popular-feeds-groups">')
-const popularFeedsConditionalIndex = feedListPage.indexOf('{popularFeedsExpanded && (')
-if (
-  popularFeedsContainerIndex < 0 ||
-  popularFeedsConditionalIndex < 0 ||
-  popularFeedsContainerIndex >= popularFeedsConditionalIndex
-) {
-  throw new Error('popular feeds aria-controls target should remain mounted while collapsed')
+if (page.includes('getInitialPopularFeedsExpanded') || page.includes('popularFeedsExpanded')) {
+  throw new Error('the directory must not use the legacy auto-collapse rule')
 }
-
-console.log('popularFeedsSection wiring test passed')
+console.log('source directory integration check passed')

@@ -17,7 +17,7 @@ import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
 import { useBreakpoint } from '../hooks/useBreakpoint'
 import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
 import { useArticleDetailPrefetch } from '../hooks/useArticleDetailPrefetch'
-import FeedSourceLink from '../components/FeedSourceLink'
+import ArticleSourceLink from '../components/ArticleSourceLink'
 import { saveListReturn, takeListReturn } from '../utils/articleListReturn'
 import { pinyinSearchIncludes } from '../utils/pinyinSearch'
 
@@ -172,9 +172,9 @@ function SearchArticleRow({
               <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
               <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} mediaType={article.media_type} mediaDurationSeconds={article.media_duration_seconds} />
             </div>
-            {article.feed_title && (
-              <FeedSourceLink
-                feedId={article.feed_id}
+            {(article.source || article.feed_title) && (
+              <ArticleSourceLink
+                article={article}
                 label={article.feed_title}
                 search={sourceSearch}
                 className="text-sm"
@@ -1067,9 +1067,9 @@ export default function ArticleListPage() {
                     </div>
                     <div className="flex gap-2 mt-1">
                       <span className="text-muted text-sm">{formatDate(article.published_at)}</span>
-                      {article.feed_title && (
-                        <FeedSourceLink
-                          feedId={article.feed_id}
+                      {(article.source || article.feed_title) && (
+                        <ArticleSourceLink
+                          article={article}
                           label={article.feed_title}
                           search={sourceSearch}
                           className="text-sm"

@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/rss"
 	"github.com/bytedance/rss-pal/internal/service"
 	"github.com/bytedance/rss-pal/internal/sharetoken"
+	"github.com/bytedance/rss-pal/internal/sourcedirectory"
 	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/bytedance/rss-pal/internal/version"
@@ -333,6 +334,7 @@ func main() {
 	adminAIGroup.POST("/models", adminAI.Models)
 	catalogService := feedcatalog.NewFeedCatalogService(repository.NewFeedCatalogRepository(adminDB), feedcatalog.CatalogRSSVerifier(cfg.RSSHub.BaseURL))
 	catalogHandler := api.NewFeedCatalogHandler(adminDB, catalogService)
+	apiGroup.GET("/source-directory", api.NewSourceDirectoryHandler(sourcedirectory.New()).Get)
 	apiGroup.GET("/feed-catalog", catalogHandler.PublicList)
 	catalogAdmin := apiGroup.Group("/admin/feed-catalog", catalogHandler.RequireAdmin, api.TaskBudgetMiddleware(taskBudgets, policies))
 	catalogAdmin.GET("", catalogHandler.List)

@@ -1,3 +1,4 @@
+vi.mock('../src/api/sourceDirectory', () => ({ getSourceDirectory: vi.fn().mockResolvedValue(null) }))
 import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -351,7 +352,7 @@ describe('personal subscription onboarding', () => {
   it('keeps a new account empty until a recommendation is explicitly subscribed', async () => {
     localStorage.setItem('rsspal:popular-feeds:first-seen-at', '1')
     renderFeeds('/feeds')
-    const showPopular = await screen.findByRole('button', { name: '查看热门推荐' })
+    const showPopular = await screen.findByRole('button', { name: '查看推荐目录' })
     expect(apiMocks.addFeed).not.toHaveBeenCalled()
     fireEvent.click(showPopular)
     fireEvent.click(screen.getByRole('button', { name: /^博客.*个源$/ }))

@@ -82,7 +82,7 @@ export default function RecommendationsCard({ recommendations, articles }: Props
                     )}
                   </div>
                   <div className="text-muted text-sm" style={{ marginTop: 4 }}>
-                    {meta.feed_title}
+                    {meta.source?.title || meta.feed_title}
                     {meta.brief ? ` · ${meta.brief}` : ''}
                   </div>
                   <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg)' }}>💡 {a.reason}</div>

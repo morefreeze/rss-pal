@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/config"
@@ -24,6 +25,8 @@ func NewFeedHealthHandler(repo *repository.FeedHealthRepository, feedRepo *repos
 type FeedHealthRow struct {
 	FeedID          int                  `json:"feed_id"`
 	FeedTitle       string               `json:"feed_title"`
+	FeedURL         string               `json:"feed_url"`
+	FeedType        string               `json:"feed_type"`
 	Status          string               `json:"status"`
 	PriorityWeight  float64              `json:"priority_weight"`
 	Produced        int                  `json:"produced"`
@@ -89,12 +92,16 @@ func (h *FeedHealthHandler) Get(c *gin.Context) {
 	feedMeta := make(map[int]struct {
 		Status string
 		Weight float64
+		URL    string
+		Type   string
 	}, len(feeds))
 	for _, f := range feeds {
 		feedMeta[f.ID] = struct {
 			Status string
 			Weight float64
-		}{f.Status, f.PriorityWeight}
+			URL    string
+			Type   string
+		}{f.Status, f.PriorityWeight, f.URL, f.FeedType}
 	}
 
 	rows := make([]FeedHealthRow, 0, len(metrics))
@@ -127,6 +134,8 @@ func (h *FeedHealthHandler) Get(c *gin.Context) {
 		row := FeedHealthRow{
 			FeedID:          m.FeedID,
 			FeedTitle:       m.FeedTitle,
+			FeedURL:         meta.URL,
+			FeedType:        meta.Type,
 			Status:          meta.Status,
 			PriorityWeight:  meta.Weight,
 			Produced:        m.Produced,
@@ -160,7 +169,11 @@ func (h *FeedHealthHandler) Get(c *gin.Context) {
 			totalActive++
 		}
 		if f.Status == "archived" {
-			archived = append(archived, ArchivedFeed{FeedID: f.ID, FeedTitle: f.Title})
+			title := strings.TrimSpace(f.Title)
+			if title == "" {
+				title = f.URL
+			}
+			archived = append(archived, ArchivedFeed{FeedID: f.ID, FeedTitle: title})
 		}
 	}
 

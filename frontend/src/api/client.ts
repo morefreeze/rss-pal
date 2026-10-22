@@ -230,7 +230,14 @@ export interface Feed {
 // list endpoint deliberately drops `content` and `summary_detailed` to
 // keep the wire payload small on weak networks. The detail view fetches
 // the full Article via GET /api/articles/:id when the user opens one.
+export interface ArticleSource {
+  key: string
+  title: string
+  url: string
+}
+
 export interface ArticleListItem {
+  source?: ArticleSource
   id: number
   feed_id: number
   feed_title?: string
@@ -264,6 +271,7 @@ export interface ArticleListItem {
 }
 
 export interface Article {
+  source?: ArticleSource
   id: number
   feed_id: number
   feed_title?: string
@@ -285,7 +293,7 @@ export interface Article {
   links_extendable?: boolean | null  // tri-state: null = unchecked, true/false = checked
   link_set_suggested?: boolean | null  // worker thinks article is a link list, awaiting user confirmation
   parent_article_id?: number | null
-  parent_title?: string  // populated only by GET /articles/recommended/link_set
+  parent_title?: string  // populated by article details and link-set recommendations
   is_fallback?: boolean  // true = surfaced by quality-fallback (may be already-read)
   processing_state?: 'ready' | 'stub' | 'queued' | 'processing' | 'failed'
   processing_error?: string
@@ -377,6 +385,7 @@ export interface RecommendationDirection {
 }
 
 export interface RecArticleMeta {
+  source?: ArticleSource
   id: number
   title: string
   feed_title: string
@@ -1200,6 +1209,8 @@ export interface PruningRule {
 export interface FeedHealthRow {
   feed_id: number
   feed_title: string
+  feed_url: string
+  feed_type: string
   status: 'active' | 'paused' | 'archived'
   priority_weight: number
   produced: number

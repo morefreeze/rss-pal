@@ -7,7 +7,7 @@ export default function ArticleDetailPreview({
   article: ArticleListItem
 }) {
   const metadata = [
-    article.feed_title,
+    article.source?.title || article.feed_title,
     article.published_at
       ? new Date(article.published_at).toLocaleString('zh-CN')
       : '',

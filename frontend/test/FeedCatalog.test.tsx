@@ -6,9 +6,11 @@ import FeedListPage from '../src/pages/FeedListPage'
 const mocks = vi.hoisted(() => ({ listFeedCatalog: vi.fn(), listAdminFeedCatalog: vi.fn(), createCatalogItem: vi.fn(), updateCatalogItem: vi.fn(), checkCatalogItem: vi.fn(), publishCatalogItem: vi.fn() }))
 const client = vi.hoisted(() => ({ getFeeds: vi.fn(), previewFeed: vi.fn(), addFeed: vi.fn() }))
 vi.mock('../src/api/feedCatalog', () => mocks)
+const directoryMock = vi.hoisted(() => ({ getSourceDirectory: vi.fn() }))
+vi.mock('../src/api/sourceDirectory', () => directoryMock)
 vi.mock('../src/api/client', async original => ({ ...await original<object>(), ...client }))
 const item = { id: 1, title: '目录新闻', url: 'https://example.com/rss', category: '新闻', description: '每日新闻', sort_order: 1, published: false, revision: 2, check_status: 'unchecked', last_checked_at: null, last_error: '' }
-beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); mocks.listAdminFeedCatalog.mockResolvedValue([item]); mocks.listFeedCatalog.mockResolvedValue([item]); client.getFeeds.mockResolvedValue([]) })
+beforeEach(() => { vi.resetAllMocks(); directoryMock.getSourceDirectory.mockResolvedValue(null); localStorage.clear(); mocks.listAdminFeedCatalog.mockResolvedValue([item]); mocks.listFeedCatalog.mockResolvedValue([item]); client.getFeeds.mockResolvedValue([]) })
 it('ordinary readers cannot load admin data', () => {
   render(<AdminFeedCatalogPage user={{ is_admin: false }} />)
   expect(screen.getByText('仅管理员可访问公共推荐目录')).toBeTruthy()
@@ -100,4 +102,14 @@ it('refreshes recorded check failure after rejected publication so retry uses cu
   expect(screen.getByRole('alert').textContent).toBe('上架检查失败')
   fireEvent.click(screen.getByRole('button', { name: '上架' }))
   await waitFor(() => expect(mocks.publishCatalogItem).toHaveBeenLastCalledWith(1, true, 3))
+})
+
+it('shows every category for returning readers without opening a legacy recommendation disclosure', async () => {
+  localStorage.setItem('rsspal:popular-feeds:first-seen-at', '1')
+  client.getFeeds.mockResolvedValue([{ id: 5, title: '已有个人源', url: 'https://existing.example/rss', is_active: true, status: 'active', article_count: 0, unread_count: 0 }])
+  render(<MemoryRouter><FeedListPage /></MemoryRouter>)
+  await screen.findByRole('heading', { name: '推荐源分类目录' })
+  for (const name of ['社交媒体', '新媒体', '传统媒体', '论坛', '博客', '编程', '设计', '直播', '音视频', '图片', '二次元', '程序更新', '购物', '游戏', '阅读', '科学期刊', '金融']) {
+    expect(screen.getByRole('button', { name: new RegExp(`^${name}.*个源$`) })).toBeTruthy()
+  }
 })
