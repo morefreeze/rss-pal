@@ -1200,6 +1200,8 @@ export interface PruningRule {
 export interface FeedHealthRow {
   feed_id: number
   feed_title: string
+  feed_url: string
+  feed_type: string
   status: 'active' | 'paused' | 'archived'
   priority_weight: number
   produced: number

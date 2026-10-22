@@ -68,7 +68,7 @@ read_dur AS (
 )
 SELECT
     f.id,
-    COALESCE(f.title, f.url) AS feed_title,
+    COALESCE(NULLIF(BTRIM(f.title), ''), f.url) AS feed_title,
     f.last_fetched_at,
     -- window-bound counts
     (SELECT COUNT(*) FROM articles_w aw WHERE aw.feed_id = f.id) AS produced,
