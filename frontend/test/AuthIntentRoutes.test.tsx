@@ -1,3 +1,4 @@
+vi.mock('../src/api/sourceDirectory', () => ({ getSourceDirectory: vi.fn().mockResolvedValue(null) }))
 import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'

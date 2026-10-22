@@ -1,7 +1,7 @@
 const { readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
 const page = readFileSync(resolve('src/pages/FeedListPage.tsx'), 'utf8')
-if (!page.includes('<SourceDirectory items={catalog}') || !page.includes('onPreview={url => { void doPreview(url) }}')) {
+if (!page.includes('<SourceDirectory items={catalog}') || !page.includes('void doPreview(url)')) {
   throw new Error('public catalog must retain the existing preview action')
 }
 if (page.includes('getInitialPopularFeedsExpanded') || page.includes('popularFeedsExpanded')) {

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { getFeeds, addFeed, deleteFeed, fetchFeedNow, previewFeed, toggleFeedActive, createOneoffLinkSet, capturePDFURL, getMyBookmarkletToken, Feed, FeedPreview } from '../api/client'
 import { listFeedCatalog, type PublicCatalogItem } from '../api/feedCatalog'
+import { getSourceDirectory, type FullSourceDirectory } from '../api/sourceDirectory'
 import { toast } from '../utils/toast'
 import { parseAuthIntent } from '../utils/authIntent'
 import { hackerNewsItemURL } from '../utils/hackerNews'
@@ -27,6 +28,29 @@ export default function FeedListPage() {
     finally { setCatalogLoading(false) }
   }
   useEffect(() => { void loadCatalog() }, [])
+  const [directory, setDirectory] = useState<FullSourceDirectory>()
+  const [directoryLoading, setDirectoryLoading] = useState(true)
+  const [directoryError, setDirectoryError] = useState(false)
+  const directoryRequest = useRef<AbortController | null>(null)
+  const loadDirectory = async () => {
+    directoryRequest.current?.abort()
+    const controller = new AbortController()
+    directoryRequest.current = controller
+    setDirectoryLoading(true)
+    setDirectoryError(false)
+    try {
+      const data = await getSourceDirectory(controller.signal)
+      if (!controller.signal.aborted) setDirectory(data || undefined)
+    } catch {
+      if (!controller.signal.aborted) setDirectoryError(true)
+    } finally {
+      if (!controller.signal.aborted) setDirectoryLoading(false)
+    }
+  }
+  useEffect(() => {
+    void loadDirectory()
+    return () => directoryRequest.current?.abort()
+  }, [])
   const navigate = useNavigate()
   const location = useLocation()
   const [feeds, setFeeds] = useState<Feed[]>([])
@@ -325,6 +349,7 @@ export default function FeedListPage() {
         <form onSubmit={handlePreview} className="flex gap-2 mb-2">
           <input
             type="text"
+            id="feed-source-url"
             placeholder="输入 RSS 地址、网站 URL、HN 帖子或 PDF 链接"
             value={newUrl}
             onChange={e => { setNewUrl(e.target.value); setPreview(null); setPreviewError('') }}
@@ -466,12 +491,15 @@ export default function FeedListPage() {
 
       <section className="card mb-2" aria-labelledby="source-directory-title">
         <h3 id="source-directory-title">推荐源分类目录</h3>
-        <p className="text-sm text-muted mt-1">按 17 个分类浏览订阅源，也可查看热门、AI、播客和健康推荐。</p>
+        <p className="text-sm text-muted mt-1">按 Folo 的 17 个分类浏览完整平台与订阅项，也可查看精选推荐。</p>
         <div id="popular-feeds-groups">
           {catalogLoading && <p role="status">正在加载推荐…</p>}
           {catalogError && <div role="alert">推荐目录加载失败 <button type="button" className="secondary" onClick={() => void loadCatalog()}>重试加载推荐</button></div>}
           {!catalogLoading && !catalogError && catalog.length === 0 && <p className="text-muted">暂无已上架的推荐</p>}
-          {!catalogLoading && !catalogError && <SourceDirectory items={catalog} onPreview={url => { void doPreview(url) }} />}
+          <SourceDirectory items={catalog} directory={directory} directoryLoading={directoryLoading} directoryError={directoryError} onReloadDirectory={() => void loadDirectory()} onPreview={url => {
+            void doPreview(url)
+            document.getElementById('feed-source-url')?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+          }} />
         </div>
       </section>
 
