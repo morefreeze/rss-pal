@@ -5,6 +5,8 @@ import { authSearch, parseAuthIntent, postAuthURL } from '../utils/authIntent'
 
 import { verifyTencentCaptcha } from '../utils/tencentCaptcha'
 import RegistrationChallenge from '../components/RegistrationChallenge'
+import VerifiedAccountAccess from '../components/VerifiedAccountAccess'
+import { getAuthMethods, type AuthMethods } from '../api/accountAuth'
 import { authErrorMessage } from '../utils/authError'
 
 interface RegisterPageProps {
@@ -27,6 +29,12 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
   useEffect(() => () => { challengeController.current?.abort() }, [])
   const [proof, setProof] = useState('')
   const [challengeAttempt, setChallengeAttempt] = useState(0)
+  const [methods, setMethods] = useState<AuthMethods | null>(null)
+  useEffect(() => {
+    let active = true
+    getAuthMethods().then(value => { if (active) setMethods(value) }).catch(() => {})
+    return () => { active = false }
+  }, [])
   useEffect(() => {
     let disposed = false
     getRegistrationConfig().then(config => {
@@ -81,6 +89,19 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
     }
   }
 
+  if (methods?.public_registration) return (
+    <div className="card account-access-card" style={{ maxWidth: 400, margin: '60px auto', padding: 20 }}>
+      <h2 style={{ marginBottom: 16 }}>注册 RSS Pal</h2>
+      <p className="text-sm mb-2">验证通过即可注册，无需邀请码。</p>
+      <VerifiedAccountAccess
+        methods={methods} mode="register" returnTo={postAuthURL(intent)}
+        onSuccess={user => { onLogin(user); navigate(postAuthURL(intent), { replace: true }) }}
+      />
+      <p className="text-sm" style={{ marginTop: 16 }}>
+        <Link to={`/login${authSearch(intent)}`}>已有账号？登录</Link>
+      </p>
+    </div>
+  )
   return (
     <div className="card" style={{ maxWidth: 400, margin: '100px auto', padding: '0 16px', width: '100%' }}>
       <h2 style={{ marginBottom: 16 }}>RSS Pal - 注册</h2>

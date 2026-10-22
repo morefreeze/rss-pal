@@ -6,6 +6,7 @@ import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useTheme, type Theme } from '../util/theme'
 import IPhoneShortcutInstall from '../components/IPhoneShortcutInstall'
 import ShortcutConnection from '../components/ShortcutConnection'
+import AccountLoginMethods from '../components/AccountLoginMethods'
 
 const STYLE_OPTIONS = [
   { value: 'bullets', label: '要点列表' },
@@ -1034,6 +1035,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
 
       {tab === 'account' && (
         <>
+          <AccountLoginMethods/>
           {/* 修改密码 */}
           <div className="card mb-2">
             <h3 className="mb-2">修改密码</h3>

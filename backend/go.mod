@@ -7,14 +7,19 @@ replace github.com/mozillazg/go-pinyin => ./third_party/go-pinyin
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.8.0
+	github.com/coreos/go-oidc/v3 v3.16.0
 	github.com/gin-contrib/gzip v1.0.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/lib/pq v1.10.9
 	github.com/mmcdole/gofeed v1.3.0
+	github.com/mozillazg/go-pinyin v0.21.0
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/captcha v1.3.52
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.179
 	golang.org/x/crypto v0.44.0
 	golang.org/x/image v0.41.0
 	golang.org/x/net v0.47.0
+	golang.org/x/oauth2 v0.31.0
 )
 
 require (
@@ -26,6 +31,7 @@ require (
 	github.com/cloudwego/iasm v0.2.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.20.0 // indirect
@@ -37,10 +43,7 @@ require (
 	github.com/mmcdole/goxpp v1.1.1-0.20240225020742-a0c311522b23 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/mozillazg/go-pinyin v0.21.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/captcha v1.3.52 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.179 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	golang.org/x/arch v0.7.0 // indirect

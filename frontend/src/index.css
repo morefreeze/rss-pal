@@ -1704,3 +1704,10 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
   .summary-controls h3 { margin: 0; }
   .summary-controls select, .summary-controls button { min-height: 44px; max-width: 100%; }
 }
+
+/* Verified account access keeps touch controls usable on narrow screens. */
+.verified-account-access button { min-height: 44px; }
+.verified-account-access input:not([type='checkbox']) { min-width: 0; width: 100%; }
+.verified-account-access label { display: block; margin-bottom: 4px; }
+.verified-account-access button.secondary { flex-shrink: 0; }
+.verified-account-access button[type='submit'] { margin-top: 12px; }

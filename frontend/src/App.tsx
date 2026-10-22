@@ -4,6 +4,7 @@ import { isLoggedIn, getMe, getUser } from './api/client'
 import { clearPrivateSessionState } from './api/privateSession'
 import { useConnectionKeepAlive } from './hooks/useConnectionKeepAlive'
 import LoginPage from './pages/LoginPage'
+import AccountAuthComplete from './pages/AccountAuthComplete'
 import RegisterPage from './pages/RegisterPage'
 import FeedListPage from './pages/FeedListPage'
 import ArticleListPage from './pages/ArticleListPage'
@@ -87,6 +88,7 @@ export function AppRoutes({
     <Routes>
       <Route path="/login" element={<LoginPage onLogin={onLogin} />} />
       <Route path="/register" element={<RegisterPage onLogin={onLogin} />} />
+      <Route path="/auth/complete" element={<AccountAuthComplete onLogin={onLogin} />} />
       <Route path="/share/:token" element={<SharePage />} />
       <Route path="/extension-config" element={<ExtensionConfigPage />} />
       <Route path="/capture" element={<ShareCapturePage />} />

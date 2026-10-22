@@ -140,3 +140,15 @@ func TestAuthAbuseRejectedIPDoesNotExhaustOtherClients(t *testing.T) {
 		t.Fatalf("blocked client exhausted global budget: %d", w.Code)
 	}
 }
+
+func TestVerifiedAuthDoesNotShareEmptyUsernameAccountBucket(t *testing.T) {
+	guard := NewAuthAbuseGuard(&memoryAuthBudget{}, "test-key")
+	r := gin.New()
+	r.POST("/verify", guard.Middleware("verified"), func(c *gin.Context) { c.Status(204) })
+	for i := 0; i < 12; i++ {
+		w := abuseRequest(r, "/verify", `{"challenge_id":"opaque","code":"123456"}`, "192.0.2.1:12", "")
+		if w.Code != 204 {
+			t.Fatalf("unrelated verified auth request %d rejected %d", i, w.Code)
+		}
+	}
+}

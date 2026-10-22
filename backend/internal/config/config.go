@@ -73,6 +73,21 @@ type VisionConfig struct {
 }
 
 type AuthConfig struct {
+	PublicRegistration bool
+	PublicOrigin       string
+	OTPSecret          string
+	SMTPHost           string
+	SMTPPort           string
+	SMTPUsername       string
+	SMTPPassword       string
+	SMTPFrom           string
+	GoogleClientID     string
+	GoogleClientSecret string
+	AppleClientID      string
+	AppleTeamID        string
+	AppleKeyID         string
+	ApplePrivateKey    string
+
 	CaptchaProvider         string
 	TencentCaptchaAppID     string
 	TencentCaptchaAppSecret string
@@ -141,6 +156,20 @@ func Load() *Config {
 			},
 		},
 		Auth: AuthConfig{
+			PublicRegistration:      getEnv("AUTH_PUBLIC_REGISTRATION", "false") == "true",
+			PublicOrigin:            getEnv("AUTH_PUBLIC_ORIGIN", ""),
+			OTPSecret:               getEnv("AUTH_OTP_SECRET", ""),
+			SMTPHost:                getEnv("SMTP_HOST", ""),
+			SMTPPort:                getEnv("SMTP_PORT", "587"),
+			SMTPUsername:            getEnv("SMTP_USERNAME", ""),
+			SMTPPassword:            getEnv("SMTP_PASSWORD", ""),
+			SMTPFrom:                getEnv("SMTP_FROM", ""),
+			GoogleClientID:          getEnv("GOOGLE_CLIENT_ID", ""),
+			GoogleClientSecret:      getEnv("GOOGLE_CLIENT_SECRET", ""),
+			AppleClientID:           getEnv("APPLE_CLIENT_ID", ""),
+			AppleTeamID:             getEnv("APPLE_TEAM_ID", ""),
+			AppleKeyID:              getEnv("APPLE_KEY_ID", ""),
+			ApplePrivateKey:         getEnv("APPLE_PRIVATE_KEY", ""),
 			CaptchaProvider:         getEnv("AUTH_CAPTCHA_PROVIDER", "tencent"),
 			TencentCaptchaAppID:     getEnv("TENCENT_CAPTCHA_APP_ID", ""),
 			TencentCaptchaAppSecret: getEnv("TENCENT_CAPTCHA_APP_SECRET", ""),

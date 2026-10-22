@@ -31,7 +31,7 @@ type AuthAbuseGuard struct {
 }
 
 func NewAuthAbuseGuard(store AuthAttemptStore, secret string) *AuthAbuseGuard {
-	return &AuthAbuseGuard{store: store, secret: []byte(secret), slots: map[string]chan struct{}{"login": make(chan struct{}, 8), "refresh": make(chan struct{}, 8), "register": make(chan struct{}, 4), "logout": make(chan struct{}, 4), "init": make(chan struct{}, 2)}}
+	return &AuthAbuseGuard{store: store, secret: []byte(secret), slots: map[string]chan struct{}{"login": make(chan struct{}, 8), "verified": make(chan struct{}, 8), "refresh": make(chan struct{}, 8), "register": make(chan struct{}, 4), "logout": make(chan struct{}, 4), "init": make(chan struct{}, 2)}}
 }
 
 func authClientNetwork(ip string) string {
@@ -129,6 +129,10 @@ func (g *AuthAbuseGuard) Middleware(action string) gin.HandlerFunc {
 				return
 			}
 			if !g.take(c, "login-account", strings.ToLower(strings.TrimSpace(identity.Username)), 10, 15*time.Minute) {
+				return
+			}
+		case "verified":
+			if !g.take(c, "verified-ip", ip, 30, 15*time.Minute) {
 				return
 			}
 		case "register":

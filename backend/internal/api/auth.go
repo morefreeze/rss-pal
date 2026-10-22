@@ -201,6 +201,11 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
+	if h.cfg.Auth.PublicRegistration {
+		c.JSON(http.StatusForbidden, gin.H{"error": "请使用邮箱验证码、Google 或 Apple 完成注册"})
+		return
+	}
+
 	if h.registrationBudget == nil {
 		defer func() {
 			reason := "failed"
