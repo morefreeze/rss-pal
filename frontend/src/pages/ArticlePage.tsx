@@ -14,7 +14,7 @@ import {
   peekArticleDetail,
   isArticleAccessDenied,
 } from '../api/articleDetailCache'
-import { ProgressSaveQueue } from '../utils/progressSaveQueue'
+import { ProgressSaveQueue, progressAccountId } from '../utils/progressSaveQueue'
 import { toast } from '../utils/toast'
 import { LinkSetChildren } from '../components/LinkSetChildren'
 import { BatchFetchConfirmDialog } from '../components/BatchFetchConfirmDialog'
@@ -617,11 +617,10 @@ export default function ArticlePage() {
 
   const progressQueueRef = useRef<ProgressSaveQueue<ReadingProgress> | null>(null)
   if (!progressQueueRef.current) {
-    const owner = localStorage.getItem('user')
-    const loggedIn = Boolean(localStorage.getItem('token'))
+    const owner = progressAccountId()
     progressQueueRef.current = new ProgressSaveQueue(
       entry => updateProgress(entry.articleId, entry.scrollPosition, entry.isCompleted),
-      () => localStorage.getItem('user') === owner && Boolean(localStorage.getItem('token')) === loggedIn,
+      () => owner !== null && progressAccountId() === owner,
       (savedArticleID, newProgress) => {
         invalidateArticleDetail(savedArticleID)
         if (currentArticleIDRef.current !== savedArticleID) return
@@ -630,6 +629,7 @@ export default function ArticlePage() {
         setProgress(previous => ({ ...newProgress, scroll_position: highWaterPosition,
           is_completed: Boolean(previous?.is_completed || newProgress.is_completed) }))
       },
+      { ownerId: owner },
     )
   }
   const flushProgress = useCallback(() => progressQueueRef.current!.flush(), [])
@@ -642,10 +642,12 @@ export default function ArticlePage() {
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pagehide', onHide)
     window.addEventListener('online', onHide)
+    window.addEventListener('pageshow', onHide)
     return () => {
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onHide)
       window.removeEventListener('online', onHide)
+      window.removeEventListener('pageshow', onHide)
       progressQueueRef.current!.detach()
     }
   }, [flushProgress])

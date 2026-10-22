@@ -166,6 +166,28 @@ describe('ArticlePage immediate loading', () => {
     vi.stubGlobal('ResizeObserver', TestResizeObserver)
   })
 
+  it('replays account progress on mount and page activation without scrolling', async () => {
+    localStorage.setItem('user', JSON.stringify({ id: 7, username: 'reader' }))
+    localStorage.setItem('token', 'token')
+    const persist = (position: number) => localStorage.setItem(`rsspal:progress:v1:7:43:pending:${position}`, JSON.stringify({
+      revision: String(position), generation: '', entry: { articleId: 43, scrollPosition: position, isCompleted: false },
+    }))
+    persist(.6)
+    putArticleDetail(detail(42))
+    apiMocks.getArticle.mockResolvedValue(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.updateProgress).toHaveBeenCalledWith(43, .6, false))
+    persist(.8)
+    // Profile metadata changes must not invalidate the same numeric account.
+    localStorage.setItem('user', JSON.stringify({ id: 7, username: 'renamed' }))
+    fireEvent(window, new Event('pageshow'))
+    await waitFor(() => expect(apiMocks.updateProgress).toHaveBeenCalledWith(43, .8, false))
+    localStorage.setItem('user', JSON.stringify({ id: 8 }))
+    persist(.9)
+    fireEvent.online(window)
+    expect(apiMocks.updateProgress).not.toHaveBeenCalledWith(43, .9, false)
+  })
+
   it('clears a disconnected stream warning when persisted completion is confirmed', async () => {
     const initial = detail(42)
     putArticleDetail(initial)
