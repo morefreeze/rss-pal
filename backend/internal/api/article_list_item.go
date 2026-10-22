@@ -11,6 +11,8 @@ import (
 // fields — the list UI only renders the brief summary. Detail pages
 // fetch the full article via GET /api/articles/:id.
 type ArticleListItem struct {
+	Source *model.ArticleSource `json:"source,omitempty"`
+
 	ID                   int             `json:"id"`
 	FeedID               int             `json:"feed_id"`
 	FeedTitle            string          `json:"feed_title,omitempty"`
@@ -39,7 +41,9 @@ func articleToListItem(a model.Article, tags []model.UserTag) ArticleListItem {
 	if tags == nil {
 		tags = []model.UserTag{}
 	}
+	a.ResolveSource()
 	return ArticleListItem{
+		Source:               a.Source,
 		ID:                   a.ID,
 		FeedID:               a.FeedID,
 		FeedTitle:            a.FeedTitle,

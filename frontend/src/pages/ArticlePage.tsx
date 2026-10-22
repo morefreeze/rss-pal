@@ -50,7 +50,8 @@ import ArticleProgressBar from '../components/ArticleProgressBar'
 import ShareDialog from '../components/ShareDialog'
 import CopyPublicLinkButton from '../components/CopyPublicLinkButton'
 import { readNavList, readNavContext, writeNav, fetchMoreIds } from '../utils/articleNav'
-import FeedSourceLink from '../components/FeedSourceLink'
+import ArticleSourceLink from '../components/ArticleSourceLink'
+import ArticleProvenance from '../components/ArticleProvenance'
 import { extractSearchFromPath } from '../utils/feedFilterLink'
 import {
   computeViewportProgress,
@@ -1043,7 +1044,7 @@ export default function ArticlePage() {
 
   const handleShareXiaohongshu = () => {
     if (!article) return
-    const feedTitle = (article as any).feed_title || ''
+    const feedTitle = article.source?.title || article.feed_title || ''
     const text = `📖 ${article.title}\n\n${article.summary_brief || ''}\n\n🔗 ${article.url}\n#RSS阅读 #${feedTitle}`
     navigator.clipboard.writeText(text).then(() => {
       toast.success('已复制到剪贴板，去小红书粘贴发布吧！')
@@ -1254,9 +1255,9 @@ export default function ArticlePage() {
               {loadingNext ? '加载中…' : '下一篇 ›'}
             </button>
           </div>
-          {article.feed_title && (
-            <FeedSourceLink
-              feedId={article.feed_id}
+          {(article.source || article.feed_title) && (
+            <ArticleSourceLink
+              article={article}
               label={article.feed_title}
               search={entrySearch}
               className="text-sm"
@@ -1280,6 +1281,8 @@ export default function ArticlePage() {
             invalidateArticleDetail(article.id)
             setArticle(current => current?.id === article.id ? { ...current, capture_note: note } : current)
           }} />
+
+        <ArticleProvenance article={article} />
 
         <TagBar articleId={article.id} />
 

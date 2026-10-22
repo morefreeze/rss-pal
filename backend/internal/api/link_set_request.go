@@ -72,6 +72,8 @@ func linkSetChildInputs(parent *model.Article, candidates []BatchFetchCandidate)
 	inputs := make([]repository.LinkSetChildInput, 0, len(candidates))
 	for _, candidate := range candidates {
 		inputs = append(inputs, repository.LinkSetChildInput{
+			// The feed retains discovery ownership; the child source is resolved
+			// independently from candidate.URL and ParentArticleID by the repository.
 			FeedID:          parent.FeedID,
 			ParentArticleID: parent.ID,
 			Title:           candidate.Title,

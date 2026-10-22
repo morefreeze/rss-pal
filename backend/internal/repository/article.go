@@ -191,6 +191,7 @@ func (r *ArticleRepository) scanArticle(rows *sql.Rows) ([]model.Article, error)
 		a.MediaURL = mediaURL.String
 		a.MediaType = mediaType.String
 		a.MediaDurationSeconds = int(mediaDuration.Int64)
+		a.ResolveSource()
 		articles = append(articles, a)
 	}
 	return articles, nil
@@ -232,6 +233,7 @@ func (r *ArticleRepository) scanArticleNoFeedTitle(rows *sql.Rows) ([]model.Arti
 		a.MediaURL = mediaURL.String
 		a.MediaType = mediaType.String
 		a.MediaDurationSeconds = int(mediaDuration.Int64)
+		a.ResolveSource()
 		articles = append(articles, a)
 	}
 	return articles, nil
@@ -283,6 +285,7 @@ func (r *ArticleRepository) scanArticleWithParentTitle(rows *sql.Rows) ([]model.
 		a.MediaType = mediaType.String
 		a.MediaDurationSeconds = int(mediaDuration.Int64)
 		a.ParentTitle = parentTitle.String
+		a.ResolveSource()
 		articles = append(articles, a)
 	}
 	return articles, nil
@@ -425,6 +428,7 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	a.MediaType = mediaType.String
 	a.MediaDurationSeconds = int(mediaDuration.Int64)
 	a.ImageDimensions = decodeImageDimensions(imageDimensions)
+	a.ResolveSource()
 	return &a, nil
 }
 
@@ -447,9 +451,10 @@ func decodeImageDimensions(raw []byte) map[string][2]int {
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions, COALESCE(cn.capture_note, '')
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions, p.title, COALESCE(cn.capture_note, '')
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
+		LEFT JOIN articles p ON p.id = a.parent_article_id AND p.feed_id = a.feed_id
 		LEFT JOIN article_capture_notes cn ON cn.article_id=a.id AND cn.user_id=$2
 		WHERE a.id = $1 AND (f.owner_id = $2)`
 	var a model.Article
@@ -460,16 +465,18 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	var processingState, processingError, editorNote sql.NullString
 	var prerankScore sql.NullFloat64
 	var imageDimensions []byte
+	var parentTitle sql.NullString
 	err := r.db.QueryRow(query, id, userID).Scan(
 		&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
 		&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
 		&mediaURL, &mediaType, &mediaDuration,
 		&feedTitle, &feedType,
-		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions, &a.CaptureNote,
+		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions, &parentTitle, &a.CaptureNote,
 	)
 	if err != nil {
 		return nil, "", err
 	}
+	a.ParentTitle = parentTitle.String
 	a.Content = content.String
 	a.SummaryBrief = summaryBrief.String
 	a.SummaryDetailed = summaryDetailed.String
@@ -498,6 +505,7 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	a.MediaType = mediaType.String
 	a.MediaDurationSeconds = int(mediaDuration.Int64)
 	a.ImageDimensions = decodeImageDimensions(imageDimensions)
+	a.ResolveSource()
 	return &a, feedType.String, nil
 }
 
@@ -644,6 +652,7 @@ func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*mo
 	}
 	a.EditorNote = editorNote.String
 	a.Kind = kind.String
+	a.ResolveSource()
 	return &a, nil
 }
 
@@ -1306,6 +1315,7 @@ func (r *ArticleRepository) scanTopicGroups(query string, args []interface{}) ([
 			currentTopic = topic
 			currentIdx = len(groups) - 1
 		}
+		a.ResolveSource()
 		groups[currentIdx].Articles = append(groups[currentIdx].Articles, a)
 	}
 	return groups, rows.Err()
@@ -1365,6 +1375,7 @@ func (r *ArticleRepository) scanFlatGroup(query string, args []interface{}, tota
 		a.MediaURL = mediaURL.String
 		a.MediaType = mediaType.String
 		a.MediaDurationSeconds = int(mediaDuration.Int64)
+		a.ResolveSource()
 		group.Articles = append(group.Articles, a)
 	}
 	return group, rows.Err()
@@ -1843,6 +1854,7 @@ LIMIT $2
 			if len(brief) > 60 {
 				brief = brief[:60]
 			}
+			a.ResolveSource()
 			*out = append(*out, model.InterestCandidate{
 				Article:     a,
 				AlreadyRead: alreadyRead,

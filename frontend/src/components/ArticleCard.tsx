@@ -10,7 +10,7 @@ type ArticleCardItem = Article | ArticleListItem
 import ReadingMeta from './ReadingMeta'
 import TagChip from './TagChip'
 import { useExposureTracking, reportClick } from '../hooks/useExposureTracking'
-import FeedSourceLink from './FeedSourceLink'
+import ArticleSourceLink from './ArticleSourceLink'
 
 function NotePreview({ note }: { note?: string }) {
   if (!note) return null
@@ -120,7 +120,7 @@ export default function ArticleCard({
   dateField = 'published',
 }: Props) {
   const exposureRef = useExposureTracking(article.id)
-  const effectiveSourceLabel = sourceLabel ?? article.feed_title
+  const effectiveSourceLabel = article.source?.title ?? sourceLabel ?? article.feed_title
   const articleId = article.id
 
   // Merge the exposure ref with the optional prefetch (infinite-scroll) ref
@@ -228,9 +228,9 @@ export default function ArticleCard({
           {(showSourceTag && effectiveSourceLabel) || manualTags.length > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4 }}>
               {showSourceTag && effectiveSourceLabel && (
-                onSourceFilter ? (
-                  <FeedSourceLink
-                    feedId={article.feed_id}
+                article.source || onSourceFilter ? (
+                  <ArticleSourceLink
+                    article={article}
                     label={effectiveSourceLabel}
                     search={sourceSearch}
                     onNavigate={onSourceFilter}

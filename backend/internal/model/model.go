@@ -215,6 +215,8 @@ type Feed struct {
 }
 
 type Article struct {
+	Source *ArticleSource `json:"source,omitempty"`
+
 	CaptureNote          string     `json:"capture_note"`
 	ID                   int        `json:"id" db:"id"`
 	FeedID               int        `json:"feed_id" db:"feed_id"`
@@ -245,7 +247,8 @@ type Article struct {
 	// referenced inside Content's markdown) to [width, height] in pixels.
 	// nil = not yet probed; renderer falls back to height:auto.
 	ImageDimensions map[string][2]int `json:"image_dimensions,omitempty" db:"image_dimensions"`
-	// Transient fields populated by GetLinkSetRecommendations only — not stored in DB.
+	// ParentTitle is populated by authorized details and link-set recommendations.
+	// Source and these transient fields are derived, not stored in DB.
 	ParentTitle string `json:"parent_title,omitempty"`
 	IsFallback  bool   `json:"is_fallback,omitempty"`
 }
