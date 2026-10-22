@@ -639,7 +639,7 @@ export const getFeeds = () =>
   api.get<Feed[]>('/feeds').then(res => res.data)
 
 export const previewFeed = (url: string, signal?: AbortSignal) =>
-  api.post<FeedPreview>('/feeds/preview', { url }, { signal }).then(res => res.data)
+  api.post<FeedPreview>('/feeds/preview', { url }, { signal, timeout: 35000 }).then(res => res.data)
 
 export const addFeed = (url: string, feedType?: string, expandLinks: boolean = false, title?: string) =>
   api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss', expand_links: expandLinks, title }).then(res => res.data)
