@@ -127,6 +127,7 @@ func (h *InterestsHandler) latest(c *gin.Context, payloadKey string) {
 						"id":         a.ID,
 						"title":      a.Title,
 						"feed_title": a.FeedTitle,
+						"source":     a.Source,
 						"brief":      string(brief),
 						"is_read":    a.IsRead,
 					}

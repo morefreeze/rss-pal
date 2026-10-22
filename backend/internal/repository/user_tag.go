@@ -336,16 +336,23 @@ func (r *ArticleUserTagRepository) GetSourceForArticle(articleID, userID int) (m
 	var s model.ArticleTagSource
 	var feedTitle, feedType, articleURL string
 	var feedID int
+	var parentID *int
 	err := r.db.QueryRow(`
-		SELECT f.id, f.title, COALESCE(f.feed_type, 'rss'), a.url
+		SELECT f.id, f.title, COALESCE(f.feed_type, 'rss'), a.url, a.parent_article_id
 		FROM articles a
 		JOIN feeds f ON f.id = a.feed_id
 		WHERE a.id = $1 AND (f.owner_id = $2)
-	`, articleID, userID).Scan(&feedID, &feedTitle, &feedType, &articleURL)
+	`, articleID, userID).Scan(&feedID, &feedTitle, &feedType, &articleURL, &parentID)
 	if err != nil {
 		return s, err
 	}
 	s.FeedID = feedID
+	a := model.Article{URL: articleURL, ParentArticleID: parentID}
+	a.ResolveSource()
+	if a.Source != nil {
+		s.Title = a.Source.Title
+		return s, nil
+	}
 	if feedType == "clip" {
 		if host := extractHost(articleURL); host != "" {
 			s.Title = host

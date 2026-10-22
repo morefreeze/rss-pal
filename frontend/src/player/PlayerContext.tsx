@@ -149,7 +149,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setState({
       articleId: article.id,
       title: article.title,
-      feedTitle: article.feed_title || '',
+      feedTitle: article.source?.title || article.feed_title || '',
 	  src,
       duration: article.media_duration_seconds || 0,
       position: resumeAt,

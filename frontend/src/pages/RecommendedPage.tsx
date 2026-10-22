@@ -1,3 +1,4 @@
+import ArticleProvenance from '../components/ArticleProvenance'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getLinkSetRecommendations, Article } from '../api/client'
@@ -69,32 +70,10 @@ export default function RecommendedPage() {
             {a.summary_brief && (
               <div className="text-muted text-sm mt-1">{a.summary_brief.slice(0, 120)}…</div>
             )}
-            {a.feed_title && (
-              <div className="text-muted text-sm mt-1" style={{ color: 'var(--accent)' }}>{a.feed_title}</div>
+            {(a.source || a.feed_title) && (
+              <div className="text-muted text-sm mt-1" style={{ color: 'var(--accent)' }}>{a.source?.title || a.feed_title}</div>
             )}
-            {a.parent_title && a.parent_article_id != null && (
-              <div className="text-muted text-sm mt-1">
-                来自《
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    navigate(`/articles/${a.parent_article_id}`)
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    color: 'var(--accent)',
-                    cursor: 'pointer',
-                    font: 'inherit',
-                  }}
-                >
-                  {a.parent_title}
-                </button>
-                》
-              </div>
-            )}
+            <ArticleProvenance article={a} />
           </div>
         ))}
       </div>

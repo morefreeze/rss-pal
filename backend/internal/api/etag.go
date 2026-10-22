@@ -20,7 +20,7 @@ import (
 // Format: W/"<hex sha256 prefix>"
 func ComputeListETag(querySignature string, items []ArticleListItem) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "v1|%s|count=%d|", querySignature, len(items))
+	fmt.Fprintf(h, "v2-source|%s|count=%d|", querySignature, len(items))
 	if len(items) > 0 {
 		var maxFetched time.Time
 		for _, it := range items {
@@ -34,6 +34,9 @@ func ComputeListETag(querySignature string, items []ArticleListItem) string {
 		// catches every processing_state transition in the cached set.
 		for _, it := range items {
 			fmt.Fprintf(h, "%d=%s;", it.ID, it.ProcessingState)
+			if it.Source != nil {
+				fmt.Fprintf(h, "source=%s|%s|%s;", it.Source.Key, it.Source.Title, it.Source.URL)
+			}
 		}
 	}
 	return `W/"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`

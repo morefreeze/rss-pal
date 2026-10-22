@@ -36,10 +36,16 @@ func (r *ShareRepository) WithCtx(c ctxkey.CtxGetter) *ShareRepository {
 // SnapshotFromArticle selects only fields that are safe to expose on the
 // unauthenticated share surface.
 func SnapshotFromArticle(a *model.Article, now time.Time) model.ArticleShareSnapshot {
+	sourceTitle := a.FeedTitle
+	copy := *a
+	copy.ResolveSource()
+	if copy.Source != nil {
+		sourceTitle = copy.Source.Title
+	}
 	return model.ArticleShareSnapshot{
 		Title:                a.Title,
 		URL:                  a.URL,
-		FeedTitle:            a.FeedTitle,
+		FeedTitle:            sourceTitle,
 		PublishedAt:          a.PublishedAt,
 		WordCount:            a.WordCount,
 		ReadingMinutes:       a.ReadingMinutes,

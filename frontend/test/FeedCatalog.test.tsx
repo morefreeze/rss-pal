@@ -101,3 +101,13 @@ it('refreshes recorded check failure after rejected publication so retry uses cu
   fireEvent.click(screen.getByRole('button', { name: '上架' }))
   await waitFor(() => expect(mocks.publishCatalogItem).toHaveBeenLastCalledWith(1, true, 3))
 })
+
+it('shows every category for returning readers without opening a legacy recommendation disclosure', async () => {
+  localStorage.setItem('rsspal:popular-feeds:first-seen-at', '1')
+  client.getFeeds.mockResolvedValue([{ id: 5, title: '已有个人源', url: 'https://existing.example/rss', is_active: true, status: 'active', article_count: 0, unread_count: 0 }])
+  render(<MemoryRouter><FeedListPage /></MemoryRouter>)
+  await screen.findByRole('heading', { name: '推荐源分类目录' })
+  for (const name of ['社交媒体', '新媒体', '传统媒体', '论坛', '博客', '编程', '设计', '直播', '音视频', '图片', '二次元', '程序更新', '购物', '游戏', '阅读', '科学期刊', '金融']) {
+    expect(screen.getByRole('button', { name: new RegExp(`^${name}.*个源$`) })).toBeTruthy()
+  }
+})
