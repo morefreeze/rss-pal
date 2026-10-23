@@ -76,6 +76,13 @@ type AuthConfig struct {
 	PublicRegistration bool
 	PublicOrigin       string
 	OTPSecret          string
+	EmailProvider      string
+	SESSecretID        string
+	SESSecretKey       string
+	SESRegion          string
+	SESTemplateID      string
+	SESFrom            string
+	SESReplyTo         string
 	SMTPHost           string
 	SMTPPort           string
 	SMTPUsername       string
@@ -159,6 +166,13 @@ func Load() *Config {
 			PublicRegistration:      getEnv("AUTH_PUBLIC_REGISTRATION", "false") == "true",
 			PublicOrigin:            getEnv("AUTH_PUBLIC_ORIGIN", ""),
 			OTPSecret:               getEnv("AUTH_OTP_SECRET", ""),
+			EmailProvider:           getEnv("AUTH_EMAIL_PROVIDER", "smtp"),
+			SESSecretID:             getEnv("TENCENT_SES_SECRET_ID", ""),
+			SESSecretKey:            getEnv("TENCENT_SES_SECRET_KEY", ""),
+			SESRegion:               getEnv("TENCENT_SES_REGION", "ap-hongkong"),
+			SESTemplateID:           getEnv("TENCENT_SES_TEMPLATE_ID", ""),
+			SESFrom:                 getEnv("TENCENT_SES_FROM", ""),
+			SESReplyTo:              getEnv("TENCENT_SES_REPLY_TO", ""),
 			SMTPHost:                getEnv("SMTP_HOST", ""),
 			SMTPPort:                getEnv("SMTP_PORT", "587"),
 			SMTPUsername:            getEnv("SMTP_USERNAME", ""),

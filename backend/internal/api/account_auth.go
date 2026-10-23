@@ -28,11 +28,16 @@ type AccountAuthHandler struct {
 	repo       *repository.AccountAuthRepository
 	sendEmail  func(context.Context, string, string) error
 	httpClient *http.Client
+	sesSender  *sesEmailSender
 }
 
 func NewAccountAuthHandler(auth *AuthHandler, repo *repository.AccountAuthRepository) *AccountAuthHandler {
 	h := &AccountAuthHandler{auth: auth, repo: repo, httpClient: &http.Client{Timeout: 15 * time.Second}}
 	h.sendEmail = h.smtpEmail
+	if auth.cfg.Auth.EmailProvider == "tencent-ses" {
+		h.sesSender = newSESEmailSender(auth.cfg.Auth)
+		h.sendEmail = h.sesSender.Send
+	}
 	return h
 }
 func randomAuthToken() string {
@@ -70,7 +75,14 @@ func (h *AccountAuthHandler) captchaReady() bool {
 func (h *AccountAuthHandler) emailReady() bool {
 	a := h.auth.cfg.Auth
 	_, e := mail.ParseAddress(a.SMTPFrom)
-	return h.origin() != "" && len(a.OTPSecret) >= 32 && a.SMTPHost != "" && e == nil && h.auth.registrationVerifier != nil && h.captchaReady()
+	providerReady := false
+	switch a.EmailProvider {
+	case "", "smtp":
+		providerReady = a.SMTPHost != "" && e == nil
+	case "tencent-ses":
+		providerReady = h.sesSender != nil && h.sesSender.ready
+	}
+	return h.origin() != "" && len(a.OTPSecret) >= 32 && providerReady && h.auth.registrationVerifier != nil && h.captchaReady()
 }
 func (h *AccountAuthHandler) Methods(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")

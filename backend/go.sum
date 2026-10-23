@@ -89,8 +89,11 @@ github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/captcha v1.3.52 h1:bPz4h9cPAD2psXNdVNHZUM/V13P05rtXoFIFn1IIPoA=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/captcha v1.3.52/go.mod h1:KDlcSxrt2pw9nenvXpw/VHipuokbA0j2iRXV+2gF5j8=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.52/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.136/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.179 h1:RV8ArAJg7CNR/kdnzGj4M8M+6xAs0i0qusTKWQ9DJlE=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.179/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ses v1.3.136 h1:PGwraJhUB6f4SzI+/ZTWlxjPNGfNPeIh4H54J76uMD0=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ses v1.3.136/go.mod h1:bQZ79jqIltjI+RaAktC1mS3dSur3ExKl8htXUgXCIA4=
 github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=
 github.com/twitchyliquid64/golang-asm v0.15.1/go.mod h1:a1lVb/DtPvCB8fslRZhAngC2+aY1QWCk3Cedj/Gdt08=
 github.com/ugorji/go/codec v1.2.12 h1:9LC83zGrHhuUA9l16C9AHXAqEV/2wBQ4nkvumAE65EE=
