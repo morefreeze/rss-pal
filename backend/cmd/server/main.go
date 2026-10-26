@@ -404,6 +404,8 @@ func main() {
 		apiGroup.PATCH("/articles/:id/note", articleHandler.UpdateCaptureNote)
 		apiGroup.POST("/articles/:id/youtube-playback", youtubePlaybackHandler.Start)
 		apiGroup.POST("/articles/:id/summary", articleHandler.GenerateSummary)
+		apiGroup.GET("/articles/:id/summary/input", articleHandler.LocalSummaryInput)
+		apiGroup.PUT("/articles/:id/summary/result", articleHandler.SaveLocalSummary)
 		apiGroup.POST("/articles/:id/content", contentHandler.FetchContent)
 		apiGroup.GET("/articles/:id/export/md", contentHandler.ExportMarkdown)
 		apiGroup.POST("/articles/:id/shares", shareHandler.Create)

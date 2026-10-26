@@ -408,15 +408,8 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		defer failUnsettled()
 	}
 	afterRollback(c, func() { _ = h.articleRepo.FailSummary(id, token, errors.New("保存总结失败，请重试")) })
-	// Determine which summarizer to use (user-custom or global)
+	// User keys never reach the server. This legacy path uses site-operated AI only.
 	summarizerToUse := h.summarizer
-
-	if h.templateRepo != nil && h.cfg != nil {
-		aiCfg, err := h.templateRepo.WithCtx(c).GetUserAIConfig(userID)
-		if err == nil && aiCfg != nil && aiCfg.APIKey != "" {
-			summarizerToUse = newUserSummarizerService(aiCfg, h.cfg)
-		}
-	}
 
 	// Parse optional template_id from JSON body or query
 	var bodyReq struct {
@@ -855,22 +848,6 @@ func derefIntPtr(p *int) any {
 		return "nil"
 	}
 	return *p
-}
-
-func newUserSummarizerService(aiCfg *model.UserAIConfig, cfg *config.Config) *service.SummarizerService {
-	if aiCfg == nil || aiCfg.APIKey == "" {
-		return nil
-	}
-	baseURL := aiCfg.BaseURL
-	if baseURL == "" && cfg != nil {
-		baseURL = cfg.Claude.BaseURL
-	}
-	userSummarizer := ai.NewSummarizerWithModel(aiCfg.APIKey, baseURL, aiCfg.Model)
-	userSummarizer.DisableArticleRouting()
-	if cfg != nil && cfg.AI.Vision.Model != "" {
-		userSummarizer.SetVisionModel(cfg.AI.Vision.Model)
-	}
-	return service.NewSummarizerService(userSummarizer)
 }
 
 func fetchTranscriptContentForSummary(ctx context.Context, fetcher transcript.Fetcher, article *model.Article) (string, int, bool, error) {

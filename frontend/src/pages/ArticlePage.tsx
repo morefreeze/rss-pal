@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
@@ -1461,6 +1461,8 @@ export default function ArticlePage() {
 
         {streamPhase === 'idle' && summaryJob?.state === 'running' && <p role="status" className="text-muted text-sm">总结正在生成，完成后会自动更新。</p>}
         {streamPhase === 'idle' && (summaryError || summaryJob?.state === 'failed') && <p role="alert" className="text-sm">{summaryError || summaryJob?.last_error || '上次生成失败，可以重试。'}</p>}
+        <p className="text-muted text-sm mb-2">本机 API Key 仅在手动点击“生成总结”或“重新生成”时使用，浏览器直接调用模型，完成后同步摘要。请保持页面打开；未配置时使用系统 AI。<Link to="/settings#ai">配置本机 AI</Link></p>
+
         {streamPhase !== 'idle' ? (
           <div className="markdown-body">
             {streamingBrief && (

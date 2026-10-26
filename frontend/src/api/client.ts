@@ -1,3 +1,4 @@
+import { callLocalAI, clearLocalAISession, localAIAccount, readLocalAIConfig } from '../lib/localAI'
 import type { User } from '../App'
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { clearAllFabCollapsed } from '../components/CollapsibleFab'
@@ -55,6 +56,7 @@ function clearAuthLocal() {
   for (const key of Object.keys(sessionStorage)) {
     if (key.startsWith('rsspal:nickname-skipped:')) sessionStorage.removeItem(key)
   }
+  clearLocalAISession()
   localStorage.removeItem('token')
   localStorage.removeItem('user')
   localStorage.removeItem('refresh_token')
@@ -926,13 +928,6 @@ export interface SummaryTemplate {
   created_at: string
 }
 
-export interface UserAIConfig {
-  id?: number
-  api_key: string
-  base_url: string
-  model: string
-}
-
 export type ArticleShareStatus = 'active' | 'expired' | 'revoked'
 
 export interface ArticleShareListItem {
@@ -952,12 +947,6 @@ export const createTemplate = (t: Partial<SummaryTemplate>) =>
 
 export const deleteTemplate = (id: number) =>
   api.delete(`/templates/${id}`)
-
-export const getAIConfig = () =>
-  api.get<UserAIConfig>('/settings/ai').then(res => res.data)
-
-export const saveAIConfig = (cfg: UserAIConfig) =>
-  api.put<UserAIConfig>('/settings/ai', cfg).then(res => res.data)
 
 export const setDefaultTemplate = (templateId: number) =>
   api.put('/settings/template', { template_id: templateId })
@@ -991,6 +980,35 @@ export async function generateSummaryStream(
   signal?: AbortSignal,
   opts?: { forceVision?: boolean },
 ): Promise<void> {
+  const localConfig = readLocalAIConfig()
+  if (localConfig) {
+    const account = localAIAccount()
+    const ensureCurrent = () => {
+      signal?.throwIfAborted()
+      if (localAIAccount() !== account) throw new Error('账号已切换，本次生成已停止')
+    }
+    try {
+      const input = await api.get<{ content_hash: string; summary_version: string; brief_prompt: string; detailed_prompt: string }>(`/articles/${articleId}/summary/input`, {
+        params: templateId ? { template_id: templateId } : {}, signal,
+      }).then(r => r.data)
+      ensureCurrent()
+      const brief = await callLocalAI(localConfig, input.brief_prompt, signal)
+      ensureCurrent()
+      handlers.onBriefDone?.(brief)
+      handlers.onBriefPhaseDone?.()
+      const detailed = await callLocalAI(localConfig, input.detailed_prompt + '\n\n前置要点（仅供去重，不作为新的事实来源）：\n' + brief, signal)
+      ensureCurrent()
+      await api.put(`/articles/${articleId}/summary/result`, {
+        content_hash: input.content_hash, summary_version: input.summary_version, summary_brief: brief, summary_detailed: detailed,
+      }, { signal })
+      ensureCurrent()
+      handlers.onDetailedDone?.(detailed)
+      handlers.onDone?.()
+    } catch (e: any) {
+      if (!signal?.aborted) handlers.onError?.(e?.response?.data?.error || (e instanceof Error ? e.message : '本机 AI 调用失败，请手动重试'))
+    }
+    return
+  }
   const token = localStorage.getItem('token')
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -1079,8 +1097,11 @@ function dispatchSummaryFrame(line: string, h: SummaryStreamHandlers) {
 export const exportMarkdown = (articleId: number) =>
   api.get(`/articles/${articleId}/export/md`, { responseType: 'text' }).then(res => res.data as string)
 
-export const polishPrompt = (content: string) =>
-  api.post<{ polished: string }>('/settings/polish-prompt', { content }).then(res => res.data.polished)
+export const polishPrompt = async (content: string) => {
+  const cfg = readLocalAIConfig()
+  if (cfg) return callLocalAI(cfg, '请润色以下摘要模板，只返回润色后的模板，保留 {title} 和 {content} 占位符：\n' + content)
+  return api.post<{ polished: string }>('/settings/polish-prompt', { content }).then(res => res.data.polished)
+}
 
 export const getBookmarkletToken = () =>
   api.get<{ token: string | null }>('/settings/bookmarklet-token').then(res => res.data.token)

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/transcript"
 )
@@ -19,27 +18,6 @@ type stubTranscriptFetcher struct {
 func (f *stubTranscriptFetcher) Fetch(ctx context.Context, article *model.Article) (*transcript.Result, error) {
 	f.calls++
 	return f.result, f.err
-}
-
-func TestUserAIConfigSummarizerCarriesVisionModel(t *testing.T) {
-	cfg := &config.Config{
-		Claude: config.ClaudeConfig{BaseURL: "https://global.example/v1"},
-		AI:     config.AIConfig{Vision: config.VisionConfig{Model: "vision-model"}},
-	}
-	userCfg := &model.UserAIConfig{
-		APIKey:  "user-key",
-		BaseURL: "https://user.example/v1",
-		Model:   "text-model",
-	}
-
-	svc := newUserSummarizerService(userCfg, cfg)
-
-	if svc == nil {
-		t.Fatal("expected a summarizer service")
-	}
-	if got := svc.Summarizer().VisionModel(); got != "vision-model" {
-		t.Fatalf("vision model = %q, want %q", got, "vision-model")
-	}
 }
 
 func TestFetchTranscriptContentForSummaryAppendsVideoTranscript(t *testing.T) {

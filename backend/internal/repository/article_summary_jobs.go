@@ -70,8 +70,22 @@ func (r *ArticleRepository) GetSummaryJob(ctx context.Context, id int) (*Summary
 // CompleteSummary locks the lease before checking content; superseded or expired
 // owners cannot overwrite either summaries or a newer owner's job state.
 func (r *ArticleRepository) CompleteSummary(id int, token, content, brief, detailed string) (bool, error) {
+	return r.completeSummary(id, token, content, brief, detailed, nil)
+}
+
+// Browser results may arrive after another generation finished. Compare the
+// prior summary atomically with the write, in addition to content and lease.
+func (r *ArticleRepository) CompleteLocalSummary(id int, token, content, brief, detailed, priorBrief, priorDetailed string) (bool, error) {
+	return r.completeSummary(id, token, content, brief, detailed, &[2]string{priorBrief, priorDetailed})
+}
+
+func (r *ArticleRepository) completeSummary(id int, token, content, brief, detailed string, prior *[2]string) (bool, error) {
 	if strings.TrimSpace(brief) == "" || strings.TrimSpace(detailed) == "" {
 		return false, errors.New("AI 返回了空总结，请重试")
+	}
+	var priorBrief, priorDetailed string
+	if prior != nil {
+		priorBrief, priorDetailed = prior[0], prior[1]
 	}
 	var saved bool
 	err := r.db.QueryRow(`WITH lease AS MATERIALIZED (
@@ -79,11 +93,12 @@ func (r *ArticleRepository) CompleteSummary(id int, token, content, brief, detai
  ), saved AS (
  UPDATE articles SET summary_brief=$4,summary_detailed=$5,
  processing_state=CASE WHEN processing_state='processing' THEN 'ready' ELSE processing_state END
- WHERE id=$1 AND content IS NOT DISTINCT FROM $3 AND EXISTS(SELECT 1 FROM lease) RETURNING id
+ WHERE id=$1 AND content IS NOT DISTINCT FROM $3 AND EXISTS(SELECT 1 FROM lease)
+ AND (NOT $6 OR (COALESCE(summary_brief,'')=$7 AND COALESCE(summary_detailed,'')=$8)) RETURNING id
  ), finished AS (
  UPDATE article_summary_jobs SET state='done',lease_expires_at=NULL,retry_at=NULL,last_error='',attempts=0,updated_at=clock_timestamp()
  WHERE article_id IN(SELECT id FROM saved) AND lease_token=$2 RETURNING article_id)
- SELECT EXISTS(SELECT 1 FROM finished)`, id, token, content, brief, detailed).Scan(&saved)
+ SELECT EXISTS(SELECT 1 FROM finished)`, id, token, content, brief, detailed, prior != nil, priorBrief, priorDetailed).Scan(&saved)
 	return saved, err
 }
 

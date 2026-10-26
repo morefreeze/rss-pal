@@ -96,31 +96,6 @@ func (r *TemplateRepository) SetUserDefaultTemplate(userID, templateID int) erro
 	return err
 }
 
-// GetUserAIConfig 获取用户 AI 配置
-func (r *TemplateRepository) GetUserAIConfig(userID int) (*model.UserAIConfig, error) {
-	cfg := &model.UserAIConfig{}
-	err := r.db.QueryRow(
-		`SELECT id, user_id, api_key, base_url, model, created_at, updated_at
-		 FROM user_ai_configs WHERE user_id = $1`,
-		userID,
-	).Scan(&cfg.ID, &cfg.UserID, &cfg.APIKey, &cfg.BaseURL, &cfg.Model, &cfg.CreatedAt, &cfg.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return cfg, err
-}
-
-// UpsertUserAIConfig 保存用户 AI 配置（upsert）
-func (r *TemplateRepository) UpsertUserAIConfig(cfg *model.UserAIConfig) error {
-	return r.db.QueryRow(
-		`INSERT INTO user_ai_configs (user_id, api_key, base_url, model)
-		 VALUES ($1, $2, $3, $4)
-		 ON CONFLICT (user_id) DO UPDATE SET api_key = $2, base_url = $3, model = $4, updated_at = NOW()
-		 RETURNING id, created_at, updated_at`,
-		cfg.UserID, cfg.APIKey, cfg.BaseURL, cfg.Model,
-	).Scan(&cfg.ID, &cfg.CreatedAt, &cfg.UpdatedAt)
-}
-
 func scanTemplates(rows *sql.Rows) ([]model.SummaryTemplate, error) {
 	var templates []model.SummaryTemplate
 	for rows.Next() {

@@ -140,22 +140,8 @@ func (h *InterestsHandler) latest(c *gin.Context, payloadKey string) {
 }
 
 func (h *InterestsHandler) chooseSummarizer(c *gin.Context, userID int) *ai.Summarizer {
-	if h.templateRepo == nil {
-		return h.summarizer
-	}
-	aiCfg, err := h.templateRepo.WithCtx(c).GetUserAIConfig(userID)
-	if err != nil || aiCfg == nil || aiCfg.APIKey == "" {
-		return h.summarizer
-	}
-	baseURL := aiCfg.BaseURL
-	if baseURL == "" {
-		baseURL = h.cfg.Claude.BaseURL
-	}
-	model := aiCfg.Model
-	if model == "" && h.cfg != nil {
-		model = h.cfg.Claude.Model
-	}
-	return ai.NewSummarizerWithModel(aiCfg.APIKey, baseURL, model)
+	// Site-operated analysis never reads user credentials.
+	return h.summarizer
 }
 
 // Generate kicks off an async interest job. Returns immediately with the

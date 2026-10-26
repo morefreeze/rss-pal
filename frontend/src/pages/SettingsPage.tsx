@@ -1,8 +1,9 @@
+import LocalAISettings from '../components/LocalAISettings'
 import type { User } from '../App'
 import NicknameSetup from '../components/NicknameSetup'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, restoreBackupUpload, downloadBackup, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
+import { getTemplates, createTemplate, deleteTemplate, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, restoreBackupUpload, downloadBackup, BackupFile, SummaryTemplate, InviteCode } from '../api/client'
 import { toast } from '../utils/toast'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useTheme, type Theme } from '../util/theme'
@@ -825,12 +826,7 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
   const readerSettings = useReaderSettings()
   const [tab, setTab] = useSettingsTab()
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
-  const [aiConfig, setAiConfig] = useState<UserAIConfig>({ api_key: '', base_url: '', model: '' })
-  const [apiKeyConfigured, setApiKeyConfigured] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [aiSaving, setAiSaving] = useState(false)
-  const [aiError, setAiError] = useState('')
-  const [aiSuccess, setAiSuccess] = useState('')
 
   // Invite codes (admin only)
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([])
@@ -862,13 +858,8 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
   useEffect(() => {
     const load = async () => {
       try {
-        const [tmpl, cfg] = await Promise.all([getTemplates(), getAIConfig()])
+        const tmpl = await getTemplates()
         setTemplates(tmpl || [])
-        if (cfg) {
-          const hasKey = !!cfg.api_key
-          setApiKeyConfigured(hasKey)
-          setAiConfig({ api_key: '', base_url: cfg.base_url || '', model: cfg.model || '' })
-        }
       } catch {
         // ignore — backend may not have config yet
       } finally {
@@ -901,41 +892,6 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
       setCopiedCode(code)
       setTimeout(() => setCopiedCode(''), 2000)
     })
-  }
-
-  const handleSaveAI = async () => {
-    setAiSaving(true)
-    setAiError('')
-    setAiSuccess('')
-    try {
-      await saveAIConfig(aiConfig)
-      if (aiConfig.api_key) {
-        setApiKeyConfigured(true)
-        setAiConfig(prev => ({ ...prev, api_key: '' }))
-      }
-      setAiSuccess('保存成功')
-    } catch {
-      setAiError('保存失败，请重试')
-    } finally {
-      setAiSaving(false)
-    }
-  }
-
-  const handleClearAI = async () => {
-    if (!confirm('确定清除 AI 配置？将恢复使用系统 AI')) return
-    setAiSaving(true)
-    setAiError('')
-    setAiSuccess('')
-    try {
-      await saveAIConfig({ api_key: '', base_url: '', model: '' })
-      setAiConfig({ api_key: '', base_url: '', model: '' })
-      setApiKeyConfigured(false)
-      setAiSuccess('已清除，将使用系统 AI')
-    } catch {
-      setAiError('操作失败，请重试')
-    } finally {
-      setAiSaving(false)
-    }
   }
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -1115,61 +1071,7 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
 
       {tab === 'ai' && (
         <>
-          {/* AI 配置区域 */}
-          <div className="card mb-2">
-            <h3 className="mb-1">我的 AI 配置</h3>
-            <p className="text-muted text-sm mb-2">配置你自己的 AI 服务，将优先于系统 AI 使用</p>
-
-            <div className="mb-1">
-              <div className="flex-between" style={{ marginBottom: 4 }}>
-                <label className="text-sm text-bold">API Key</label>
-                {apiKeyConfigured && !aiConfig.api_key && (
-                  <span className="text-sm" style={{ color: '#16a34a' }}>✓ 已配置</span>
-                )}
-              </div>
-              <input
-                type="password"
-                value={aiConfig.api_key}
-                placeholder={apiKeyConfigured ? '输入新 Key 以覆盖现有配置' : 'sk-...'}
-                onChange={e => setAiConfig(prev => ({ ...prev, api_key: e.target.value }))}
-                style={{ width: '100%' }}
-              />
-            </div>
-
-            <div className="mb-1">
-              <label className="text-sm text-bold">Base URL</label>
-              <input
-                type="text"
-                value={aiConfig.base_url}
-                placeholder="https://api.openai.com/v1"
-                onChange={e => setAiConfig(prev => ({ ...prev, base_url: e.target.value }))}
-                style={{ width: '100%', marginTop: 4 }}
-              />
-            </div>
-
-            <div className="mb-2">
-              <label className="text-sm text-bold">Model</label>
-              <input
-                type="text"
-                value={aiConfig.model}
-                placeholder="gpt-4o-mini"
-                onChange={e => setAiConfig(prev => ({ ...prev, model: e.target.value }))}
-                style={{ width: '100%', marginTop: 4 }}
-              />
-            </div>
-
-            {aiError && <div className="text-sm mb-1" style={{ color: '#dc2626' }}>{aiError}</div>}
-            {aiSuccess && <div className="text-sm mb-1" style={{ color: '#16a34a' }}>{aiSuccess}</div>}
-
-            <div className="flex gap-2">
-              <button onClick={handleSaveAI} disabled={aiSaving}>
-                {aiSaving ? '保存中...' : '保存'}
-              </button>
-              <button className="secondary" onClick={handleClearAI} disabled={aiSaving}>
-                清除配置
-              </button>
-            </div>
-          </div>
+          <LocalAISettings />
 
           {/* 摘要模板区域 */}
           <div className="card">

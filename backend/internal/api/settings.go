@@ -120,70 +120,13 @@ func (h *SettingsHandler) SetDefaultTemplate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "default template updated"})
 }
 
-// GetAIConfig GET /api/settings/ai — 获取用户 AI 配置（api_key 脱敏）
+// Legacy endpoints deliberately never read, parse, echo or store credentials.
 func (h *SettingsHandler) GetAIConfig(c *gin.Context) {
-	userID := getUserID(c)
-
-	cfg, err := h.templateRepo.WithCtx(c).GetUserAIConfig(userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if cfg == nil {
-		c.JSON(http.StatusOK, gin.H{})
-		return
-	}
-
-	// 脱敏 api_key：只返回前4位 + ***
-	masked := cfg.APIKey
-	if len(masked) > 4 {
-		masked = masked[:4] + "***"
-	}
-	cfg.APIKey = masked
-
-	c.JSON(http.StatusOK, cfg)
+	c.JSON(http.StatusGone, gin.H{"code": "local_ai_only", "error": "API Key 已改为仅保存在本机浏览器，请在设置中重新配置；需要手动点击生成"})
 }
 
-// SaveAIConfig PUT /api/settings/ai — 保存用户 AI 配置
 func (h *SettingsHandler) SaveAIConfig(c *gin.Context) {
-	var req struct {
-		APIKey  string `json:"api_key"`
-		BaseURL string `json:"base_url"`
-		Model   string `json:"model"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	userID := getUserID(c)
-
-	// If api_key is empty, preserve existing key
-	templateRepo := h.templateRepo.WithCtx(c)
-	if req.APIKey == "" {
-		existing, _ := templateRepo.GetUserAIConfig(userID)
-		if existing != nil {
-			req.APIKey = existing.APIKey
-		}
-	}
-
-	cfg := &model.UserAIConfig{
-		UserID:  userID,
-		APIKey:  req.APIKey,
-		BaseURL: req.BaseURL,
-		Model:   req.Model,
-	}
-	if err := templateRepo.UpsertUserAIConfig(cfg); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// 返回时脱敏
-	if len(cfg.APIKey) > 4 {
-		cfg.APIKey = cfg.APIKey[:4] + "***"
-	}
-
-	c.JSON(http.StatusOK, cfg)
+	h.GetAIConfig(c)
 }
 
 // PolishPrompt POST /api/settings/polish-prompt — AI 润色摘要 prompt

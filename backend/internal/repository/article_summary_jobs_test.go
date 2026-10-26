@@ -232,3 +232,25 @@ func TestSummaryFailureDoesNotExposeProviderDetails(t *testing.T) {
 		t.Fatalf("provider details leaked: %+v", job)
 	}
 }
+
+func TestLocalSummaryCASRejectsChangedPriorSummary(t *testing.T) {
+	repo, db, _, id := seedLinkSetParent(t)
+	if _, err := db.Exec(`UPDATE articles SET content='body',summary_brief='newer brief',summary_detailed='newer detailed' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	token, err := repo.ClaimSummary(context.Background(), id, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := repo.CompleteLocalSummary(id, token, "body", "stale brief", "stale detailed", "prior brief", "prior detailed")
+	if err != nil || saved {
+		t.Fatalf("stale result saved=%v err=%v", saved, err)
+	}
+	if err := repo.FailSummary(id, token, errors.New("stale result")); err != nil {
+		t.Fatal(err)
+	}
+	var brief string
+	if err := db.QueryRow(`SELECT summary_brief FROM articles WHERE id=$1`, id).Scan(&brief); err != nil || brief != "newer brief" {
+		t.Fatalf("summary=%q err=%v", brief, err)
+	}
+}
