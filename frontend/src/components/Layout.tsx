@@ -38,7 +38,7 @@ function VersionFooter() {
 }
 
 interface LayoutProps {
-  user: { id: number; username: string; is_admin: boolean } | null
+  user: { id: number; username: string; nickname?: string; is_admin: boolean } | null
   onLogout: () => void
 }
 
@@ -203,7 +203,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
 }
 
 interface LayoutInnerProps {
-  user: { id: number; username: string; is_admin: boolean } | null
+  user: { id: number; username: string; nickname?: string; is_admin: boolean } | null
   unreadCount: number
   onLogout: () => void
   renderNavLabel: (item: NavItem) => React.ReactNode
@@ -261,7 +261,7 @@ function LayoutInner({
                 {renderNavLabel(item)}
               </Link>
             ))}
-            {user && <UserMenu username={user.username} onLogout={onLogout} />}
+            {user && <UserMenu username={user.nickname || user.username} onLogout={onLogout} />}
           </nav>
 
           <button
@@ -293,7 +293,7 @@ function LayoutInner({
               </Link>
             ))}
             <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="text-muted text-sm">👤 {user?.username}</span>
+              <span className="text-muted text-sm">👤 {user?.nickname || user?.username}</span>
               <button className="btn-ghost btn-sm" onClick={onLogout}>
                 🚪 登出
               </button>

@@ -1,3 +1,5 @@
+import type { User } from '../App'
+import NicknameSetup from '../components/NicknameSetup'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { getTemplates, createTemplate, deleteTemplate, getAIConfig, saveAIConfig, setDefaultTemplate, createInviteCode, getInviteCodes, changePassword, polishPrompt, getBookmarkletToken, regenerateBookmarkletToken, listBackups, createBackupNow, restoreBackup, restoreBackupUpload, downloadBackup, BackupFile, SummaryTemplate, UserAIConfig, InviteCode } from '../api/client'
@@ -17,7 +19,8 @@ const STYLE_OPTIONS = [
 ]
 
 interface SettingsPageProps {
-  user?: { is_admin: boolean } | null
+  user?: User | null
+  onUserUpdate?: (user: User) => void
 }
 
 function PromptField({
@@ -818,7 +821,7 @@ function AppearanceTab({ readerSettings }: { readerSettings: ReturnType<typeof u
   )
 }
 
-export default function SettingsPage({ user }: SettingsPageProps) {
+export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) {
   const readerSettings = useReaderSettings()
   const [tab, setTab] = useSettingsTab()
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
@@ -1035,6 +1038,7 @@ export default function SettingsPage({ user }: SettingsPageProps) {
 
       {tab === 'account' && (
         <>
+          {user && <div className="card mb-2"><h3 className="mb-2">昵称</h3><NicknameSetup key={user.id} user={user} onSaved={onUserUpdate || (() => {})} /></div>}
           <AccountLoginMethods/>
           {/* 修改密码 */}
           <div className="card mb-2">

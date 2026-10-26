@@ -1,3 +1,4 @@
+import type { User } from '../App'
 import axios from 'axios'
 import { api } from './client'
 export type AccountProvider = 'google' | 'apple' | 'github'
@@ -11,7 +12,7 @@ export type AuthMethods = {
 }
 export type AccountSession = {
   token: string
-  user: { id: number; username: string; is_admin: boolean }
+  user: User
   refresh_token?: string
   refresh_token_expires_at?: string
   return_to?: string
@@ -49,6 +50,7 @@ export function currentAccountID(): number | null {
 export function persistAccountSession(v: AccountSession) {
   if (!v?.token || !Number.isSafeInteger(v.user?.id) || v.user.id <= 0)
     throw Error('登录响应无效，请重试')
+  sessionStorage.removeItem(`rsspal:nickname-skipped:${v.user.id}`)
   localStorage.setItem('token', v.token)
   localStorage.setItem('user', JSON.stringify(v.user))
   for (const key of ['refresh_token', 'refresh_token_expires_at'] as const) {

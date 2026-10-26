@@ -1,3 +1,4 @@
+import type { User } from '../App'
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { clearAllFabCollapsed } from '../components/CollapsibleFab'
 import { safePublicSourceURL } from '../utils/authIntent'
@@ -51,6 +52,9 @@ async function tryRefreshAccessToken(): Promise<string | null> {
 // Clears all auth state. Called when both access JWT and refresh token have
 // been rejected (or no refresh token was issued in the first place).
 function clearAuthLocal() {
+  for (const key of Object.keys(sessionStorage)) {
+    if (key.startsWith('rsspal:nickname-skipped:')) sessionStorage.removeItem(key)
+  }
   localStorage.removeItem('token')
   localStorage.removeItem('user')
   localStorage.removeItem('refresh_token')
@@ -135,6 +139,7 @@ export const initAdmin = (password: string) =>
 
 export const login = (username: string, password: string, remember = false) =>
   api.post('/auth/login', { username, password, remember }).then(res => {
+    sessionStorage.removeItem(`rsspal:nickname-skipped:${res.data.user.id}`)
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('user', JSON.stringify(res.data.user))
     if (res.data.refresh_token) {
@@ -161,7 +166,15 @@ export const register = (username: string, password: string, code: string, proof
   })
 
 export const getMe = () =>
-  api.get<{ id: number; username: string; is_admin: boolean }>('/auth/me').then(res => res.data)
+  api.get<User>('/auth/me').then(res => res.data)
+
+export const setNickname = (nickname: string) =>
+  api.put<User>('/auth/nickname', { nickname, confirmed: true }).then(res => {
+    // Ignore responses from a session that has since switched accounts.
+    if (getUser()?.id !== res.data.id) throw new Error('账号已切换，请刷新页面')
+    localStorage.setItem('user', JSON.stringify(res.data))
+    return res.data
+  })
 
 export const getServerHealth = () =>
   api.get<{ status: string; version: string }>('/health').then(res => res.data)

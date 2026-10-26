@@ -30,11 +30,14 @@ import Layout from './components/Layout'
 import AdminLayout from './components/AdminLayout'
 import AdminStatusPage from './pages/AdminStatusPage'
 import RoutePageTitle from './components/RoutePageTitle'
+import { NicknameOnboarding } from './components/NicknameSetup'
 
 export interface User {
   id: number
   username: string
   is_admin: boolean
+  nickname?: string
+  needs_nickname?: boolean
 }
 
 export const SHORT_SHARE_HOSTNAME = 'r.morefreeze.top'
@@ -62,7 +65,7 @@ export function ShortShareRoutes() {
   )
 }
 
-function RequireAuth({ user, onLogout }: { user: User | null; onLogout: () => void }) {
+function RequireAuth({ user, onLogout, onUserUpdate }: { user: User | null; onLogout: () => void; onUserUpdate: (user: User) => void }) {
   const loggedIn = isLoggedIn()
   // Mounted here rather than on the article list alone: the costliest case is
   // reading one article for a few minutes, going back, then opening another —
@@ -72,7 +75,7 @@ function RequireAuth({ user, onLogout }: { user: User | null; onLogout: () => vo
   if (!loggedIn) {
     return <Navigate to="/login" replace />
   }
-  return <Layout user={user} onLogout={onLogout} />
+  return <><Layout user={user} onLogout={onLogout} />{user && <NicknameOnboarding key={user.id} user={user} onSaved={onUserUpdate} />}</>
 }
 
 export function AppRoutes({
@@ -92,7 +95,7 @@ export function AppRoutes({
       <Route path="/share/:token" element={<SharePage />} />
       <Route path="/extension-config" element={<ExtensionConfigPage />} />
       <Route path="/capture" element={<ShareCapturePage />} />
-      <Route element={<RequireAuth user={user} onLogout={onLogout} />}>
+      <Route element={<RequireAuth user={user} onLogout={onLogout} onUserUpdate={onLogin} />}>
         <Route index element={<Navigate to="/articles" replace />} />
         <Route path="feeds" element={<FeedListPage />} />
         <Route path="feeds/health" element={<FeedHealthPage />} />
@@ -111,7 +114,7 @@ export function AppRoutes({
         <Route path="interests" element={<InterestsPage />} />
         <Route path="insights" element={<Navigate to="/interests" replace />} />
         <Route path="stats" element={<StatsPage />} />
-        <Route path="settings" element={<SettingsPage user={user} />} />
+        <Route path="settings" element={<SettingsPage user={user} onUserUpdate={onLogin} />} />
         <Route path="admin" element={<AdminLayout user={user} />}>
           <Route index element={<Navigate to="feed-catalog" replace />} />
           <Route path="feed-catalog" element={<AdminFeedCatalogPage user={user} />} />
@@ -135,7 +138,13 @@ export function MainSiteApp() {
   useEffect(() => {
     if (!isLoggedIn()) return
     getMe()
-      .then(u => setUser(u))
+      .then(u => {
+        const cached = getUser()
+        // A slow boot request must not overwrite a later login or nickname save.
+        if (cached?.id !== u.id || (cached.nickname && !u.nickname)) return
+        localStorage.setItem('user', JSON.stringify(u))
+        setUser(u)
+      })
       .catch(() => {
         // Transient errors (network, 5xx, DNS) — keep the cached session.
         // The interceptor logs out on a real 401.

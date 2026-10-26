@@ -47,7 +47,7 @@ func resolveIdentity(ctx context.Context, tx *sql.Tx, provider, subject, email s
 		if _, err := rand.Read(b); err != nil {
 			return 0, err
 		}
-		if err := tx.QueryRowContext(ctx, `INSERT INTO users(username,password_hash,is_admin) VALUES($1,'!external',false) RETURNING id`, "reader_"+hex.EncodeToString(b)).Scan(&uid); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO users(username,password_hash,is_admin,nickname_setup_required) VALUES($1,'!external',false,true) RETURNING id`, "reader_"+hex.EncodeToString(b)).Scan(&uid); err != nil {
 			return 0, err
 		}
 	}

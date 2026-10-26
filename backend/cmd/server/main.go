@@ -361,6 +361,7 @@ func main() {
 		apiGroup.GET("/articles/:id/images/:idx", pdfImgHandler.Serve)
 		// User
 		apiGroup.GET("/auth/me", authHandler.GetMe)
+		apiGroup.PUT("/auth/nickname", authHandler.SetNickname)
 		apiGroup.PUT("/auth/password", authHandler.ChangePassword)
 		apiGroup.PUT("/auth/visibility-floor", authHandler.UpdateVisibilityFloor)
 		apiGroup.POST("/auth/invite-codes", authHandler.CreateInviteCode)

@@ -3,6 +3,8 @@ package model
 import "time"
 
 type User struct {
+	Nickname          string    `json:"nickname"`
+	NeedsNickname     bool      `json:"needs_nickname"`
 	ID                int       `json:"id"`
 	Username          string    `json:"username"`
 	PasswordHash      string    `json:"-"`

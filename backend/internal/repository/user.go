@@ -75,8 +75,8 @@ func (r *UserRepository) UpdateSharedVisibleFrom(userID, daysBack int) (time.Tim
 func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE username = $1`, username,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '') FROM users WHERE username = $1`, username,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom, &user.Nickname, &user.NeedsNickname)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -86,8 +86,8 @@ func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 func (r *UserRepository) FindByID(id int) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE id = $1`, id,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '') FROM users WHERE id = $1`, id,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom, &user.Nickname, &user.NeedsNickname)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -230,9 +230,9 @@ func (r *UserRepository) GetByBookmarkletToken(token string) (*model.User, error
 	}
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from FROM users WHERE bookmarklet_token = $1`,
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '') FROM users WHERE bookmarklet_token = $1`,
 		token,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom)
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom, &user.Nickname, &user.NeedsNickname)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

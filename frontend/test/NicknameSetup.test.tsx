@@ -1,0 +1,66 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, expect, it, vi } from 'vitest'
+import NicknameSetup, { NicknameOnboarding } from '../src/components/NicknameSetup'
+import { setNickname } from '../src/api/client'
+vi.mock('../src/api/client', () => ({ setNickname: vi.fn() }))
+const user = { id: 19, username: 'reader_auto', is_admin: false, nickname: '', needs_nickname: true }
+beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear() })
+it('warns in red, requires a second confirmation, saves once and locks', async () => {
+ const onSaved = vi.fn()
+ vi.mocked(setNickname).mockResolvedValue({ ...user, nickname: '小读者', needs_nickname: false })
+ const { rerender } = render(<NicknameSetup user={user} onSaved={onSaved} />)
+ expect(screen.getByText('昵称只能设置一次，确认后无法修改。').getAttribute('style')).toContain('color:')
+ fireEvent.change(screen.getByLabelText('昵称'), { target: { value: '小读者' } })
+ fireEvent.click(screen.getByRole('button', { name: '确认昵称' }))
+ expect(setNickname).not.toHaveBeenCalled()
+ expect(screen.getByRole('alertdialog').textContent).toContain('小读者')
+ fireEvent.click(screen.getByRole('button', { name: '返回修改' }))
+ expect(setNickname).not.toHaveBeenCalled()
+ fireEvent.click(screen.getByRole('button', { name: '确认昵称' }))
+ fireEvent.click(screen.getByRole('button', { name: '确认并永久保存' }))
+ await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ nickname: '小读者' })))
+ expect(setNickname).toHaveBeenCalledWith('小读者')
+ rerender(<NicknameSetup user={{ ...user, nickname: '小读者', needs_nickname: false }} onSaved={onSaved} />)
+ expect(screen.queryByRole('textbox')).toBeNull()
+ expect(screen.getByText('昵称已设置，无法再次修改。')).toBeTruthy()
+})
+it('skip suppresses onboarding for the session; other accounts are independent', () => {
+ const { unmount } = render(<NicknameOnboarding user={user} onSaved={vi.fn()} />)
+ fireEvent.click(screen.getByRole('button', { name: '稍后设置' }))
+ expect(screen.queryByRole('dialog')).toBeNull()
+ unmount()
+ const { rerender } = render(<NicknameOnboarding user={user} onSaved={vi.fn()} />)
+ expect(screen.queryByRole('dialog')).toBeNull()
+ rerender(<NicknameOnboarding user={{ ...user, id: 20 }} onSaved={vi.fn()} />)
+ expect(screen.getByRole('dialog')).toBeTruthy()
+})
+it('does not prompt already named or legacy users', () => {
+ const { rerender } = render(<NicknameOnboarding user={{ ...user, nickname: '已有昵称', needs_nickname: false }} onSaved={vi.fn()} />)
+ expect(screen.queryByRole('dialog')).toBeNull()
+ rerender(<NicknameOnboarding user={{ ...user, needs_nickname: false }} onSaved={vi.fn()} />)
+ expect(screen.queryByRole('dialog')).toBeNull()
+})
+it('keeps form usable after a save failure', async () => {
+ vi.mocked(setNickname).mockRejectedValue({ response: { data: { error: '暂时保存失败' } } })
+ render(<NicknameSetup user={user} onSaved={vi.fn()} />)
+ fireEvent.change(screen.getByLabelText('昵称'), { target: { value: '重试读者' } })
+ fireEvent.click(screen.getByRole('button', { name: '确认昵称' }))
+ fireEvent.click(screen.getByRole('button', { name: '确认并永久保存' }))
+ await screen.findByText('暂时保存失败')
+ expect(screen.getByRole('textbox').getAttribute('disabled')).toBeNull()
+})
+it('restores page scrolling when both onboarding dialogs close after saving', async () => {
+ const { useState } = await import('react')
+ vi.mocked(setNickname).mockResolvedValue({ ...user, nickname: '滚动读者', needs_nickname: false })
+ function Harness() {
+  const [current, setCurrent] = useState(user)
+  return <NicknameOnboarding user={current} onSaved={setCurrent} />
+ }
+ document.body.style.overflow = 'auto'
+ render(<Harness />)
+ fireEvent.change(screen.getByLabelText('昵称'), { target: { value: '滚动读者' } })
+ fireEvent.click(screen.getByRole('button', { name: '确认昵称' }))
+ fireEvent.click(screen.getByRole('button', { name: '确认并永久保存' }))
+ await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+ expect(document.body.style.overflow).toBe('auto')
+})
