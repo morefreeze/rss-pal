@@ -84,27 +84,27 @@ function formatTimestamp(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function buildInlineVideoLink(platform: VideoEmbedData['platform'], id: string, rawParams?: string): string {
+function buildVideoURL(platform: VideoEmbedData['platform'], id: string, rawParams?: string): string {
   const params = new URLSearchParams(rawParams ?? '')
   const start = params.get('start')
   const page = params.get('page')
   const startSeconds = start && /^\d+$/.test(start) ? parseInt(start, 10) : 0
-  const label = startSeconds > 0
-    ? formatTimestamp(startSeconds)
-    : platform === 'youtube'
-      ? 'YouTube'
-      : 'Bilibili'
-
   if (platform === 'youtube') {
-    const url = `https://www.youtube.com/watch?v=${id}${startSeconds > 0 ? `&t=${startSeconds}` : ''}`
-    return `[${label}](${url})`
+    return `https://www.youtube.com/watch?v=${id}${startSeconds > 0 ? `&t=${startSeconds}` : ''}`
   }
 
   const query = new URLSearchParams()
   if (page && /^\d+$/.test(page) && parseInt(page, 10) > 1) query.set('p', page)
   if (startSeconds > 0) query.set('t', String(startSeconds))
   const qs = query.toString()
-  return `[${label}](https://www.bilibili.com/video/${id}${qs ? `?${qs}` : ''})`
+  return `https://www.bilibili.com/video/${id}${qs ? `?${qs}` : ''}`
+}
+
+function buildInlineVideoLink(platform: VideoEmbedData['platform'], id: string, rawParams?: string): string {
+  const start = new URLSearchParams(rawParams ?? '').get('start')
+  const startSeconds = start && /^\d+$/.test(start) ? parseInt(start, 10) : 0
+  const label = startSeconds > 0 ? formatTimestamp(startSeconds) : platform === 'youtube' ? 'YouTube' : 'Bilibili'
+  return `[${label}](${buildVideoURL(platform, id, rawParams)})`
 }
 
 export function normalizeVideoPlaceholders(source: string): string {
@@ -113,6 +113,13 @@ export function normalizeVideoPlaceholders(source: string): string {
       ESCAPED_VIDEO_PLACEHOLDER_RE,
       (_match, platform: VideoEmbedData['platform'], id: string, params?: string) =>
         `[[video:${platform}:${id}${params ? `?${params}` : ''}]]`,
+    )
+    // Older captures stored placeholders inside Markdown link destinations.
+    // Restore only their URL before converting inline placeholders into links.
+    .replace(
+      /(\]\(\s*)\[\[video:(youtube|bilibili):([\w-]+)(?:\?([\w=&]+))?]]/g,
+      (_match, prefix: string, platform: VideoEmbedData['platform'], id: string, params?: string) =>
+        `${prefix}${buildVideoURL(platform, id, params)}`,
     )
     .split(/\r?\n/)
     .map((line) => {
@@ -193,6 +200,9 @@ function ArticleLink({ href, children, className, node: _node, ...rest }: Articl
     const title = (anchorRef.current.textContent ?? '').trim().replace(/\s+/g, ' ') || normalized
     actionContext.onLinkDiscovered({ url: normalized, title })
   }, [actionContext, children, normalized])
+
+  // An empty href opens the current RSS Pal article again in a new tab.
+  if (!href?.trim()) return <span className={className}>{children}</span>
 
   return (
     <a

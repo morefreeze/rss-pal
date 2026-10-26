@@ -305,36 +305,31 @@ var videoURLRegex = regexp.MustCompile(
 	`https?://(?:www\.|m\.|music\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be|bilibili\.com)/[^\s)<>"']+`,
 )
 
-// markdownLinkRegex matches [text](url) form. Used to rewrite the entire
-// link (including the bracket) into a placeholder when url is a video.
-var markdownLinkRegex = regexp.MustCompile(`\[([^\]]*)\]\((https?://[^)\s]+)\)`)
+// Match complete Markdown links before bare URLs so the bare-URL rewrite
+// cannot put a video placeholder inside a link destination. Group 3 is the
+// optional CommonMark title (double/single quoted or parenthesized).
+var markdownLinkRegex = regexp.MustCompile(`\[([^\]]*)\]\((https?://[^)\s]+)(?:[ \t]+("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\([^)]*\)))?[ \t]*\)`)
+var videoLinkOrURLRegex = regexp.MustCompile(markdownLinkRegex.String() + `|` + videoURLRegex.String())
 
-// RewriteVideoLinks scans md and replaces YouTube/Bilibili URLs (both
-// markdown-link form and bare URLs) with [[video:...]] placeholders.
-// Idempotent — placeholders are not re-rewritten because the regex only
-// matches http(s) URLs.
+// RewriteVideoLinks turns video links and bare URLs into placeholders.
+// Titled links, used by newsletters for vote/comment metadata, remain links
+// with their original text, URL and title. A single pass keeps their URLs
+// out of the bare-URL rewrite and is idempotent for existing placeholders.
 func RewriteVideoLinks(md string) string {
-	// Pass 1: rewrite [text](url) where url is a video URL.
-	md = markdownLinkRegex.ReplaceAllStringFunc(md, func(m string) string {
-		sub := markdownLinkRegex.FindStringSubmatch(m)
-		if len(sub) != 3 {
-			return m
+	return videoLinkOrURLRegex.ReplaceAllStringFunc(md, func(match string) string {
+		rawURL := match
+		if sub := markdownLinkRegex.FindStringSubmatch(match); len(sub) == 4 {
+			if sub[3] != "" {
+				return match
+			}
+			rawURL = sub[2]
 		}
-		v, ok := ExtractVideo(sub[2])
+		v, ok := ExtractVideo(rawURL)
 		if !ok {
-			return m
+			return match
 		}
 		return v.Placeholder()
 	})
-	// Pass 2: rewrite bare URLs.
-	md = videoURLRegex.ReplaceAllStringFunc(md, func(u string) string {
-		v, ok := ExtractVideo(u)
-		if !ok {
-			return u
-		}
-		return v.Placeholder()
-	})
-	return md
 }
 
 // RewriteVideoIframes walks selection and replaces every <iframe> whose src

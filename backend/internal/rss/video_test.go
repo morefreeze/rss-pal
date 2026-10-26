@@ -88,11 +88,11 @@ func TestExtractVideo_NotAVideo(t *testing.T) {
 		"https://example.com/post/123",
 		"https://vimeo.com/123456",
 		"https://www.youtube.com/",
-		"https://www.youtube.com/watch",                  // no v=
-		"https://www.youtube.com/watch?v=tooShort",       // wrong length
+		"https://www.youtube.com/watch", // no v=
+		"https://www.youtube.com/watch?v=tooShort", // wrong length
 		"https://www.youtube.com/feed/subscriptions",
-		"https://b23.tv/abc123",                          // out of scope
-		"https://www.bilibili.com/video/av12345",         // legacy AV out of scope
+		"https://b23.tv/abc123",                  // out of scope
+		"https://www.bilibili.com/video/av12345", // legacy AV out of scope
 	}
 	for _, in := range cases {
 		t.Run(in, func(t *testing.T) {
@@ -189,6 +189,22 @@ func TestExtractVideoMedia(t *testing.T) {
 			}
 			if !strings.Contains(got.URL, tc.wantHost) {
 				t.Errorf("URL = %q does not contain %q", got.URL, tc.wantHost)
+			}
+		})
+	}
+}
+
+func TestRewriteVideoLinksPreservesTitledNewsletterLinks(t *testing.T) {
+	for _, link := range []string{
+		`[I built a drone with only one motor](https://www.youtube.com/watch?v=Ndftcft6XhU&utm_source=hackernewsletter "Votes: 667 Comments: 148")`,
+		`[Math](https://youtu.be/LKrwhjOI8Nc 'Votes: 386 Comments: 471')`,
+		`[Tutorial](https://www.bilibili.com/video/BV1xx411c7mD?p=2&t=42 "Tutorial")`,
+	} {
+		t.Run(link, func(t *testing.T) {
+			input := link + " //video [comments→](https://news.ycombinator.com/item?id=50150089) and https://youtu.be/dQw4w9WgXcQ"
+			want := link + " //video [comments→](https://news.ycombinator.com/item?id=50150089) and [[video:youtube:dQw4w9WgXcQ]]"
+			if got := RewriteVideoLinks(input); got != want {
+				t.Fatalf("got %q, want %q", got, want)
 			}
 		})
 	}
@@ -304,7 +320,7 @@ func TestRewriteVideoIframes(t *testing.T) {
 		{
 			"unrelated_iframe_left_alone",
 			`<iframe src="https://example.com/widget"></iframe>`,
-			"<iframe",  // unchanged
+			"<iframe", // unchanged
 			"[[video",
 		},
 	}

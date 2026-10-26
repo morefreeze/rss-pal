@@ -34,6 +34,13 @@ function selectText(node: Node, start: number, end: number) {
 }
 
 describe('MarkdownArticle reader link actions', () => {
+  it('renders empty newsletter links as text without navigating to the current article', () => {
+    render(<MarkdownArticle source={'[View in your browser]() and [Article](https://example.com/post)'} />)
+    expect(screen.getByText('View in your browser').closest('a')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'View in your browser' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Article' }).getAttribute('href')).toBe('https://example.com/post')
+  })
+
   it('marks English-heavy article bodies for browser hyphenation', () => {
     render(
       <MarkdownArticle source="Internationalization improves readability for exceptionallylongenglishheadwords near narrow edges." />,
