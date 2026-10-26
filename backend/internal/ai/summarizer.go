@@ -20,18 +20,19 @@ import (
 const DefaultModel = "glm-5.3"
 
 type Summarizer struct {
-	providerProtocol     string
-	articleResolver      ArticleResolver
-	articleRouted        bool
-	routingErr           error
-	articleModelSelected bool
-	usageRecorder        func(aiusage.Record)
-	admission            Admission
-	apiKey               string
-	baseURL              string
-	model                string
-	visionModel          string // optional; set via SetVisionModel for SummarizeWithImages*
-	httpClient           *http.Client
+	defaultSummaryReasoning bool
+	providerProtocol        string
+	articleResolver         ArticleResolver
+	articleRouted           bool
+	routingErr              error
+	articleModelSelected    bool
+	usageRecorder           func(aiusage.Record)
+	admission               Admission
+	apiKey                  string
+	baseURL                 string
+	model                   string
+	visionModel             string // optional; set via SetVisionModel for SummarizeWithImages*
+	httpClient              *http.Client
 }
 
 func NewSummarizer(apiKey, baseURL string) *Summarizer {
@@ -60,10 +61,11 @@ func (s *Summarizer) SetVisionModel(m string) { s.visionModel = m }
 func (s *Summarizer) VisionModel() string { return s.visionModel }
 
 type chatRequest struct {
-	Model          string          `json:"model"`
-	MaxTokens      int             `json:"max_tokens"`
-	Messages       []chatMessage   `json:"messages"`
-	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	Model           string          `json:"model"`
+	MaxTokens       int             `json:"max_tokens"`
+	Messages        []chatMessage   `json:"messages"`
+	ResponseFormat  *responseFormat `json:"response_format,omitempty"`
 }
 
 type responseFormat struct {
@@ -99,11 +101,12 @@ type chatResponse struct {
 }
 
 type chatStreamRequest struct {
-	StreamOptions map[string]bool `json:"stream_options"`
-	Model         string          `json:"model"`
-	MaxTokens     int             `json:"max_tokens"`
-	Stream        bool            `json:"stream"`
-	Messages      []chatMessage   `json:"messages"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	StreamOptions   map[string]bool `json:"stream_options"`
+	Model           string          `json:"model"`
+	MaxTokens       int             `json:"max_tokens"`
+	Stream          bool            `json:"stream"`
+	Messages        []chatMessage   `json:"messages"`
 }
 
 type streamChunk struct {
@@ -138,8 +141,9 @@ func truncateContent(content string) string {
 
 func (s *Summarizer) call(ctx context.Context, prompt string, maxTokens int) (string, error) {
 	req := chatRequest{
-		Model:     s.model,
-		MaxTokens: maxTokens,
+		ReasoningEffort: s.summaryReasoningEffort(s.model),
+		Model:           s.model,
+		MaxTokens:       maxTokens,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemGuardrail},
 			{Role: "user", Content: prompt},
@@ -216,10 +220,11 @@ func (s *Summarizer) doCallOnce(ctx context.Context, body []byte, maxTokens int)
 // produce duplicate output. Caller should re-invoke from scratch on error.
 func (s *Summarizer) callStream(ctx context.Context, prompt string, maxTokens int, onDelta func(string)) (string, error) {
 	req := chatStreamRequest{
-		Model:         s.model,
-		MaxTokens:     maxTokens,
-		Stream:        true,
-		StreamOptions: map[string]bool{"include_usage": true},
+		ReasoningEffort: s.summaryReasoningEffort(s.model),
+		Model:           s.model,
+		MaxTokens:       maxTokens,
+		Stream:          true,
+		StreamOptions:   map[string]bool{"include_usage": true},
 		Messages: []chatMessage{
 			{Role: "system", Content: systemGuardrail},
 			{Role: "user", Content: prompt},
@@ -259,7 +264,7 @@ type SummaryResult struct {
 }
 
 func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*SummaryResult, error) {
-	s = s.forArticle(ctx, content)
+	s = s.forArticle(ctx, content).forDefaultSummary()
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
@@ -283,7 +288,7 @@ func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*Sum
 // onBriefDelta and onDetailedDelta with token chunks as they arrive.
 func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
-	s = s.forArticle(ctx, content)
+	s = s.forArticle(ctx, content).forDefaultSummary()
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
@@ -348,7 +353,7 @@ func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, con
 }
 
 func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (string, error) {
-	s = s.forArticle(ctx, content)
+	s = s.forArticle(ctx, content).forDefaultSummary()
 	if s.routingErr != nil {
 		return "", s.routingErr
 	}
@@ -366,7 +371,7 @@ func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (
 }
 
 func (s *Summarizer) generateDetailed(ctx context.Context, title, content, brief string) (string, error) {
-	s = s.forArticle(ctx, content)
+	s = s.forArticle(ctx, content).forDefaultSummary()
 	if s.routingErr != nil {
 		return "", s.routingErr
 	}
@@ -514,9 +519,10 @@ func (s *Summarizer) callVision(ctx context.Context, prompt string, imagePaths [
 		return "", errors.New("no images loaded")
 	}
 	req := chatRequest{
-		Model:     s.visionModel,
-		MaxTokens: maxTokens,
-		Messages:  msgs,
+		ReasoningEffort: s.summaryReasoningEffort(s.visionModel),
+		Model:           s.visionModel,
+		MaxTokens:       maxTokens,
+		Messages:        msgs,
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -593,7 +599,7 @@ const imageEmbedInstruction = `如果某张附图能直观说明总结中的某�
 // to the text-only Summarize() path so the caller always gets a SummaryResult
 // if the model is reachable in any form.
 func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content string, imagePaths, imageURLs []string) (*SummaryResult, error) {
-	s = s.forArticle(ctx, content)
+	s = s.forArticle(ctx, content).forDefaultSummary()
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
@@ -698,11 +704,12 @@ func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imageP
 		return "", errors.New("no images loaded")
 	}
 	req := chatStreamRequest{
-		Model:         s.visionModel,
-		MaxTokens:     maxTokens,
-		Stream:        true,
-		StreamOptions: map[string]bool{"include_usage": true},
-		Messages:      msgs,
+		ReasoningEffort: s.summaryReasoningEffort(s.visionModel),
+		Model:           s.visionModel,
+		MaxTokens:       maxTokens,
+		Stream:          true,
+		StreamOptions:   map[string]bool{"include_usage": true},
+		Messages:        msgs,
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -736,7 +743,7 @@ func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imageP
 func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, content string,
 	imagePaths, imageURLs []string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
-	s = s.forArticle(ctx, content)
+	s = s.forArticle(ctx, content).forDefaultSummary()
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}

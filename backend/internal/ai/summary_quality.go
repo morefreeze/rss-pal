@@ -64,3 +64,19 @@ func appendDefaultSummaryGuidance(prompt string, detailed bool, brief string) st
 	}
 	return prompt
 }
+
+// GLM 5.3 defaults to maximum forced reasoning. Extraction needs lightweight
+// reasoning so the existing output budget remains available for the summary.
+// Clone the client: custom templates and unrelated AI calls keep their settings.
+func (s *Summarizer) forDefaultSummary() *Summarizer {
+	selected := *s
+	selected.defaultSummaryReasoning = true
+	return &selected
+}
+
+func (s *Summarizer) summaryReasoningEffort(model string) string {
+	if s.defaultSummaryReasoning && (model == "glm-5.3" || model == "glm-5.3-flash") {
+		return "low"
+	}
+	return ""
+}
