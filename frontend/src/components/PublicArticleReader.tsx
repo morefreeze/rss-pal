@@ -9,6 +9,7 @@ import ShareActions from './ShareActions'
 export { safePublicSourceURL } from '../utils/authIntent'
 
 export interface SharedArticleSnapshot {
+  sharer_name?: string
   registration_allowed?: boolean
   title: string
   url: string
@@ -199,6 +200,7 @@ export default function PublicArticleReader({ article, shareURL, shareRef }: Pro
 
       <article>
         <section className="card public-reader-heading">
+          {article.sharer_name && <p className="text-muted text-sm" style={{ margin: '0 0 10px', overflowWrap: 'anywhere' }}>来自 {article.sharer_name} 的分享</p>}
           <h1>{article.title}</h1>
           <div className="public-reader-meta text-muted text-sm">
             {article.feed_title && <span>{article.feed_title}</span>}

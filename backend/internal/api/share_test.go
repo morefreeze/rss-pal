@@ -584,7 +584,7 @@ func TestPublicShareReturnsImmutableSnapshotAndRewritesOnlyExactAssets(t *testin
 		switch key {
 		case "title", "url", "feed_title", "published_at", "word_count", "reading_minutes",
 			"summary_brief", "summary_detailed", "content", "media_url", "media_type",
-			"media_duration_seconds", "image_dimensions", "snapshotted_at", "registration_allowed":
+			"media_duration_seconds", "image_dimensions", "snapshotted_at", "registration_allowed", "sharer_name":
 		default:
 			t.Fatalf("public response exposed forbidden key %q: %s", key, w.Body.String())
 		}
@@ -931,5 +931,41 @@ func TestPublicShareNeverIncludesCaptureNotes(t *testing.T) {
 	}
 	if strings.Contains(snapshot, "capture_note") || strings.Contains(snapshot, "capture-note-private-secret") {
 		t.Fatalf("stored snapshot leaked note: %s", snapshot)
+	}
+}
+
+func TestPublicShareAttribution(t *testing.T) {
+	f := newShareAPIFixture(t)
+	share := f.createShare(t, f.userA, `{"expires_at":null}`)
+	paths := []string{"/api/share/" + f.longToken(share), "/api/s/" + f.shortCode(t, share)}
+	assertName := func(want string) {
+		t.Helper()
+		for _, path := range paths {
+			// The viewer's identity never changes the share creator attribution.
+			w := f.request(t, http.MethodGet, path, f.userB, "")
+			if w.Code != 200 {
+				t.Fatalf("public share failed %d %s", w.Code, w.Body.String())
+			}
+			var data map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+				t.Fatal(err)
+			}
+			if data["sharer_name"] != want {
+				t.Fatalf("%s sharer=%v want=%s", path, data["sharer_name"], want)
+			}
+			assertNoPrivateJSONKeys(t, w.Body.Bytes())
+		}
+	}
+	assertName("share-a")
+	// A link created before its owner sets a nickname picks up that nickname.
+	if _, err := f.privDB.Exec(`UPDATE users SET nickname='爱读书的人' WHERE id=$1`, f.userA); err != nil {
+		t.Fatal(err)
+	}
+	assertName("爱读书的人")
+	for _, path := range paths {
+		w := f.publicRequest(http.MethodGet, path)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "爱读书的人") {
+			t.Fatalf("anonymous attribution missing: %s", w.Body.String())
+		}
 	}
 }

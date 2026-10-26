@@ -614,3 +614,20 @@ it('places exactly one share toolbar at the beginning, before the article title'
   expect(document.querySelector('.public-reader-actions .social-share')).toBeNull()
   expect(screen.getByRole('link', {name: '阅读原文'})).toBeTruthy()
 })
+
+it.each(['long', 'short'] as const)('shows the share creator above the title on %s links', async kind => {
+ axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ sharer_name: '爱读书的人' }) })
+ localStorage.setItem('user', JSON.stringify({ id: 777, nickname: '当前访问者' }))
+ renderSharePage(kind === 'short' ? '/Aa0000000000' : '/share/v1_token', false, false, kind)
+ const attribution = await screen.findByText('来自 爱读书的人 的分享')
+ const heading = screen.getByRole('heading', { name: 'Shared title' })
+ expect(attribution.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+ expect(screen.queryByText('来自 当前访问者 的分享')).toBeNull()
+ localStorage.removeItem('user')
+})
+it('renders HTML in share names as plain text', async () => {
+ axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ sharer_name: '<img src=x onerror=alert(1)>' }) })
+ renderSharePage()
+ expect(await screen.findByText('来自 <img src=x onerror=alert(1)> 的分享')).toBeTruthy()
+ expect(document.querySelector('img[src="x"]')).toBeNull()
+})

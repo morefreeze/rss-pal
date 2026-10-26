@@ -200,3 +200,11 @@ func nilOnNoRows(share *model.ArticleShare, err error) (*model.ArticleShare, err
 	}
 	return share, err
 }
+
+// SharerName returns only the public display name, never private account details.
+// Resolve it at read time so existing links reflect a newly chosen nickname.
+func (r *ShareRepository) SharerName(userID int) (string, error) {
+	var name string
+	err := r.db.QueryRow(`SELECT COALESCE(NULLIF(nickname, ''), username) FROM users WHERE id=$1`, userID).Scan(&name)
+	return name, err
+}

@@ -93,10 +93,21 @@ func (h *ShareHandler) GetPublic(c *gin.Context) {
 
 	snapshot := row.Snapshot
 	snapshot.Content = rewriteShareAssets(snapshot.Content, "/api/share/"+url.PathEscape(c.Param("token"))+"/assets/", row.ArticleID)
+	h.writePublicShare(c, row, snapshot)
+}
+
+// Article content remains an immutable snapshot; attribution follows its owner.
+func (h *ShareHandler) writePublicShare(c *gin.Context, row *model.ArticleShare, snapshot model.ArticleShareSnapshot) {
+	name, err := h.shares.SharerName(row.CreatedBy)
+	if err != nil {
+		shareInternalError(c, "read sharer name", err)
+		return
+	}
 	c.JSON(http.StatusOK, struct {
 		model.ArticleShareSnapshot
-		RegistrationAllowed bool `json:"registration_allowed"`
-	}{snapshot, h.registrationPolicy.Allows(row.CreatedBy)})
+		SharerName          string `json:"sharer_name"`
+		RegistrationAllowed bool   `json:"registration_allowed"`
+	}{snapshot, name, h.registrationPolicy.Allows(row.CreatedBy)})
 }
 
 func (h *ShareHandler) GetAsset(c *gin.Context) {
@@ -123,10 +134,7 @@ func (h *ShareHandler) GetShortPublic(c *gin.Context) {
 
 	snapshot := row.Snapshot
 	snapshot.Content = rewriteShareAssets(snapshot.Content, "/api/s/"+c.Param("short_code")+"/assets/", row.ArticleID)
-	c.JSON(http.StatusOK, struct {
-		model.ArticleShareSnapshot
-		RegistrationAllowed bool `json:"registration_allowed"`
-	}{snapshot, h.registrationPolicy.Allows(row.CreatedBy)})
+	h.writePublicShare(c, row, snapshot)
 }
 
 func (h *ShareHandler) GetShortAsset(c *gin.Context) {
