@@ -1711,3 +1711,13 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
 .verified-account-access label { display: block; margin-bottom: 4px; }
 .verified-account-access button.secondary { flex-shrink: 0; }
 .verified-account-access button[type='submit'] { margin-top: 12px; }
+
+.article-read-surface { position: relative; touch-action: pan-y pinch-zoom; }
+.article-read-surface .card { padding-right: 56px; -webkit-touch-callout: none; }
+.article-read-controls { position: absolute; top: 8px; right: 8px; z-index: 2; }
+.article-read-controls > button { min-width: 44px; min-height: 44px; }
+.article-read-surface:has([aria-expanded="true"]) { z-index: 20; }
+.article-read-menu { position: absolute; right: 0; top: 46px; width: 260px; max-width: calc(100vw - 48px); padding: 8px; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated, var(--bg)); box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+.article-read-menu > button { min-height: 44px; text-align: left; padding: 10px 12px; }
+.article-read-menu > span { padding: 4px 8px; }
+.article-read-swipe-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--accent); background: var(--accent-soft); border-radius: 10px; }

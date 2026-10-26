@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   getTagSidebar: vi.fn(),
   likeArticle: vi.fn(),
   markAllRead: vi.fn(),
+  markReadRange: vi.fn(),
   postEvent: vi.fn(async () => undefined),
   searchArticles: vi.fn(),
 }))
@@ -24,6 +25,7 @@ vi.mock('../src/api/client', () => apiMocks)
 
 const detailCacheMocks = vi.hoisted(() => ({
   prefetchArticleDetail: vi.fn(async () => undefined),
+  invalidateArticleDetail: vi.fn(),
 }))
 
 vi.mock('../src/api/articleDetailCache', () => detailCacheMocks)
@@ -38,11 +40,13 @@ vi.mock('../src/components/ArticleCard', () => ({
     prefetchRef,
     onOpen,
     onPrefetch,
+    onMarkRead,
   }: {
     article: ArticleListItem
     prefetchRef?: React.RefObject<HTMLDivElement>
     onOpen: (id: number, preview: ArticleListItem) => void
     onPrefetch?: (id: number) => void
+    onMarkRead?: (direction: 'single' | 'above' | 'below') => void
   }) => (
     <div
       ref={prefetchRef}
@@ -51,6 +55,7 @@ vi.mock('../src/components/ArticleCard', () => ({
       onClick={() => onOpen(article.id, article)}
     >
       {article.title}
+      {onMarkRead && <button aria-label={`read-below-${article.id}`} onClick={e=>{e.stopPropagation();onMarkRead('below')}}>Read below</button>}
     </div>
   ),
 }))
@@ -183,6 +188,55 @@ describe('ArticleListPage automatic pagination', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('marks an inclusive range with server filters, refreshes pages, and records unloaded changed IDs', async () => {
+    localStorage.setItem('unreadOnly', 'true')
+    localStorage.setItem('savedOnly', 'true')
+    localStorage.setItem('articlesSortField', 'captured')
+    localStorage.setItem('articlesSortDir', 'asc')
+    localStorage.setItem('articleTagFilter', JSON.stringify({kind:'tag',id:8}))
+    sessionStorage.setItem('selectedFeed', '4')
+    apiMocks.getArticles.mockResolvedValueOnce(makeArticles(1)).mockResolvedValue(makeArticles(50))
+    apiMocks.markReadRange.mockResolvedValue({count:3,article_ids:[10,11,200]})
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button',{name:'read-below-10'}))
+    await waitFor(()=>expect(apiMocks.markReadRange).toHaveBeenCalledWith({anchor_id:10,direction:'below',sort:'captured',order:'asc',feed_id:4,unread:true,saved:true,tag_id:8,untagged:false}))
+    expect(await screen.findByTestId('article-50')).toBeTruthy()
+    expect(apiMocks.getArticles).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(sessionStorage.getItem('readArticles')!)).toEqual([10,11,200])
+    expect(detailCacheMocks.invalidateArticleDetail).toHaveBeenCalledWith(200)
+  })
+
+  it('does not overwrite a newer filter response when a range mutation finishes', async () => {
+    const pending = deferred<{count:number;article_ids:number[]}>()
+    apiMocks.getArticles.mockImplementation(({unread}:{unread?:boolean})=>Promise.resolve(unread?makeArticles(50):makeArticles(1)))
+    apiMocks.markReadRange.mockReturnValue(pending.promise)
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button',{name:'read-below-10'}))
+    fireEvent.click(screen.getByRole('checkbox',{name:'仅未读'}))
+    expect(await screen.findByTestId('article-50')).toBeTruthy()
+    const requests=apiMocks.getArticles.mock.calls.length
+    await act(async()=>pending.resolve({count:1,article_ids:[10]}))
+    expect(apiMocks.getArticles).toHaveBeenCalledTimes(requests)
+    expect(screen.queryByTestId('article-1')).toBeNull()
+    expect(screen.getByTestId('article-50')).toBeTruthy()
+  })
+
+  it('ignores a grouped mutation refresh after switching filters', async () => {
+    localStorage.setItem('articlesGrouped','true')
+    const groups = (id:number) => ({groups:[{topic:'ai_eng',total_count:1,articles:[makeBriefingArticle(id, `Group ${id}`)]}],unclassified:{topic:'',total_count:0,articles:[]}})
+    const oldRefresh = deferred<ReturnType<typeof groups>>()
+    apiMocks.getGroupedArticles.mockResolvedValueOnce(groups(1)).mockReturnValueOnce(oldRefresh.promise).mockResolvedValue(groups(50))
+    apiMocks.markReadRange.mockResolvedValue({count:1,article_ids:[1]})
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button',{name:'read-below-1'}))
+    await waitFor(()=>expect(apiMocks.getGroupedArticles).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole('checkbox',{name:'仅未读'}))
+    expect(await screen.findByTestId('article-50')).toBeTruthy()
+    await act(async()=>oldRefresh.resolve(groups(10)))
+    expect(screen.queryByTestId('article-10')).toBeNull()
+    expect(screen.getByTestId('article-50')).toBeTruthy()
   })
 
   it('keeps a deep return snapshot across StrictMode effects and revalidates every loaded page', async () => {

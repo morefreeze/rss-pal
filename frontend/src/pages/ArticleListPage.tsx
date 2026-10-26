@@ -1,9 +1,10 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { getArticles, getGroupedArticles, searchArticles, getDailyDigest, markAllRead, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, getTagSidebar, TagSidebarData } from '../api/client'
+import { getArticles, getGroupedArticles, searchArticles, getDailyDigest, markAllRead, markReadRange, ReadDirection, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, getTagSidebar, TagSidebarData } from '../api/client'
 import { writeNav, type NavContext } from '../utils/articleNav'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
+import ArticleReadSurface from '../components/ArticleReadSurface'
 import { ArticleListSkeleton } from '../components/ArticleListSkeleton'
 import BackToTopButton from '../components/BackToTopButton'
 import GroupedArticleView from '../components/GroupedArticleView'
@@ -19,6 +20,8 @@ import { useInfiniteScrollTrigger } from '../hooks/useInfiniteScrollTrigger'
 import { useArticleDetailPrefetch } from '../hooks/useArticleDetailPrefetch'
 import ArticleSourceLink from '../components/ArticleSourceLink'
 import { saveListReturn, takeListReturn } from '../utils/articleListReturn'
+import { toast } from '../utils/toast'
+import { recordReadArticles } from '../utils/markReadArticles'
 import { pinyinSearchIncludes } from '../utils/pinyinSearch'
 
 const PAGE_SIZE = 20
@@ -385,6 +388,8 @@ export default function ArticleListPage() {
   const [searchResults, setSearchResults] = useState<ArticleListItem[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [markingAllRead, setMarkingAllRead] = useState(false)
+  const [markingRead, setMarkingRead] = useState(false)
+  const readMutationRef = useRef(false)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const requestGenerationRef = useRef(0)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -541,14 +546,16 @@ export default function ArticleListPage() {
       restoredListRef.current = null
       restoreScrollRef.current = null
       // Grouped mode fetches its own payload — single shot, no pagination.
+      const generation = ++requestGenerationRef.current
       setGroupedLoading(true)
       getGroupedArticles({
         feed_id: selectedFeed || undefined,
         unread: unreadOnly || undefined,
         saved: savedOnly || undefined,
       })
-        .then(setGroupedData)
-        .finally(() => setGroupedLoading(false))
+        .then(data => { if(generation === requestGenerationRef.current) setGroupedData(data) })
+        .catch(() => { if(generation === requestGenerationRef.current) setGroupedData(null) })
+        .finally(() => { if(generation === requestGenerationRef.current) setGroupedLoading(false) })
       return
     }
     if (restoredListRef.current?.key !== listReturnKey) restoredListRef.current = takeListReturn(listReturnKey)
@@ -645,7 +652,7 @@ export default function ArticleListPage() {
   }, [selectedFeed, unreadOnly, savedOnly, sortField, sortDir, tagFilter])
 
   const loadMore = useCallback(async () => {
-    if (!loadingMore && hasMore) {
+    if (!readMutationRef.current && !loadingMore && hasMore) {
       await loadArticles(offset + PAGE_SIZE, false)
     }
   }, [loadingMore, hasMore, offset, loadArticles])
@@ -663,7 +670,52 @@ export default function ArticleListPage() {
     onLoadMore: loadMore,
   })
 
+  const handleMarkRead = async (anchorId: number, direction: ReadDirection) => {
+    if (readMutationRef.current || markingAllRead) return
+    readMutationRef.current = true
+    setMarkingRead(true)
+    // Invalidate in-flight pagination before the server changes the result set.
+    const generation = ++requestGenerationRef.current
+    setLoadingMore(false)
+    try {
+      const result = await markReadRange({
+        anchor_id: anchorId, direction, sort: sortField, order: sortDir,
+        feed_id: searchQuery ? undefined : selectedFeed ?? undefined, unread: unreadOnly, saved: searchQuery ? false : savedOnly,
+        tag_id: !searchQuery && tagFilter.kind === 'tag' ? tagFilter.id : undefined,
+        untagged: !searchQuery && tagFilter.kind === 'untagged',
+      })
+      recordReadArticles(result.article_ids)
+      toast.success(`已将 ${result.count} 篇文章标记为已读`)
+      if (generation !== requestGenerationRef.current) return
+      const changed = new Set([...result.article_ids, anchorId])
+      setSessionReadIds(prev => new Set([...prev, ...changed]))
+      if (searchQuery) {setSearchResults(prev => prev?.map(a => changed.has(a.id) ? {...a,is_read:true} : a) ?? null); return}
+      if (grouped) {
+        const data = await getGroupedArticles({feed_id:selectedFeed ?? undefined,unread:unreadOnly,saved:savedOnly})
+        if (generation === requestGenerationRef.current) setGroupedData(data)
+        return
+      }
+      setArticles(prev => prev.map(a => changed.has(a.id) ? { ...a, is_read: true } : a))
+      // Refill the same number of pages; offsets must be recalculated after
+      // removing unread rows or the next page could skip unread articles.
+      const refreshGeneration = requestGenerationRef.current + 1
+      await loadArticles(0, true, offset)
+      if (sidebarOpen && refreshGeneration === requestGenerationRef.current) {
+        getTagSidebar({ feed_id: selectedFeed ?? undefined, unread: unreadOnly, saved: savedOnly })
+          .then(data => { if (refreshGeneration === requestGenerationRef.current) setTagSidebarData(data) })
+          .catch(() => {})
+      }
+    } catch {
+      toast.error('标记已读失败，请重试')
+      if (generation === requestGenerationRef.current && !grouped && !searchQuery) await loadArticles(0, true, offset)
+    } finally {
+      readMutationRef.current = false
+      setMarkingRead(false)
+    }
+  }
+
   const handleMarkAllRead = async () => {
+    if (readMutationRef.current) return
     setMarkingAllRead(true)
     try {
       if (isClippingMode) {
@@ -1097,6 +1149,7 @@ export default function ArticleListPage() {
             <>
               <div className="text-muted text-sm mb-1" style={{ padding: '0 4px' }}>找到 {searchResults.length} 篇文章</div>
               {searchResults.map((article, idx) => (
+                <ArticleReadSurface key={article.id} onMarkRead={() => { void handleMarkRead(article.id, 'single') }} allowRange={false} disabled={markingRead || markingAllRead}>
                 <SearchArticleRow
                   key={article.id}
                   article={article}
@@ -1114,6 +1167,7 @@ export default function ArticleListPage() {
                   sourceSearch={sourceSearch}
                   onSourceFilter={handleSourceFilter}
                 />
+                </ArticleReadSurface>
               ))}
             </>
           )
@@ -1126,6 +1180,8 @@ export default function ArticleListPage() {
         ) : groupedData ? (
           <GroupedArticleView
             data={groupedData}
+            onMarkRead={id => { void handleMarkRead(id, 'single') }}
+            readBusy={markingRead || markingAllRead}
             isRead={isRead}
             formatDate={formatDate}
             stripMarkdown={stripMarkdown}
@@ -1180,6 +1236,8 @@ export default function ArticleListPage() {
               onFocus={setFocusedIdx}
               onPrefetch={promoteArticlePrefetch}
               observeRef={registerArticlePrefetchCard}
+              onMarkRead={direction => { void handleMarkRead(article.id, direction) }}
+              readBusy={markingRead || markingAllRead}
               dateField={sortField === 'captured' ? 'captured' : 'published'}
               sourceSearch={sourceSearch}
               onSourceFilter={handleSourceFilter}

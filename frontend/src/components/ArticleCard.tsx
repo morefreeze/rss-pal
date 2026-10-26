@@ -1,6 +1,8 @@
 import React, { useCallback } from 'react'
 import { Article, ArticleListItem, UserTag } from '../api/client'
 import TweetCard from './TweetCard'
+import ArticleReadSurface from './ArticleReadSurface'
+import type { ReadDirection } from '../api/client'
 
 // ArticleCardItem is what the card renders: anything with the lean
 // list-item shape. Both the full Article (detail page) and the
@@ -66,6 +68,9 @@ function MediaIndicator({ article, onPlay }: { article: ArticleCardItem; onPlay:
 }
 
 interface Props {
+  onMarkRead?: (direction: ReadDirection) => void
+  allowReadRange?: boolean
+  readBusy?: boolean
   article: ArticleCardItem
   manualTags?: UserTag[]
   isRead: boolean
@@ -101,6 +106,7 @@ interface Props {
 // infinite-scroll observer working.
 export default function ArticleCard({
   article,
+  onMarkRead, allowReadRange, readBusy,
   manualTags = [],
   isRead,
   isFocused,
@@ -137,6 +143,10 @@ export default function ArticleCard({
     observeRef?.(articleId, el)
   }, [exposureRef, prefetchRef, observeRef, articleId])
 
+  const wrap = (content: React.ReactNode) => onMarkRead
+    ? <ArticleReadSurface onMarkRead={onMarkRead} allowRange={allowReadRange} disabled={readBusy}>{content}</ArticleReadSurface>
+    : content
+
   const handleCardClick = () => {
     onFocus(idx)
     reportClick(article.id)
@@ -149,7 +159,7 @@ export default function ArticleCard({
   // click-to-open handler — TweetCard renders inside that chrome with its
   // own header/body/footer layout instead of the title + summary row.
   if (article.kind === 'tweet') {
-    return (
+    return wrap(
       <div
         ref={mergedRef}
         className="card"
@@ -172,7 +182,7 @@ export default function ArticleCard({
     )
   }
 
-  return (
+  return wrap(
     <div
       ref={mergedRef}
       className="card"

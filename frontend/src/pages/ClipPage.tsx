@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArticleOrder,
@@ -8,6 +8,8 @@ import {
   ClipListResponse,
   UserTag,
   getClip,
+  markReadRange,
+  ReadDirection,
   listTags,
 } from '../api/client'
 import ArticleCard from '../components/ArticleCard'
@@ -20,6 +22,9 @@ import { usePlayer } from '../player/PlayerContext'
 import { reportClick } from '../hooks/useExposureTracking'
 import { useBreakpoint } from '../hooks/useBreakpoint'
 import { writeNav, type NavContext } from '../utils/articleNav'
+
+import { toast } from '../utils/toast'
+import { recordReadArticles } from '../utils/markReadArticles'
 
 const PAGE_SIZE = 20
 
@@ -110,6 +115,10 @@ export default function ClipPage({
   const [loadingMore, setLoadingMore] = useState(false)
   const [offset, setOffset] = useState(0)
   const [focusedIdx, setFocusedIdx] = useState(-1)
+  const [markingRead, setMarkingRead] = useState(false)
+  const readMutationRef = useRef(false)
+  const generationRef = useRef(0)
+  const selectionKeyRef = useRef('')
 
   // Initial sidebar tag list
   useEffect(() => {
@@ -133,9 +142,14 @@ export default function ClipPage({
     return out
   }, [selection, restrictToFeedId, sortField, sortDir, unreadOnly, savedOnly])
   const paramsKey = JSON.stringify(params)
+  if (selectionKeyRef.current !== paramsKey) {
+    selectionKeyRef.current = paramsKey
+    generationRef.current++
+  }
 
   const loadPage = useCallback(
     async (off: number, reset: boolean) => {
+      const generation = reset ? ++generationRef.current : generationRef.current
       if (reset) setLoading(true)
       else setLoadingMore(true)
       try {
@@ -144,6 +158,7 @@ export default function ClipPage({
           limit: PAGE_SIZE,
           offset: off,
         })
+        if (generation !== generationRef.current) return
         const data = resp.items || []
         if (reset) {
           setItems(data)
@@ -154,8 +169,10 @@ export default function ClipPage({
         setTotal(resp.total || 0)
         setOffset(off)
       } finally {
-        setLoading(false)
-        setLoadingMore(false)
+        if (generation === generationRef.current) {
+          setLoading(false)
+          setLoadingMore(false)
+        }
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -206,7 +223,7 @@ export default function ClipPage({
   const hasMore = items.length < total
 
   const loadMore = () => {
-    if (loadingMore || !hasMore) return
+    if (readMutationRef.current || loadingMore || !hasMore) return
     loadPage(offset + PAGE_SIZE, false)
   }
 
@@ -259,6 +276,30 @@ export default function ClipPage({
     }
   })()
 
+  const handleMarkRead = async (anchorId: number, direction: ReadDirection) => {
+    if (readMutationRef.current) return
+    readMutationRef.current = true
+    setMarkingRead(true)
+    const generation = ++generationRef.current
+    try {
+      const result = await markReadRange({
+        anchor_id: anchorId, direction, sort: sortField, order: sortDir,
+        feed_id: restrictToFeedId, clip: true, source: params.source,
+        tag_id: selection.kind === 'tag' ? selection.id : undefined,
+        untagged: selection.kind === 'untagged', unread: unreadOnly, saved: savedOnly,
+      })
+      recordReadArticles(result.article_ids)
+      toast.success(`已将 ${result.count} 篇文章标记为已读`)
+      if (generation === generationRef.current && selectionKeyRef.current === paramsKey) await loadPage(0, true).catch(() => toast.error('列表刷新失败，请刷新重试'))
+    } catch {
+      toast.error('标记已读失败，请重试')
+      if (generation === generationRef.current && selectionKeyRef.current === paramsKey) await loadPage(0, true).catch(() => toast.error('列表刷新失败，请刷新重试'))
+    } finally {
+      readMutationRef.current = false
+      setMarkingRead(false)
+    }
+  }
+
   const renderList = () => {
     if (loading) return <div className="card">Loading...</div>
     if (items.length === 0) return <div className="card text-muted">暂无收藏文章</div>
@@ -278,6 +319,9 @@ export default function ClipPage({
             onOpen={openArticle}
             onFocus={setFocusedIdx}
             sourceLabel={it.effective_source?.title}
+            dateField={sortField === 'captured' ? 'captured' : 'published'}
+            onMarkRead={direction => { void handleMarkRead(it.id, direction) }}
+            readBusy={markingRead}
           />
         ))}
         {hasMore && (

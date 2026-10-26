@@ -6,6 +6,8 @@ import { labelFor } from './categoryLabels'
 const INITIAL_PER_GROUP = 5
 
 interface Props {
+  onMarkRead?: (id: number) => void
+  readBusy?: boolean
   data: GroupedArticles
   isRead: (a: Article | ArticleListItem) => boolean
   formatDate: (d: string | null) => string
@@ -19,11 +21,11 @@ interface Props {
 function GroupSection({
   group,
   label,
-  isRead, formatDate, stripMarkdown, onOpen, onPlay, sourceSearch, onSourceFilter,
+  isRead, formatDate, stripMarkdown, onOpen, onPlay, sourceSearch, onSourceFilter, onMarkRead, readBusy,
 }: {
   group: TopicGroup
   label: string
-} & Pick<Props, 'isRead' | 'formatDate' | 'stripMarkdown' | 'onOpen' | 'onPlay' | 'sourceSearch' | 'onSourceFilter'>) {
+} & Pick<Props, 'isRead' | 'formatDate' | 'stripMarkdown' | 'onOpen' | 'onPlay' | 'sourceSearch' | 'onSourceFilter' | 'onMarkRead' | 'readBusy'>) {
   const [expanded, setExpanded] = useState(false)
   if (group.articles.length === 0) return null
 
@@ -52,6 +54,9 @@ function GroupSection({
           onFocus={() => {}}
           sourceSearch={sourceSearch}
           onSourceFilter={onSourceFilter}
+          onMarkRead={onMarkRead ? () => onMarkRead(article.id) : undefined}
+          allowReadRange={false}
+          readBusy={readBusy}
         />
       ))}
       {(hiddenInResponse > 0 || (!expanded && beyondResponse > 0)) && (
@@ -72,6 +77,7 @@ function GroupSection({
 
 export default function GroupedArticleView({
   data,
+  onMarkRead, readBusy,
   isRead,
   formatDate,
   stripMarkdown,
@@ -89,6 +95,8 @@ export default function GroupedArticleView({
       {data.groups.map(g => (
         <GroupSection
           key={g.topic}
+          onMarkRead={onMarkRead}
+          readBusy={readBusy}
           group={g}
           label={labelFor(g.topic)}
           isRead={isRead}
@@ -102,6 +110,8 @@ export default function GroupedArticleView({
       ))}
       {data.unclassified.articles.length > 0 && (
         <GroupSection
+          onMarkRead={onMarkRead}
+          readBusy={readBusy}
           group={data.unclassified}
           label="未分类"
           isRead={isRead}

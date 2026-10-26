@@ -1388,3 +1388,20 @@ export const pairShortcut = () =>
   api.post<{ code: string; expires_at: string }>('/settings/shortcuts/pair').then(res => res.data)
 export const revokeShortcutConnections = () =>
   api.delete('/settings/shortcuts').then(() => undefined)
+
+export type ReadDirection = 'single' | 'above' | 'below'
+export interface MarkReadRangeParams {
+ anchor_id: number
+ direction: ReadDirection
+ sort?: ArticleSort
+ order?: ArticleOrder
+ feed_id?: number
+ tag_id?: number
+ untagged?: boolean
+ unread?: boolean
+ saved?: boolean
+ clip?: boolean
+ source?: string
+}
+export const markReadRange = (params: MarkReadRangeParams) =>
+ api.post<{count:number;article_ids:number[]}>('/articles/mark-read-range',params).then(res=>res.data)

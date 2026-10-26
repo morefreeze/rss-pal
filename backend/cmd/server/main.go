@@ -397,6 +397,7 @@ func main() {
 		apiGroup.GET("/articles/recommended", articleHandler.GetRecommended)
 		apiGroup.GET("/articles/unread-count", articleHandler.GetUnreadCount)
 		apiGroup.POST("/articles/mark-all-read", articleHandler.MarkAllRead)
+		apiGroup.POST("/articles/mark-read-range", articleHandler.MarkReadRange)
 		apiGroup.GET("/articles/:id", articleHandler.GetByID)
 		apiGroup.GET("/articles/:id/capture-drafts", articleHandler.CaptureDrafts)
 		apiGroup.DELETE("/articles/:id/capture-drafts", articleHandler.DeleteCaptureDrafts)

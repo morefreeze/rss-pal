@@ -37,6 +37,7 @@ func buildArticleFilterSQL(f ArticleFilter, alias string, nextArg int) (
 	finalArg int,
 ) {
 	args = []any{}
+	userArg := nextArg
 	// Reading-progress join is always emitted because unread filter and
 	// is_read field both need it. Caller already aliases reading-progress
 	// result as `rp`.
@@ -63,7 +64,7 @@ LEFT JOIN hidden_articles ha ON %s.id = ha.article_id AND ha.user_id = $%d`, ali
 	}
 	if f.SavedOnly {
 		joinSQL += fmt.Sprintf(`
-LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.user_id = $%d AND up_save.signal_type = 'save'`, alias, nextArg-1) // reuse user_id arg
+LEFT JOIN user_preferences up_save ON %s.id = up_save.article_id AND up_save.user_id = $%d AND up_save.signal_type = 'save'`, alias, userArg) // reuse user_id arg
 		// Note: we don't append user_id again because we already pushed it
 		// for the rp join. But we DO need a literal 1.0 arg.
 		whereFragments = append(whereFragments, fmt.Sprintf("up_save.signal_value = $%d", nextArg))
@@ -335,14 +336,22 @@ func ArticleOrderClause(alias string, sort SortMode, dir SortDir) string {
 	if alias != ArticleAliasFormal && alias != ArticleAliasExplore {
 		return ""
 	}
-	direction := dir.sql()
-	if sort == SortCaptured {
-		return fmt.Sprintf("ORDER BY %s.fetched_at %s", alias, direction)
+	keys := articleSortExpressions(alias, sort)
+	for i := range keys {
+		keys[i] += " " + dir.sql()
 	}
-	return fmt.Sprintf(
-		"ORDER BY DATE_TRUNC('day', GREATEST(COALESCE(%s.published_at, %s.fetched_at), %s.fetched_at - INTERVAL '7 days')) %s, COALESCE(%s.published_at, %s.fetched_at) %s",
-		alias, alias, alias, direction, alias, alias, direction,
-	)
+	return "ORDER BY " + strings.Join(keys, ", ")
+}
+
+// Shared timestamp keys for list sorting and inclusive read-range boundaries.
+func articleSortExpressions(alias string, sort SortMode) []string {
+	if sort == SortCaptured {
+		return []string{alias + ".fetched_at"}
+	}
+	return []string{
+		fmt.Sprintf("DATE_TRUNC('day', GREATEST(COALESCE(%s.published_at, %s.fetched_at), %s.fetched_at - INTERVAL '7 days'))", alias, alias, alias),
+		fmt.Sprintf("COALESCE(%s.published_at, %s.fetched_at)", alias, alias),
+	}
 }
 
 func (r *ArticleRepository) GetAll(limit, offset int, feedID *int, unreadOnly bool, savedOnly bool, userID int, tagID *int, untagged bool, sort SortMode, dir SortDir) ([]model.Article, error) {
@@ -370,7 +379,7 @@ JOIN feeds ON articles.feed_id = feeds.id` + joins
 		}
 	}
 
-	query += fmt.Sprintf(" %s LIMIT $%d OFFSET $%d", ArticleOrderClause(ArticleAliasFormal, sort, dir), nextArg, nextArg+1)
+	query += fmt.Sprintf(" %s LIMIT $%d OFFSET $%d", ArticleOrderClause(ArticleAliasFormal, sort, dir)+", articles.id "+dir.sql(), nextArg, nextArg+1)
 	args = append(args, limit, offset)
 
 	rows, err := r.db.Query(query, args...)
