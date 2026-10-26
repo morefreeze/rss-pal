@@ -45,6 +45,8 @@ func (h *AccountAuthHandler) providerReady(p string) bool {
 		return false
 	}
 	switch p {
+	case "github":
+		return a.GitHubClientID != "" && a.GitHubClientSecret != ""
 	case "google":
 		return a.GoogleClientID != "" && a.GoogleClientSecret != ""
 	case "apple":
@@ -80,6 +82,10 @@ func (h *AccountAuthHandler) oauthConfig(provider string) (*oauth2.Config, error
 	a := h.auth.cfg.Auth
 	o := &oauth2.Config{RedirectURL: h.origin() + "/api/auth/oauth/" + provider + "/callback"}
 	switch provider {
+	case "github":
+		o.ClientID = a.GitHubClientID
+		o.ClientSecret = a.GitHubClientSecret
+		o.Endpoint = oauth2.Endpoint{AuthURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", AuthStyle: oauth2.AuthStyleInParams}
 	case "google":
 		o.ClientID = a.GoogleClientID
 		o.ClientSecret = a.GoogleClientSecret
@@ -140,7 +146,7 @@ func (h *AccountAuthHandler) oauthStart(c *gin.Context, bind int) {
 	state := randomAuthToken()
 	f := accountOAuthFlow{Provider: provider, Nonce: randomAuthToken(), BindUserID: bind, Remember: req.Remember, ReturnTo: safeAuthReturn(req.ReturnTo)}
 	opts := []oauth2.AuthCodeOption{oauth2.SetAuthURLParam("nonce", f.Nonce)}
-	if provider == "google" {
+	if provider == "google" || provider == "github" {
 		f.Verifier = oauth2.GenerateVerifier()
 		opts = append(opts, oauth2.S256ChallengeOption(f.Verifier))
 	} else {
@@ -185,14 +191,20 @@ func (h *AccountAuthHandler) OAuthCallback(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
-	ctx = context.WithValue(ctx, oauth2.HTTPClient, h.httpClient)
+	client := h.httpClient
+	if provider == "github" {
+		copy := *client
+		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &copy
+	}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
 	o, e := h.oauthConfig(provider)
 	if e != nil {
 		fail()
 		return
 	}
 	opts := []oauth2.AuthCodeOption{}
-	if provider == "google" {
+	if provider == "google" || provider == "github" {
 		opts = append(opts, oauth2.VerifierOption(f.Verifier))
 	}
 	tok, e := o.Exchange(ctx, code, opts...)
@@ -200,17 +212,22 @@ func (h *AccountAuthHandler) OAuthCallback(c *gin.Context) {
 		fail()
 		return
 	}
-	raw, ok := tok.Extra("id_token").(string)
-	if !ok {
-		fail()
-		return
+	var subject, email string
+	if provider == "github" {
+		subject, e = githubSubject(ctx, client, tok.AccessToken)
+	} else {
+		raw, ok := tok.Extra("id_token").(string)
+		if !ok {
+			fail()
+			return
+		}
+		issuer, jwks := "https://accounts.google.com", "https://www.googleapis.com/oauth2/v3/certs"
+		if provider == "apple" {
+			issuer, jwks = "https://appleid.apple.com", "https://appleid.apple.com/auth/keys"
+		}
+		verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, jwks), &oidc.Config{ClientID: o.ClientID, SupportedSigningAlgs: []string{oidc.RS256}})
+		subject, email, e = verifyOAuthClaims(ctx, verifier, raw, f.Nonce)
 	}
-	issuer, jwks := "https://accounts.google.com", "https://www.googleapis.com/oauth2/v3/certs"
-	if provider == "apple" {
-		issuer, jwks = "https://appleid.apple.com", "https://appleid.apple.com/auth/keys"
-	}
-	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, jwks), &oidc.Config{ClientID: o.ClientID, SupportedSigningAlgs: []string{oidc.RS256}})
-	subject, email, e := verifyOAuthClaims(ctx, verifier, raw, f.Nonce)
 	if e != nil {
 		fail()
 		return

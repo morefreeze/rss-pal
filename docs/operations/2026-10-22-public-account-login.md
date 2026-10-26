@@ -22,6 +22,7 @@ Put credentials in the protected runtime `.env` or existing secret management, n
 | Common | `AUTH_PUBLIC_ORIGIN=https://rss.morefreeze.top` | HTTPS origin must match |
 | Email | independent random `AUTH_OTP_SECRET` of at least 32 characters; `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`; existing captcha credentials | sender/domain authorization and actual inbox receipt |
 | Tencent SES email | `AUTH_EMAIL_PROVIDER=tencent-ses`; independent `AUTH_OTP_SECRET`; `TENCENT_SES_SECRET_ID`, `TENCENT_SES_SECRET_KEY`, `TENCENT_SES_REGION=ap-hongkong`, `TENCENT_SES_TEMPLATE_ID=227021`, `TENCENT_SES_FROM=RSS Pal <noreply@rss.morefreeze.top>`, `TENCENT_SES_REPLY_TO=morefreeze@gmail.com`; existing captcha credentials | no callback; template variable `code` |
+| GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`; no requested scopes | `https://rss.morefreeze.top/api/auth/oauth/github/callback` |
 | Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | `https://rss.morefreeze.top/api/auth/oauth/google/callback` |
 | Apple | `APPLE_CLIENT_ID` (web Services ID), `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (P-256 PEM, literal `\n` supported) | `https://rss.morefreeze.top/api/auth/oauth/apple/callback` |
 
@@ -45,3 +46,9 @@ Use the dedicated API-only rsspal-ses-sender user, bound only to RSSPalSESSendEm
 When recreating only the API after changing protected environment values, include the same production Compose files used by the deployment script. On the current Tencent host these are `docker-compose.yml`, `docker-compose.override.yml` and `docker-compose.override.oci-egress-20260729.yml`. A plain `docker compose up -d --no-deps api` omits the explicitly selected egress file, dropping the API's proxy environment. Direct Google token/JWKS requests then time out even though `/api/health` and `/api/auth/methods` look healthy.
 
 Use the established deployment workflow for releases. If a configuration-only API recreation is necessary, preserve the deployed file set (check Compose container labels and `scripts/auto_deploy.sh`), then check Google token/JWKS connectivity through the configured proxy without sending credentials. Finish with actual consent/callback/exchange and sign-out/sign-in verification. Do not print OAuth codes, state, tickets, tokens or client secrets in diagnostics.
+
+## GitHub OAuth runtime
+
+Register an OAuth App owned by the RSS Pal operator. Set homepage to `https://rss.morefreeze.top` and callback to exactly `https://rss.morefreeze.top/api/auth/oauth/github/callback`; do not enable Device Flow for this web flow. Install its client ID and client secret only in the protected production environment file. Keep `github` unavailable until both exist, and preserve the production egress override when recreating API configuration.
+
+The server uses authorization code + S256 PKCE, checks single-use browser-bound state, then calls only `https://api.github.com/user` with the short-lived provider token. It requests no scopes, persists only the stable positive GitHub numeric user ID (no email, avatar or mutable username), and never uses a public email to merge identities. Provider tokens remain transient and are not exposed to the browser or stored with identity records. Existing users bind from Settings → Account; verify sign-out/sign-in returns to that same account. Update public privacy disclosure before enabling.

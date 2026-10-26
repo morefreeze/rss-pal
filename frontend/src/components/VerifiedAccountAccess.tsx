@@ -215,6 +215,11 @@ export default function VerifiedAccountAccess({
             {binding ? '绑定 Google' : '使用 Google 继续'}
           </button>
         )}
+        {methods.github && (
+          <button type="button" className="secondary" disabled={busy} onClick={() => void oauth('github')}>
+            {binding ? '绑定 GitHub' : '使用 GitHub 继续'}
+          </button>
+        )}
         {methods.apple && (
           <button
             type="button"
@@ -298,7 +303,7 @@ export default function VerifiedAccountAccess({
           </button>
         </form>
       )}
-      {!methods.email && !methods.google && !methods.apple && (
+      {!methods.email && !methods.google && !methods.github && !methods.apple && (
         <p className="text-muted">验证登录暂时不可用，请稍后再试。</p>
       )}
       {error && (

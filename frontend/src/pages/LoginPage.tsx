@@ -26,7 +26,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [methods,setMethods]=useState<AuthMethods|null>(null)
   const [showPassword,setShowPassword]=useState(false)
   useEffect(()=>{let active=true;getAuthMethods().then(m=>{if(active)setMethods(m)}).catch(()=>{});return()=>{active=false}},[])
-  const verified = Boolean(methods && (methods.email || methods.google || methods.apple))
+  const verified = Boolean(methods && (methods.email || methods.google || methods.apple || methods.github))
 
   useEffect(() => {
     api.post('/auth/init').then(() => {

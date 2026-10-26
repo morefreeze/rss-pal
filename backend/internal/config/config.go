@@ -88,6 +88,8 @@ type AuthConfig struct {
 	SMTPUsername       string
 	SMTPPassword       string
 	SMTPFrom           string
+	GitHubClientID     string
+	GitHubClientSecret string
 	GoogleClientID     string
 	GoogleClientSecret string
 	AppleClientID      string
@@ -178,6 +180,8 @@ func Load() *Config {
 			SMTPUsername:            getEnv("SMTP_USERNAME", ""),
 			SMTPPassword:            getEnv("SMTP_PASSWORD", ""),
 			SMTPFrom:                getEnv("SMTP_FROM", ""),
+			GitHubClientID:          getEnv("GITHUB_CLIENT_ID", ""),
+			GitHubClientSecret:      getEnv("GITHUB_CLIENT_SECRET", ""),
 			GoogleClientID:          getEnv("GOOGLE_CLIENT_ID", ""),
 			GoogleClientSecret:      getEnv("GOOGLE_CLIENT_SECRET", ""),
 			AppleClientID:           getEnv("APPLE_CLIENT_ID", ""),

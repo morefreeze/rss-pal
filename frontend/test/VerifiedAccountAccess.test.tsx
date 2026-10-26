@@ -213,3 +213,9 @@ it('rejects email binding after switching accounts between send and verify', asy
   expect(await screen.findByRole('alert')).toBeTruthy()
   expect(mocks.verify).not.toHaveBeenCalled()
 })
+
+it('offers GitHub login without enabling email or unrelated providers', () => {
+ render(<VerifiedAccountAccess methods={{...methods, email:false, google:false, github:true}} mode="login" returnTo="/articles" />)
+ expect(screen.getByRole('button', {name:'使用 GitHub 继续'})).toBeTruthy()
+ expect(screen.queryByLabelText('邮箱')).toBeNull()
+})

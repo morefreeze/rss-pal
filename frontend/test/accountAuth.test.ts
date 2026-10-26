@@ -117,3 +117,12 @@ it('rejects switched-owner or expired flows', async () => {
   )
   expect(readAccountFlow()).toBeNull()
 })
+
+it('allows only the exact GitHub host for GitHub OAuth redirects', async () => {
+ m.publicPost.mockResolvedValue({data:{url:'https://github.com/login/oauth/authorize?state=s'}})
+ await expect(startAccountOAuth('github','/articles',true)).resolves.toContain('https://github.com/')
+ for (const bad of ['https://github.com.evil.test/login','http://github.com/login', 'https://accounts.google.com/login']) {
+  m.publicPost.mockResolvedValue({data:{url:bad}})
+  await expect(startAccountOAuth('github','/articles',true)).rejects.toThrow()
+ }
+})

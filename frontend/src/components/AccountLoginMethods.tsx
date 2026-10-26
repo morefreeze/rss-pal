@@ -50,6 +50,7 @@ export default function AccountLoginMethods() {
   const available = {
     ...methods,
     email: methods.email && !identities.some((i) => i.provider === 'email'),
+    github: methods.github && !identities.some((i) => i.provider === 'github'),
     google: methods.google && !identities.some((i) => i.provider === 'google'),
     apple: methods.apple && !identities.some((i) => i.provider === 'apple'),
   }
@@ -65,15 +66,17 @@ export default function AccountLoginMethods() {
             <li key={i.provider}>
               {i.provider === 'email'
                 ? '邮箱'
-                : i.provider === 'google'
-                  ? 'Google'
-                  : 'Apple'}
+                : i.provider === 'github'
+                  ? 'GitHub'
+                  : i.provider === 'google'
+                    ? 'Google'
+                    : 'Apple'}
               ：已绑定{i.email ? `（${i.email}）` : ''}
             </li>
           ))}
         </ul>
       )}
-      {(available.email || available.google || available.apple) && (
+      {(available.email || available.google || available.apple || available.github) && (
         <VerifiedAccountAccess
           methods={available}
           mode="bind"
