@@ -148,7 +148,7 @@ func TestGenerateDetailedAnnotatesOnlyTruncatedContent(t *testing.T) {
 	s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
 	content := strings.Repeat("前", maxContentRunes) + "\n\n不应进入提示词的正文"
 
-	if _, err := s.generateDetailed(context.Background(), "Title", content); err != nil {
+	if _, err := s.generateDetailed(context.Background(), "Title", content, ""); err != nil {
 		t.Fatalf("generateDetailed: %v", err)
 	}
 	if len(cap.bodies) != 1 {

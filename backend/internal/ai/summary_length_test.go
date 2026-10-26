@@ -10,10 +10,7 @@ func assertSummaryLengthPrompts(t *testing.T, bodies [][]byte) {
 	t.Helper()
 	for i, body := range bodies {
 		prompt := requestUserText(t, body)
-		want := "总字符数不超过300"
-		if i%2 == 1 {
-			want = "总字符数不超过2000"
-		}
+		want := []string{"总字符数不超过16", "总字符数不超过48", "总字符数不超过300", "总字符数不超过2000"}[i]
 		for _, rule := range []string{want, "完整收尾", "已有更严格的篇幅限制", "Markdown"} {
 			if !strings.Contains(prompt, rule) {
 				t.Errorf("request %d missing %q", i, rule)
@@ -60,7 +57,7 @@ func TestSummaryLengthInstructionsInVisionPrompts(t *testing.T) {
 	for _, urls := range []string{"", "https://example.com/pic.jpg"} {
 		for _, tc := range []struct{ prompt, rule string }{
 			{buildVisionBriefPrompt("Title", "Body", urls), "总字符数不超过300"},
-			{buildVisionDetailedPrompt("Title", "Body", urls), "总字符数不超过2000"},
+			{buildVisionDetailedPrompt("Title", "Body", urls, ""), "总字符数不超过2000"},
 		} {
 			if !strings.Contains(tc.prompt, tc.rule) || !strings.Contains(tc.prompt, "完整收尾") {
 				t.Errorf("vision prompt missing length/ending rules: %s", tc.prompt)
