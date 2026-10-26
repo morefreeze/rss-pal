@@ -100,6 +100,7 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
       <p className="text-sm" style={{ marginTop: 16 }}>
         <Link to={`/login${authSearch(intent)}`}>已有账号？登录</Link>
       </p>
+      <p className="text-sm" style={{ textAlign: 'center', marginTop: 16 }}><a href="/privacy.html" target="_blank" rel="noopener noreferrer">隐私政策</a></p>
     </div>
   )
   return (
@@ -150,6 +151,7 @@ export default function RegisterPage({ onLogin }: RegisterPageProps) {
           </Link>
         </div>
       </form>
+      <p className="text-sm" style={{ textAlign: 'center', marginTop: 16 }}><a href="/privacy.html" target="_blank" rel="noopener noreferrer">隐私政策</a></p>
     </div>
   )
 }

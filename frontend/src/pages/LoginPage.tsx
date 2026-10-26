@@ -111,6 +111,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           </Link>
         </div>
 
+      <p className="text-sm" style={{ textAlign: 'center', marginTop: 16 }}><a href="/privacy.html" target="_blank" rel="noopener noreferrer">隐私政策</a></p>
     </div>
   )
 }
