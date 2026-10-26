@@ -18,6 +18,7 @@ export default function AccountAuthComplete({
     navigate = useNavigate()
   const [initial] = useState(() => ({
     ticket: new URLSearchParams(location.search).get('ticket'),
+    providerError: new URLSearchParams(location.search).get('error') === 'oauth_failed',
     flow: readAccountFlow(),
   }))
   const [error, setError] = useState('')
@@ -27,6 +28,10 @@ export default function AccountAuthComplete({
     if (window.location.pathname === '/auth/complete')
       window.history.replaceState(window.history.state, '', '/auth/complete')
     const { ticket, flow } = initial
+    if (initial.providerError) {
+      setError('第三方登录验证未完成，请返回重试；如持续失败，请联系支持。')
+      return
+    }
     if (
       !ticket ||
       ticket.length > 256 ||

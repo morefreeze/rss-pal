@@ -22,11 +22,11 @@ function Destination() {
   const l = useLocation()
   return <output>{l.pathname + l.search}</output>
 }
-function view() {
+function view(entry = '/auth/complete?ticket=one-use-ticket') {
   const onLogin = vi.fn()
   render(
     <StrictMode>
-      <MemoryRouter initialEntries={['/auth/complete?ticket=one-use-ticket']}>
+      <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route
             path="/auth/complete"
@@ -80,5 +80,12 @@ it('does not replace a newly logged-in account while the exchange is in flight',
   finish({ token: 'old', user: { id: 9, username: 'new', is_admin: false } })
   expect(await screen.findByRole('alert')).toBeTruthy()
   expect(login).not.toHaveBeenCalled()
+  expect(m.persist).not.toHaveBeenCalled()
+})
+
+it.each(['', '&ticket=must-not-exchange'])('reports provider callback failure without blaming an unchanged account (%s)', async (suffix) => {
+  view('/auth/complete?error=oauth_failed' + suffix)
+  expect((await screen.findByRole('alert')).textContent).toBe('第三方登录验证未完成，请返回重试；如持续失败，请联系支持。')
+  expect(m.exchange).not.toHaveBeenCalled()
   expect(m.persist).not.toHaveBeenCalled()
 })

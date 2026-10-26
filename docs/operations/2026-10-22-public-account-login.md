@@ -39,3 +39,9 @@ After configuring one or more channels, deploy the API using the established rel
 ## Tencent SES runtime
 
 Use the dedicated API-only rsspal-ses-sender user, bound only to RSSPalSESSendEmailOnly (`ses:SendEmail`, resource `*`). These credentials are independent from Tencent Captcha credentials. The API does not support limiting this operation to a single sender. No console login, dedicated IP or additional permissions are required. Keep credentials in the mode-0600 production environment file. The API sender always addresses a single recipient, uses TriggerType=1 and template JSON data, rejects redirects, enforces a 15-second deadline, sanitizes failures and requires a nonempty MessageId before accepting the send. An accepted API request alone does not prove inbox receipt.
+
+## Tencent Google OAuth egress
+
+When recreating only the API after changing protected environment values, include the same production Compose files used by the deployment script. On the current Tencent host these are `docker-compose.yml`, `docker-compose.override.yml` and `docker-compose.override.oci-egress-20260729.yml`. A plain `docker compose up -d --no-deps api` omits the explicitly selected egress file, dropping the API's proxy environment. Direct Google token/JWKS requests then time out even though `/api/health` and `/api/auth/methods` look healthy.
+
+Use the established deployment workflow for releases. If a configuration-only API recreation is necessary, preserve the deployed file set (check Compose container labels and `scripts/auto_deploy.sh`), then check Google token/JWKS connectivity through the configured proxy without sending credentials. Finish with actual consent/callback/exchange and sign-out/sign-in verification. Do not print OAuth codes, state, tickets, tokens or client secrets in diagnostics.
