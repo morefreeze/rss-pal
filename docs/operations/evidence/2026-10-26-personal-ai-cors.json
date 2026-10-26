@@ -1,0 +1,404 @@
+{
+  "checked_on": "2026-10-26",
+  "origin": "https://rss.morefreeze.top",
+  "browser_page": "https://rss.morefreeze.top/privacy.html",
+  "request": {
+    "method": "POST",
+    "credentials": "omit",
+    "redirect": "error",
+    "referrerPolicy": "no-referrer",
+    "auth": "intentionally invalid probe key; no user/platform credentials used",
+    "openai_path": "/chat/completions",
+    "openai_headers": [
+      "content-type: application/json",
+      "authorization: Bearer <invalid probe>"
+    ],
+    "anthropic_path": "/messages",
+    "anthropic_headers": [
+      "content-type: application/json",
+      "x-api-key: <invalid probe>",
+      "anthropic-version: 2023-06-01",
+      "anthropic-dangerous-direct-browser-access: true"
+    ]
+  },
+  "verification_scope": "Readable invalid-key error responses in a real Chromium browser confirm the preflight and error response CORS path. No valid-key paid inference, model entitlement, account/region access or HTTP 200 inference response was verified. Providers may change policies; users must still manually test their own key.",
+  "browser_openai": [
+    {
+      "id": "openai",
+      "url": "https://api.openai.com/v1",
+      "readable": true,
+      "status": 401
+    },
+    {
+      "id": "deepseek",
+      "url": "https://api.deepseek.com",
+      "readable": true,
+      "status": 401
+    },
+    {
+      "id": "zai",
+      "url": "https://api.z.ai/api/paas/v4",
+      "readable": false,
+      "error": "TypeError"
+    },
+    {
+      "id": "zai-coding",
+      "url": "https://api.z.ai/api/coding/paas/v4",
+      "readable": false,
+      "error": "TypeError"
+    },
+    {
+      "id": "bigmodel",
+      "url": "https://open.bigmodel.cn/api/paas/v4",
+      "readable": false,
+      "error": "TypeError"
+    },
+    {
+      "id": "bailian-cn",
+      "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "readable": true,
+      "status": 401
+    },
+    {
+      "id": "bailian-intl",
+      "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "readable": true,
+      "status": 401
+    },
+    {
+      "id": "xai",
+      "url": "https://api.x.ai/v1",
+      "readable": true,
+      "status": 400
+    },
+    {
+      "id": "openrouter",
+      "url": "https://openrouter.ai/api/v1",
+      "readable": true,
+      "status": 401
+    },
+    {
+      "id": "siliconflow",
+      "url": "https://api.siliconflow.cn/v1",
+      "readable": true,
+      "status": 401
+    },
+    {
+      "id": "moonshot",
+      "url": "https://api.moonshot.cn/v1",
+      "readable": true,
+      "status": 401
+    },
+    {
+      "id": "groq",
+      "url": "https://api.groq.com/openai/v1",
+      "readable": true,
+      "status": 401
+    }
+  ],
+  "browser_claude_glm": [
+    {
+      "id": "claude",
+      "url": "https://api.anthropic.com/v1/messages",
+      "native": true,
+      "readable": true,
+      "status": 401
+    },
+    {
+      "id": "claude-openai",
+      "url": "https://api.anthropic.com/v1/chat/completions",
+      "native": false,
+      "readable": false,
+      "error": "TypeError"
+    },
+    {
+      "id": "glm-coding-cn",
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+      "native": false,
+      "readable": false,
+      "error": "TypeError"
+    },
+    {
+      "id": "glm-anthropic-cn",
+      "url": "https://open.bigmodel.cn/api/anthropic/v1/messages",
+      "native": true,
+      "readable": false,
+      "error": "TypeError"
+    },
+    {
+      "id": "zai-anthropic",
+      "url": "https://api.z.ai/api/anthropic/v1/messages",
+      "native": true,
+      "readable": false,
+      "error": "TypeError"
+    }
+  ],
+  "curl_cross_check": [
+    {
+      "id": "openai",
+      "url": "https://api.openai.com/v1",
+      "options": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-origin": "https://rss.morefreeze.top",
+          "access-control-expose-headers": "CF-Ray",
+          "access-control-allow-headers": "authorization,content-type",
+          "access-control-allow-methods": "GET, OPTIONS, POST",
+          "access-control-max-age": "86400"
+        }
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-origin": "*",
+          "access-control-expose-headers": "CF-Ray"
+        }
+      }
+    },
+    {
+      "id": "deepseek",
+      "url": "https://api.deepseek.com",
+      "options": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-allow-methods": "POST",
+          "access-control-allow-headers": "authorization,content-type",
+          "access-control-allow-origin": "https://rss.morefreeze.top"
+        }
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-allow-origin": "https://rss.morefreeze.top"
+        }
+      }
+    },
+    {
+      "id": "zai",
+      "url": "https://api.z.ai/api/paas/v4",
+      "options": {
+        "status": 200,
+        "headers": {}
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-origin": "https://rss.morefreeze.top",
+          "access-control-allow-credentials": "true"
+        }
+      }
+    },
+    {
+      "id": "zai-coding",
+      "url": "https://api.z.ai/api/coding/paas/v4",
+      "options": {
+        "status": 200,
+        "headers": {}
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-origin": "https://rss.morefreeze.top",
+          "access-control-allow-credentials": "true"
+        }
+      }
+    },
+    {
+      "id": "bigmodel",
+      "url": "https://open.bigmodel.cn/api/paas/v4",
+      "options": {
+        "status": 200,
+        "headers": {}
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-origin": "https://rss.morefreeze.top",
+          "access-control-allow-credentials": "true"
+        }
+      }
+    },
+    {
+      "id": "bailian-cn",
+      "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "options": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "POST,GET",
+          "access-control-allow-headers": "authorization, content-type",
+          "access-control-max-age": "1800"
+        }
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-origin": "*"
+        }
+      }
+    },
+    {
+      "id": "bailian-intl",
+      "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "options": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-origin": "https://rss.morefreeze.top",
+          "access-control-allow-credentials": "true",
+          "access-control-allow-methods": "GET,POST,PUT,DELETE,HEAD,OPTIONS,PATCH",
+          "access-control-allow-headers": "authorization,content-type",
+          "access-control-max-age": "86400",
+          "access-control-expose-headers": "*"
+        }
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-origin": "https://rss.morefreeze.top",
+          "access-control-allow-credentials": "true",
+          "access-control-expose-headers": "*"
+        }
+      }
+    },
+    {
+      "id": "xai",
+      "url": "https://api.x.ai/v1",
+      "options": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-methods": "*",
+          "access-control-allow-headers": "*",
+          "access-control-allow-origin": "*"
+        }
+      },
+      "post": {
+        "status": 400,
+        "headers": {
+          "access-control-allow-origin": "*",
+          "access-control-expose-headers": "*"
+        }
+      }
+    },
+    {
+      "id": "openrouter",
+      "url": "https://openrouter.ai/api/v1",
+      "options": {
+        "status": 204,
+        "headers": {
+          "access-control-allow-origin": "*",
+          "access-control-allow-headers": "Authorization,User-Agent,X-Api-Key,X-CSRF-Token,X-Requested-With,Accept,Accept-Version,Content-Length,Content-Encoding,Content-MD5,Content-Type,Date,X-Api-Version,HTTP-Referer,X-Windowai-Title,X-Openrouter-Title,X-Title,X-Openrouter-Categories,X-Openrouter-App-Visibility,X-Session-Id,X-Stainless-Lang,X-Stainless-Package-Version,X-Stainless-OS,X-Stainless-Arch,X-Stainless-Runtime,X-Stainless-Runtime-Version,X-Stainless-Retry-Count,X-Stainless-Timeout,X-Stainless-Helper-Method,Protection-Key,Idempotency-Key,traceparent,tracestate,b3",
+          "access-control-allow-methods": "GET,OPTIONS,PATCH,DELETE,POST,PUT",
+          "access-control-expose-headers": "X-Generation-Id,X-Provider-Name,request-id,cf-ray"
+        }
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-origin": "*",
+          "access-control-expose-headers": "X-Generation-Id,X-Provider-Name,request-id,cf-ray"
+        }
+      }
+    },
+    {
+      "id": "siliconflow",
+      "url": "https://api.siliconflow.cn/v1",
+      "options": {
+        "status": 204,
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-allow-methods": "GET,POST,DELETE,PUT,PATCH",
+          "access-control-allow-headers": "*",
+          "access-control-max-age": "43200",
+          "access-control-allow-origin": "*"
+        }
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-expose-headers": "Content-Length",
+          "access-control-allow-origin": "*"
+        }
+      }
+    },
+    {
+      "id": "moonshot",
+      "url": "https://api.moonshot.cn/v1",
+      "options": {
+        "status": 204,
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-allow-headers": "authorization,content-type",
+          "access-control-allow-methods": "POST",
+          "access-control-allow-origin": "https://rss.morefreeze.top"
+        }
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-allow-origin": "https://rss.morefreeze.top"
+        }
+      }
+    },
+    {
+      "id": "groq",
+      "url": "https://api.groq.com/openai/v1",
+      "options": {
+        "status": 403,
+        "headers": {}
+      },
+      "post": {
+        "status": 403,
+        "headers": {}
+      }
+    },
+    {
+      "id": "claude-openai",
+      "url": "https://api.anthropic.com/v1",
+      "options": {
+        "status": 400,
+        "headers": {
+          "access-control-allow-methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+          "access-control-max-age": "600",
+          "access-control-allow-credentials": "true",
+          "access-control-allow-headers": "authorization,content-type"
+        }
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-credentials": "true"
+        }
+      }
+    },
+    {
+      "id": "glm-coding-cn",
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "options": {
+        "status": 200,
+        "headers": {}
+      },
+      "post": {
+        "status": 401,
+        "headers": {
+          "access-control-allow-origin": "https://rss.morefreeze.top",
+          "access-control-allow-credentials": "true"
+        }
+      }
+    }
+  ],
+  "official_references": [
+    "https://platform.claude.com/docs/en/api/openai-sdk",
+    "https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/main/src/client.ts",
+    "https://docs.z.ai/api-reference/introduction",
+    "https://api-docs.deepseek.com/",
+    "https://openrouter.ai/docs/api/reference/overview",
+    "https://docs.siliconflow.cn/docs/api/chat-completions-post",
+    "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
+    "https://platform.kimi.com/docs/api/chat",
+    "https://console.groq.com/docs/api-reference"
+  ]
+}

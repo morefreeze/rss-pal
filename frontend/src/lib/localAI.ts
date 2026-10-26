@@ -1,3 +1,5 @@
+import { findLocalAIPreset } from './localAIPresets'
+
 // This module deliberately has no dependency on the site's authenticated HTTP client.
 export interface LocalAIConfig {
   api_key: string
@@ -72,6 +74,7 @@ export function clearLocalAISession(): void {
 
 export async function callLocalAI(config: LocalAIConfig, prompt: string, signal?: AbortSignal, test = false): Promise<string> {
   const cfg = validateLocalAIConfig(config)
+  const nativeClaude = findLocalAIPreset(cfg.base_url)?.protocol === 'anthropic'
   signal?.throwIfAborted()
   const ctrl = new AbortController()
   const abort = () => ctrl.abort()
@@ -80,9 +83,12 @@ export async function callLocalAI(config: LocalAIConfig, prompt: string, signal?
   try {
     let response: Response
     try {
-      response = await fetch(`${cfg.base_url}/chat/completions`, {
+      response = await fetch(`${cfg.base_url}/${nativeClaude ? 'messages' : 'chat/completions'}`, {
         method: 'POST', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
+        headers: nativeClaude ? {
+          'Content-Type': 'application/json', 'x-api-key': cfg.api_key,
+          'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true',
+        } : { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
         body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], max_tokens: test ? 16 : 8192, stream: false }),
         signal: ctrl.signal,
       })
@@ -95,9 +101,12 @@ export async function callLocalAI(config: LocalAIConfig, prompt: string, signal?
     let data
     try { data = await response.json() } catch { throw new Error('AI 服务返回了无效响应') }
     const choice = data?.choices?.[0]
-    const content = choice?.message?.content
+    const content = nativeClaude
+      ? (Array.isArray(data?.content) ? data.content.filter((block: { type?: string; text?: unknown }) => block.type === 'text' && typeof block.text === 'string').map((block: { text: string }) => block.text).join('\n') : '')
+      : choice?.message?.content
+    const complete = nativeClaude ? ['end_turn', 'stop_sequence'].includes(data?.stop_reason) : choice?.finish_reason === 'stop'
     if (typeof content !== 'string' || !content.trim()) throw new Error('AI 服务返回了空结果，请检查模型或重试')
-    if (!test && choice.finish_reason !== 'stop') throw new Error('AI 未返回完整结果，本次不会保存，请手动重试')
+    if (!test && !complete) throw new Error('AI 未返回完整结果，本次不会保存，请手动重试')
     // A provider can echo request credentials. Never upload or display that echo.
     if (content.includes(cfg.api_key)) throw new Error('AI 响应包含敏感凭证，本次结果已丢弃')
     return content.trim()

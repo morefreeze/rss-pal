@@ -73,3 +73,27 @@ describe('browser direct calls', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 })
+describe('native Claude browser calls', () => {
+  const claude={...cfg,base_url:'https://api.anthropic.com/v1',model:'claude-test'}
+  it('uses the Messages protocol and direct-browser headers only on the official Claude origin', async () => {
+    const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify({content:[{type:'thinking',thinking:'private reasoning'},{type:'text',text:'Claude summary'}],stop_reason:'end_turn'})))
+    vi.stubGlobal('fetch',fetch)
+    expect(await callLocalAI(claude,'article prompt')).toBe('Claude summary')
+    expect(fetch).toHaveBeenCalledWith('https://api.anthropic.com/v1/messages',expect.objectContaining({
+      credentials:'omit',redirect:'error',headers:{'Content-Type':'application/json','x-api-key':cfg.api_key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    }))
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({model:'claude-test',messages:[{role:'user',content:'article prompt'}],stream:false})
+    expect(fetch.mock.calls[0][1].headers.Authorization).toBeUndefined()
+  })
+  it('rejects truncated Claude responses', async () => {
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({content:[{type:'text',text:'partial'}],stop_reason:'max_tokens'}))))
+    await expect(callLocalAI(claude,'prompt')).rejects.toThrow(/完整/)
+  })
+  it('never sends Claude headers to a similar-looking custom origin', async () => {
+    const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify({choices:[{message:{content:'ok'},finish_reason:'stop'}]})))
+    vi.stubGlobal('fetch',fetch)
+    await callLocalAI({...claude,base_url:'https://api.anthropic.com.example/v1'},'prompt')
+    expect(fetch.mock.calls[0][0]).toBe('https://api.anthropic.com.example/v1/chat/completions')
+    expect(fetch.mock.calls[0][1].headers['x-api-key']).toBeUndefined()
+  })
+})
