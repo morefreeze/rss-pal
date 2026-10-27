@@ -75,6 +75,8 @@ type ArticleLocationState = {
   articlePreview?: ArticleListItem
 }
 
+const LOCAL_AI_HINT_MUTE_KEY = 'rss-pal:local-ai-usage-hint-muted:v1'
+
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -237,6 +239,13 @@ export default function ArticlePage() {
   currentArticleIDRef.current = articleID
   const [summaryJob, setSummaryJob] = useState<ArticleDetailResponse['summary_job']>(initialDetail?.summary_job)
   const [summaryError, setSummaryError] = useState('')
+  const [localAIHintMuted, setLocalAIHintMuted] = useState(() => {
+    try { return localStorage.getItem(LOCAL_AI_HINT_MUTE_KEY) === '1' } catch { return false }
+  })
+  const muteLocalAIHint = () => {
+    setLocalAIHintMuted(true)
+    try { localStorage.setItem(LOCAL_AI_HINT_MUTE_KEY, '1') } catch { /* Still hide for this page if storage is unavailable. */ }
+  }
 
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
 
@@ -1461,7 +1470,12 @@ export default function ArticlePage() {
 
         {streamPhase === 'idle' && summaryJob?.state === 'running' && <p role="status" className="text-muted text-sm">总结正在生成，完成后会自动更新。</p>}
         {streamPhase === 'idle' && (summaryError || summaryJob?.state === 'failed') && <p role="alert" className="text-sm">{summaryError || summaryJob?.last_error || '上次生成失败，可以重试。'}</p>}
-        <p className="text-muted text-sm mb-2">本机 API Key 仅在手动点击“生成总结”或“重新生成”时使用，浏览器直接调用模型，完成后同步摘要。请保持页面打开；未配置时使用系统 AI。<Link to="/settings#ai">配置本机 AI</Link></p>
+        {!localAIHintMuted && (
+          <p className="text-muted text-sm mb-2">
+            本机 API Key 仅在手动点击“生成总结”或“重新生成”时使用，浏览器直接调用模型，完成后同步摘要。请保持页面打开；未配置时使用系统 AI。<Link to="/settings#ai">配置本机 AI</Link>
+            <button type="button" className="btn-ghost btn-sm" onClick={muteLocalAIHint} aria-label="不再显示本机 AI 使用提示" style={{ marginLeft: 8 }}>不再提示</button>
+          </p>
+        )}
 
         {streamPhase !== 'idle' ? (
           <div className="markdown-body">
