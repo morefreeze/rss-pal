@@ -1,0 +1,73 @@
+/* GitHub Dark syntax colors for the site's two dark themes. Keep the light
+   palette and the shared --code-bg/layout rules unchanged. */
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body .hljs {
+  color: var(--fg);
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body :is(
+  .hljs-doctag, .hljs-keyword, .hljs-template-tag, .hljs-template-variable,
+  .hljs-type, .hljs-variable.language_
+) {
+  color: #ff7b72;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body .hljs-title {
+  color: #d2a8ff;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body :is(
+  .hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta, .hljs-number,
+  .hljs-operator, .hljs-variable, .hljs-selector-attr, .hljs-selector-class,
+  .hljs-selector-id
+) {
+  color: #79c0ff;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body :is(
+  .hljs-regexp, .hljs-string
+) {
+  color: #a5d6ff;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body :is(
+  .hljs-built_in, .hljs-symbol
+) {
+  color: #ffa657;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body :is(
+  .hljs-comment, .hljs-code, .hljs-formula
+) {
+  color: #8b949e;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body :is(
+  .hljs-name, .hljs-quote, .hljs-selector-tag, .hljs-selector-pseudo
+) {
+  color: #7ee787;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body :is(
+  .hljs-subst, .hljs-emphasis, .hljs-strong
+) {
+  color: var(--fg);
+}
+
+/* The original dark palette's heading blue is too dim on --code-bg. */
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body .hljs-section {
+  color: #79c0ff;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body .hljs-bullet {
+  color: #f2cc60;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body .hljs-addition {
+  color: #aff5b4;
+  background-color: #033a16;
+}
+
+body:is([data-theme='night'], [data-theme='neon']) .markdown-body .hljs-deletion {
+  color: #ffdcd7;
+  background-color: #67060c;
+}
