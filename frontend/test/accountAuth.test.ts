@@ -126,3 +126,12 @@ it('allows only the exact GitHub host for GitHub OAuth redirects', async () => {
   await expect(startAccountOAuth('github','/articles',true)).rejects.toThrow()
  }
 })
+
+it('restricts QQ OAuth redirects to the exact official HTTPS host', async () => {
+ m.publicPost.mockResolvedValue({data:{url:'https://graph.qq.com/oauth2.0/authorize?state=s'}})
+ await expect(startAccountOAuth('qq','/articles',true)).resolves.toContain('https://graph.qq.com/')
+ for(const bad of ['http://graph.qq.com/oauth2.0/authorize','https://graph.qq.com.evil.test/','https://github.com/login']) {
+  m.publicPost.mockResolvedValue({data:{url:bad}})
+  await expect(startAccountOAuth('qq','/articles',true)).rejects.toThrow()
+ }
+})

@@ -25,7 +25,7 @@ func TestPublicAccountMethodsFailClosed(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/methods", nil))
 	var m map[string]any
 	json.Unmarshal(w.Body.Bytes(), &m)
-	if m["email"] != false || m["google"] != false || m["apple"] != false || m["github"] != false {
+	if m["email"] != false || m["google"] != false || m["apple"] != false || m["github"] != false || m["qq"] != false {
 		t.Fatal(w.Body.String())
 	}
 	w = httptest.NewRecorder()

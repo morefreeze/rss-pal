@@ -7,6 +7,9 @@ import {
   type AuthMethods,
 } from '../api/accountAuth'
 import VerifiedAccountAccess from './VerifiedAccountAccess'
+const providerNames: Record<AccountIdentity['provider'], string> = {
+  email: '邮箱', google: 'Google', apple: 'Apple', github: 'GitHub', qq: 'QQ',
+}
 export default function AccountLoginMethods() {
   const [methods, setMethods] = useState<AuthMethods | null>(null),
     [identities, setIdentities] = useState<AccountIdentity[]>([]),
@@ -50,6 +53,7 @@ export default function AccountLoginMethods() {
   const available = {
     ...methods,
     email: methods.email && !identities.some((i) => i.provider === 'email'),
+    qq: methods.qq && !identities.some((i) => i.provider === 'qq'),
     github: methods.github && !identities.some((i) => i.provider === 'github'),
     google: methods.google && !identities.some((i) => i.provider === 'google'),
     apple: methods.apple && !identities.some((i) => i.provider === 'apple'),
@@ -64,19 +68,13 @@ export default function AccountLoginMethods() {
         <ul>
           {identities.map((i) => (
             <li key={i.provider}>
-              {i.provider === 'email'
-                ? '邮箱'
-                : i.provider === 'github'
-                  ? 'GitHub'
-                  : i.provider === 'google'
-                    ? 'Google'
-                    : 'Apple'}
+              {providerNames[i.provider]}
               ：已绑定{i.email ? `（${i.email}）` : ''}
             </li>
           ))}
         </ul>
       )}
-      {(available.email || available.google || available.apple || available.github) && (
+      {(available.email || available.google || available.apple || available.github || available.qq) && (
         <VerifiedAccountAccess
           methods={available}
           mode="bind"

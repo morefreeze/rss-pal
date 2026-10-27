@@ -1,0 +1,7 @@
+# QQ and Douban account access
+
+User authorized QQ and Douban login. QQ has a documented current application path. Implement minimal get_user_info authorization with server-side code exchange and verified client_id/OpenID; persist only application-scoped identity, not QQ number, avatar or provider tokens. Reuse one-use browser-bound state/ticket and explicit binding; no identity merge from names/email. Use mobile authorization presentation for mobile user agents. Include forward migration in the production status-migrate chain, tests for malformed/mismatched credentials, signup/binding/replay, existing providers and deployment checks.
+
+QQ platform certification and app review gate credential activation/public availability. Register using actual approved user information only, confirm legal/security actions at action time. Do not show unconfigured providers. Finish code/review/tests, integrate current master, deploy Tencent and verify revision/health/hidden state before activation and real authorization acceptance.
+
+Douban: user has no existing application. Its official developer endpoint fails to open via browser (HTTP2 error); official archived client proves only historical OAuth support. New application eligibility/credentials are unresolved, so do not implement or expose an unverified provider. Continue application investigation independently and report the precise external blocker if no supported path is available.

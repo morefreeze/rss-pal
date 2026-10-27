@@ -219,3 +219,9 @@ it('offers GitHub login without enabling email or unrelated providers', () => {
  expect(screen.getByRole('button', {name:'使用 GitHub 继续'})).toBeTruthy()
  expect(screen.queryByLabelText('邮箱')).toBeNull()
 })
+
+it('offers QQ as an independent login provider', () => {
+ render(<VerifiedAccountAccess methods={{...methods,email:false,google:false,github:false,qq:true}} mode="login" returnTo="/articles" />)
+ expect(screen.getByRole('button',{name:'使用 QQ 继续'})).toBeTruthy()
+ expect(screen.queryByLabelText('邮箱')).toBeNull()
+})

@@ -45,6 +45,8 @@ func (h *AccountAuthHandler) providerReady(p string) bool {
 		return false
 	}
 	switch p {
+	case "qq":
+		return a.QQClientID != "" && a.QQClientSecret != ""
 	case "github":
 		return a.GitHubClientID != "" && a.GitHubClientSecret != ""
 	case "google":
@@ -82,6 +84,11 @@ func (h *AccountAuthHandler) oauthConfig(provider string) (*oauth2.Config, error
 	a := h.auth.cfg.Auth
 	o := &oauth2.Config{RedirectURL: h.origin() + "/api/auth/oauth/" + provider + "/callback"}
 	switch provider {
+	case "qq":
+		o.ClientID = a.QQClientID
+		o.ClientSecret = a.QQClientSecret
+		o.Scopes = []string{"get_user_info"}
+		o.Endpoint = oauth2.Endpoint{AuthURL: "https://graph.qq.com/oauth2.0/authorize", TokenURL: "https://graph.qq.com/oauth2.0/token", AuthStyle: oauth2.AuthStyleInParams}
 	case "github":
 		o.ClientID = a.GitHubClientID
 		o.ClientSecret = a.GitHubClientSecret
@@ -145,11 +152,17 @@ func (h *AccountAuthHandler) oauthStart(c *gin.Context, bind int) {
 	}
 	state := randomAuthToken()
 	f := accountOAuthFlow{Provider: provider, Nonce: randomAuthToken(), BindUserID: bind, Remember: req.Remember, ReturnTo: safeAuthReturn(req.ReturnTo)}
-	opts := []oauth2.AuthCodeOption{oauth2.SetAuthURLParam("nonce", f.Nonce)}
+	opts := []oauth2.AuthCodeOption{}
+	if provider != "qq" {
+		opts = append(opts, oauth2.SetAuthURLParam("nonce", f.Nonce))
+	}
+	if provider == "qq" && (strings.Contains(c.Request.UserAgent(), "Mobile") || strings.Contains(c.Request.UserAgent(), "Android")) {
+		opts = append(opts, oauth2.SetAuthURLParam("display", "mobile"))
+	}
 	if provider == "google" || provider == "github" {
 		f.Verifier = oauth2.GenerateVerifier()
 		opts = append(opts, oauth2.S256ChallengeOption(f.Verifier))
-	} else {
+	} else if provider == "apple" {
 		opts = append(opts, oauth2.SetAuthURLParam("response_mode", "form_post"))
 	}
 	if e = h.repo.PutFlow(c.Request.Context(), authHash(state), "state", authHash(h.browser(c, true)), f); e != nil {
@@ -192,7 +205,7 @@ func (h *AccountAuthHandler) OAuthCallback(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 	client := h.httpClient
-	if provider == "github" {
+	if provider == "github" || provider == "qq" {
 		copy := *client
 		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		client = &copy
@@ -207,30 +220,38 @@ func (h *AccountAuthHandler) OAuthCallback(c *gin.Context) {
 	if provider == "google" || provider == "github" {
 		opts = append(opts, oauth2.VerifierOption(f.Verifier))
 	}
-	tok, e := o.Exchange(ctx, code, opts...)
-	if e != nil {
-		fail()
-		return
-	}
 	var subject, email string
-	if provider == "github" {
-		subject, e = githubSubject(ctx, client, tok.AccessToken)
-	} else {
-		raw, ok := tok.Extra("id_token").(string)
-		if !ok {
+	if provider == "qq" {
+		subject, e = qqSubject(ctx, client, o, code)
+		if e != nil {
 			fail()
 			return
 		}
-		issuer, jwks := "https://accounts.google.com", "https://www.googleapis.com/oauth2/v3/certs"
-		if provider == "apple" {
-			issuer, jwks = "https://appleid.apple.com", "https://appleid.apple.com/auth/keys"
+	} else {
+		tok, e := o.Exchange(ctx, code, opts...)
+		if e != nil {
+			fail()
+			return
 		}
-		verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, jwks), &oidc.Config{ClientID: o.ClientID, SupportedSigningAlgs: []string{oidc.RS256}})
-		subject, email, e = verifyOAuthClaims(ctx, verifier, raw, f.Nonce)
-	}
-	if e != nil {
-		fail()
-		return
+		if provider == "github" {
+			subject, e = githubSubject(ctx, client, tok.AccessToken)
+		} else {
+			raw, ok := tok.Extra("id_token").(string)
+			if !ok {
+				fail()
+				return
+			}
+			issuer, jwks := "https://accounts.google.com", "https://www.googleapis.com/oauth2/v3/certs"
+			if provider == "apple" {
+				issuer, jwks = "https://appleid.apple.com", "https://appleid.apple.com/auth/keys"
+			}
+			verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, jwks), &oidc.Config{ClientID: o.ClientID, SupportedSigningAlgs: []string{oidc.RS256}})
+			subject, email, e = verifyOAuthClaims(ctx, verifier, raw, f.Nonce)
+		}
+		if e != nil {
+			fail()
+			return
+		}
 	}
 	f.Subject = subject
 	f.Email = email

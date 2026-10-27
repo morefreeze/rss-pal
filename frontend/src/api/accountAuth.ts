@@ -1,11 +1,12 @@
 import type { User } from '../App'
 import axios from 'axios'
 import { api } from './client'
-export type AccountProvider = 'google' | 'apple' | 'github'
+export type AccountProvider = 'google' | 'apple' | 'github' | 'qq'
 export type AuthMethods = {
   public_registration: boolean
   legacy_password: boolean
   email: boolean
+  qq: boolean
   github: boolean
   google: boolean
   apple: boolean
@@ -154,7 +155,7 @@ export async function startAccountOAuth(
   const u = new URL(data.url)
   if (
     u.protocol !== 'https:' ||
-    u.hostname !== {google: 'accounts.google.com', apple: 'appleid.apple.com', github: 'github.com'}[provider]
+    u.hostname !== {google: 'accounts.google.com', apple: 'appleid.apple.com', github: 'github.com', qq: 'graph.qq.com'}[provider]
   )
     throw Error('登录跳转无效，请重试')
   sessionStorage.setItem(flowKey, JSON.stringify(flow))
