@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticleListPage from '../src/pages/ArticleListPage'
+import Toaster from '../src/components/Toaster'
 import type { Article, ArticleListItem, Feed } from '../src/api/client'
 
 const apiMocks = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const apiMocks = vi.hoisted(() => ({
   likeArticle: vi.fn(),
   markAllRead: vi.fn(),
   markReadRange: vi.fn(),
+  undoMarkRead: vi.fn(),
   postEvent: vi.fn(async () => undefined),
   searchArticles: vi.fn(),
 }))
@@ -237,6 +239,35 @@ describe('ArticleListPage automatic pagination', () => {
     await act(async()=>oldRefresh.resolve(groups(10)))
     expect(screen.queryByTestId('article-10')).toBeNull()
     expect(screen.getByTestId('article-50')).toBeTruthy()
+  })
+
+  it('offers undo for all-read and refreshes the currently selected filter', async () => {
+    apiMocks.getArticles.mockImplementation(({unread}:{unread?:boolean})=>Promise.resolve(unread?makeArticles(101):makeArticles(1)))
+    apiMocks.markAllRead.mockResolvedValue({count:50,article_ids:[1,2,100],undo_token:'undo-all'})
+    apiMocks.undoMarkRead.mockResolvedValue({count:3,article_ids:[1,2,100]})
+    render(<MemoryRouter><Toaster/><ArticleListPage /></MemoryRouter>)
+    await screen.findByTestId('article-1')
+    fireEvent.click(screen.getByRole('button',{name:'全部已读'}))
+    expect(await screen.findByRole('button',{name:'撤销'})).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox',{name:'仅未读'}))
+    await screen.findByTestId('article-101')
+    const count = apiMocks.getArticles.mock.calls.length
+    fireEvent.click(screen.getByRole('button',{name:'撤销'}))
+    await waitFor(()=>expect(apiMocks.undoMarkRead).toHaveBeenCalledWith('undo-all'))
+    await waitFor(()=>expect(apiMocks.getArticles.mock.calls.length).toBeGreaterThan(count))
+    expect(apiMocks.getArticles.mock.calls.at(-1)![0]).toEqual(expect.objectContaining({unread:true,offset:0}))
+    expect(JSON.parse(sessionStorage.getItem('readArticles')!)).toEqual([])
+  })
+
+  it('keeps an unread anchor visible when concurrent progress caused the server to skip it', async () => {
+    localStorage.setItem('unreadOnly','true')
+    apiMocks.getArticles.mockResolvedValue(makeArticles(1))
+    apiMocks.markReadRange.mockResolvedValue({count:0,article_ids:[],undo_token:''})
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button',{name:'read-below-1'}))
+    await waitFor(()=>expect(apiMocks.getArticles).toHaveBeenCalledTimes(2))
+    expect(screen.getByTestId('article-1')).toBeTruthy()
+    expect(JSON.parse(sessionStorage.getItem('readArticles')!)).toEqual([])
   })
 
   it('keeps a deep return snapshot across StrictMode effects and revalidates every loaded page', async () => {

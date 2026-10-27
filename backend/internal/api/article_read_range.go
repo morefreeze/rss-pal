@@ -42,7 +42,7 @@ func (h *ArticleHandler) MarkReadRange(c *gin.Context) {
 	if req.Order == "asc" {
 		dir = repository.SortAsc
 	}
-	ids, err := h.progressRepo.WithCtx(c).MarkReadRange(repository.ReadRange{
+	result, err := h.progressRepo.WithCtx(c).MarkReadRangeWithUndo(repository.ReadRange{
 		Filter:   repository.ArticleFilter{UserID: getUserID(c), FeedID: req.FeedID, TagID: req.TagID, Untagged: req.Untagged, UnreadOnly: req.Unread, SavedOnly: req.Saved},
 		AnchorID: req.AnchorID, Direction: req.Direction, Sort: sort, Dir: dir, ClipOnly: req.Clip, Source: req.Source,
 	})
@@ -52,6 +52,26 @@ func (h *ArticleHandler) MarkReadRange(c *gin.Context) {
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "标记已读失败，请重试"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": len(result.ArticleIDs), "article_ids": result.ArticleIDs, "undo_token": result.UndoToken})
+}
+
+func (h *ArticleHandler) UndoMarkRead(c *gin.Context) {
+	var req struct {
+		Token string `json:"undo_token" binding:"required,len=64,hexadecimal"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的撤销操作"})
+		return
+	}
+	ids, err := h.progressRepo.WithCtx(c).UndoMarkRead(getUserID(c), req.Token)
+	if errors.Is(err, repository.ErrReadUndoNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "撤销已过期或已使用"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "撤销失败，请重试"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"count": len(ids), "article_ids": ids})

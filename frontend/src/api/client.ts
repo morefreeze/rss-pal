@@ -761,7 +761,7 @@ export const markAllRead = (filters?: {
   untagged?: boolean
   source?: string
 }) =>
-  api.post('/articles/mark-all-read', null, {
+  api.post<ReadMutationResponse>('/articles/mark-all-read', null, {
     params: {
       feed_id: filters?.feedId ?? undefined,
       unread: filters?.unread ? 'true' : undefined,
@@ -1425,4 +1425,12 @@ export interface MarkReadRangeParams {
  source?: string
 }
 export const markReadRange = (params: MarkReadRangeParams) =>
- api.post<{count:number;article_ids:number[]}>('/articles/mark-read-range',params).then(res=>res.data)
+ api.post<ReadMutationResponse>('/articles/mark-read-range',params).then(res=>res.data)
+
+export interface ReadMutationResponse {
+ count: number
+ article_ids: number[]
+ undo_token: string
+}
+export const undoMarkRead = (undoToken: string) =>
+ api.post<{count:number;article_ids:number[]}>('/articles/undo-read',{undo_token:undoToken}).then(res=>res.data)

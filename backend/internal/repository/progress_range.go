@@ -3,7 +3,6 @@ package repository
 import (
 	"errors"
 	"fmt"
-	"github.com/lib/pq"
 	"strings"
 )
 
@@ -23,8 +22,13 @@ type ReadRange struct {
 // The anchor is resolved before excluding read rows, so an already-read anchor
 // remains usable in an unread-only list. All writes use the caller's RLS tx.
 func (r *ProgressRepository) MarkReadRange(q ReadRange) ([]int, error) {
+	result, err := r.MarkReadRangeWithUndo(q)
+	return result.ArticleIDs, err
+}
+
+func (r *ProgressRepository) MarkReadRangeWithUndo(q ReadRange) (ReadMutationResult, error) {
 	if q.AnchorID <= 0 || (q.Direction != "single" && q.Direction != "above" && q.Direction != "below") {
-		return nil, fmt.Errorf("invalid read range")
+		return ReadMutationResult{}, fmt.Errorf("invalid read range")
 	}
 	filter := q.Filter
 	filter.UnreadOnly = false
@@ -36,7 +40,7 @@ func (r *ProgressRepository) MarkReadRange(q ReadRange) ([]int, error) {
 	if q.Source != "" {
 		kind, value, ok := strings.Cut(q.Source, ":")
 		if !q.ClipOnly || !ok || value == "" {
-			return nil, fmt.Errorf("invalid source")
+			return ReadMutationResult{}, fmt.Errorf("invalid source")
 		}
 		switch kind {
 		case "feed":
@@ -44,7 +48,7 @@ func (r *ProgressRepository) MarkReadRange(q ReadRange) ([]int, error) {
 		case "host":
 			where = append(where, fmt.Sprintf(`lower(regexp_replace(articles.url, '^https?://(?:www\.)?([^/]+).*$', '\1')) = lower($%d)`, next))
 		default:
-			return nil, fmt.Errorf("invalid source")
+			return ReadMutationResult{}, fmt.Errorf("invalid source")
 		}
 		args = append(args, value)
 		next++
@@ -64,30 +68,10 @@ func (r *ProgressRepository) MarkReadRange(q ReadRange) ([]int, error) {
 		}
 		boundary = "(s.key1, s.key2, s.id) " + op + " (SELECT key1, key2, id FROM anchor)"
 	}
-	query := `WITH scoped AS (
- SELECT articles.id, COALESCE(rp.is_completed,false) AS is_read, ` + keys[0] + ` AS key1, ` + keys[1] + ` AS key2
+	ctes := `scoped AS MATERIALIZED (
+ SELECT articles.id, to_jsonb(rp) AS previous, COALESCE(rp.is_completed,false) AS is_read, ` + keys[0] + ` AS key1, ` + keys[1] + ` AS key2
  FROM articles JOIN feeds ON feeds.id=articles.feed_id ` + joins + `
  WHERE ` + strings.Join(where, " AND ") + `
- ), anchor AS (SELECT * FROM scoped WHERE id=` + anchorParam + `), changed AS (
- INSERT INTO reading_progress(user_id,article_id,scroll_position,last_read_at,is_completed)
- SELECT $1,s.id,1.0,NOW(),true FROM scoped s
- WHERE NOT s.is_read AND EXISTS(SELECT 1 FROM anchor) AND ` + boundary + `
- ON CONFLICT(article_id,user_id) DO UPDATE SET
- is_completed=true,scroll_position=1.0,last_read_at=NOW()
- WHERE reading_progress.is_completed IS DISTINCT FROM true
- RETURNING article_id
- ) SELECT EXISTS(SELECT 1 FROM anchor), COALESCE((SELECT array_agg(article_id) FROM changed),'{}'::int[])`
-	var exists bool
-	var rawIDs pq.Int64Array
-	if err := r.db.QueryRow(query, args...).Scan(&exists, &rawIDs); err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, ErrReadAnchorNotFound
-	}
-	ids := make([]int, len(rawIDs))
-	for i, id := range rawIDs {
-		ids[i] = int(id)
-	}
-	return ids, nil
+ ), anchor AS (SELECT * FROM scoped WHERE id=` + anchorParam + `)`
+	return r.executeReadMutation(ctes, boundary, "EXISTS(SELECT 1 FROM anchor)", args)
 }

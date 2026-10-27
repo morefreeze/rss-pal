@@ -82,11 +82,12 @@ func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
 		}
 	}
 
-	if err := h.progressRepo.WithCtx(c).MarkAllRead(getUserID(c), feedID, unreadOnly, savedOnly, clip); err != nil {
+	result, err := h.progressRepo.WithCtx(c).MarkAllReadWithUndo(getUserID(c), feedID, unreadOnly, savedOnly, clip)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "已全部标记为已读"})
+	c.JSON(http.StatusOK, gin.H{"message": "已全部标记为已读", "count": len(result.ArticleIDs), "article_ids": result.ArticleIDs, "undo_token": result.UndoToken})
 }
 
 func NewArticleHandler(articleRepo *repository.ArticleRepository, bindRepo *repository.ArticleUserTagRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, hiddenRepo *repository.HiddenArticleRepository, summarizer *service.SummarizerService, contentFetcher *rss.ContentFetcher) *ArticleHandler {

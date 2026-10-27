@@ -106,10 +106,15 @@ type MarkAllReadClipFilter struct {
 // savedOnly=false to apply across the whole library. clip carries the
 // extra tag/source filters used by 网摘 mode.
 func (r *ProgressRepository) MarkAllRead(userID int, feedID *int, unreadOnly, savedOnly bool, clip MarkAllReadClipFilter) error {
+	_, err := r.MarkAllReadWithUndo(userID, feedID, unreadOnly, savedOnly, clip)
+	return err
+}
+
+func (r *ProgressRepository) MarkAllReadWithUndo(userID int, feedID *int, unreadOnly, savedOnly bool, clip MarkAllReadClipFilter) (ReadMutationResult, error) {
 	args := []interface{}{userID}
 	argIdx := 2
-	joins := ""
-	conditions := []string{"(f.owner_id = $1)"}
+	joins := " LEFT JOIN reading_progress rp ON rp.article_id = a.id AND rp.user_id = $1"
+	conditions := []string{"(f.owner_id = $1)", "NOT EXISTS (SELECT 1 FROM hidden_articles ha WHERE ha.article_id=a.id AND ha.user_id=$1)"}
 
 	if feedID != nil {
 		conditions = append(conditions, fmt.Sprintf("a.feed_id = $%d", argIdx))
@@ -117,7 +122,6 @@ func (r *ProgressRepository) MarkAllRead(userID int, feedID *int, unreadOnly, sa
 		argIdx++
 	}
 	if unreadOnly {
-		joins += " LEFT JOIN reading_progress rp ON rp.article_id = a.id AND rp.user_id = $1"
 		conditions = append(conditions, "COALESCE(rp.is_completed, false) = false")
 	}
 	if savedOnly {
@@ -176,15 +180,9 @@ func (r *ProgressRepository) MarkAllRead(userID int, feedID *int, unreadOnly, sa
 		where += " AND " + conditions[i]
 	}
 
-	query := `
-		INSERT INTO reading_progress (user_id, article_id, scroll_position, last_read_at, is_completed)
-		SELECT $1, a.id, 1.0, NOW(), true
-		FROM articles a
-		JOIN feeds f ON a.feed_id = f.id` + joins + `
-		WHERE ` + where + `
-		ON CONFLICT (article_id, user_id) DO UPDATE SET
-			is_completed = true, scroll_position = 1.0, last_read_at = NOW()
-	`
-	_, err := r.db.Exec(query, args...)
-	return err
+	ctes := `scoped AS MATERIALIZED (
+ SELECT a.id,to_jsonb(rp) AS previous,COALESCE(rp.is_completed,false) AS is_read
+ FROM articles a JOIN feeds f ON a.feed_id=f.id ` + joins + `
+ WHERE ` + where + `)`
+	return r.executeReadMutation(ctes, "true", "true", args)
 }

@@ -24,7 +24,7 @@ import { useBreakpoint } from '../hooks/useBreakpoint'
 import { writeNav, type NavContext } from '../utils/articleNav'
 
 import { toast } from '../utils/toast'
-import { recordReadArticles } from '../utils/markReadArticles'
+import { recordReadArticles, showReadUndoToast } from '../utils/markReadArticles'
 
 const PAGE_SIZE = 20
 
@@ -289,7 +289,7 @@ export default function ClipPage({
         untagged: selection.kind === 'untagged', unread: unreadOnly, saved: savedOnly,
       })
       recordReadArticles(result.article_ids)
-      toast.success(`已将 ${result.count} 篇文章标记为已读`)
+      showReadUndoToast(result)
       if (generation === generationRef.current && selectionKeyRef.current === paramsKey) await loadPage(0, true).catch(() => toast.error('列表刷新失败，请刷新重试'))
     } catch {
       toast.error('标记已读失败，请重试')
@@ -299,6 +299,12 @@ export default function ClipPage({
       setMarkingRead(false)
     }
   }
+
+  useEffect(() => {
+    const onUndo = () => {void loadPage(0, true).catch(() => toast.error('列表刷新失败，请刷新重试'))}
+    window.addEventListener('read-state-refresh', onUndo)
+    return () => window.removeEventListener('read-state-refresh', onUndo)
+  }, [loadPage])
 
   const renderList = () => {
     if (loading) return <div className="card">Loading...</div>

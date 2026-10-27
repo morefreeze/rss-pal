@@ -21,7 +21,7 @@ import { useArticleDetailPrefetch } from '../hooks/useArticleDetailPrefetch'
 import ArticleSourceLink from '../components/ArticleSourceLink'
 import { saveListReturn, takeListReturn } from '../utils/articleListReturn'
 import { toast } from '../utils/toast'
-import { recordReadArticles } from '../utils/markReadArticles'
+import { recordReadArticles, showReadUndoToast } from '../utils/markReadArticles'
 import { pinyinSearchIncludes } from '../utils/pinyinSearch'
 
 const PAGE_SIZE = 20
@@ -424,8 +424,6 @@ export default function ArticleListPage() {
   // Mirrors the embedded ClipPage's tag/source selection so the toolbar
   // (mark-all-read in particular) acts on the same subset the user sees.
   const [clipSelection, setClipSelection] = useState<ClipSelection>({ kind: 'all' })
-  // Bumped after mark-all-read in clip mode to force ClipPage to refetch.
-  const [clipRefreshKey, setClipRefreshKey] = useState(0)
 
   // 网摘 (clip) mode: when the selected feed is the user's clip bin,
   // swap the regular article list for the tag-sidebar layout that used
@@ -670,6 +668,30 @@ export default function ArticleListPage() {
     onLoadMore: loadMore,
   })
 
+  useEffect(() => {
+    let active = true
+    const refresh = async () => {
+      if (isClippingMode) return // Embedded ClipPage owns its list refresh.
+      if (searchQuery) {
+        const data = await searchArticles(searchQuery.trim(), 30)
+        if (active) setSearchResults(data || [])
+      } else if (grouped) {
+        const generation = ++requestGenerationRef.current
+        const data = await getGroupedArticles({feed_id:selectedFeed ?? undefined,unread:unreadOnly,saved:savedOnly})
+        if (active && generation === requestGenerationRef.current) setGroupedData(data)
+      } else {
+        await loadArticles(0, true, offset)
+      }
+      if (active && sidebarOpen) {
+        const data = await getTagSidebar({feed_id:selectedFeed ?? undefined,unread:unreadOnly,saved:savedOnly})
+        if (active) setTagSidebarData(data)
+      }
+    }
+    const onUndo = () => { void refresh().catch(() => toast.error('列表刷新失败，请刷新重试')) }
+    window.addEventListener('read-state-refresh', onUndo)
+    return () => {active = false; window.removeEventListener('read-state-refresh', onUndo)}
+  }, [isClippingMode, searchQuery, grouped, selectedFeed, unreadOnly, savedOnly, sidebarOpen, loadArticles, offset])
+
   const handleMarkRead = async (anchorId: number, direction: ReadDirection) => {
     if (readMutationRef.current || markingAllRead) return
     readMutationRef.current = true
@@ -685,9 +707,9 @@ export default function ArticleListPage() {
         untagged: !searchQuery && tagFilter.kind === 'untagged',
       })
       recordReadArticles(result.article_ids)
-      toast.success(`已将 ${result.count} 篇文章标记为已读`)
+      showReadUndoToast(result)
       if (generation !== requestGenerationRef.current) return
-      const changed = new Set([...result.article_ids, anchorId])
+      const changed = new Set(result.article_ids)
       setSessionReadIds(prev => new Set([...prev, ...changed]))
       if (searchQuery) {setSearchResults(prev => prev?.map(a => changed.has(a.id) ? {...a,is_read:true} : a) ?? null); return}
       if (grouped) {
@@ -715,51 +737,31 @@ export default function ArticleListPage() {
   }
 
   const handleMarkAllRead = async () => {
-    if (readMutationRef.current) return
+    if (readMutationRef.current || markingAllRead) return
+    readMutationRef.current = true
     setMarkingAllRead(true)
     try {
-      if (isClippingMode) {
-        // 网摘 mode: forward the same tag/source filters the user sees so the
-        // mark-read scope matches the visible list. The clip feed itself is
-        // already implied via feedId, but we also pass it as the source when
-        // no narrower source is selected — matches ClipPage.params.
-        const sourceOverride =
-          clipSelection.kind === 'source'
-            ? clipSelection.key
-            : selectedFeed != null
-              ? `feed:${selectedFeed}`
-              : undefined
-        await markAllRead({
-          feedId: selectedFeed,
-          unread: unreadOnly,
-          saved: savedOnly,
-          tagIds: clipSelection.kind === 'tag' ? [clipSelection.id] : undefined,
-          untagged: clipSelection.kind === 'untagged',
-          source: sourceOverride,
-        })
-        setClipRefreshKey(k => k + 1)
-      } else {
-        await markAllRead({ feedId: selectedFeed, unread: unreadOnly, saved: savedOnly })
-        // Mirror the per-article session tracking so the list still reflects the
-        // change before the next fetch, without clobbering reads from other filters.
-        const markedIds = articles.map(a => a.id)
-        try {
-          const stored: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
-          const merged = Array.from(new Set([...stored, ...markedIds]))
-          sessionStorage.setItem('readArticles', JSON.stringify(merged))
-          setSessionReadIds(new Set(merged))
-        } catch {}
-        if (unreadOnly) {
-          setArticles([])
-          setHasMore(false)
-        } else {
-          setArticles(prev => prev.map(a => ({ ...a, is_read: true })))
-        }
-      }
-      window.dispatchEvent(new Event('refresh-unread'))
+      const source = isClippingMode
+        ? clipSelection.kind === 'source' ? clipSelection.key
+          : selectedFeed != null ? `feed:${selectedFeed}` : undefined
+        : undefined
+      const result = await markAllRead({
+        feedId: selectedFeed, unread: unreadOnly, saved: savedOnly,
+        tagIds: isClippingMode
+          ? clipSelection.kind === 'tag' ? [clipSelection.id] : undefined
+          : tagFilter.kind === 'tag' ? [tagFilter.id] : undefined,
+        untagged: isClippingMode ? clipSelection.kind === 'untagged' : tagFilter.kind === 'untagged',
+        source,
+      })
+      recordReadArticles(result.article_ids)
+      showReadUndoToast(result)
+      // Refill the currently selected list. A concurrent reading update can
+      // make the server skip an article, so never blindly empty unread rows.
+      window.dispatchEvent(new Event('read-state-refresh'))
     } catch {
-      // silent fail
+      toast.error('标记已读失败，请重试')
     } finally {
+      readMutationRef.current = false
       setMarkingAllRead(false)
     }
   }
@@ -1057,7 +1059,6 @@ export default function ArticleListPage() {
 
       {isClippingMode && selectedFeed != null && (
         <ClipPage
-          key={clipRefreshKey}
           restrictToFeedId={selectedFeed}
           entryPath="/articles"
           sidebarOpen={true}
