@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 export type Theme = 'paper' | 'quiet' | 'pearl' | 'night' | 'neon'
 
 const STORAGE_KEY = 'rsspal:theme'
-const DEFAULT: Theme = 'paper'
+const DEFAULT: Theme = 'quiet'
 const EVENT = 'rsspal-theme-change'
 
 const VALID: Record<Theme, true> = { paper: true, quiet: true, pearl: true, night: true, neon: true }

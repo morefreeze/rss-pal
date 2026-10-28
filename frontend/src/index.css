@@ -106,13 +106,12 @@ body[data-theme='neon'] {
   --cal-today: var(--accent);
 }
 
-/* Fallback when no theme attr yet (pre-boot) — Paper.
-   Values must mirror body[data-theme='paper'] exactly. */
+/* Fallback before theme initialization — Quiet, matching the new-reader default. */
 body:not([data-theme]) {
-  --bg: #f5edd6; --surface: #ede4c6; --surface-hover: #e4d9b3;
-  --fg: #3a2f1a; --fg-muted: #6b6046;
-  --accent: #5b3b00; --accent-soft: rgba(91, 59, 0, 0.18); --accent-fg: #f5edd6;
-  --border: #d9cdaa; --code-bg: #ebe2c8; --link: #5b3b00;
+  --bg: #fafaf7; --surface: #ffffff; --surface-hover: #f3f3ee;
+  --fg: #1f2933; --fg-muted: #5a6473;
+  --accent: #3a5a40; --accent-soft: rgba(58, 90, 64, 0.18); --accent-fg: #ffffff;
+  --border: #e3e3de; --code-bg: #f3f3ee; --link: #3a5a40;
 }
 
 /* === Element defaults === */
