@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -1055,6 +1056,42 @@ func TestExploreCandidatesRequireRecentSuccessfulFetch(t *testing.T) {
 	}
 	if len(candidates) != 1 || candidates[0].Title != "fresh" {
 		t.Fatalf("stale source can be recommended: %+v", candidates)
+	}
+}
+
+func TestExploreCandidatesFilterCachedFutureRowsBeforeRecentFive(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	var validSource, validArticle int
+	for i, rawURL := range []string{"https://release.example/feed", "https://sandbox.getindico.io/category/0/events.atom"} {
+		var source int
+		if err := db.QueryRow(`INSERT INTO recommended_feeds(url,normalized_url,title,category,language,validation_status,last_fetched_at) VALUES($1,$1,'Demo framework release','test','en','valid',$2) RETURNING id`, rawURL, now).Scan(&source); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) SELECT id,$1,$2,$3 FROM explore_registry_providers WHERE provider_key='chinese-independent'`, source, rawURL, now); err != nil {
+			t.Fatal(err)
+		}
+		var article int
+		if err := db.QueryRow(`INSERT INTO explore_articles(source_id,url,normalized_url,title,published_at,fetched_at) VALUES ($1,$2,$2,'Valid article',$3,$3) RETURNING id`, source, rawURL+"/article", now).Scan(&article); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			validSource, validArticle = source, article
+			for n := 0; n < 6; n++ {
+				if _, err := db.Exec(`INSERT INTO explore_articles(source_id,url,normalized_url,title,published_at,fetched_at) VALUES ($1,$2,$2,'Lunar Base Opening',$3,$4)`, source, fmt.Sprintf("https://release.example/future/%d", n), now.AddDate(73, 0, n), now); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	candidates, err := (&sqlExploreRankInputs{db: db}).LoadCandidates(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := explorelogic.RankExploreCandidates(explorelogic.ExploreProfile{}, candidates, now)
+	if len(got) != 1 || got[0].SourceID != validSource || len(got[0].Articles) != 1 || got[0].Articles[0].ID != validArticle {
+		t.Fatalf("cached invalid rows hid a legitimate article or recommended sandbox source: %+v", got)
 	}
 }
 

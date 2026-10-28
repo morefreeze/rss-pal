@@ -453,6 +453,57 @@ func TestExploreContentAuthorizationPrecedesCache(t *testing.T) {
 	}
 }
 
+func TestExploreColdDisplayedSourcesRemainSubscribableAfterEligibilityFilters(t *testing.T) {
+	for _, excluded := range []string{"sandbox", "future-only"} {
+		t.Run(excluded, func(t *testing.T) {
+			db, cleanup := testdb.New(t)
+			defer cleanup()
+			now := time.Now().UTC().Truncate(time.Second)
+			var user, provider, lastSource int
+			if err := db.QueryRow(`INSERT INTO users(username,password_hash) VALUES ('cold-eligibility','x') RETURNING id`).Scan(&user); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow(`INSERT INTO explore_registry_providers(provider_key,provider_kind,endpoint,sync_interval_minutes) VALUES ('eligibility','directory','https://directory.example',360) RETURNING id`).Scan(&provider); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i <= 12; i++ {
+				rawURL := fmt.Sprintf("https://production-%d.example/feed", i)
+				published := now
+				if i == 0 && excluded == "sandbox" {
+					rawURL = "https://sandbox.getindico.io/category/0/events.atom"
+				}
+				if i == 0 && excluded == "future-only" {
+					published = now.AddDate(73, 0, 0)
+				}
+				var source int
+				if err := db.QueryRow(`INSERT INTO recommended_feeds(url,normalized_url,title,category,language,validation_status,is_broken,health_score,last_fetched_at) VALUES($1,$1,'Demo framework news','test','en','valid',false,0.9,$2) RETURNING id`, rawURL, now).Scan(&source); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) VALUES ($1,$2,$3,$4)`, provider, source, rawURL, now); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`INSERT INTO explore_articles(source_id,url,normalized_url,title,content,published_at,fetched_at) VALUES ($1,$2,$2,'Release','body',$3,$4)`, source, rawURL+"/article", published, now); err != nil {
+					t.Fatal(err)
+				}
+				lastSource = source
+			}
+			repo := repository.NewExploreRepository(db)
+			page, err := repo.GetPage(user, repository.ExploreListParams{Limit: 20})
+			if err != nil || len(page.Articles) != 12 {
+				t.Fatalf("filtered cold page=(%+v,%v)", page, err)
+			}
+			sources, err := repo.GetSources(user)
+			if err != nil || len(sources) != 12 || sources[11].ID != lastSource {
+				t.Fatalf("filtered cold sources=(%+v,%v)", sources, err)
+			}
+			result, err := explorelogic.NewSubscribeService(db, func() time.Time { return now }).SubscribeOne(user, lastSource)
+			if err != nil || result.FeedID <= 0 || result.CopiedArticles != 1 {
+				t.Fatalf("displayed source could not be subscribed: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
 func TestExploreContentHTTPReleasesAuthorizationTransactionAndReadsCache(t *testing.T) {
 	db, done := testdb.New(t)
 	defer done()

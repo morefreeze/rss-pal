@@ -199,7 +199,9 @@ func loadPromotableSources(db Querier, userID int, sourceIDs []int, now time.Tim
 			) observation ON true
 			WHERE source.validation_status='valid' AND source.is_broken=false
 			  AND source.merged_into_source_id IS NULL
-			  AND EXISTS (SELECT 1 FROM explore_articles article WHERE article.source_id=source.id)
+			  AND source.url !~* '^https?://sandbox[.]getindico[.]io[.]?(:[0-9]+)?([/?#]|$)'
+			  AND EXISTS (SELECT 1 FROM explore_articles article WHERE article.source_id=source.id
+			      AND (article.published_at IS NULL OR article.published_at <= $3::timestamp + INTERVAL '24 hours'))
 			  AND NOT EXISTS (
 				SELECT 1 FROM explore_feedback hidden
 				WHERE hidden.user_id=$1 AND hidden.source_id=source.id AND hidden.feedback_type='hide_source'
@@ -219,6 +221,7 @@ func loadPromotableSources(db Querier, userID int, sourceIDs []int, now time.Tim
 		  AND source.validation_status='valid'
 		  AND source.is_broken=false
 		  AND source.merged_into_source_id IS NULL
+		  AND source.url !~* '^https?://sandbox[.]getindico[.]io[.]?(:[0-9]+)?([/?#]|$)'
 		  AND (EXISTS (
 		      SELECT 1
 		      FROM explore_batch_sources batch_source

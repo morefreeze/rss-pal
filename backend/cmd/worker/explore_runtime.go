@@ -29,6 +29,7 @@ const exploreCandidateSQL = `
 	  AND source.last_fetched_at >= $1::timestamp - INTERVAL '12 hours'
 	  AND source.last_fetched_at <= $1::timestamp
 	  AND source.merged_into_source_id IS NULL
+	  AND source.url !~* '^https?://sandbox[.]getindico[.]io[.]?(:[0-9]+)?([/?#]|$)'
 	  AND EXISTS (
 	      SELECT 1 FROM explore_source_observations observation
 	      JOIN explore_registry_providers provider ON provider.id=observation.provider_id
@@ -361,10 +362,11 @@ func (inputs *sqlExploreRankInputs) LoadCandidates(ctx context.Context, now time
 		JOIN LATERAL (
 			SELECT id,source_id,title,published_at,fetched_at FROM explore_articles
 			WHERE source_id=source.id
+			  AND (published_at IS NULL OR published_at <= $2::timestamp + INTERVAL '24 hours')
 			ORDER BY COALESCE(published_at,fetched_at) DESC,fetched_at DESC,id DESC LIMIT 5
 		) article ON true
 		WHERE source.id=ANY($1)
-		ORDER BY article.source_id,COALESCE(article.published_at,article.fetched_at) DESC,article.id DESC`, pq.Array(ids))
+		ORDER BY article.source_id,COALESCE(article.published_at,article.fetched_at) DESC,article.id DESC`, pq.Array(ids), now)
 	if err != nil {
 		return nil, err
 	}
