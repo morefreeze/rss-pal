@@ -98,7 +98,7 @@ func TestDefaultSummaryQualityReachesEveryTransport(t *testing.T) {
 			}
 			for i, body := range bodies {
 				system, user := summaryRequestMessages(t, body)
-				for _, rule := range []string{"来源性质", "公开分享", "事实与推断", "条件与对应结论一起呈现", "条件步骤", "例外", "完整评测", "实验分组"} {
+				for _, rule := range []string{"来源性质", "公开分享", "事实与推断", "条件与对应结论一起呈现", "条件步骤", "何时触发、何时跳过", "不能只写“条件性”或“可选”", "例外", "完整评测", "实验分组"} {
 					if !strings.Contains(system, rule) {
 						t.Errorf("request %d missing factual guard %q", i, rule)
 					}
@@ -121,6 +121,9 @@ func TestDefaultSummaryQualityReachesEveryTransport(t *testing.T) {
 				}
 				if !strings.Contains(user, "宁可舍弃次要要点，也不能删掉改变结论含义的条件") {
 					t.Errorf("request %d allows compression to strip a material condition", i)
+				}
+				if !strings.Contains(user, "触发条件和跳过条件优先于操作参数") {
+					t.Errorf("request %d does not prioritize actionable workflow conditions", i)
 				}
 				if i == 1 {
 					for _, rule := range []string{brief, "不重复", "关键前提", "要点漏掉的必要条件或例外仍须补全"} {
