@@ -108,7 +108,7 @@ function dollarStartsMath(r: string[]): boolean {
 }
 
 function shouldEscapeProseDollarPair(body: string): boolean {
-  if (/^[0-9]+(?:\.[0-9]+)?[A-Za-z0-9]*(?:[+*/-][A-Za-z0-9.]+)*$/.test(body)) return false
+  if (/^[0-9]+(?:\.[0-9]+)?(?:[A-Za-z][A-Za-z0-9]*)?(?:[+*/-][A-Za-z0-9.]+)*$/.test(body)) return false
   if (body.length === 0) return false
   const first = body.codePointAt(0)
   if (first === undefined) return false

@@ -4,6 +4,13 @@ import MarkdownArticle from '../src/components/MarkdownArticle'
 import { escapeAmbiguousMathDollars } from '../src/util/mathShadow'
 
 describe('numeric symbolic math dollars', () => {
+  it('rejects long digit-led prose without blocking article rendering', () => {
+    const source = '$' + '9'.repeat(50_000) + ' dollars$'
+    const start = performance.now()
+    expect(escapeAmbiguousMathDollars(source)).toBe('\\$' + '9'.repeat(50_000) + ' dollars\\$')
+    expect(performance.now() - start).toBeLessThan(500)
+  })
+
   it('keeps numeric products and the following TeX formula intact', () => {
     const source = 'Training takes $6N$, $2ND$, $5x+3$ and $C \\approx 6ND$ operations.'
     expect(escapeAmbiguousMathDollars(source)).toBe(source)

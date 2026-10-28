@@ -964,7 +964,7 @@ func escapeAmbiguousMathDollars(md string) string {
 	return b.String()
 }
 
-var numericMathBody = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?[A-Za-z0-9]*(?:[+*/-][A-Za-z0-9.]+)*$`)
+var numericMathBody = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?(?:[A-Za-z][A-Za-z0-9]*)?(?:[+*/-][A-Za-z0-9.]+)*$`)
 
 func shouldEscapeProseDollarPair(body []rune) bool {
 	if numericMathBody.MatchString(string(body)) {
