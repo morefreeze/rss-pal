@@ -12,6 +12,7 @@ import {
 import { verifyTencentCaptcha } from '../utils/tencentCaptcha'
 import RegistrationChallenge from './RegistrationChallenge'
 import { authErrorMessage } from '../utils/authError'
+import AccountProviderIcon from './AccountProviderIcon'
 type Props = {
   methods: AuthMethods
   mode: 'login' | 'register' | 'bind'
@@ -204,39 +205,6 @@ export default function VerifiedAccountAccess({
           记住此设备 90 天
         </label>
       )}
-      <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
-        {methods.google && (
-          <button
-            type="button"
-            className="secondary"
-            disabled={busy}
-            onClick={() => void oauth('google')}
-          >
-            {binding ? '绑定 Google' : '使用 Google 继续'}
-          </button>
-        )}
-        {methods.github && (
-          <button type="button" className="secondary" disabled={busy} onClick={() => void oauth('github')}>
-            {binding ? '绑定 GitHub' : '使用 GitHub 继续'}
-          </button>
-        )}
-        {methods.qq && (
-          <button type="button" className="secondary" disabled={busy} onClick={() => void oauth('qq')}>
-            <img src="/qq-connect.png" alt="" width={16} height={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            {binding ? '绑定 QQ' : '使用 QQ 继续'}
-          </button>
-        )}
-        {methods.apple && (
-          <button
-            type="button"
-            className="secondary"
-            disabled={busy}
-            onClick={() => void oauth('apple')}
-          >
-            {binding ? '绑定 Apple' : '使用 Apple 继续'}
-          </button>
-        )}
-      </div>
       {methods.email && (
         <form onSubmit={verify}>
           <label htmlFor="verified-email">邮箱</label>
@@ -308,6 +276,31 @@ export default function VerifiedAccountAccess({
                   : '验证并登录'}
           </button>
         </form>
+      )}
+      {(['google', 'github', 'qq', 'apple'] as const).some(provider => methods[provider]) && (
+        <div className={binding ? 'account-provider-bindings' : 'account-provider-logins'}>
+          {!binding && <div className="account-provider-divider">其他登录方式</div>}
+          <div className="account-provider-buttons" role="group" aria-label={binding ? '第三方账号绑定' : '第三方登录'}>
+            {(['google', 'github', 'qq', 'apple'] as const).filter(provider => methods[provider]).map(provider => {
+              const name = { google: 'Google', github: 'GitHub', qq: 'QQ', apple: 'Apple' }[provider]
+              const label = binding ? `绑定 ${name}` : `使用 ${name} 继续`
+              return (
+                <button
+                  key={provider}
+                  type="button"
+                  className={`secondary${binding ? '' : ' account-provider-icon'}`}
+                  aria-label={label}
+                  title={label}
+                  disabled={busy}
+                  onClick={() => void oauth(provider)}
+                >
+                  <AccountProviderIcon provider={provider} />
+                  {binding && <span>{label}</span>}
+                </button>
+              )
+            })}
+          </div>
+        </div>
       )}
       {!methods.email && !methods.google && !methods.github && !methods.qq && !methods.apple && (
         <p className="text-muted">验证登录暂时不可用，请稍后再试。</p>

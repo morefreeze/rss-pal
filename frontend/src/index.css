@@ -1721,3 +1721,11 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
 .article-read-menu > button { min-height: 44px; text-align: left; padding: 10px 12px; }
 .article-read-menu > span { padding: 4px 8px; }
 .article-read-swipe-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--accent); background: var(--accent-soft); border-radius: 10px; }
+
+.account-provider-logins { margin-top: 24px; }
+.account-provider-divider { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; color: var(--fg-muted); font-size: 12px; }
+.account-provider-divider::before, .account-provider-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.account-provider-buttons { display: flex; justify-content: center; flex-wrap: wrap; gap: 16px; }
+.verified-account-access .account-provider-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; padding: 0; border-radius: 50%; }
+.account-provider-bindings { margin-top: 16px; }
+.account-provider-bindings button { display: inline-flex; align-items: center; gap: 8px; }
