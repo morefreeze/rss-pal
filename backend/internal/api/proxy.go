@@ -98,13 +98,24 @@ func (p *ImageProxy) Handle(c *gin.Context) {
 		return
 	}
 
+	// Do not send success/cache headers until the bounded upstream body has
+	// completed. Otherwise an interrupted image can be cached for a week.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, proxyMaxBytes+1))
+	if err != nil {
+		c.String(http.StatusBadGateway, "read upstream image: %s", err)
+		return
+	}
+	if len(body) > proxyMaxBytes {
+		c.String(http.StatusBadGateway, "upstream image too large")
+		return
+	}
+
 	c.Header("Content-Type", ct)
 	if et := resp.Header.Get("ETag"); et != "" {
 		c.Header("ETag", et)
 	}
 	c.Header("Cache-Control", "public, max-age=604800, immutable")
-	c.Status(http.StatusOK)
-	_, _ = io.Copy(c.Writer, io.LimitReader(resp.Body, proxyMaxBytes))
+	c.Data(http.StatusOK, ct, body)
 }
 
 // Handle serves media GET/HEAD requests and preserves byte-range semantics so

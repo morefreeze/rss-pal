@@ -167,6 +167,39 @@ func TestProxyImage_StreamsAndInjectsReferer(t *testing.T) {
 	}
 }
 
+func TestProxyImageRejectsIncompleteOrOversizeStreamsBeforeCaching(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name  string
+		write func(http.ResponseWriter)
+	}{
+		{"interrupted declared length", func(w http.ResponseWriter) {
+			w.Header().Set("Content-Length", "1000")
+			_, _ = w.Write([]byte("partial image"))
+		}},
+		{"oversize chunked", func(w http.ResponseWriter) {
+			w.(http.Flusher).Flush()
+			_, _ = w.Write([]byte(strings.Repeat("x", proxyMaxBytes+1)))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "image/png")
+				w.Header().Set("ETag", "incomplete")
+				tc.write(w)
+			}))
+			defer origin.Close()
+			r := gin.New()
+			r.GET("/proxy", newTestProxy(allowLoopbackValidator).Handle)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/proxy?url="+url.QueryEscape(origin.URL), nil))
+			if rec.Code != http.StatusBadGateway || rec.Header().Get("Cache-Control") != "" || rec.Header().Get("ETag") != "" || strings.HasPrefix(rec.Header().Get("Content-Type"), "image/") {
+				t.Fatalf("incomplete response was successful or cacheable: status=%d headers=%v", rec.Code, rec.Header())
+			}
+		})
+	}
+}
+
 // TestProxyImage_OverridesUpstreamCacheControl pins the no-passthrough policy:
 // upstream's anti-caching headers must not leak through, or mobile browsers
 // re-fetch every image on scroll once they evict the decoded copy from memory.
