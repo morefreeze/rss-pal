@@ -8,6 +8,10 @@ import (
 
 type ArticleResolver func(context.Context, int) (airouting.Target, error)
 
+// Article input has a separate bound from stored content and digest snippets.
+// Browser and server summaries must see the same long-article context.
+const maxArticleContentRunes = 100000
+
 // Only platform clients opt in. Personal API clients never inherit this resolver.
 func (s *Summarizer) SetArticleResolver(resolve ArticleResolver) { s.articleResolver = resolve }
 func (s *Summarizer) DisableArticleRouting()                     { s.articleModelSelected = true }
@@ -49,12 +53,13 @@ func (s *Summarizer) forArticle(ctx context.Context, content string) *Summarizer
 	return &selected
 }
 func (s *Summarizer) truncateArticle(content string) string {
-	if s.articleRouted || (s.articleModelSelected && s.model == "glm-5.3") {
-		r := []rune(content)
-		if len(r) > 100000 {
-			return string(r[:100000]) + "\n...(内容已截断)"
-		}
-		return content
+	return prepareArticleContent(content)
+}
+
+func prepareArticleContent(content string) string {
+	r := []rune(content)
+	if len(r) > maxArticleContentRunes {
+		return string(r[:maxArticleContentRunes]) + "\n...(内容已截断)"
 	}
-	return truncateContent(content)
+	return content
 }

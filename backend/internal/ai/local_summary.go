@@ -8,7 +8,7 @@ import (
 // LocalSummaryPrompts prepares text-only browser calls without credentials or
 // provider requests. Keep the same grounding, length and source-anchor policy.
 func LocalSummaryPrompts(title, content, briefTemplate, detailedTemplate string) (string, string) {
-	content = truncateContent(content)
+	content = prepareArticleContent(content)
 	if briefTemplate != "" || detailedTemplate != "" {
 		brief := strings.NewReplacer("{title}", title, "{content}", content).Replace(briefTemplate)
 		return systemGuardrail + "\n\n" + appendSummaryLengthInstruction(brief, briefMaxCharacters), systemGuardrail + "\n\n" + buildDetailedTemplatePrompt(title, content, detailedTemplate)

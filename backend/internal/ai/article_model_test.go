@@ -12,7 +12,7 @@ import (
 )
 
 func TestArticleModelBoundary(t *testing.T) {
-	for _, n := range []int{9999, 10000, 10001} {
+	for _, n := range []int{8001, 9999, 10000, 10001} {
 		t.Run(string(rune(n)), func(t *testing.T) {
 			want := "glm-5.3-flash"
 			if n > 10000 {
@@ -26,7 +26,7 @@ func TestArticleModelBoundary(t *testing.T) {
 				if q.Model != want {
 					t.Errorf("n=%d model=%s want=%s", n, q.Model, want)
 				}
-				if n > 10000 && !strings.Contains(q.Messages[1].Content.(string), "正文末尾") {
+				if !strings.Contains(q.Messages[1].Content.(string), "正文末尾") {
 					t.Error("long article truncated at old limit")
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -43,6 +43,24 @@ func TestArticleModelBoundary(t *testing.T) {
 				t.Fatal("shared client mutated", calls)
 			}
 		})
+	}
+}
+
+func TestArticleInputRetainsConditionsAcrossClientTypes(t *testing.T) {
+	const condition = "只有预算允许才付费；除 Hard tier 外成绩更好。"
+	content := strings.Repeat("文", 26000) + condition
+	for _, model := range []string{"custom-model", "glm-5.3-flash"} {
+		t.Run(model, func(t *testing.T) {
+			s := NewSummarizerWithModel("", "", model).forArticle(context.Background(), content)
+			if got := s.truncateArticle(content); got != content {
+				t.Fatal("article context lost a tail condition before the bounded article limit")
+			}
+		})
+	}
+	input := strings.Repeat("文", 100000) + "超出上限"
+	got := NewSummarizerWithModel("", "", "custom-model").truncateArticle(input)
+	if !strings.HasPrefix(got, strings.Repeat("文", 100000)) || !strings.HasSuffix(got, "\n...(内容已截断)") || strings.Contains(got, "超出上限") {
+		t.Fatal("article input must remain bounded and mark truncation explicitly")
 	}
 }
 

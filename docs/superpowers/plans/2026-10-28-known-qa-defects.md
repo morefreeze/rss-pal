@@ -1,0 +1,13 @@
+# Known QA defects implementation plan
+
+Based on the approved request to fix known problems and the accompanying specification.
+
+1. **Article completeness and math conversion (007/010).** Add failing end-to-end fetch/Reader and combined numeric-math regressions. Remove the 50KB persistence truncation, explicitly reject incomplete transport responses, repair dollar matching and align the frontend heuristic. Test Unicode, suffixes, refs, code, prices, placeholders and rendered annotations. Commit the isolated changes.
+2. **Summary conditions and bounded input (004/005/006/009).** Add failing default/custom local prompt and routed/non-routed input boundary regressions. Keep critical qualifiers beside claims, give them priority over brevity and de-duplication, and unify a bounded long-article input policy without exposing personal credentials. Preserve source attribution, adaptive output limits and completion handling.
+3. **Explore eligibility (003).** Add ingestion, ranking and cached-query regressions for far-future publication times before source/page limits. Preserve missing dates, modest skew and real articles containing “demo”. No public data deletion.
+4. **Complete image responses.** Add a failing interrupted-stream regression; buffer within the existing maximum and send success/cache headers only for a complete permitted image response.
+5. **Mobile formula containment (008).** Add component accessibility/resize regressions, implement local display-math scrolling, then probe actual long inline math and contain it only as needed. Validate real layout, keyboard scrolling, MathML and dark-code regression.
+6. **Review and integration.** Run appropriate full backend/frontend checks and production builds. Independently review specification compliance, then code quality; fix findings and recheck. Fetch concurrent mainline updates, integrate into actual master and push through the established protected workflow.
+7. **Tencent delivery and affected samples.** Wait for the established deployment, verify exact revision/service health/bundle and UI. Back up and refresh only affected test-account content. Use at most two new summaries per acceptance round, wait for completion, compare qualifiers against sources and save evidence. Update the QA issue registry only for demonstrated outcomes and list any semantic samples still pending.
+
+Baseline: backend `go test ./...` and frontend `npm run check` pass; logs are in the local QA `2026-10-28/fix-known-issues/baseline` directory. Research agents were read-only. Implementation agents execute serially; parent can work on disjoint files while one task is delegated. Each completed implementation receives specification and quality review before integration.
