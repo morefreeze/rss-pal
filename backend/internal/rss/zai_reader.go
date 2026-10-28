@@ -224,14 +224,15 @@ func (r *zaiReader) post(ctx context.Context, stage string, payload any, session
 		return nil, "", fmt.Errorf("z.ai reader %s: http status %d", stage, resp.StatusCode)
 	}
 	returnedSessionID := resp.Header.Get("Mcp-Session-Id")
-	if !wantResponse {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, zaiReaderBodyLimit))
-		return nil, returnedSessionID, nil
-	}
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, zaiReaderBodyLimit))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, zaiReaderBodyLimit+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("z.ai reader %s: read response", stage)
+	}
+	if len(raw) > zaiReaderBodyLimit {
+		return nil, "", fmt.Errorf("z.ai reader %s: response exceeds %d bytes", stage, zaiReaderBodyLimit)
+	}
+	if !wantResponse {
+		return nil, returnedSessionID, nil
 	}
 	decoded, err := decodeMCPBody(raw)
 	if err != nil {

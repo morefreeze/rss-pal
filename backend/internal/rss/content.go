@@ -41,7 +41,10 @@ var mdConverter = htmltomd.NewConverter(
 // fallback is exercised before an article gets flagged for endless re-fetching.
 const jinaFallbackMinChars = 300
 
-const defaultJinaReaderBaseURL = "https://r.jina.ai/"
+const (
+	defaultJinaReaderBaseURL = "https://r.jina.ai/"
+	jinaReaderBodyLimit      = 200_000
+)
 
 type ContentFetcher struct {
 	client      *http.Client
@@ -292,8 +295,6 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentRe
 	// Clean up content
 	content = cleanContent(content)
 
-	content = limitContent(content, 50000)
-
 	return ContentResult{Content: content, Title: title, PublishedAt: publishedAt}, http.StatusOK, nil
 }
 
@@ -339,17 +340,19 @@ func (f *ContentFetcher) jinaRequest(ctx context.Context, target, apiKey string)
 		return "", fmt.Errorf("jina reader returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 200_000))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, jinaReaderBodyLimit+1))
 	if err != nil {
 		return "", err
+	}
+	if len(body) > jinaReaderBodyLimit {
+		return "", fmt.Errorf("jina reader response exceeds %d bytes", jinaReaderBodyLimit)
 	}
 
 	return normalizeReaderMarkdown(string(body)), nil
 }
 
 func normalizeReaderMarkdown(content string) string {
-	content = escapeAmbiguousMathDollars(flattenImageAltBlankLines(stripJinaMathShadow(strings.TrimSpace(content))))
-	return limitContent(content, 50000)
+	return escapeAmbiguousMathDollars(flattenImageAltBlankLines(stripJinaMathShadow(strings.TrimSpace(content))))
 }
 
 // limitContent enforces a byte ceiling without splitting a UTF-8 code point or
@@ -899,12 +902,9 @@ func reinsertMathPlaceholders(md string, phs []mathPlaceholder) string {
 // certainly prose (e.g. "$9 ... $200" — two prices on one line). Without
 // escaping, remark-math greedily pairs them into a single inline-math span.
 //
-// A pair is escaped when its body starts with an ASCII digit AND contains no
-// LaTeX specials (`\` `{` `}` `_` `^`) or relation operators (`=` `<` `>`). Real math like `$\sqrt{x}$` keeps its
-// `$` because of the LaTeX specials; algebra like `$x = 1$` keeps its `$`
-// because it doesn't start with a digit. False positives only occur on the
-// rare case of digit-led pure-arithmetic math like `$5x+3$`, which degrades
-// gracefully to readable plain text rather than a broken span.
+// Digit-led prose is escaped unless it is a compact number or algebraic
+// expression (e.g. `$2$`, `$6N$`, `$2ND$`, `$5x+3$`), or contains LaTeX
+// specials (`\` `{` `}` `_` `^`) or relation operators (`=` `<` `>`).
 //
 // Idempotent: an already-escaped `\$...\$` is not re-escaped because the
 // scanner treats `\$` as an escape and skips it.
@@ -964,7 +964,7 @@ func escapeAmbiguousMathDollars(md string) string {
 	return b.String()
 }
 
-var numericMathBody = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
+var numericMathBody = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?[A-Za-z0-9]*(?:[+*/-][A-Za-z0-9.]+)*$`)
 
 func shouldEscapeProseDollarPair(body []rune) bool {
 	if numericMathBody.MatchString(string(body)) {

@@ -76,6 +76,38 @@ func TestNumericInlineMath(t *testing.T) {
 	}
 }
 
+func TestNumericSymbolicMathDoesNotCorruptFollowingFormula(t *testing.T) {
+	for _, text := range []string{
+		`Training takes $6N$ and $C \approx 6ND$ operations.`,
+		`Compare $2ND$, $5x+3$ and $C \approx 6ND$.`,
+	} {
+		for _, pipeline := range []string{"feed", "page"} {
+			t.Run(pipeline+"/"+text, func(t *testing.T) {
+				raw := "<article><p>" + text + "</p></article>"
+				got := NormalizeFeedContent(raw, "https://example.org/article")
+				if pipeline == "page" {
+					var err error
+					got, err = NewContentFetcher().FetchContentFromReader(strings.NewReader(raw))
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if got != text {
+					t.Errorf("formula conversion got %q, want %q", got, text)
+				}
+			})
+		}
+	}
+}
+
+func TestRejectedPricePairDoesNotConsumeFollowingFormula(t *testing.T) {
+	got := NormalizeFeedContent(`<p>Price $9 dollars$ and $C \approx 6ND$.</p>`, "https://example.org")
+	want := `Price \$9 dollars\$ and $C \approx 6ND$.`
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestSubscriptionFallbackPreservesMath(t *testing.T) {
 	raw := `<p>Ring $x \in B$.</p><script type="math/tex; mode=display">2x=0</script>`
 	for _, tt := range []struct{ description, content string }{{raw, ""}, {"", raw}, {"Brief summary", raw}} {

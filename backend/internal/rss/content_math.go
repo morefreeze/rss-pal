@@ -63,9 +63,9 @@ func extractRawTextMath(selection *goquery.Selection, phs []mathPlaceholder) []m
 							i = end + len(close)
 							continue
 						}
-						// An invalid price pair may end at a real formula's opener.
-						// Keep it literal here; escape prices after HTML conversion.
-						if open == "$" && shouldEscapeProseDollarPair([]rune(body)) {
+						// Reuse a rejected pair's closing dollar only when it really
+						// opens the next formula; otherwise consume the literal pair.
+						if open == "$" && shouldEscapeProseDollarPair([]rune(body)) && dollarStartsMath([]rune(s[end:])) {
 							out.WriteByte('$')
 							i++
 							continue

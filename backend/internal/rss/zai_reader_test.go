@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -240,6 +242,30 @@ func TestZAIReaderAcceptsStringWrappedReaderResult(t *testing.T) {
 	}
 	if result.Title != "Wrapped title" || result.Content != "# Wrapped Reader content" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestZAIReaderRejectsIncompleteBodies(t *testing.T) {
+	for _, wantResponse := range []bool{true, false} {
+		for _, scenario := range []string{"over transport limit", "interrupted body"} {
+			t.Run(fmt.Sprintf("response=%t/%s", wantResponse, scenario), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					body := "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"
+					if scenario == "over transport limit" {
+						body += strings.Repeat(" ", zaiReaderBodyLimit)
+					} else {
+						w.Header().Set("Content-Length", strconv.Itoa(len(body)+100))
+					}
+					_, _ = io.WriteString(w, body)
+				}))
+				defer server.Close()
+				reader := newZAIReader("reader-test-key", server.URL, server.Client())
+				got, _, err := reader.post(context.Background(), "test", map[string]any{}, "", wantResponse)
+				if err == nil || len(got) != 0 {
+					t.Fatalf("incomplete response accepted: bytes = %d, error = %v", len(got), err)
+				}
+			})
+		}
 	}
 }
 

@@ -44,9 +44,9 @@ function isSentencePunctCp(cp: number): boolean {
 }
 
 // escapeAmbiguousMathDollars mirrors backend/internal/rss/content.go.
-// Escapes pairs of literal `$` whose body looks like prose (digit-led, no
-// LaTeX specials) so remark-math doesn't pair them into a math span. Keeps
-// real math (`$\sqrt{x}$`, `$x = 1$`) untouched. Idempotent on already-
+// Escapes digit-led prose so remark-math doesn't pair prices into a math
+// span. Keeps compact algebra (`$6N$`, `$2ND$`, `$5x+3$`) and other real
+// math (`$\sqrt{x}$`, `$x = 1$`) untouched. Idempotent on already-
 // escaped input. Applied client-side so articles stored before the
 // server-side escape is deployed render correctly.
 export function escapeAmbiguousMathDollars(md: string): string {
@@ -108,7 +108,7 @@ function dollarStartsMath(r: string[]): boolean {
 }
 
 function shouldEscapeProseDollarPair(body: string): boolean {
-  if (/^[0-9]+(?:\.[0-9]+)?$/.test(body)) return false
+  if (/^[0-9]+(?:\.[0-9]+)?[A-Za-z0-9]*(?:[+*/-][A-Za-z0-9.]+)*$/.test(body)) return false
   if (body.length === 0) return false
   const first = body.codePointAt(0)
   if (first === undefined) return false
