@@ -6,6 +6,7 @@ import { authSearch, parseAuthIntent, postAuthURL } from '../utils/authIntent'
 import VerifiedAccountAccess from '../components/VerifiedAccountAccess'
 import { getAuthMethods, type AuthMethods } from '../api/accountAuth'
 import { authErrorMessage } from '../utils/authError'
+import './LoginPage.css'
 
 interface LoginPageProps {
   onLogin: (user: any) => void
@@ -53,65 +54,44 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
   }
 
-  return (
-    <div className="card" style={{ maxWidth: 400, margin: '100px auto', padding: '0 16px', width: '100%' }}>
-      <h2 style={{ marginBottom: 16 }}>RSS Pal</h2>
-
-      {verified && methods && <VerifiedAccountAccess
-        methods={methods} mode="login" returnTo={postAuthURL(intent)}
-        onSuccess={user => { onLogin(user); navigate(postAuthURL(intent), { replace: true }) }}
-      />}
-      {verified && <button type="button" className="secondary" style={{ width: '100%', margin: '16px 0' }} onClick={() => setShowPassword(value => !value)}>
+  const passwordAccess = (
+    <>
+      {verified && <button type="button" className="login-text-action" aria-expanded={showPassword} aria-controls="password-login" onClick={() => setShowPassword(value => !value)}>
         {showPassword ? '收起密码登录' : '使用账号密码登录'}
       </button>}
-      {(!verified || showPassword) && <form onSubmit={handleSubmit}>
-        <div className="mb-2">
-          <input
-            type="text"
-            placeholder="用户名"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            autoComplete="username"
-            disabled={submitting}
-          />
-        </div>
-        <div className="mb-2">
-          <input
-            type="password"
-            placeholder="密码"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            autoComplete="current-password"
-            disabled={submitting}
-          />
-        </div>
-        <label className="text-sm mb-2" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={e => setRemember(e.target.checked)}
-            disabled={submitting}
-            style={{ width: 'auto' }}
-          />
+      {(!verified || showPassword) && <form id="password-login" className="login-password-form" onSubmit={handleSubmit}>
+        <label htmlFor="login-username">用户名</label>
+        <input id="login-username" placeholder="用户名" type="text" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" disabled={submitting} />
+        <label htmlFor="login-password">密码</label>
+        <input id="login-password" placeholder="密码" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" disabled={submitting} />
+        <label className="account-remember">
+          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={submitting} />
           <span>记住此设备 90 天</span>
         </label>
-        {firstRun && (
-          <div className="text-sm mb-2" style={{ color: '#2e7d32', background: '#f1f8e9', padding: '8px', borderRadius: 4 }}>
-            首次使用，已自动创建管理员账号。用户名：admin，请使用管理员配置的密码登录
-          </div>
-        )}
-        {error && <div className="text-sm mb-2" style={{ color: 'red' }}>{error}</div>}
-        <button type="submit" style={{ width: '100%' }} disabled={submitting}>
-          {submitting ? '登录中...' : '登录'}
-        </button>
+        {firstRun && <p className="login-notice">首次使用，已自动创建管理员账号。用户名：admin，请使用管理员配置的密码登录</p>}
+        {error && <p role="alert" className="login-error">{error}</p>}
+        <button type="submit" disabled={submitting}>{submitting ? '登录中...' : '登录'}</button>
       </form>}
-        <div style={{ textAlign: 'center', marginTop: 12 }}>
-          <Link to={`/register${authSearch(intent)}`}>
-            <button type="button" className="secondary">{methods?.public_registration ? '新用户注册' : intent.shareRef ? '通过分享邀请注册' : '使用邀请码注册'}</button>
-          </Link>
-        </div>
+    </>
+  )
 
-      <p className="text-sm" style={{ textAlign: 'center', marginTop: 16 }}><a href="/privacy.html" target="_blank" rel="noopener noreferrer">隐私政策</a></p>
-    </div>
+  return (
+    <main className="login-page">
+      <div className="login-shell">
+        <header className="login-heading">
+          <div className="login-brand"><img src="/favicon.svg" width={32} height={32} alt="" /><span>RSS Pal</span></div>
+          <h1>登录 RSS Pal</h1>
+          <p>继续阅读你关心的内容。</p>
+        </header>
+        {verified && methods ? <VerifiedAccountAccess
+          methods={methods} mode="login" returnTo={postAuthURL(intent)}
+          onSuccess={user => { onLogin(user); navigate(postAuthURL(intent), { replace: true }) }}
+        >{passwordAccess}</VerifiedAccountAccess> : passwordAccess}
+        <footer className="login-footer">
+          <p>还没有账号？ <Link to={`/register${authSearch(intent)}`}>{methods?.public_registration ? '注册账号' : intent.shareRef ? '通过分享邀请注册' : '使用邀请码注册'}</Link></p>
+          <a className="login-privacy" href="/privacy.html" target="_blank" rel="noopener noreferrer">隐私政策</a>
+        </footer>
+      </div>
+    </main>
   )
 }

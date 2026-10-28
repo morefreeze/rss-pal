@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, it, expect, vi } from 'vitest'
@@ -26,9 +27,10 @@ vi.mock('../src/api/client', () => ({
   },
 }))
 vi.mock('../src/components/VerifiedAccountAccess', () => ({
-  default: ({ mode, onBound }: { mode: string; onBound?: () => void }) => (
+  default: ({ mode, onBound, children }: { mode: string; onBound?: () => void; children?: ReactNode }) => (
     <div>
       verified {mode}
+      {children}
       {onBound && <button onClick={onBound}>fixture bound</button>}
     </div>
   ),
@@ -71,7 +73,7 @@ it('keeps public registration visible and legacy password login accessible', asy
     </MemoryRouter>,
   )
   expect(await screen.findByText('verified login')).toBeTruthy()
-  expect(screen.getByRole('link', { name: '新用户注册' })).toBeTruthy()
+  expect(screen.getByRole('link', { name: '注册账号' })).toBeTruthy()
   expect(screen.queryByPlaceholderText('密码')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '使用账号密码登录' }))
   expect(screen.getByPlaceholderText('密码')).toBeTruthy()

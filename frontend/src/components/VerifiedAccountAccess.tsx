@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { getRegistrationConfig } from '../api/client'
 import {
   currentAccountID,
@@ -17,6 +17,7 @@ type Props = {
   methods: AuthMethods
   mode: 'login' | 'register' | 'bind'
   returnTo: string
+  children?: ReactNode
   onSuccess?: (user: {
     id: number
     username: string
@@ -30,6 +31,7 @@ export default function VerifiedAccountAccess({
   returnTo,
   onSuccess,
   onBound,
+  children,
 }: Props) {
   const binding = mode === 'bind'
   const [email, setEmail] = useState(''),
@@ -187,7 +189,7 @@ export default function VerifiedAccountAccess({
       className="verified-account-access"
       aria-label={binding ? '绑定登录方式' : '验证登录'}
     >
-      {!binding && (
+      {!binding && mode !== 'login' && (
         <label
           style={{
             display: 'flex',
@@ -226,7 +228,7 @@ export default function VerifiedAccountAccess({
             }}
           />
           <div
-            style={{ display: 'flex', gap: 8, alignItems: 'end', marginTop: 8 }}
+            style={{ display: 'flex', gap: 8, alignItems: 'end', marginTop: mode === 'login' ? 16 : 8 }}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
               <label htmlFor="verified-code">邮箱验证码</label>
@@ -262,6 +264,12 @@ export default function VerifiedAccountAccess({
               验证码已发送，请检查收件箱和垃圾邮件。
             </p>
           )}
+          {mode === 'login' && (
+            <label className="account-remember">
+              <input type="checkbox" checked={remember} disabled={busy} onChange={e => setRemember(e.target.checked)} />
+              记住此设备 90 天
+            </label>
+          )}
           <button
             type="submit"
             style={{ width: '100%' }}
@@ -277,6 +285,13 @@ export default function VerifiedAccountAccess({
           </button>
         </form>
       )}
+      {mode === 'login' && !methods.email && (
+        <label className="account-remember">
+          <input type="checkbox" checked={remember} disabled={busy} onChange={e => setRemember(e.target.checked)} />
+          记住此设备 90 天
+        </label>
+      )}
+      {children}
       {(['google', 'github', 'qq', 'apple'] as const).some(provider => methods[provider]) && (
         <div className={binding ? 'account-provider-bindings' : 'account-provider-logins'}>
           {!binding && <div className="account-provider-divider">其他登录方式</div>}
