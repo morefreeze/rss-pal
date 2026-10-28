@@ -7,6 +7,12 @@ import {
 } from 'react'
 import type { ReadDirection } from '../api/client'
 
+const nativeInteractionSelector = 'button,a,input,select,textarea,video,audio,[role="menu"],[role="button"],[role="link"],[contenteditable]:not([contenteditable="false"])'
+function isNativeInteraction(target: EventTarget | null) {
+  const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null
+  return Boolean(element?.closest(nativeInteractionSelector))
+}
+
 interface Props {
   children: ReactNode
   onMarkRead: (direction: ReadDirection) => void
@@ -34,6 +40,10 @@ export default function ArticleReadSurface({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suppressUntil = useRef(0)
   const consumed = useRef(false)
+  // Browsers can cancel touch delivery before firing their native menu.
+  // Keep the touch origin until a new mouse/keyboard interaction, independent
+  // of the read timer and gesture cancellation.
+  const suppressNativeMenu = useRef(false)
   const clearTimer = () => {
     if (timer.current) clearTimeout(timer.current)
     timer.current = null
@@ -74,15 +84,15 @@ export default function ArticleReadSurface({
   const onStart = (e: TouchEvent) => {
     cancel()
     consumed.current = false
+    suppressNativeMenu.current = false
     if (
       disabled ||
       menu ||
       e.touches.length !== 1 ||
-      (e.target as Element).closest(
-        'button,a,input,select,textarea,video,audio,[role="menu"]',
-      )
+      isNativeInteraction(e.target)
     )
       return
+    suppressNativeMenu.current = true
     const t = e.touches[0]
     gesture.current = { x: t.clientX, y: t.clientY, axis: 'pending', dx: 0 }
     timer.current = setTimeout(() => {
@@ -142,9 +152,14 @@ export default function ArticleReadSurface({
       onTouchMove={onMove}
       onTouchEnd={onEnd}
       onTouchCancel={cancel}
-      onContextMenu={(e) => {
-        if (gesture.current || consumed.current || Date.now() < suppressUntil.current)
+      onPointerDownCapture={(e) => {
+        if (e.pointerType === 'mouse') suppressNativeMenu.current = false
+      }}
+      onKeyDownCapture={() => { suppressNativeMenu.current = false }}
+      onContextMenuCapture={(e) => {
+        if (!isNativeInteraction(e.target) && suppressNativeMenu.current) {
           e.preventDefault()
+        }
       }}
       onClickCapture={(e) => {
         if (

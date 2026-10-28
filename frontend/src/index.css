@@ -1713,7 +1713,7 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
 .verified-account-access button[type='submit'] { margin-top: 12px; }
 
 .article-read-surface { position: relative; touch-action: pan-y pinch-zoom; }
-.article-read-surface .card { padding-right: 56px; -webkit-touch-callout: none; }
+.article-read-surface .card { padding-right: 56px; }
 .article-read-controls { position: absolute; top: 8px; right: 8px; z-index: 2; }
 .article-read-controls > button { min-width: 44px; min-height: 44px; }
 .article-read-surface:has([aria-expanded="true"]) { z-index: 20; }
@@ -1729,3 +1729,20 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
 .verified-account-access .account-provider-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; padding: 0; border-radius: 50%; }
 .account-provider-bindings { margin-top: 16px; }
 .account-provider-bindings button { display: inline-flex; align-items: center; gap: 8px; }
+
+/* A list-card long press belongs to the read gesture. Prevent native text
+   selection/callouts on touch devices without disabling scrolling, zoom,
+   desktop selection, or native link/control interactions. */
+@media (hover: none) and (pointer: coarse) {
+  .article-read-surface {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .article-read-surface :is(a, button, input, select, textarea, video, audio, [role="menu"], [role="button"], [role="link"], [contenteditable]:not([contenteditable="false"])),
+  .article-read-surface :is(a, button, input, select, textarea, video, audio, [role="menu"], [role="button"], [role="link"], [contenteditable]:not([contenteditable="false"])) * {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}

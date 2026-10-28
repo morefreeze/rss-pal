@@ -9,7 +9,7 @@ function setup() {
   render(
     <ArticleReadSurface onMarkRead={mark}>
       <div data-testid="card" onClick={open}>
-        文章<button>来源</button>
+        文章<button>来源</button><a href="https://example.com">原文链接</a>
       </div>
     </ArticleReadSurface>,
   )
@@ -102,6 +102,39 @@ describe('article read gestures', () => {
     act(() => vi.advanceTimersByTime(600))
     end(button, 10)
     expect(mark).not.toHaveBeenCalled()
+  })
+  it('suppresses a delayed native context menu even after touch cancellation', () => {
+    const {card} = setup()
+    start(card)
+    fireEvent.touchCancel(card)
+    expect(fireEvent.contextMenu(card)).toBe(false)
+  })
+  it('keeps native menus for links and controls even during a card touch gesture', () => {
+    const {card} = setup()
+    start(card)
+    expect(fireEvent.contextMenu(screen.getByRole('link',{name:'原文链接'}))).toBe(true)
+    expect(fireEvent.contextMenu(screen.getByText('来源'))).toBe(true)
+  })
+  it('preserves desktop right-click and keyboard context menus', () => {
+    const {card} = setup()
+    expect(fireEvent.contextMenu(card)).toBe(true)
+    start(card)
+    fireEvent.touchCancel(card)
+    fireEvent.keyDown(card,{key:'ContextMenu'})
+    expect(fireEvent.contextMenu(card)).toBe(true)
+    start(card)
+    fireEvent.touchCancel(card)
+    const mouse = new Event('pointerdown',{bubbles:true})
+    Object.defineProperty(mouse,'pointerType',{value:'mouse'})
+    fireEvent(card,mouse)
+    expect(fireEvent.contextMenu(card)).toBe(true)
+  })
+  it('prevents the native menu before a child can stop event propagation', () => {
+    const mark=vi.fn()
+    render(<ArticleReadSurface onMarkRead={mark}><div data-testid="nested" onContextMenu={e=>e.stopPropagation()}>摘要文字</div></ArticleReadSurface>)
+    const text=screen.getByTestId('nested')
+    start(text)
+    expect(fireEvent.contextMenu(text)).toBe(false)
   })
   it('desktop menu offers single and inclusive ranges', () => {
     const { mark } = setup()
