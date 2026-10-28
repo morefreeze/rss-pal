@@ -187,6 +187,51 @@ function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) 
   )
 }
 
+function DisplayMath({ children, ...rest }: React.HTMLAttributes<HTMLSpanElement>) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [overflowing, setOverflowing] = useState(false)
+
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+    let active = true
+    const measure = () => {
+      if (active) setOverflowing(element.scrollWidth > element.clientWidth)
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(element)
+    // The formula can change width when KaTeX fonts finish loading, even
+    // when the available article width stays the same.
+    if (element.firstElementChild) observer?.observe(element.firstElementChild)
+    void document.fonts?.ready.then(measure)
+    if (!observer) window.addEventListener('resize', measure)
+    return () => {
+      active = false
+      observer?.disconnect()
+      if (!observer) window.removeEventListener('resize', measure)
+    }
+  }, [children])
+
+  return (
+    <span
+      {...rest}
+      ref={ref}
+      tabIndex={overflowing ? 0 : undefined}
+      role={overflowing ? 'region' : undefined}
+      aria-label={overflowing ? '数学公式，可横向滚动' : undefined}
+    >
+      {children}
+    </span>
+  )
+}
+
+function ArticleSpan({ node: _node, ...rest }: React.HTMLAttributes<HTMLSpanElement> & ExtraProps) {
+  return rest.className?.split(/\s+/).includes('katex-display')
+    ? <DisplayMath {...rest} />
+    : <span {...rest} />
+}
+
 type ArticleLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & ExtraProps
 
 function ArticleLink({ href, children, className, node: _node, ...rest }: ArticleLinkProps) {
@@ -246,6 +291,7 @@ function ArticleImage({ src, alt, node: _node, ...rest }: React.ComponentProps<'
 const COMPONENTS: Components = {
   img: ArticleImage,
   a: ArticleLink,
+  span: ArticleSpan,
   p: ({ children, node: _node, ...rest }) => {
     const suppressedVideo = useContext(SuppressedVideoContext)
     const text = extractParagraphText(children)

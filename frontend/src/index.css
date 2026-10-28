@@ -865,6 +865,27 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 6px 10px; }
 .markdown-body th { background: var(--surface-hover); font-weight: 600; }
 
+/* Keep wide equations inside the article. A max-content inner block keeps
+   centered KaTeX from placing the start of a wide equation off-screen. */
+.markdown-body .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  /* KaTeX glyphs can extend beyond their layout struts. Leave room for
+     them inside the scrollport while retaining the normal outer spacing. */
+  padding-block: 0.5em;
+  margin-block: 0.5em;
+}
+.markdown-body .katex-display > .katex {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+}
+.markdown-body .katex-display:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .summary-markdown { line-height: 1.5; }
 .summary-markdown p { margin: 4px 0; }
 .summary-markdown ul, .summary-markdown ol { padding-left: 1.4em; margin: 4px 0; }
