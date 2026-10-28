@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -56,8 +58,23 @@ func TestBudgetDenialsReachJSONAndSummaryStream(t *testing.T) {
 					t.Fatal("not handled")
 				}
 				var data map[string]any
-				if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
-					t.Fatalf("decode %s: %v", w.Body.String(), err)
+				decoder := json.NewDecoder(bytes.NewReader(w.Body.Bytes()))
+				heartbeats := 0
+				for {
+					if err := decoder.Decode(&data); err != nil {
+						t.Fatalf("decode %s: %v", w.Body.String(), err)
+					}
+					if !stream || data["type"] != "heartbeat" {
+						break
+					}
+					heartbeats++
+				}
+				if stream && heartbeats == 0 {
+					t.Error("stream did not send an initial heartbeat")
+				}
+				var extra map[string]any
+				if err := decoder.Decode(&extra); err != io.EOF {
+					t.Fatalf("unexpected frame after terminal result: %+v err=%v", extra, err)
 				}
 				if data["reason"] != reason || data["bucket"] != "ai" || data["used"] != float64(1) || data["limit"] != float64(1) {
 					t.Errorf("stream=%v missing denial details: %s", stream, w.Body.String())

@@ -527,10 +527,9 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 		return false
 	}
 
-	writeAndFlush := func(frame map[string]any) {
-		writeFrame(c, frame)
-		flusher.Flush()
-	}
+	stream := newSummaryStreamWriter(c.Request.Context(), c.Writer, flusher, summaryHeartbeatInterval)
+	defer stream.stopHeartbeat()
+	writeAndFlush := stream.writeAndFlush
 
 	briefDone := false
 	onBrief := func(delta string) {
@@ -589,6 +588,7 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 
 	if serr != nil {
 		_ = h.articleRepo.FailSummary(id, token, serr)
+		stream.stopHeartbeat()
 		if payload, denied := taskBudgetErrorPayload(serr); denied {
 			payload["type"] = "error"
 			payload["msg"] = payload["error"]
@@ -601,6 +601,7 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 	}
 
 	updated, err := h.articleRepo.WithCtx(c).CompleteSummary(id, token, article.Content, brief, detailed)
+	stream.stopHeartbeat()
 	if err != nil {
 		writeAndFlush(map[string]any{"type": "error", "msg": err.Error()})
 		return false

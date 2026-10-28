@@ -18,6 +18,11 @@ import (
 
 func summaryTestRouter(t *testing.T, provider string, sabotage bool) (*gin.Engine, *sql.DB, int) {
 	t.Helper()
+	return summaryTestRouterWithMiddleware(t, provider, sabotage)
+}
+
+func summaryTestRouterWithMiddleware(t *testing.T, provider string, sabotage bool, middleware ...gin.HandlerFunc) (*gin.Engine, *sql.DB, int) {
+	t.Helper()
 	db, cleanup := testdb.New(t)
 	t.Cleanup(cleanup)
 	var user, feed, article int
@@ -39,6 +44,7 @@ func summaryTestRouter(t *testing.T, provider string, sabotage bool) (*gin.Engin
 	handler := NewArticleHandler(repo, nil, nil, nil, nil, service.NewSummarizerService(ai.NewSummarizerWithModel("k", provider, "test")), nil)
 	router := gin.New()
 	router.Use(func(c *gin.Context) { c.Set("userID", user) }, RLSTxMiddleware(db))
+	router.Use(middleware...)
 	router.POST("/articles/:id/summary", func(c *gin.Context) {
 		if sabotage {
 			if _, err := c.MustGet(CtxKeyTx).(*sql.Tx).Exec(`INSERT INTO summary_commit_probe VALUES(-999)`); err != nil {

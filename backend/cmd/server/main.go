@@ -29,7 +29,6 @@ import (
 	"github.com/bytedance/rss-pal/internal/transcript"
 	"github.com/bytedance/rss-pal/internal/version"
 	"github.com/bytedance/rss-pal/internal/youtuberelay"
-	gingzip "github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
 
@@ -190,14 +189,7 @@ func main() {
 	// when the API is reached directly (no nginx); skip already-compressed
 	// content types and the streaming summary endpoint that controls its
 	// own framing.
-	router.Use(gingzip.Gzip(
-		gingzip.DefaultCompression,
-		gingzip.WithExcludedExtensions([]string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mp3", ".woff", ".woff2"}),
-		gingzip.WithExcludedPathsRegexs([]string{
-			"/api/articles/.*/summary/stream",
-			"/api/media/youtube/.*",
-		}),
-	))
+	router.Use(api.ResponseCompression())
 	// Trust only requests from localhost/private networks (running behind nginx).
 	// nginx uses $proxy_add_x_forwarded_for, so Gin walks the chain right-to-left
 	// and selects the first untrusted address. This assumes the API port remains
