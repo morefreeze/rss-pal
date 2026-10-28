@@ -8,6 +8,18 @@ import (
 	"time"
 )
 
+func TestExploreRankDoesNotRescueFarFuturePublicationWithFetchedTime(t *testing.T) {
+	now := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+	input := []RankArticle{{ID: 1, Title: "Demo framework release", PublishedAt: now.Add(-time.Hour), FetchedAt: now}, {ID: 2, Title: "No date", FetchedAt: now}}
+	for id := 3; id < 10; id++ {
+		input = append(input, RankArticle{ID: id, Title: "Lunar Base Opening", PublishedAt: now.AddDate(73, 0, 0), FetchedAt: now})
+	}
+	got, _ := rankedArticles(input, now)
+	if len(got) != 2 || got[0].ID != 2 || got[1].ID != 1 {
+		t.Fatalf("far-future items crowded out valid articles: %+v", got)
+	}
+}
+
 func TestExploreRankSubscriptionOutweighsBehaviorAndFeedbackOutweighsBehavior(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	profile := BuildExploreProfile(ProfileInput{

@@ -495,6 +495,9 @@ func exploreArticleFromItem(item *gofeed.Item, base *url.URL, fetchedAt time.Tim
 		effective = &updated
 	}
 	if effective != nil {
+		if effective.After(fetchedAt.Add(maxArticleClockSkew)) {
+			return model.ExploreArticle{}, false
+		}
 		article.PublishedAt = effective
 	}
 	if content := strings.TrimSpace(item.Content); content != "" {

@@ -408,6 +408,11 @@ func normalizePublicURL(raw string) (string, bool) {
 	if isPrivateHost(u.Hostname()) {
 		return "", false
 	}
+	// This public instance explicitly hosts disposable test events. Match the
+	// confirmed instance, not arbitrary articles about demos or sandboxes.
+	if strings.EqualFold(strings.TrimSuffix(u.Hostname(), "."), "sandbox.getindico.io") {
+		return "", false
+	}
 	return util.NormalizeURL(u.String()), true
 }
 

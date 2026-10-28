@@ -261,6 +261,33 @@ func TestSourceFetchValidationAndArticleNormalization(t *testing.T) {
 	}
 }
 
+func TestExploreFeedRejectsFarFutureItemsBeforeLimits(t *testing.T) {
+	now := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+	items := rssItem("Demo framework release", "https://9.9.9.9/release", now) + rssItem("Missing date", "https://9.9.9.9/missing", time.Time{})
+	for i := 0; i < 60; i++ {
+		items += rssItem("Lunar Base Opening", fmt.Sprintf("https://9.9.9.9/future/%d", i), now.AddDate(73, 0, 0))
+	}
+	for _, minimum := range []int{0, 1, 2} {
+		articles, recognized, err := parseExploreFeed([]byte(validRSS(items)), "https://8.8.8.8/feed", now, minimum)
+		if err != nil || !recognized || len(articles) != 2 {
+			t.Fatalf("minimum=%d: got %d articles, recognized=%t err=%v", minimum, len(articles), recognized, err)
+		}
+	}
+}
+
+func TestExploreURLsExcludeConfirmedDemoHostOnly(t *testing.T) {
+	for _, raw := range []string{"https://sandbox.getindico.io/category/0/events.atom", "https://SANDBOX.GETINDICO.IO.:443/event/5819/"} {
+		if _, ok := normalizePublicURL(raw); ok {
+			t.Errorf("demo instance accepted: %s", raw)
+		}
+	}
+	for _, raw := range []string{"https://indico.cern.ch/category/0/events.atom", "https://9.9.9.9/demo-framework", "https://sandbox.getindico.io.example.com/feed"} {
+		if _, ok := normalizePublicURL(raw); !ok {
+			t.Errorf("legitimate public source rejected: %s", raw)
+		}
+	}
+}
+
 func TestSourceRefreshSkipsConfidenceButRequiresNonEmptyRecentOutput(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {

@@ -331,6 +331,7 @@ func buildExplorePageQuery(params ExploreListParams) string {
 		JOIN LATERAL (
 			SELECT explore_articles.* FROM explore_articles
 			WHERE explore_articles.source_id=source.id
+			  AND (explore_articles.published_at IS NULL OR explore_articles.published_at <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '24 hours')
               AND NOT EXISTS (SELECT 1 FROM explore_article_states state WHERE state.user_id=$1 AND state.normalized_url=explore_articles.normalized_url AND state.skipped)
 			ORDER BY COALESCE(explore_articles.published_at, explore_articles.fetched_at) DESC,
 			         explore_articles.fetched_at DESC, explore_articles.id DESC
@@ -340,6 +341,7 @@ func buildExplorePageQuery(params ExploreListParams) string {
 		  AND source.validation_status='valid'
 		  AND source.is_broken=false
 		  AND source.merged_into_source_id IS NULL
+		  AND source.url !~* '^https?://sandbox[.]getindico[.]io[.]?(:[0-9]+)?([/?#]|$)'
 		  AND source.last_fetched_at BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '12 hours' AND (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
 		  AND NOT EXISTS (
 		      SELECT 1 FROM explore_feedback hidden
@@ -372,8 +374,10 @@ const exploreColdSourcesCTE = `
 		) observation ON true
 		WHERE source.validation_status='valid' AND source.is_broken=false
 		  AND source.merged_into_source_id IS NULL
+		  AND source.url !~* '^https?://sandbox[.]getindico[.]io[.]?(:[0-9]+)?([/?#]|$)'
 		  AND source.last_fetched_at BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '12 hours' AND (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-		  AND EXISTS (SELECT 1 FROM explore_articles article WHERE article.source_id=source.id)
+		  AND EXISTS (SELECT 1 FROM explore_articles article WHERE article.source_id=source.id
+		      AND (article.published_at IS NULL OR article.published_at <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '24 hours'))
 		  AND NOT EXISTS (
 			SELECT 1 FROM explore_feedback hidden
 			WHERE hidden.user_id=$1 AND hidden.source_id=source.id AND hidden.feedback_type='hide_source'
@@ -423,6 +427,7 @@ func buildExploreColdPageQuery(params ExploreListParams) string {
 		JOIN LATERAL (
 			SELECT explore_articles.* FROM explore_articles
 			WHERE explore_articles.source_id=cold.id
+			  AND (explore_articles.published_at IS NULL OR explore_articles.published_at <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '24 hours')
               AND NOT EXISTS (SELECT 1 FROM explore_article_states state WHERE state.user_id=$1 AND state.normalized_url=explore_articles.normalized_url AND state.skipped)
 			ORDER BY COALESCE(explore_articles.published_at, explore_articles.fetched_at) DESC,
 			         explore_articles.fetched_at DESC, explore_articles.id DESC
@@ -538,7 +543,8 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 		       batch_source.rank, COALESCE(batch_source.topic, ''),
 		       COALESCE(batch_source.reason, ''), source.health_score,
 		       source.validation_status, source.is_broken, source.merged_into_source_id,
-		       (SELECT COUNT(*) FROM explore_articles article WHERE article.source_id=source.id),
+		       (SELECT COUNT(*) FROM explore_articles article WHERE article.source_id=source.id
+		           AND (article.published_at IS NULL OR article.published_at <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '24 hours')),
 		       false,
 		       EXISTS (SELECT 1 FROM explore_feedback feedback
 		               WHERE feedback.user_id=$1 AND feedback.source_id=source.id
@@ -548,13 +554,17 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 		JOIN explore_batch_sources batch_source
 		  ON batch_source.batch_id=batch.id AND batch_source.user_id=$1
 		JOIN recommended_feeds source ON source.id=batch_source.source_id
+		WHERE source.url !~* '^https?://sandbox[.]getindico[.]io[.]?(:[0-9]+)?([/?#]|$)'
+		  AND EXISTS (SELECT 1 FROM explore_articles article WHERE article.source_id=source.id
+		      AND (article.published_at IS NULL OR article.published_at <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '24 hours'))
 		ORDER BY batch_source.rank, source.id
 	`
 	if status.ID == 0 || useFallback {
 		query = exploreColdSourcesCTE + `
 			SELECT cold.id,cold.title,cold.url,cold.site_url,cold.rank,cold.topic,cold.reason,
 			       cold.health_score,'valid',false,NULL::integer,
-			       (SELECT COUNT(*) FROM explore_articles article WHERE article.source_id=cold.id),
+			       (SELECT COUNT(*) FROM explore_articles article WHERE article.source_id=cold.id
+			           AND (article.published_at IS NULL OR article.published_at <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '24 hours')),
 			       false,false,false
 			FROM cold_sources cold
 			ORDER BY cold.rank,cold.id`

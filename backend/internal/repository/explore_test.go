@@ -79,6 +79,48 @@ func TestBuildExplorePageQueryLimitsEachSourceToRecentFiveBeforeRequestedOrderin
 	}
 }
 
+func TestExplorePagesExcludeFutureAndDemoRowsBeforeCandidateLimits(t *testing.T) {
+	for _, cold := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cold=%t", cold), func(t *testing.T) {
+			db, cleanup := testdb.New(t)
+			defer cleanup()
+			userID, _ := insertExploreUsers(t, db)
+			now := time.Now().UTC().Truncate(time.Second)
+			valid := insertExploreSource(t, db, "https://production.example/feed", "Demo framework news")
+			demo := insertExploreSource(t, db, "https://sandbox.getindico.io/category/0/events.atom", "Demo")
+			good := insertExploreArticle(t, db, valid, now.Add(-time.Hour), "valid-release")
+			insertExploreArticle(t, db, demo, now, "sandbox-current-event")
+			for i := 0; i < 6; i++ {
+				id := insertExploreArticle(t, db, valid, now.AddDate(73, 0, i), fmt.Sprintf("future-%d", i))
+				if _, err := db.Exec(`UPDATE explore_articles SET fetched_at=$2 WHERE id=$1`, id, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if cold {
+				var provider int
+				if err := db.QueryRow(`INSERT INTO explore_registry_providers(provider_key,provider_kind,endpoint,sync_interval_minutes) VALUES ('qa-directory','directory','https://directory.example',360) RETURNING id`).Scan(&provider); err != nil {
+					t.Fatal(err)
+				}
+				for _, source := range []int{valid, demo} {
+					if _, err := db.Exec(`INSERT INTO explore_source_observations(provider_id,source_id,external_key,last_seen_at) VALUES ($1,$2,$2::integer::text,$3)`, provider, source, now); err != nil {
+						t.Fatal(err)
+					}
+				}
+			} else {
+				insertExploreDoneBatch(t, db, userID, now, []exploreTestBatchSource{{sourceID: valid, rank: 1}, {sourceID: demo, rank: 2}})
+			}
+			page, err := NewExploreRepository(db).GetPage(userID, ExploreListParams{Limit: 20})
+			if err != nil || len(page.Articles) != 1 || page.Articles[0].ID != good {
+				t.Fatalf("future or demo rows remained visible/crowded out valid rows: page=%+v err=%v", page, err)
+			}
+			sources, err := NewExploreRepository(db).GetSources(userID)
+			if err != nil || len(sources) != 1 || sources[0].ID != valid || sources[0].RecentArticleCount != 1 {
+				t.Fatalf("source list still recommends demo/future-only data: sources=%+v err=%v", sources, err)
+			}
+		})
+	}
+}
+
 func TestExploreStableSourceDiversityPreservesSourceOrder(t *testing.T) {
 	in := []ExploreArticleListItem{
 		{ID: 11, SourceID: 1}, {ID: 12, SourceID: 1}, {ID: 13, SourceID: 1},

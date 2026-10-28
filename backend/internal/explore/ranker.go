@@ -317,6 +317,11 @@ func cleanRankArticle(article RankArticle, now time.Time) (RankArticle, bool) {
 	if article.ID <= 0 {
 		return RankArticle{}, false
 	}
+	// A clearly implausible publication date is not missing metadata. Do not
+	// turn it into a fresh article by falling back to its recent fetch time.
+	if !now.IsZero() && article.PublishedAt.After(now.Add(maxArticleClockSkew)) {
+		return RankArticle{}, false
+	}
 	article.Tags = append([]string(nil), article.Tags...)
 	article.PublishedAt = cleanRankArticleTime(article.PublishedAt, now)
 	article.FetchedAt = cleanRankArticleTime(article.FetchedAt, now)
