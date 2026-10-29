@@ -48,6 +48,7 @@ const (
 
 type ContentFetcher struct {
 	client      *http.Client
+	freshClient *http.Client // Used only for explicit manual source HTML fetches.
 	jinaAPIKey  string
 	jinaBaseURL string
 	reader      *zaiReader
@@ -138,6 +139,7 @@ func NewContentFetcher() *ContentFetcher {
 	client := httpx.NewClient(30 * time.Second)
 	return &ContentFetcher{
 		client:      client,
+		freshClient: httpx.NewBufferedGETClient(30 * time.Second),
 		jinaAPIKey:  os.Getenv("JINA_API_KEY"),
 		jinaBaseURL: defaultJinaReaderBaseURL,
 		reader:      newZAIReader(os.Getenv("ZAI_READER_API_KEY"), os.Getenv("ZAI_READER_MCP_URL"), client),
@@ -188,7 +190,11 @@ func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url strin
 		stagesLeft++
 	}
 	directCtx, directCancel := f.fetchStageContext(ctx, stagesLeft)
-	result, status, err := f.fetchDirect(directCtx, url)
+	directClient := f.client
+	if noReaderCache && f.freshClient != nil {
+		directClient = f.freshClient
+	}
+	result, status, err := f.fetchDirectWithClient(directCtx, url, directClient)
 	directCancel()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ContentResult{}, ctxErr
@@ -276,6 +282,10 @@ func (f *ContentFetcher) FetchHTMLDocument(ctx context.Context, pageURL string) 
 // fetchDirect performs the original direct HTTP scrape. Returns the extracted
 // content + metadata, the HTTP status code, and any transport error.
 func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentResult, int, error) {
+	return f.fetchDirectWithClient(ctx, url, f.client)
+}
+
+func (f *ContentFetcher) fetchDirectWithClient(ctx context.Context, url string, client *http.Client) (ContentResult, int, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return ContentResult{}, 0, err
@@ -285,7 +295,7 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentRe
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 
-	resp, err := f.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return ContentResult{}, 0, err
 	}

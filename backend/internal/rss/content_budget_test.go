@@ -296,6 +296,99 @@ func TestContentFetcherFastDirectSuccessWithDeadline(t *testing.T) {
 	}
 }
 
+func TestContentFetcherFreshClientOnlyFetchesSourceHTML(t *testing.T) {
+	for _, scenario := range []string{"automatic", "fresh source", "fresh ZAI", "fresh Jina", "injected legacy client"} {
+		t.Run(scenario, func(t *testing.T) {
+			calls := make(map[string]int)
+			legacyBody := strings.Repeat("Legacy source article paragraph. ", 20)
+			freshBody := strings.Repeat("Fresh source article paragraph. ", 20)
+			legacy := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				switch req.URL.Host {
+				case "source.invalid":
+					calls["legacy source"]++
+					return contentBudgetResponse(http.StatusOK, "<article><p>"+legacyBody+"</p></article>"), nil
+				case "reader.invalid":
+					calls["legacy reader"]++
+					if scenario == "fresh Jina" {
+						return contentBudgetResponse(http.StatusServiceUnavailable, ""), nil
+					}
+					switch calls["legacy reader"] {
+					case 1:
+						response := contentBudgetResponse(http.StatusOK, `{"jsonrpc":"2.0","id":1,"result":{}}`)
+						response.Header.Set("Mcp-Session-Id", "source-client-session")
+						return response, nil
+					case 2:
+						return contentBudgetResponse(http.StatusAccepted, ""), nil
+					default:
+						var call struct {
+							Params struct {
+								Arguments struct {
+									NoCache bool `json:"no_cache"`
+								} `json:"arguments"`
+							} `json:"params"`
+						}
+						if err := json.NewDecoder(req.Body).Decode(&call); err != nil || !call.Params.Arguments.NoCache {
+							t.Errorf("fresh Reader no_cache missing: %v", err)
+						}
+						return contentBudgetResponse(http.StatusOK, `{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"content\":\"Legacy ZAI client content\"}"}]}}`), nil
+					}
+				case "jina.invalid":
+					calls["legacy Jina"]++
+					return contentBudgetResponse(http.StatusOK, "Legacy Jina client content"), nil
+				}
+				return nil, fmt.Errorf("unexpected legacy request %s", req.URL)
+			})}
+			fresh := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls["fresh source"]++
+				if req.URL.Host != "source.invalid" || req.Method != http.MethodGet {
+					return nil, fmt.Errorf("non-source request reached manual client: %s", req.URL)
+				}
+				if !strings.Contains(req.Header.Get("User-Agent"), "Chrome/120.0.0.0") ||
+					req.Header.Get("Accept") != "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" ||
+					req.Header.Get("Accept-Language") != "zh-CN,zh;q=0.9,en;q=0.8" || req.Header.Get("Referer") != "" {
+					t.Error("manual source request changed normal direct headers")
+				}
+				if scenario == "fresh ZAI" || scenario == "fresh Jina" {
+					return contentBudgetResponse(http.StatusForbidden, ""), nil
+				}
+				return contentBudgetResponse(http.StatusOK, "<article><p>"+freshBody+"</p></article>"), nil
+			})}
+			fetcher := &ContentFetcher{client: legacy, freshClient: fresh, jinaBaseURL: "https://jina.invalid/"}
+			wantBody := strings.TrimSpace(freshBody)
+			wantCalls := map[string]int{"fresh source": 1}
+			switch scenario {
+			case "automatic", "injected legacy client":
+				wantBody = strings.TrimSpace(legacyBody)
+				wantCalls = map[string]int{"legacy source": 1}
+				if scenario == "injected legacy client" {
+					fetcher.freshClient = nil
+				}
+			case "fresh ZAI":
+				wantBody = "Legacy ZAI client content"
+				wantCalls["legacy reader"] = 3
+				fetcher.reader = newZAIReader("key", "https://reader.invalid/mcp", legacy)
+			case "fresh Jina":
+				wantBody = "Legacy Jina client content"
+				wantCalls["legacy reader"] = 1
+				wantCalls["legacy Jina"] = 1
+				fetcher.reader = newZAIReader("key", "https://reader.invalid/mcp", legacy)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			var got string
+			var err error
+			if scenario == "automatic" {
+				got, err = fetcher.FetchContent(ctx, "https://source.invalid/article")
+			} else {
+				got, err = fetcher.FetchContentFresh(ctx, "https://source.invalid/article")
+			}
+			if err != nil || got != wantBody || !reflect.DeepEqual(calls, wantCalls) {
+				t.Fatalf("source/provider routing: body=%q error=%v calls=%v want=%v", got, err, calls, wantCalls)
+			}
+		})
+	}
+}
+
 func contentBudgetResponse(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
