@@ -10,7 +10,7 @@ vi.mock('../src/api/client', () => ({
   getBookmarkletToken: vi.fn(async () => 'test-token'),
 }))
 
-async function capture(html: string, hostname = 'example.test') {
+async function capture(html: string, hostname = 'example.test', mathJax?: (doc: Document) => unknown) {
   render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><SettingsPage user={{ is_admin: false }} /></MemoryRouter>)
   const link = await screen.findByRole('link', { name: '⭐ 发送到 RSS Pal' })
   const source = decodeURIComponent(link.getAttribute('href')!.slice('javascript:'.length))
@@ -19,10 +19,12 @@ async function capture(html: string, hostname = 'example.test') {
   const open = vi.fn((_url: string, _target: string) => ({}))
   const alert = vi.fn()
   // Execute the generated bookmarklet in an isolated DOM with its real receiver payload.
-  new Function('document', 'location', 'window', 'alert', source)(doc, { hostname, href: `https://${hostname}/article` }, { open }, alert)
+  new Function('document', 'location', 'window', 'alert', source)(doc, { hostname, href: `https://${hostname}/article` }, { open, MathJax: mathJax?.(doc) }, alert)
   expect(alert).not.toHaveBeenCalled()
   expect(doc.documentElement.outerHTML).toBe(before)
   const receiver = String(open.mock.calls[0]?.[0])
+  expect(receiver.startsWith(`${window.location.origin}/bookmarklet-receiver.html#`)).toBe(true)
+  expect(open.mock.calls[0]?.[1]).toBe('_blank')
   const payload = JSON.parse(decodeURIComponent(escape(atob(receiver.split('#')[1]))))
   expect(payload.token).toBe('test-token')
   expect(payload.url).toBe(`https://${hostname}/article`)
@@ -51,6 +53,78 @@ describe('Settings bookmarklet capture', () => {
     expect(doc.querySelector('img')?.getAttribute('srcset')).toBe('https://example.test/2x.jpg 2x')
     expect(doc.querySelector('math')?.textContent).toBe('x')
     expect(doc.querySelector('style')).toBeNull()
+  })
+
+  it('preserves runtime-only MathJax TeX and display mode in the matching cloned containers', async () => {
+    const inline = String.raw`\mathbf{x}_\text{adv}`
+    const display = String.raw`\frac{x_1}{y} < z & \alpha > 0`
+    const doc = await capture(`<body><article><p>完整正文 <mjx-container id="inline"><mjx-math>rendered inline</mjx-math></mjx-container></p>
+      <mjx-container id="display"><mjx-math>rendered block</mjx-math></mjx-container>
+      <img data-src="https://example.test/formula.jpg"></article></body>`, 'example.test', source => ({
+      startup: { document: { math: new Set([
+        { typesetRoot: source.querySelector('#display'), math: display, display: true },
+        { typesetRoot: source.querySelector('#inline'), math: inline, display: false },
+      ]) } },
+    }))
+    expect(doc.querySelector('#inline annotation[encoding="application/x-tex"]')?.textContent).toBe(inline)
+    expect(doc.querySelector('#display annotation[encoding="application/x-tex"]')?.textContent).toBe(display)
+    expect(doc.querySelector('#inline')?.getAttribute('display')).toBe('false')
+    expect(doc.querySelector('#display')?.getAttribute('display')).toBe('true')
+    expect(doc.querySelector('#inline mjx-math')?.textContent).toBe('rendered inline')
+    expect(doc.querySelector('img')?.getAttribute('src')).toBe('https://example.test/formula.jpg')
+  })
+
+  it('keeps existing TeX annotations and inert MathJax v2 scripts alongside JSON-LD', async () => {
+    const metadata = { '@type': 'Article', datePublished: '2026-09-20' }
+    const doc = await capture(String.raw`<head><script type="application/ld+json">${JSON.stringify(metadata)}</script>
+      <script>window.unwanted=true</script><script type="module" src="/app.js"></script><style>math{color:red}</style></head>
+      <body><article><p>完整正文
+      <span class="katex"><math><semantics><annotation encoding="application/x-tex">\sqrt{x+7} \ge 0</annotation></semantics></math></span>
+      <math id="mathml"><semantics><annotation encoding="application/x-tex">a^2+b^2=c^2</annotation></semantics></math>
+      <mjx-container id="annotated" display="true"><annotation encoding="application/x-tex">\frac{a}{b}</annotation></mjx-container>
+      <script type="math/tex">x \ge 1</script><script type="math/tex; mode=display">y=\frac{a}{b}</script></p></article></body>`, 'example.test', source => ({
+      startup: { document: { math: [{ typesetRoot: source.querySelector('#annotated'), math: 'do-not-replace-existing-TeX', display: true }] } },
+    }))
+    expect(doc.querySelector('.katex annotation')?.textContent).toBe(String.raw`\sqrt{x+7} \ge 0`)
+    expect(doc.querySelector('#mathml annotation')?.textContent).toBe('a^2+b^2=c^2')
+    expect(doc.querySelectorAll('#annotated annotation')).toHaveLength(1)
+    expect(doc.querySelector('#annotated annotation')?.textContent).toBe(String.raw`\frac{a}{b}`)
+    expect(Array.from(doc.querySelectorAll('script')).map(script => script.getAttribute('type'))).toEqual([
+      'application/ld+json', 'math/tex', 'math/tex; mode=display',
+    ])
+    expect(doc.querySelector('script[type="math/tex"]')?.textContent).toBe(String.raw`x \ge 1`)
+    expect(doc.querySelector('script[type="math/tex; mode=display"]')?.textContent).toBe(String.raw`y=\frac{a}{b}`)
+    expect(JSON.parse(doc.querySelector('script[type="application/ld+json"]')!.textContent!)).toEqual(metadata)
+    expect(doc.querySelector('style')).toBeNull()
+  })
+
+  it('skips malformed or unmatched MathJax items without losing later TeX or other content', async () => {
+    const doc = await capture('<body><article><p>完整正文</p><mjx-container id="broken">rendered broken</mjx-container><mjx-container id="nontex">rendered MathML</mjx-container><mjx-container id="empty">rendered empty</mjx-container><mjx-container id="valid">rendered valid</mjx-container><img data-src="https://example.test/full.jpg"></article></body>', 'example.test', source => ({
+      startup: { document: { math: new Set([
+        { typesetRoot: source.querySelector('#broken'), get math() { throw new Error('bad math item') } },
+        { typesetRoot: source.createElement('mjx-container'), math: 'unmatched', display: false },
+        { typesetRoot: source.querySelector('#nontex'), math: '<math><mi>x</mi></math>', inputJax: { name: 'MathML' }, display: false },
+        { typesetRoot: source.querySelector('#empty'), math: '  ', display: false },
+        { typesetRoot: source.querySelector('#valid'), math: String.raw`\alpha + \beta`, display: false },
+      ]) } },
+    }))
+    expect(doc.querySelectorAll('annotation')).toHaveLength(1)
+    expect(doc.querySelector('#valid annotation')?.textContent).toBe(String.raw`\alpha + \beta`)
+    expect(doc.querySelector('article p')?.textContent).toBe('完整正文')
+    expect(doc.querySelector('img')?.getAttribute('src')).toBe('https://example.test/full.jpg')
+  })
+
+  const unavailableMathRuntimes: [string, ((doc: Document) => unknown) | undefined][] = [
+    ['missing', undefined],
+    ['throwing startup', () => ({ get startup() { throw new Error('unavailable runtime') } })],
+    ['throwing iterator', () => ({ startup: { document: { math: { [Symbol.iterator]() { throw new Error('unavailable math list') } } } } })],
+  ]
+  it.each(unavailableMathRuntimes)('captures the article when the MathJax runtime is %s without guessing TeX', async (_name, runtime) => {
+    const doc = await capture('<body><article><p>完整正文</p><mjx-container><mjx-math>rendered x²</mjx-math></mjx-container><img data-src="https://example.test/full.jpg"></article></body>', 'example.test', runtime)
+    expect(doc.querySelector('article p')?.textContent).toBe('完整正文')
+    expect(doc.querySelector('img')?.getAttribute('src')).toBe('https://example.test/full.jpg')
+    expect(doc.querySelector('mjx-math')?.textContent).toBe('rendered x²')
+    expect(doc.querySelector('annotation')).toBeNull()
   })
 
   it('adds explicit WeChat publication time to metadata before cleaning', async () => {

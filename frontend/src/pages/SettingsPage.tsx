@@ -103,10 +103,38 @@ function buildBookmarkletJS(apiBase: string, token: string): string {
   // (≈60× shrink on mp.weixin.qq.com — 3 MiB → 50 KiB — also keeping the
   // resulting URL fragment well under browser limits) and promotes data-src
   // into src so lazy-loaded article images survive the round trip. The live
-  // DOM is not mutated. Keep inert JSON-LD for server-side publication-date extraction.
+  // DOM is not mutated. Carry runtime-only MathJax TeX into clone annotations;
+  // keep inert JSON-LD and math/tex sources for server-side extraction.
   const code = `(function(){
 var c=document.documentElement.cloneNode(true);
-c.querySelectorAll('script:not([type="application/ld+json" i]),style,link,noscript,template').forEach(function(n){n.remove();});
+try{
+  var mj=window.MathJax;
+  var mathItems=mj&&mj.startup&&mj.startup.document&&mj.startup.document.math;
+  if(mathItems){
+    var mathRoots=document.querySelectorAll('mjx-container');
+    var mathClones=c.querySelectorAll('mjx-container');
+    Array.from(mathItems).forEach(function(item){
+      try{
+        var tex=item&&item.math;
+        if(typeof tex!=='string'||!tex.trim())return;
+        var input=item.inputJax;
+        if(input&&input.name&&input.name!=='TeX')return;
+        var index=Array.prototype.indexOf.call(mathRoots,item.typesetRoot);
+        if(index<0)return;
+        var target=mathClones[index];
+        if(!target.querySelector('annotation[encoding="application/x-tex"]')){
+          var annotation=document.createElement('annotation');
+          annotation.setAttribute('encoding','application/x-tex');
+          annotation.textContent=tex;
+          target.appendChild(annotation);
+        }
+        var display=item.display;
+        if(typeof display==='boolean')target.setAttribute('display',String(display));
+      }catch(e){}
+    });
+  }
+}catch(e){}
+c.querySelectorAll('script:not([type="application/ld+json" i]):not([type^="math/tex" i]),style,link,noscript,template').forEach(function(n){n.remove();});
 if(location.hostname==='mp.weixin.qq.com'){
   var sources=document.querySelectorAll('#publish_time');
   var published='';
