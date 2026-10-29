@@ -13,6 +13,8 @@ import { verifyTencentCaptcha } from '../utils/tencentCaptcha'
 import RegistrationChallenge from './RegistrationChallenge'
 import { authErrorMessage } from '../utils/authError'
 import AccountProviderIcon from './AccountProviderIcon'
+import { createQQOAuthPopup, QQPopupError } from '../utils/qqOAuthPopup'
+import { safeAccountReturn } from '../api/accountAuth'
 type Props = {
   methods: AuthMethods
   mode: 'login' | 'register' | 'bind'
@@ -49,6 +51,8 @@ export default function VerifiedAccountAccess({
     } | null>(null),
     [proof, setProof] = useState(''),
     [attempt, setAttempt] = useState(0)
+  const qqPopup = useRef<ReturnType<typeof createQQOAuthPopup> | null>(null)
+  useEffect(() => () => qqPopup.current?.dispose(), [])
   const mountedOwner = useRef(currentAccountID())
   const generation = useRef(0),
     inflight = useRef(false),
@@ -165,11 +169,21 @@ export default function VerifiedAccountAccess({
     setBusy(true)
     setError('')
     try {
+      if (provider === 'qq') {
+        qqPopup.current?.dispose()
+        qqPopup.current = createQQOAuthPopup(() => {
+          if (generation.current === run) window.location.assign(safeAccountReturn(returnTo))
+        })
+      }
+      const popup = provider === 'qq' ? qqPopup.current : null
       const url = await startAccountOAuth(provider, returnTo, remember, binding)
-      if (generation.current === run) window.location.assign(url)
+      if (generation.current !== run) { popup?.dispose(); return }
+      if (popup) popup.navigate(url)
+      else window.location.assign(url)
     } catch (e) {
+      if (provider === 'qq') qqPopup.current?.dispose()
       if (generation.current === run)
-        setError(authErrorMessage(e, '第三方登录暂时不可用，请重试'))
+        setError(e instanceof QQPopupError ? e.message : authErrorMessage(e, '第三方登录暂时不可用，请重试'))
     } finally {
       if (generation.current === run) {
         inflight.current = false

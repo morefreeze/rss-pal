@@ -9,6 +9,7 @@ import {
   safeAccountReturn,
 } from '../api/accountAuth'
 import { authErrorMessage } from '../utils/authError'
+import { completeQQOAuthPopup } from '../utils/qqOAuthPopup'
 export default function AccountAuthComplete({
   onLogin,
 }: {
@@ -55,6 +56,7 @@ export default function AccountAuthComplete({
           onLogin(result.user)
         }
         clearAccountFlow()
+        completeQQOAuthPopup(flow.popupChannel)
         navigate(safeAccountReturn(result.return_to || flow.returnTo), {
           replace: true,
         })

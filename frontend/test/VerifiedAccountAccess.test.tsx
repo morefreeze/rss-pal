@@ -35,6 +35,7 @@ const methods = {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.spyOn(window, 'open').mockReturnValue({opener:null, close:vi.fn(), sessionStorage:{setItem:vi.fn()}, location:{replace:vi.fn()}} as unknown as Window)
   mocks.owner.mockReturnValue(null)
   localStorage.clear()
   sessionStorage.clear()
@@ -243,4 +244,12 @@ it('omits the QQ review notice after approval or when unavailable', () => {
  rerender(<VerifiedAccountAccess methods={{...methods,qq:false,qq_review_pending:true}} mode="login" returnTo="/articles" />)
  expect(screen.queryByRole('button',{name:'QQ登录'})).toBeNull()
  expect(screen.queryByText('QQ 登录审核中，目前仅支持开发者或调试账号。')).toBeNull()
+})
+
+it('does not start QQ authorization when popup opening is blocked', async () => {
+ vi.mocked(window.open).mockReturnValue(null)
+ render(<VerifiedAccountAccess methods={{...methods,qq:true}} mode="login" returnTo="/articles" />)
+ fireEvent.click(screen.getByRole('button',{name:'QQ登录'}))
+ expect((await screen.findByRole('alert')).textContent).toBe('请允许弹出窗口后重试 QQ 登录')
+ expect(mocks.start).not.toHaveBeenCalled()
 })

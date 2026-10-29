@@ -87,6 +87,7 @@ export async function verifyEmailCode(
 }
 const flowKey = 'rsspal:account-oauth-flow'
 export type AccountFlow = {
+  popupChannel?: string
   owner: number | null
   binding: boolean
   returnTo: string
@@ -121,7 +122,7 @@ export function readAccountFlow(): AccountFlow | null {
       Number.isFinite(v.createdAt) &&
       Date.now() - v.createdAt >= 0 &&
       Date.now() - v.createdAt < 600000
-      ? { ...v, returnTo: safeAccountReturn(v.returnTo) }
+      ? { ...v, returnTo: safeAccountReturn(v.returnTo), ...(typeof v.popupChannel === 'string' && /^rsspal-qq-[a-f0-9-]{36}$/.test(v.popupChannel) ? {popupChannel: v.popupChannel} : {popupChannel: undefined}) }
       : null
   } catch {
     return null

@@ -89,3 +89,16 @@ it.each(['', '&ticket=must-not-exchange'])('reports provider callback failure wi
   expect(m.exchange).not.toHaveBeenCalled()
   expect(m.persist).not.toHaveBeenCalled()
 })
+
+it('notifies the original window after successfully exchanging a popup ticket', async () => {
+ const postMessage=vi.fn(),closeChannel=vi.fn()
+ vi.stubGlobal('BroadcastChannel',vi.fn(function(){return {postMessage,close:closeChannel}}))
+ const close=vi.spyOn(window,'close').mockImplementation(()=>{})
+ m.flow.mockReturnValue({owner:null,binding:false,returnTo:'/feeds',createdAt:Date.now(),popupChannel:'rsspal-qq-12345678-1234-1234-1234-123456789abc'})
+ try {
+  view()
+  await waitFor(()=>expect(postMessage).toHaveBeenCalledWith('complete'))
+  expect(m.persist.mock.invocationCallOrder[0]).toBeLessThan(postMessage.mock.invocationCallOrder[0])
+  expect(close).toHaveBeenCalledOnce()
+ } finally {close.mockRestore();vi.unstubAllGlobals()}
+})
