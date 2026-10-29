@@ -134,7 +134,7 @@ try{
     });
   }
 }catch(e){}
-c.querySelectorAll('script:not([type="application/ld+json" i]):not([type^="math/tex" i]),style,link,noscript,template').forEach(function(n){n.remove();});
+c.querySelectorAll('script:not([type="application/ld+json" i]):not([type^="math/tex" i]),style,link,noscript,template,pre button.copy-code').forEach(function(n){n.remove();});
 if(location.hostname==='mp.weixin.qq.com'){
   var sources=document.querySelectorAll('#publish_time');
   var published='';

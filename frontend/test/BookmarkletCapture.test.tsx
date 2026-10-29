@@ -55,6 +55,28 @@ describe('Settings bookmarklet capture', () => {
     expect(doc.querySelector('style')).toBeNull()
   })
 
+  it('removes only copy-code buttons inside pre while preserving literal code and other buttons', async () => {
+    const samples = [
+      'const message = "copy";\ncopy(value);\n',
+      '<button class="copy-code">copy</button>\n',
+      '@article{example,\n  title = "Code sample",\n  year = "2026"\n}\n',
+    ]
+    const blocks = samples.map((text, index) => {
+      const code = document.createElement('code')
+      code.textContent = text
+      return `<pre id="sample-${index}">${code.outerHTML}<button class="copy-code">copy</button></pre>`
+    }).join('')
+    const doc = await capture(`<body><article>${blocks}<p><button id="body-copy" class="copy-code">正文复制按钮</button><button id="body-action">正文按钮</button></p><pre><button id="pre-action" class="run-code">run</button></pre></article></body>`)
+    expect(doc.querySelectorAll('pre button.copy-code')).toHaveLength(0)
+    samples.forEach((text, index) => {
+      expect(doc.querySelector(`#sample-${index} code`)?.textContent).toBe(text)
+      expect(doc.querySelector(`#sample-${index}`)?.textContent).toBe(text)
+    })
+    expect(doc.querySelector('#body-copy')?.textContent).toBe('正文复制按钮')
+    expect(doc.querySelector('#body-action')?.textContent).toBe('正文按钮')
+    expect(doc.querySelector('#pre-action')?.textContent).toBe('run')
+  })
+
   it('preserves runtime-only MathJax TeX and display mode in the matching cloned containers', async () => {
     const inline = String.raw`\mathbf{x}_\text{adv}`
     const display = String.raw`\frac{x_1}{y} < z & \alpha > 0`
