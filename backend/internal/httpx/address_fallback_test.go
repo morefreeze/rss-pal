@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -439,6 +441,286 @@ func TestBufferedGETRedirectPreservesPublicIdentityAndValidation(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestBufferedGETInvalidRedirectCannotBeatComplete200(t *testing.T) {
+	for _, location := range []string{"http://127.0.0.1/private", "http://mixed.example/private", ":invalid"} {
+		t.Run(location, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				goodStarted := make(chan struct{})
+				redirectSent := make(chan struct{})
+				goodFinished := make(chan struct{})
+				client, _ := bufferedGETFixture(t, publicGETAddresses(2), func(address string, _ *http.Request, conn net.Conn) {
+					if strings.HasPrefix(address, "93.184.216.34:") {
+						<-goodStarted
+						_, _ = fmt.Fprintf(conn, "HTTP/1.1 302 Found\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n", location)
+						close(redirectSent)
+						return
+					}
+					defer close(goodFinished)
+					close(goodStarted)
+					<-redirectSent
+					<-time.After(time.Second)
+					_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+				})
+				client.Transport.(*bufferedGETTransport).base.resolver = fakeResolver{lookup: func(_ context.Context, host string) ([]net.IPAddr, error) {
+					if host == "mixed.example" {
+						return append(publicGETAddresses(4), net.IPAddr{IP: net.ParseIP("10.0.0.7")}), nil
+					}
+					return publicGETAddresses(2), nil
+				}}
+				response, err := client.Get("http://safe.example/article")
+				if err != nil {
+					t.Errorf("invalid redirect defeated complete 200: %v", err)
+				} else {
+					body, readErr := io.ReadAll(response.Body)
+					_ = response.Body.Close()
+					if readErr != nil || response.StatusCode != http.StatusOK || string(body) != "ok" {
+						t.Errorf("usable response = %d %q %v", response.StatusCode, body, readErr)
+					}
+				}
+				<-goodFinished
+			})
+		})
+	}
+}
+
+func TestBufferedGETSOCKSClosesCompletedAndLosingConnections(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial=%t", partial), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ready := make(chan struct{})
+				count := 1
+				if partial {
+					count = 2
+				}
+				client, dialer, active, cleanup := bufferedSOCKSFixture(t, publicGETAddresses(count), true, nil, func(target string, request *http.Request, conn net.Conn) {
+					if request.Host != "safe.example" {
+						t.Errorf("SOCKS origin Host = %q", request.Host)
+					}
+					if partial && target == "93.184.216.34:80" {
+						_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nprefix")
+						close(ready)
+					} else {
+						if partial {
+							<-ready
+						}
+						_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+					}
+					_, _ = io.Copy(io.Discard, conn)
+				})
+				defer cleanup()
+				repeats := 5
+				if partial {
+					repeats = 1
+				}
+				for range repeats {
+					response, err := client.Get("http://safe.example/article")
+					if err != nil {
+						t.Fatal(err)
+					}
+					body, err := io.ReadAll(response.Body)
+					_ = response.Body.Close()
+					if err != nil || string(body) != "ok" {
+						t.Errorf("complete SOCKS response = %q, %v", body, err)
+					}
+					synctest.Wait()
+					if active.Load() != 0 || len(client.Transport.(*bufferedGETTransport).slots) != 0 {
+						t.Errorf("completed SOCKS capture retained connections=%d permits=%d", active.Load(), len(client.Transport.(*bufferedGETTransport).slots))
+					}
+				}
+				for _, address := range dialer.addresses() {
+					if address != "proxy.example:1080" {
+						t.Errorf("SOCKS capture bypassed trusted proxy: %s", address)
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestBufferedGETSOCKSCancellationAndPendingPermits(t *testing.T) {
+	for _, phase := range []string{"handshake", "body", "pending permit"} {
+		t.Run(phase, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				client, dialer, active, cleanup := bufferedSOCKSFixture(t, publicGETAddresses(4), phase != "handshake", nil, func(_ string, _ *http.Request, conn net.Conn) {
+					_, _ = io.Copy(io.Discard, conn)
+				})
+				defer cleanup()
+				transport := client.Transport.(*bufferedGETTransport)
+				transport.slots = make(chan struct{}, 4)
+				if phase == "pending permit" {
+					for range 4 {
+						transport.slots <- struct{}{}
+					}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://safe.example/article", nil)
+				if _, err := client.Do(req); !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("SOCKS cancellation = %v", err)
+				}
+				synctest.Wait()
+				wantDials := 4
+				if phase == "pending permit" {
+					wantDials = 0
+				}
+				if active.Load() != 0 || len(dialer.addresses()) != wantDials {
+					t.Errorf("SOCKS cancellation retained connections=%d dials=%v", active.Load(), dialer.addresses())
+				}
+			})
+		})
+	}
+}
+
+func TestBufferedGETSOCKSPreservesPinnedTargetTLSAndPublicIdentity(t *testing.T) {
+	certificate, roots := testCertificate(t)
+	for _, scheme := range []string{"socks5", "socks5h"} {
+		t.Run(scheme, func(t *testing.T) {
+			sni := make(chan string, 1)
+			serverTLS := &tls.Config{Certificates: []tls.Certificate{certificate}, GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+				sni <- hello.ServerName
+				return nil, nil
+			}}
+			client, dialer, active, cleanup := bufferedSOCKSFixture(t, publicGETAddresses(1), true, serverTLS, func(target string, request *http.Request, conn net.Conn) {
+				if target != "93.184.216.34:443" || request.Host != "safe.example" {
+					t.Errorf("SOCKS identity target=%s Host=%s", target, request.Host)
+				}
+				_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+				_, _ = io.Copy(io.Discard, conn)
+			})
+			defer cleanup()
+			transport := client.Transport.(*bufferedGETTransport)
+			transport.base.tlsConfig = &tls.Config{RootCAs: roots}
+			proxyURL, _ := url.Parse(scheme + "://proxy.example:1080")
+			transport.base.proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+			response, err := client.Get("https://safe.example/article")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if got := <-sni; got != "safe.example" {
+				t.Errorf("SOCKS TLS SNI = %s", got)
+			}
+			if active.Load() != 0 || response.Request.URL.String() != "https://safe.example/article" {
+				t.Errorf("SOCKS capture retained sockets=%d or changed identity=%s", active.Load(), response.Request.URL)
+			}
+			for _, address := range dialer.addresses() {
+				if address != "proxy.example:1080" {
+					t.Errorf("SOCKS capture bypassed proxy: %s", address)
+				}
+			}
+		})
+	}
+}
+
+func TestBufferedGETRetainsClientRedirectLimit(t *testing.T) {
+	client, _ := bufferedGETFixture(t, publicGETAddresses(2), func(_ string, _ *http.Request, conn net.Conn) {
+		_, _ = io.WriteString(conn, "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n")
+	})
+	if _, err := client.Get("http://safe.example/start"); err == nil || !strings.Contains(err.Error(), "too many redirects") {
+		t.Fatalf("redirect limit = %v", err)
+	}
+}
+
+type bufferedGETTrackedConn struct {
+	net.Conn
+	active *atomic.Int32
+	once   sync.Once
+}
+
+func (c *bufferedGETTrackedConn) Close() error {
+	c.once.Do(func() { c.active.Add(-1) })
+	return c.Conn.Close()
+}
+
+func bufferedSOCKSFixture(t *testing.T, addresses []net.IPAddr, handshake bool, serverTLS *tls.Config, serve func(string, *http.Request, net.Conn)) (*http.Client, *recordingDialer, *atomic.Int32, func()) {
+	t.Helper()
+	var active atomic.Int32
+	var mu sync.Mutex
+	var connections []net.Conn
+	closed := false
+	resolver := fakeResolver{lookup: func(context.Context, string) ([]net.IPAddr, error) { return addresses, nil }}
+	dialer := &recordingDialer{dial: func(_ context.Context, _, _ string) (net.Conn, error) {
+		client, server := net.Pipe()
+		active.Add(1)
+		tracked := &bufferedGETTrackedConn{Conn: client, active: &active}
+		mu.Lock()
+		if closed {
+			mu.Unlock()
+			_ = tracked.Close()
+			_ = server.Close()
+			return nil, net.ErrClosed
+		}
+		connections = append(connections, tracked)
+		mu.Unlock()
+		go func() {
+			defer server.Close()
+			if !handshake {
+				_, _ = io.Copy(io.Discard, server)
+				return
+			}
+			target, err := acceptBufferedSOCKS(server)
+			if err != nil {
+				return
+			}
+			var origin net.Conn = server
+			if serverTLS != nil {
+				tlsConn := tls.Server(server, serverTLS)
+				if err := tlsConn.Handshake(); err != nil {
+					return
+				}
+				origin = tlsConn
+			}
+			request, err := http.ReadRequest(bufio.NewReader(origin))
+			if err == nil {
+				serve(target, request, origin)
+			}
+		}()
+		return tracked, nil
+	}}
+	proxyURL, _ := url.Parse("socks5://proxy.example:1080")
+	client := withBufferedGETAddressFallback(newClientWithProxy(30*time.Second, resolver, dialer, func(*http.Request) (*url.URL, error) { return proxyURL, nil }))
+	cleanup := func() {
+		mu.Lock()
+		closed = true
+		defer mu.Unlock()
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	}
+	return client, dialer, &active, cleanup
+}
+
+func acceptBufferedSOCKS(conn net.Conn) (string, error) {
+	var greeting [2]byte
+	if _, err := io.ReadFull(conn, greeting[:]); err != nil {
+		return "", err
+	}
+	if _, err := io.CopyN(io.Discard, conn, int64(greeting[1])); err != nil {
+		return "", err
+	}
+	if _, err := conn.Write([]byte{5, 0}); err != nil {
+		return "", err
+	}
+	var connect [4]byte
+	if _, err := io.ReadFull(conn, connect[:]); err != nil {
+		return "", err
+	}
+	size := net.IPv4len
+	if connect[3] == 4 {
+		size = net.IPv6len
+	} else if connect[3] != 1 {
+		return "", errors.New("SOCKS target was not pinned to an IP")
+	}
+	address := make([]byte, size+2)
+	if _, err := io.ReadFull(conn, address); err != nil {
+		return "", err
+	}
+	if _, err := conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(net.IP(address[:size]).String(), fmt.Sprint(binary.BigEndian.Uint16(address[size:]))), nil
 }
 
 func publicGETAddresses(count int) []net.IPAddr {
