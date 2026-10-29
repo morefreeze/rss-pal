@@ -114,6 +114,67 @@ func TestContentFetcherDeadlineReservesTimeForJina(t *testing.T) {
 	}
 }
 
+func TestContentFetcherDeadlineReservesJinaAcrossMultipleReaderRequests(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+		defer cancel()
+		callerDeadline, _ := ctx.Deadline()
+		var readerMethods []string
+		var jinaTimeRemaining time.Duration
+		const want = "Complete Jina article after slow MCP requests"
+		client := &http.Client{Timeout: 30 * time.Second, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Host {
+			case "source.invalid":
+				return contentBudgetResponse(http.StatusForbidden, ""), nil
+			case "reader.invalid":
+				var call struct {
+					Method string `json:"method"`
+				}
+				if err := json.NewDecoder(req.Body).Decode(&call); err != nil {
+					return nil, err
+				}
+				readerMethods = append(readerMethods, call.Method)
+				if call.Method == "tools/call" {
+					<-req.Context().Done()
+					return nil, req.Context().Err()
+				}
+				select {
+				case <-time.After(29 * time.Second):
+				case <-req.Context().Done():
+					return nil, req.Context().Err()
+				}
+				if call.Method == "initialize" {
+					response := contentBudgetResponse(http.StatusOK, `{"jsonrpc":"2.0","id":1,"result":{}}`)
+					response.Header.Set("Mcp-Session-Id", "slow-mcp-session")
+					return response, nil
+				}
+				return contentBudgetResponse(http.StatusAccepted, ""), nil
+			case "jina.invalid":
+				jinaTimeRemaining = time.Until(callerDeadline)
+				if err := req.Context().Err(); err != nil {
+					return nil, err
+				}
+				return contentBudgetResponse(http.StatusOK, want), nil
+			}
+			return nil, fmt.Errorf("unexpected request %s", req.URL)
+		})}
+		fetcher := &ContentFetcher{client: client, reader: newZAIReader("key", "https://reader.invalid/mcp", client), jinaBaseURL: "https://jina.invalid/"}
+		got, err := fetcher.FetchContentFreshWithMetadata(ctx, "https://source.invalid/article")
+		if err != nil || got.Content != want {
+			t.Errorf("final fallback = %q, %v; Reader methods=%v, remaining=%s", got.Content, err, readerMethods, jinaTimeRemaining)
+		}
+		if jinaTimeRemaining != 37500*time.Millisecond {
+			t.Errorf("Jina time remaining = %s, want 37.5s", jinaTimeRemaining)
+		}
+		if !reflect.DeepEqual(readerMethods, []string{"initialize", "notifications/initialized"}) {
+			t.Errorf("Reader requests exceeded whole-stage deadline: %v", readerMethods)
+		}
+		if err := ctx.Err(); err != nil {
+			t.Errorf("Reader exhausted the caller's deadline: %v", err)
+		}
+	})
+}
+
 func TestContentFetcherPreservesReaderTimeWithAmpleOrNoDeadline(t *testing.T) {
 	for _, withDeadline := range []bool{false, true} {
 		t.Run(fmt.Sprintf("deadline=%t", withDeadline), func(t *testing.T) {

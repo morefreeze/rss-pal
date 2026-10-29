@@ -232,19 +232,13 @@ func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url strin
 	return result, nil
 }
 
-// fetchStageContext reserves time for later routes when the caller's deadline
-// cannot fit their usual HTTP timeouts. Recompute after each stage so a fast
-// failure leaves its unused time available to the remaining fallbacks.
+// fetchStageContext reserves a share of the remaining deadline for each route.
+// A reader may perform multiple HTTP requests, so its whole stage shares one
+// budget. Fast failures leave their unused time for subsequent fallbacks.
 func (f *ContentFetcher) fetchStageContext(ctx context.Context, stagesLeft int) (context.Context, context.CancelFunc) {
 	if deadline, ok := ctx.Deadline(); ok && stagesLeft > 1 {
 		budget := time.Until(deadline) / time.Duration(stagesLeft)
-		usualTimeout := f.client.Timeout
-		if usualTimeout <= 0 {
-			usualTimeout = 30 * time.Second
-		}
-		if budget < usualTimeout {
-			return context.WithTimeout(ctx, budget)
-		}
+		return context.WithTimeout(ctx, budget)
 	}
 	return ctx, func() {}
 }
