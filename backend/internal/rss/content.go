@@ -176,16 +176,34 @@ func (f *ContentFetcher) FetchContentWithMetadata(ctx context.Context, url strin
 }
 
 func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url string, noReaderCache bool) (ContentResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ContentResult{}, err
+	}
 	if canonical, ok := HackerNewsItemURL(url); ok {
 		return f.fetchHackerNews(ctx, canonical)
 	}
-	result, status, err := f.fetchDirect(ctx, url)
+	readerAvailable := f.reader != nil && f.reader.apiKey != ""
+	stagesLeft := 2 // Direct extraction and the always-available anonymous Jina fallback.
+	if readerAvailable {
+		stagesLeft++
+	}
+	directCtx, directCancel := f.fetchStageContext(ctx, stagesLeft)
+	result, status, err := f.fetchDirect(directCtx, url)
+	directCancel()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ContentResult{}, ctxErr
+	}
 	if err == nil && status == http.StatusOK && len(result.Content) >= jinaFallbackMinChars {
 		return result, nil
 	}
 
-	if f.reader != nil && f.reader.apiKey != "" {
-		readerResult, readerErr := f.reader.fetch(ctx, url, noReaderCache)
+	if readerAvailable {
+		readerCtx, readerCancel := f.fetchStageContext(ctx, 2)
+		readerResult, readerErr := f.reader.fetch(readerCtx, url, noReaderCache)
+		readerCancel()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ContentResult{}, ctxErr
+		}
 		if readerErr == nil {
 			readerResult.Content = normalizeReaderMarkdown(readerResult.Content)
 			readerResult.PublishedAt = result.PublishedAt
@@ -198,7 +216,11 @@ func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url strin
 	}
 
 	// Reader is unavailable or failed — retain Jina as the final fallback.
-	if jc, jerr := f.fetchViaJina(ctx, url); jerr == nil && jc != "" {
+	jc, jerr := f.fetchViaJina(ctx, url)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ContentResult{}, ctxErr
+	}
+	if jerr == nil && jc != "" {
 		return ContentResult{Content: jc, Title: result.Title, PublishedAt: result.PublishedAt}, nil
 	} else if jerr != nil {
 		log.Printf("Jina fallback failed for %s: %v", url, jerr)
@@ -208,6 +230,23 @@ func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url strin
 		return ContentResult{}, err
 	}
 	return result, nil
+}
+
+// fetchStageContext reserves time for later routes when the caller's deadline
+// cannot fit their usual HTTP timeouts. Recompute after each stage so a fast
+// failure leaves its unused time available to the remaining fallbacks.
+func (f *ContentFetcher) fetchStageContext(ctx context.Context, stagesLeft int) (context.Context, context.CancelFunc) {
+	if deadline, ok := ctx.Deadline(); ok && stagesLeft > 1 {
+		budget := time.Until(deadline) / time.Duration(stagesLeft)
+		usualTimeout := f.client.Timeout
+		if usualTimeout <= 0 {
+			usualTimeout = 30 * time.Second
+		}
+		if budget < usualTimeout {
+			return context.WithTimeout(ctx, budget)
+		}
+	}
+	return ctx, func() {}
 }
 
 // FetchHTMLDocument fetches the URL and returns a parsed goquery document.
@@ -305,13 +344,17 @@ func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentRe
 // (auth error / out of balance), retries once anonymously so the fallback
 // still works on the free tier.
 func (f *ContentFetcher) fetchViaJina(ctx context.Context, target string) (string, error) {
-	if content, err := f.jinaRequest(ctx, target, f.jinaAPIKey); err == nil {
-		return content, nil
-	} else if f.jinaAPIKey == "" {
+	if err := ctx.Err(); err != nil {
 		return "", err
-	} else {
-		log.Printf("Jina request with API key failed (%v), retrying anonymously", err)
 	}
+	content, err := f.jinaRequest(ctx, target, f.jinaAPIKey)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", ctxErr
+	}
+	if err == nil || f.jinaAPIKey == "" {
+		return content, err
+	}
+	log.Printf("Jina request with API key failed (%v), retrying anonymously", err)
 	return f.jinaRequest(ctx, target, "")
 }
 
