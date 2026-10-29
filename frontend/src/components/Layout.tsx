@@ -309,7 +309,7 @@ function LayoutInner({
       <Toaster />
       <MiniPlayer />
       {bp !== 'desktop' && (
-        <MobileTabBar unreadCount={unreadCount} onLogout={onLogout} isAdmin={!!user?.is_admin} />
+        <MobileTabBar user={user} unreadCount={unreadCount} onLogout={onLogout} isAdmin={!!user?.is_admin} />
       )}
     </div>
   )

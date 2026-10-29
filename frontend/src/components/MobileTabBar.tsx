@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import MoreSheet from './MoreSheet'
+import type { DisplayAccount } from './AccountDisplay'
 
 type Tab = { to: string; icon: string; label: string; showUnread?: boolean; matchClip?: boolean }
 
@@ -12,12 +13,13 @@ const TABS: Tab[] = [
 ]
 
 interface Props {
+  user?: DisplayAccount | null
   isAdmin?: boolean
   unreadCount: number
   onLogout: () => void
 }
 
-export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false }: Props) {
+export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, user }: Props) {
   const [moreOpen, setMoreOpen] = useState(false)
   const location = useLocation()
   const isClipView = location.pathname === '/articles'
@@ -103,7 +105,7 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false }:
           <span>更多</span>
         </button>
       </nav>
-      <MoreSheet isAdmin={isAdmin} open={moreOpen} onClose={() => setMoreOpen(false)} onLogout={onLogout} />
+      <MoreSheet user={user} isAdmin={isAdmin} open={moreOpen} onClose={() => setMoreOpen(false)} onLogout={onLogout} />
     </>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
 
 type SheetItem = { icon: string; label: string; to?: string; action?: 'logout' }
 
@@ -12,13 +13,14 @@ const ITEMS: SheetItem[] = [
 ]
 
 interface Props {
+  user?: DisplayAccount | null
   isAdmin?: boolean
   open: boolean
   onClose: () => void
   onLogout: () => void
 }
 
-export default function MoreSheet({ open, onClose, onLogout, isAdmin = false }: Props) {
+export default function MoreSheet({ open, onClose, onLogout, isAdmin = false, user }: Props) {
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -71,6 +73,7 @@ export default function MoreSheet({ open, onClose, onLogout, isAdmin = false }: 
             margin: '8px auto 12px',
           }}
         />
+        {user && <div style={{padding:'8px 16px 16px', borderBottom:'1px solid var(--border)'}}><AccountDisplay user={user} /></div>}
         {items.map(item => (
           <button
             key={item.label}
