@@ -222,6 +222,25 @@ it('offers GitHub login without enabling email or unrelated providers', () => {
 
 it('offers QQ as an independent login provider', () => {
  render(<VerifiedAccountAccess methods={{...methods,email:false,google:false,github:false,qq:true}} mode="login" returnTo="/articles" />)
- expect(screen.getByRole('button',{name:'使用 QQ 继续'})).toBeTruthy()
+ expect(screen.getByRole('button',{name:'QQ登录'})).toBeTruthy()
  expect(screen.queryByLabelText('邮箱')).toBeNull()
+})
+
+for (const mode of ['login', 'register'] as const) {
+ it(`shows a visible QQ label and review restriction on ${mode}`, async () => {
+  mocks.start.mockRejectedValue(new Error('fixture stop'))
+  render(<VerifiedAccountAccess methods={{...methods, github:false, qq:true, qq_review_pending:true}} mode={mode} returnTo="/articles" />)
+  const button = screen.getByRole('button', {name:'QQ登录'})
+  expect(button.textContent).toBe('QQ登录')
+  expect(screen.getByText('QQ 登录审核中，目前仅支持开发者或调试账号。')).toBeTruthy()
+  fireEvent.click(button)
+  await waitFor(() => expect(mocks.start).toHaveBeenCalledWith('qq', '/articles', true, false))
+ })
+}
+it('omits the QQ review notice after approval or when unavailable', () => {
+ const {rerender} = render(<VerifiedAccountAccess methods={{...methods,qq:true}} mode="login" returnTo="/articles" />)
+ expect(screen.queryByText('QQ 登录审核中，目前仅支持开发者或调试账号。')).toBeNull()
+ rerender(<VerifiedAccountAccess methods={{...methods,qq:false,qq_review_pending:true}} mode="login" returnTo="/articles" />)
+ expect(screen.queryByRole('button',{name:'QQ登录'})).toBeNull()
+ expect(screen.queryByText('QQ 登录审核中，目前仅支持开发者或调试账号。')).toBeNull()
 })

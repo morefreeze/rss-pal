@@ -86,7 +86,7 @@ func (h *AccountAuthHandler) emailReady() bool {
 }
 func (h *AccountAuthHandler) Methods(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	c.JSON(200, gin.H{"public_registration": h.auth.cfg.Auth.PublicRegistration, "legacy_password": true, "email": h.emailReady(), "qq": h.providerReady("qq"), "github": h.providerReady("github"), "google": h.providerReady("google"), "apple": h.providerReady("apple")})
+	c.JSON(200, gin.H{"public_registration": h.auth.cfg.Auth.PublicRegistration, "legacy_password": true, "email": h.emailReady(), "qq": h.providerReady("qq"), "qq_review_pending": h.providerReady("qq") && h.auth.cfg.Auth.QQReviewPending, "github": h.providerReady("github"), "google": h.providerReady("google"), "apple": h.providerReady("apple")})
 }
 func (h *AccountAuthHandler) sameOrigin(c *gin.Context) bool {
 	o := c.GetHeader("Origin")

@@ -90,6 +90,7 @@ type AuthConfig struct {
 	SMTPFrom           string
 	QQClientID         string
 	QQClientSecret     string
+	QQReviewPending    bool
 	GitHubClientID     string
 	GitHubClientSecret string
 	GoogleClientID     string
@@ -184,6 +185,7 @@ func Load() *Config {
 			SMTPFrom:                getEnv("SMTP_FROM", ""),
 			QQClientID:              getEnv("QQ_CLIENT_ID", ""),
 			QQClientSecret:          getEnv("QQ_CLIENT_SECRET", ""),
+			QQReviewPending:         getEnv("QQ_REVIEW_PENDING", "false") == "true",
 			GitHubClientID:          getEnv("GITHUB_CLIENT_ID", ""),
 			GitHubClientSecret:      getEnv("GITHUB_CLIENT_SECRET", ""),
 			GoogleClientID:          getEnv("GOOGLE_CLIENT_ID", ""),

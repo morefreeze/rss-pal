@@ -298,23 +298,26 @@ export default function VerifiedAccountAccess({
           <div className="account-provider-buttons" role="group" aria-label={binding ? '第三方账号绑定' : '第三方登录'}>
             {(['google', 'github', 'qq', 'apple'] as const).filter(provider => methods[provider]).map(provider => {
               const name = { google: 'Google', github: 'GitHub', qq: 'QQ', apple: 'Apple' }[provider]
-              const label = binding ? `绑定 ${name}` : `使用 ${name} 继续`
+              const label = binding ? `绑定 ${name}` : provider === 'qq' ? 'QQ登录' : `使用 ${name} 继续`
               return (
                 <button
                   key={provider}
                   type="button"
-                  className={`secondary${binding ? '' : ' account-provider-icon'}`}
+                  className={`secondary${binding ? '' : provider === 'qq' ? ' account-provider-qq' : ' account-provider-icon'}`}
                   aria-label={label}
                   title={label}
                   disabled={busy}
                   onClick={() => void oauth(provider)}
                 >
                   <AccountProviderIcon provider={provider} />
-                  {binding && <span>{label}</span>}
+                  {(binding || provider === 'qq') && <span>{label}</span>}
                 </button>
               )
             })}
           </div>
+          {methods.qq && methods.qq_review_pending && (
+            <p className="account-provider-review">QQ 登录审核中，目前仅支持开发者或调试账号。</p>
+          )}
         </div>
       )}
       {!methods.email && !methods.google && !methods.github && !methods.qq && !methods.apple && (

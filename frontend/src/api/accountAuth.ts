@@ -7,6 +7,7 @@ export type AuthMethods = {
   legacy_password: boolean
   email: boolean
   qq: boolean
+  qq_review_pending?: boolean
   github: boolean
   google: boolean
   apple: boolean

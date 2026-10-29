@@ -33,6 +33,32 @@ func TestQQLoginConfiguration(t *testing.T) {
 	}
 }
 
+func TestQQReviewMethods(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		for _, pending := range []bool{false, true} {
+			cfg := config.Load()
+			cfg.Auth.PublicOrigin = "https://rss.morefreeze.top"
+			cfg.Auth.QQClientID = "123456"
+			cfg.Auth.QQClientSecret = ""
+			if configured {
+				cfg.Auth.QQClientSecret = "fixture-secret"
+			}
+			cfg.Auth.QQReviewPending = pending
+			h := NewAccountAuthHandler(NewAuthHandler(cfg, nil, nil), nil)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			h.Methods(c)
+			var result map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result["qq"] != configured || result["qq_review_pending"] != (configured && pending) {
+				t.Fatalf("configured=%v pending=%v: unexpected methods", configured, pending)
+			}
+		}
+	}
+}
+
 func TestQQSubjectRejectsInvalidIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name, token, identity string
