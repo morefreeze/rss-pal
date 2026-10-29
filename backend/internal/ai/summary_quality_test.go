@@ -300,7 +300,8 @@ func assertDefaultStatisticalUserGuidance(t *testing.T, prompt, content string, 
 	if detailed {
 		rules = append(rules,
 			"多重否定或嵌套量词的结论",
-			"没有任何单一方法能在每一种条件下都达到阈值",
+			"仅当原文明确说明没有单一方法在所有条件下都达标时，才可用“没有任何单一方法能在每一种条件下都达到阈值”",
+			"其他量词组合必须保留原文的主体、否定和作用域，不得套用该否定句式",
 			"篇幅不足以保留完整限定时，省略次要数字",
 		)
 		unexpected = "要点中的统计取舍："
@@ -320,6 +321,9 @@ func assertDefaultStatisticalUserGuidance(t *testing.T, prompt, content string, 
 	if strings.Contains(prompt, unexpected) {
 		t.Errorf("user prompt received the other summary stage's guidance %q", unexpected)
 	}
+	if strings.Contains(prompt, "多重否定或嵌套量词的结论，优先用") {
+		t.Error("user guidance must not prescribe the negative template for every nested quantifier conclusion")
+	}
 	sourceAt, guidanceAt := strings.Index(prompt, content), strings.Index(prompt, "统计范围复核：")
 	if sourceAt < 0 || guidanceAt < sourceAt+len(content) {
 		t.Error("statistical scope guidance must follow the intact article in the user prompt")
@@ -336,7 +340,6 @@ func assertNoDefaultStatisticalUserGuidance(t *testing.T, prompt string) {
 }
 
 func TestDefaultStatisticalGuidanceFollowsSourceInOutboundRequests(t *testing.T) {
-	const content = "The main trial enrolled 120 participants. Different methods worked better under different conditions; no single method met the threshold in every condition. In 600 runs, the device both reset and avoided an alarm in fewer than 1% of runs."
 	for _, tc := range []struct {
 		name           string
 		stream, vision bool
@@ -345,14 +348,37 @@ func TestDefaultStatisticalGuidanceFollowsSourceInOutboundRequests(t *testing.T)
 		{"vision", false, true}, {"vision stream", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			bodies, brief := captureDefaultSummaryRequests(t, content, "所有方法都未达标，设备重置概率不到 1%。", tc.stream, tc.vision)
-			for i, body := range bodies {
-				system, user := summaryRequestMessages(t, body)
-				assertSummaryClaimBoundaryGuidance(t, system)
+			for _, article := range []struct{ name, content string }{
+				{"negative universal", "The main trial enrolled 120 participants. Different methods worked better under different conditions; no single method met the threshold in every condition. In 600 runs, the device both reset and avoided an alarm in fewer than 1% of runs."},
+				{"universal existential", "Every method met the threshold in at least one condition."},
+				{"existential universal", "One method met the threshold in every condition."},
+			} {
+				t.Run(article.name, func(t *testing.T) {
+					bodies, brief := captureDefaultSummaryRequests(t, article.content, "所有方法都未达标。", tc.stream, tc.vision)
+					for i, body := range bodies {
+						system, user := summaryRequestMessages(t, body)
+						assertSummaryClaimBoundaryGuidance(t, system)
+						assertDefaultStatisticalUserGuidance(t, user, article.content, i == 1)
+						if i == 1 && !strings.Contains(user, "已生成的前置要点（仅供去重，不是新的事实来源；其中原文无依据的表述不要沿用）：\n"+brief) {
+							t.Error("detailed scope guidance must not make the misleading brief authoritative")
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestLocalSummaryPreservesPositiveQuantifierSources(t *testing.T) {
+	for _, content := range []string{
+		"每个方法都至少在一种条件下达标。",
+		"有一个方法在所有条件下都达标。",
+	} {
+		t.Run(content, func(t *testing.T) {
+			brief, detailed := LocalSummaryPrompts("Title", content, "", "")
+			for i, prompt := range []string{brief, detailed} {
+				_, user, _ := strings.Cut(prompt, "\n\n")
 				assertDefaultStatisticalUserGuidance(t, user, content, i == 1)
-				if i == 1 && !strings.Contains(user, "已生成的前置要点（仅供去重，不是新的事实来源；其中原文无依据的表述不要沿用）：\n"+brief) {
-					t.Error("detailed scope guidance must not make the misleading brief authoritative")
-				}
 			}
 		})
 	}
