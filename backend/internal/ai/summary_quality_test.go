@@ -287,6 +287,77 @@ func TestDefaultDetailedSummaryExplainsSelectedMethods(t *testing.T) {
 	}
 }
 
+func assertDefaultStatisticalUserGuidance(t *testing.T, prompt, content string, detailed bool) {
+	t.Helper()
+	rules := []string{
+		"统计范围复核：",
+		"要点与详细总结的事件和比较范围必须一致，以原文为准",
+		"原文只是否定单一方法跨所有条件的一致达标时",
+		"不能写成所有方法在所有条件下都失败",
+		"不要用“均未超过”等暗示普遍上限的写法",
+	}
+	unexpected := "多重否定或嵌套量词的结论"
+	if detailed {
+		rules = append(rules,
+			"多重否定或嵌套量词的结论",
+			"没有任何单一方法能在每一种条件下都达到阈值",
+			"篇幅不足以保留完整限定时，省略次要数字",
+		)
+		unexpected = "要点中的统计取舍："
+	} else {
+		rules = append(rules,
+			"要点中的统计取舍：",
+			"跨多个环境或分组以及复合事件的统计，优先定性概括",
+			"把次要数字及完整限定留给详细总结",
+			"单一明确的核心数字可保留",
+		)
+	}
+	for _, rule := range rules {
+		if !strings.Contains(prompt, rule) {
+			t.Errorf("user prompt missing statistical scope guidance %q", rule)
+		}
+	}
+	if strings.Contains(prompt, unexpected) {
+		t.Errorf("user prompt received the other summary stage's guidance %q", unexpected)
+	}
+	sourceAt, guidanceAt := strings.Index(prompt, content), strings.Index(prompt, "统计范围复核：")
+	if sourceAt < 0 || guidanceAt < sourceAt+len(content) {
+		t.Error("statistical scope guidance must follow the intact article in the user prompt")
+	}
+}
+
+func assertNoDefaultStatisticalUserGuidance(t *testing.T, prompt string) {
+	t.Helper()
+	for _, marker := range []string{"统计范围复核：", "要点中的统计取舍：", "多重否定或嵌套量词的结论"} {
+		if strings.Contains(prompt, marker) {
+			t.Errorf("custom template unexpectedly received default statistical guidance %q", marker)
+		}
+	}
+}
+
+func TestDefaultStatisticalGuidanceFollowsSourceInOutboundRequests(t *testing.T) {
+	const content = "The main trial enrolled 120 participants. Different methods worked better under different conditions; no single method met the threshold in every condition. In 600 runs, the device both reset and avoided an alarm in fewer than 1% of runs."
+	for _, tc := range []struct {
+		name           string
+		stream, vision bool
+	}{
+		{"text", false, false}, {"stream", true, false},
+		{"vision", false, true}, {"vision stream", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bodies, brief := captureDefaultSummaryRequests(t, content, "所有方法都未达标，设备重置概率不到 1%。", tc.stream, tc.vision)
+			for i, body := range bodies {
+				system, user := summaryRequestMessages(t, body)
+				assertSummaryClaimBoundaryGuidance(t, system)
+				assertDefaultStatisticalUserGuidance(t, user, content, i == 1)
+				if i == 1 && !strings.Contains(user, "已生成的前置要点（仅供去重，不是新的事实来源；其中原文无依据的表述不要沿用）：\n"+brief) {
+					t.Error("detailed scope guidance must not make the misleading brief authoritative")
+				}
+			}
+		})
+	}
+}
+
 func TestLocalSummaryClaimBoundariesUseTheSameSourceGuard(t *testing.T) {
 	const content = "标注虽有分歧，分别用各自标注训练的分类器准确率相当。单元测试可能消失；界面重要性降低，并可实时生成。完成课程后，模型重写奖励且规避检测的频率低于千分之一；另一类课程下仅重写奖励的频率低于百分之一。不同检测器各有擅长任务，没有任何一个在全部环境中的 AUROC 都超过六成。检测方法比较可信策略与目标策略的动作分布，在不同任务上效果不同。"
 	for _, custom := range []bool{false, true} {
@@ -307,6 +378,11 @@ func TestLocalSummaryClaimBoundariesUseTheSameSourceGuard(t *testing.T) {
 				}
 				if strings.Contains(user, "已生成的前置要点") {
 					t.Errorf("prompt %d unexpectedly introduced a prior summary as source context", i)
+				}
+				if custom {
+					assertNoDefaultStatisticalUserGuidance(t, user)
+				} else {
+					assertDefaultStatisticalUserGuidance(t, user, content, i == 1)
 				}
 				if !custom && i == 1 {
 					assertDefaultDetailedMechanismGuidance(t, user)
@@ -354,28 +430,52 @@ func TestDefaultSummaryLimitsIgnorePresentationMarkup(t *testing.T) {
 
 func TestCustomSummaryKeepsItsBudgetAndExplicitSourceEvidence(t *testing.T) {
 	content := "作者明确称这份材料是泄露的，并非仅仅公开分享。"
-	srv, cap := newCaptureServer(t, "brief", "detailed")
-	s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
-	if _, err := s.SummarizeWithTemplate(context.Background(), "Title", content, "BRIEF {content}", "DEEP ANALYSIS {content}"); err != nil {
-		t.Fatal(err)
-	}
-	for i, body := range cap.bodies {
-		system, user := summaryRequestMessages(t, body)
-		if !strings.Contains(system, "原文明示这些性质时可忠实转述") {
-			t.Fatal("guardrail blanket-bans legitimate source statements")
+	for _, stream := range []bool{false, true} {
+		name := "text"
+		if stream {
+			name = "stream"
 		}
-		if !strings.Contains(user, content) {
-			t.Fatal("explicit source evidence was rewritten")
-		}
-		if strings.Contains(user, "默认总结要求") || strings.Contains(user, "已生成的前置要点") {
-			t.Fatal("default-only compression leaked into a custom template")
-		}
-		limit := "总字符数不超过300"
-		if i == 1 {
-			limit = "总字符数不超过2000"
-		}
-		if !strings.Contains(user, limit) {
-			t.Fatalf("custom request %d lost its existing budget", i)
-		}
+		t.Run(name, func(t *testing.T) {
+			var bodies [][]byte
+			if stream {
+				srv, cap := newStreamCaptureServer(t, "brief", "detailed")
+				s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
+				if _, err := s.SummarizeWithTemplateStream(context.Background(), "Title", content, "BRIEF {content}", "DEEP ANALYSIS {content}", func(string) {}, func(string) {}); err != nil {
+					t.Fatal(err)
+				}
+				bodies = cap.bodies
+			} else {
+				srv, cap := newCaptureServer(t, "brief", "detailed")
+				s := NewSummarizerWithModel("test-key", srv.URL, "test-model")
+				if _, err := s.SummarizeWithTemplate(context.Background(), "Title", content, "BRIEF {content}", "DEEP ANALYSIS {content}"); err != nil {
+					t.Fatal(err)
+				}
+				bodies = cap.bodies
+			}
+			if len(bodies) != 2 {
+				t.Fatalf("custom requests=%d, want 2", len(bodies))
+			}
+			for i, body := range bodies {
+				system, user := summaryRequestMessages(t, body)
+				assertSummaryClaimBoundaryGuidance(t, system)
+				assertNoDefaultStatisticalUserGuidance(t, user)
+				if !strings.Contains(system, "原文明示这些性质时可忠实转述") {
+					t.Fatal("guardrail blanket-bans legitimate source statements")
+				}
+				if !strings.Contains(user, content) {
+					t.Fatal("explicit source evidence was rewritten")
+				}
+				if strings.Contains(user, "默认总结要求") || strings.Contains(user, "已生成的前置要点") {
+					t.Fatal("default-only compression leaked into a custom template")
+				}
+				limit := "总字符数不超过300"
+				if i == 1 {
+					limit = "总字符数不超过2000"
+				}
+				if !strings.Contains(user, limit) {
+					t.Fatalf("custom request %d lost its existing budget", i)
+				}
+			}
+		})
 	}
 }
