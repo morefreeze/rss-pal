@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	proxyMaxBytes      = 10 * 1024 * 1024 // 10MB
-	proxyTimeout       = 30 * time.Second
+	proxyMaxBytes = 10 * 1024 * 1024 // 10MB
+	// A complete multi-MB image can take over 30s through the configured
+	// egress proxy. Keep a bounded full-body budget below nginx's image-only
+	// read timeout; partial bodies must still never receive success headers.
+	imageProxyTimeout  = 90 * time.Second
 	mediaProxyMaxBytes = 512 * 1024 * 1024 // 512MB
 	mediaProxyTimeout  = 10 * time.Minute
 )
@@ -37,11 +40,11 @@ type MediaProxy struct {
 }
 
 // NewImageProxy returns a production-ready proxy: strict SSRF validation,
-// 30s timeout, 10MB cap, and redirect re-validation against the SSRF guard.
+// 90s timeout, 10MB cap, and redirect re-validation against the SSRF guard.
 func NewImageProxy() *ImageProxy {
 	return &ImageProxy{
 		Validate: httpx.ValidateURL,
-		Client:   httpx.NewClient(proxyTimeout),
+		Client:   httpx.NewClient(imageProxyTimeout),
 	}
 }
 
@@ -61,7 +64,7 @@ func (p *ImageProxy) Handle(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), proxyTimeout)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), imageProxyTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
