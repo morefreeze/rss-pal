@@ -33,6 +33,8 @@ import RoutePageTitle from './components/RoutePageTitle'
 import { NicknameOnboarding } from './components/NicknameSetup'
 
 export interface User {
+  qq_nickname?: string
+  qq_avatar_url?: string
   id: number
   username: string
   is_admin: boolean

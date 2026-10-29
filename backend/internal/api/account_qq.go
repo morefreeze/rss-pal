@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // QQ's documented server-side exchange requires GET parameters. All endpoints
@@ -35,7 +37,35 @@ func qqGetJSON(ctx context.Context, client *http.Client, endpoint string, values
 	return nil
 }
 
-func qqSubject(ctx context.Context, client *http.Client, o *oauth2.Config, code string) (string, error) {
+type qqAccountProfile struct {
+	Subject   string
+	Nickname  string
+	AvatarURL string
+}
+
+func qqAvatarURL(candidates ...string) string {
+	for _, raw := range candidates {
+		if len(raw) > 2048 {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || u.User != nil || u.Port() != "" || (u.Scheme != "http" && u.Scheme != "https") {
+			continue
+		}
+		host := strings.ToLower(u.Hostname())
+		if host != "qlogo.cn" && !strings.HasSuffix(host, ".qlogo.cn") {
+			continue
+		}
+		u.Scheme = "https"
+		u.Host = host
+		u.RawQuery = ""
+		u.Fragment = ""
+		return u.String()
+	}
+	return ""
+}
+
+func qqAccount(ctx context.Context, client *http.Client, o *oauth2.Config, code string) (qqAccountProfile, error) {
 	var token struct {
 		AccessToken string `json:"access_token"`
 		Error       *int   `json:"error"`
@@ -45,7 +75,7 @@ func qqSubject(ctx context.Context, client *http.Client, o *oauth2.Config, code 
 		"code": {code}, "redirect_uri": {o.RedirectURL}, "fmt": {"json"},
 	}, &token)
 	if err != nil || token.Error != nil || token.AccessToken == "" || len(token.AccessToken) > 8192 {
-		return "", errors.New("QQ token exchange failed")
+		return qqAccountProfile{}, errors.New("QQ token exchange failed")
 	}
 	var identity struct {
 		ClientID string `json:"client_id"`
@@ -53,11 +83,30 @@ func qqSubject(ctx context.Context, client *http.Client, o *oauth2.Config, code 
 		Error    *int   `json:"error"`
 	}
 	if err := qqGetJSON(ctx, client, "https://graph.qq.com/oauth2.0/me", url.Values{"access_token": {token.AccessToken}, "fmt": {"json"}}, &identity); err != nil {
-		return "", err
+		return qqAccountProfile{}, err
 	}
 	if identity.Error != nil || identity.ClientID != o.ClientID || identity.OpenID == "" || len(identity.OpenID) > 256 || strings.IndexFunc(identity.OpenID, func(r rune) bool { return r <= 0x20 || r == 0x7f }) >= 0 {
-		return "", errors.New("invalid QQ identity")
+		return qqAccountProfile{}, errors.New("invalid QQ identity")
 	}
-	// OpenID is application-scoped; include the verified app ID in the namespace.
-	return o.ClientID + ":" + identity.OpenID, nil
+	var profile struct {
+		Ret         *int   `json:"ret"`
+		IsLost      int    `json:"is_lost"`
+		Nickname    string `json:"nickname"`
+		Avatar100   string `json:"figureurl_qq_2"`
+		Avatar40    string `json:"figureurl_qq_1"`
+		QzoneAvatar string `json:"figureurl_2"`
+	}
+	if err := qqGetJSON(ctx, client, "https://graph.qq.com/user/get_user_info", url.Values{
+		"access_token": {token.AccessToken}, "oauth_consumer_key": {o.ClientID}, "openid": {identity.OpenID}, "fmt": {"json"},
+	}, &profile); err != nil || profile.Ret == nil || *profile.Ret != 0 || profile.IsLost != 0 {
+		return qqAccountProfile{}, errors.New("QQ user info unavailable")
+	}
+	name := strings.TrimSpace(profile.Nickname)
+	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > 128 || strings.ContainsFunc(name, func(r rune) bool {
+		return unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && r != '\u200d' && r != '\u200c')
+	}) {
+		return qqAccountProfile{}, errors.New("invalid QQ user info")
+	}
+	// OpenID remains the sole identity key; profile fields are display metadata.
+	return qqAccountProfile{Subject: o.ClientID + ":" + identity.OpenID, Nickname: name, AvatarURL: qqAvatarURL(profile.Avatar100, profile.Avatar40, profile.QzoneAvatar)}, nil
 }

@@ -7,6 +7,7 @@ import {
   type AuthMethods,
 } from '../api/accountAuth'
 import VerifiedAccountAccess from './VerifiedAccountAccess'
+import AccountDisplay from './AccountDisplay'
 const providerNames: Record<AccountIdentity['provider'], string> = {
   email: '邮箱', google: 'Google', apple: 'Apple', github: 'GitHub', qq: 'QQ',
 }
@@ -70,6 +71,7 @@ export default function AccountLoginMethods() {
             <li key={i.provider}>
               {providerNames[i.provider]}
               ：已绑定{i.email ? `（${i.email}）` : ''}
+              {i.provider === 'qq' && i.display_name && <AccountDisplay user={{username: 'QQ', qq_nickname: i.display_name, qq_avatar_url: i.avatar_url}} />}
             </li>
           ))}
         </ul>

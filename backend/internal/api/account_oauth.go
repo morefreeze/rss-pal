@@ -19,14 +19,16 @@ import (
 const authBrowserCookie = "__Host-rsspal_auth_browser"
 
 type accountOAuthFlow struct {
-	Provider   string `json:"provider"`
-	Nonce      string `json:"nonce"`
-	Verifier   string `json:"verifier,omitempty"`
-	BindUserID int    `json:"bind_user_id"`
-	Remember   bool   `json:"remember"`
-	ReturnTo   string `json:"return_to"`
-	Subject    string `json:"subject,omitempty"`
-	Email      string `json:"email,omitempty"`
+	QQNickname  string `json:"qq_nickname,omitempty"`
+	QQAvatarURL string `json:"qq_avatar_url,omitempty"`
+	Provider    string `json:"provider"`
+	Nonce       string `json:"nonce"`
+	Verifier    string `json:"verifier,omitempty"`
+	BindUserID  int    `json:"bind_user_id"`
+	Remember    bool   `json:"remember"`
+	ReturnTo    string `json:"return_to"`
+	Subject     string `json:"subject,omitempty"`
+	Email       string `json:"email,omitempty"`
 }
 
 func (h *AccountAuthHandler) appleKey() (*ecdsa.PrivateKey, error) {
@@ -222,7 +224,9 @@ func (h *AccountAuthHandler) OAuthCallback(c *gin.Context) {
 	}
 	var subject, email string
 	if provider == "qq" {
-		subject, e = qqSubject(ctx, client, o, code)
+		profile, profileErr := qqAccount(ctx, client, o, code)
+		subject, e = profile.Subject, profileErr
+		f.QQNickname, f.QQAvatarURL = profile.Nickname, profile.AvatarURL
 		if e != nil {
 			fail()
 			return
@@ -313,7 +317,12 @@ func (h *AccountAuthHandler) OAuthExchange(c *gin.Context) {
 		c.JSON(409, gin.H{"error": "当前账户已变化，请重新开始登录或绑定"})
 		return
 	}
-	id, e := h.repo.ResolveIdentity(c.Request.Context(), f.Provider, f.Subject, f.Email, f.BindUserID, h.auth.cfg.Auth.PublicRegistration)
+	var id int
+	if f.Provider == "qq" {
+		id, e = h.repo.ResolveQQIdentity(c.Request.Context(), f.Subject, f.BindUserID, h.auth.cfg.Auth.PublicRegistration, f.QQNickname, f.QQAvatarURL)
+	} else {
+		id, e = h.repo.ResolveIdentity(c.Request.Context(), f.Provider, f.Subject, f.Email, f.BindUserID, h.auth.cfg.Auth.PublicRegistration)
+	}
 	if e != nil {
 		c.JSON(409, gin.H{"error": "该登录方式已绑定其他账户，或注册尚未开放"})
 		return

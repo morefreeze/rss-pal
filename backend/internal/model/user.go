@@ -3,6 +3,8 @@ package model
 import "time"
 
 type User struct {
+	QQNickname        string    `json:"qq_nickname,omitempty"`
+	QQAvatarURL       string    `json:"qq_avatar_url,omitempty"`
 	Nickname          string    `json:"nickname"`
 	NeedsNickname     bool      `json:"needs_nickname"`
 	ID                int       `json:"id"`

@@ -82,6 +82,12 @@ func TestQQSubjectRejectsInvalidIdentity(t *testing.T) {
 				if req.Method != "GET" || req.URL.Host != "graph.qq.com" || req.URL.Query().Get("fmt") != "json" {
 					t.Fatal("incorrect QQ request")
 				}
+				if req.URL.Path == "/user/get_user_info" {
+					if req.URL.Query().Get("access_token") != "ephemeral" || req.URL.Query().Get("oauth_consumer_key") != "123456" || req.URL.Query().Get("openid") != "opaque-QQ-ID" {
+						t.Fatal("invalid user info parameters")
+					}
+					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ret":0,"nickname":"QQ读者","figureurl_qq_1":"https://q.qlogo.cn/qqapp/123456/id/40"}`)), Request: req}, nil
+				}
 				body := tc.token
 				if req.URL.Path == "/oauth2.0/me" {
 					body = tc.identity
@@ -91,9 +97,9 @@ func TestQQSubjectRejectsInvalidIdentity(t *testing.T) {
 				}
 				return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 			})}
-			sub, err := qqSubject(context.Background(), client, &oauth2.Config{ClientID: "123456", ClientSecret: "secret", RedirectURL: "https://app.example.com/callback"}, "code")
+			sub, err := qqAccount(context.Background(), client, &oauth2.Config{ClientID: "123456", ClientSecret: "secret", RedirectURL: "https://app.example.com/callback"}, "code")
 			if tc.valid {
-				if err != nil || sub != "123456:opaque-QQ-ID" {
+				if err != nil || (sub.Subject != "123456:opaque-QQ-ID" || sub.Nickname != "QQ读者" || sub.AvatarURL == "") {
 					t.Fatal(sub, err)
 				}
 			} else if err == nil {
@@ -124,6 +130,9 @@ func TestQQOAuthFlowAndBinding(t *testing.T) {
 				var err error
 				uid, err = repo.ResolveIdentity(context.Background(), "email", "reader@example.com", "reader@example.com", 0, true)
 				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = db.Exec(`UPDATE users SET nickname='原昵称',is_admin=true WHERE id=$1`, uid); err != nil {
 					t.Fatal(err)
 				}
 				bearer, err = auth.signToken(uid, "reader", false)
@@ -176,6 +185,11 @@ func TestQQOAuthFlowAndBinding(t *testing.T) {
 					body = `{"access_token":"ephemeral-token"}`
 				case "graph.qq.com/oauth2.0/me":
 					body = `{"client_id":"123456","openid":"opaque-QQ-ID"}`
+				case "graph.qq.com/user/get_user_info":
+					if req.Method != "GET" || req.URL.Query().Get("oauth_consumer_key") != "123456" || req.URL.Query().Get("openid") != "opaque-QQ-ID" || req.URL.Query().Get("access_token") != "ephemeral-token" {
+						t.Fatal("invalid profile request")
+					}
+					body = `{"ret":0,"nickname":"QQ读者","figureurl_qq_2":"http://thirdqq.qlogo.cn/qqapp/123456/id/100","gender":"private-ignored"}`
 				default:
 					t.Fatal("unexpected provider endpoint", req.URL.Host+req.URL.Path)
 				}
@@ -189,6 +203,10 @@ func TestQQOAuthFlowAndBinding(t *testing.T) {
 			ticket := complete.Query().Get("ticket")
 			if len(ticket) != 43 {
 				t.Fatal("callback failed", out.Code, out.Header().Get("Location"))
+			}
+			var pendingLeaks int
+			if err := db.QueryRow(`SELECT count(*) FROM account_auth_flows WHERE payload::text LIKE '%ephemeral-token%' OR payload::text LIKE '%qq-secret%' OR payload::text LIKE '%private-ignored%'`).Scan(&pendingLeaks); err != nil || pendingLeaks != 0 {
+				t.Fatal("provider credentials or extra profile fields persisted before exchange", err)
 			}
 			req := httptest.NewRequest("POST", "/exchange", strings.NewReader(`{"ticket":"`+ticket+`"}`))
 			req.Header.Set("Content-Type", "application/json")
@@ -206,6 +224,20 @@ func TestQQOAuthFlowAndBinding(t *testing.T) {
 			if err := db.QueryRow(`SELECT user_id,email FROM account_identities WHERE provider='qq' AND subject='123456:opaque-QQ-ID'`).Scan(&gotID, &email); err != nil || email != "" || (binding && gotID != uid) {
 				t.Fatal("unsafe identity persistence", gotID, email, err)
 			}
+			var display, avatar string
+			if err := db.QueryRow(`SELECT display_name,avatar_url FROM account_identities WHERE user_id=$1 AND provider='qq'`, gotID).Scan(&display, &avatar); err != nil || display != "QQ读者" || avatar != "https://thirdqq.qlogo.cn/qqapp/123456/id/100" {
+				t.Fatal("profile not persisted", err)
+			}
+			stored, err := users.FindByID(gotID)
+			if err != nil || stored.QQNickname != "QQ读者" || stored.QQAvatarURL != avatar {
+				t.Fatal("profile not exposed", err)
+			}
+			if binding && (stored.Nickname != "原昵称" || !stored.IsAdmin) {
+				t.Fatal("existing user changed")
+			}
+			if !binding && stored.NeedsNickname {
+				t.Fatal("QQ profile should be the initial display fallback")
+			}
 			var leaks int
 			db.QueryRow(`SELECT count(*) FROM account_auth_flows WHERE payload::text LIKE '%ephemeral-token%' OR payload::text LIKE '%qq-secret%'`).Scan(&leaks)
 			if leaks != 0 {
@@ -217,5 +249,48 @@ func TestQQOAuthFlowAndBinding(t *testing.T) {
 				t.Fatal("replayed callback accepted")
 			}
 		})
+	}
+}
+
+func TestQQUserInfoFailures(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"denied", `{"ret":1002,"msg":"token-should-not-leak"}`},
+		{"missing_ret", `{"nickname":"QQ"}`},
+		{"partial", `{"ret":0,"is_lost":1,"nickname":"QQ"}`},
+		{"control_name", `{"ret":0,"nickname":"bad\nname"}`},
+		{"too_long_name", `{"ret":0,"nickname":"` + strings.Repeat("名", 129) + `"}`},
+		{"bad_json", `not json`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: authFixtureTransport(func(req *http.Request) (*http.Response, error) {
+				body := `{"access_token":"ephemeral"}`
+				if req.URL.Path == "/oauth2.0/me" {
+					body = `{"client_id":"123456","openid":"id"}`
+				}
+				if req.URL.Path == "/user/get_user_info" {
+					body = tc.body
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+			})}
+			_, err := qqAccount(context.Background(), client, &oauth2.Config{ClientID: "123456", ClientSecret: "secret", RedirectURL: "https://app.example/callback"}, "code")
+			if err == nil || strings.Contains(err.Error(), "token-should-not-leak") {
+				t.Fatal("invalid profile accepted or leaked")
+			}
+		})
+	}
+}
+
+func TestQQAvatarURL(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"http://thirdqq.qlogo.cn/qqapp/id/100?access_token=discard#fragment", "https://thirdqq.qlogo.cn/qqapp/id/100"},
+		{"javascript:alert(1)", ""}, {"https://qlogo.cn.attacker.example/p", ""},
+		{"https://user:pass@q.qlogo.cn/p", ""}, {"https://q.qlogo.cn:8443/p", ""},
+	} {
+		if got := qqAvatarURL(tc.input); got != tc.want {
+			t.Fatalf("avatar validation failed: %q", got)
+		}
+	}
+	if got := qqAvatarURL("https://evil.example/100", "https://q.qlogo.cn/qqapp/id/40"); got != "https://q.qlogo.cn/qqapp/id/40" {
+		t.Fatal("40px fallback missing")
 	}
 }

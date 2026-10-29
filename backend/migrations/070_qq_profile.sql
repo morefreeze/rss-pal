@@ -1,0 +1,4 @@
+BEGIN;
+ALTER TABLE account_identities ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE account_identities ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
+COMMIT;

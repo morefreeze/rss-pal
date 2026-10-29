@@ -66,6 +66,25 @@ func (r *AccountAuthRepository) ResolveIdentity(ctx context.Context, p, s, e str
 	}
 	return id, tx.Commit()
 }
+
+// ResolveQQIdentity commits display metadata together with the verified identity.
+// Updating a QQ profile must never replace a user's chosen nickname or privileges.
+func (r *AccountAuthRepository) ResolveQQIdentity(ctx context.Context, subject string, bind int, signup bool, nickname, avatar string) (int, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	id, err := resolveIdentity(ctx, tx, "qq", subject, "", bind, signup)
+	if err != nil {
+		return 0, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE account_identities SET display_name=$1,avatar_url=$2 WHERE provider='qq' AND subject=$3 AND user_id=$4`, nickname, avatar, subject, id); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
 func (r *AccountAuthRepository) CreateEmailChallenge(ctx context.Context, id, email, hash, ip string, bind int) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -131,13 +150,15 @@ func (r *AccountAuthRepository) VerifyEmailChallenge(ctx context.Context, id, ha
 }
 
 type AccountIdentity struct {
-	Provider  string    `json:"provider"`
-	Email     string    `json:"email,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	DisplayName string    `json:"display_name,omitempty"`
+	AvatarURL   string    `json:"avatar_url,omitempty"`
+	Provider    string    `json:"provider"`
+	Email       string    `json:"email,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (r *AccountAuthRepository) Identities(ctx context.Context, uid int) ([]AccountIdentity, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT provider,email,created_at FROM account_identities WHERE user_id=$1 ORDER BY created_at`, uid)
+	rows, err := r.db.QueryContext(ctx, `SELECT provider,email,created_at,display_name,avatar_url FROM account_identities WHERE user_id=$1 ORDER BY created_at`, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +166,7 @@ func (r *AccountAuthRepository) Identities(ctx context.Context, uid int) ([]Acco
 	out := []AccountIdentity{}
 	for rows.Next() {
 		var i AccountIdentity
-		if err := rows.Scan(&i.Provider, &i.Email, &i.CreatedAt); err != nil {
+		if err := rows.Scan(&i.Provider, &i.Email, &i.CreatedAt, &i.DisplayName, &i.AvatarURL); err != nil {
 			return nil, err
 		}
 		out = append(out, i)

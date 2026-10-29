@@ -22,6 +22,8 @@ export type AccountSession = {
 export type AccountAuthResult =
   AccountSession | { bound: true; return_to?: string }
 export type AccountIdentity = {
+  display_name?: string
+  avatar_url?: string
   provider: 'email' | AccountProvider
   email?: string
   created_at?: string

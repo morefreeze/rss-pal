@@ -1770,3 +1770,8 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
 .verified-account-access .account-provider-qq { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 16px; border-radius: 24px; color: var(--fg); background: var(--surface); border: 1px solid var(--border); }
 .verified-account-access .account-provider-qq:hover { background: var(--surface-hover); }
 .account-provider-review { margin: 12px 0 0; color: var(--fg-muted); font-size: 12px; line-height: 1.6; text-align: center; }
+
+.account-display { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; vertical-align: middle; }
+.account-display img { flex-shrink: 0; border-radius: 50%; object-fit: cover; }
+.account-display-name { overflow-wrap: anywhere; min-width: 0; }
+.user-menu .account-display { max-width: 240px; }

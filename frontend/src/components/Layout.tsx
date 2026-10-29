@@ -1,3 +1,4 @@
+import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { getUnreadCount, getServerHealth } from '../api/client'
@@ -38,7 +39,7 @@ function VersionFooter() {
 }
 
 interface LayoutProps {
-  user: { id: number; username: string; nickname?: string; is_admin: boolean } | null
+  user: (DisplayAccount & { id: number; is_admin: boolean }) | null
   onLogout: () => void
 }
 
@@ -59,7 +60,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/settings',           icon: '⚙️', label: '设置' },
 ]
 
-function UserMenu({ username, onLogout }: { username: string; onLogout: () => void }) {
+function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => void }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -78,7 +79,7 @@ function UserMenu({ username, onLogout }: { username: string; onLogout: () => vo
   }, [open])
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} className="user-menu" style={{ position: 'relative' }}>
       <button
         type="button"
         className="nav-link"
@@ -97,7 +98,7 @@ function UserMenu({ username, onLogout }: { username: string; onLogout: () => vo
           cursor: 'pointer',
         }}
       >
-        <span>👤 {username}</span>
+        <AccountDisplay user={user} />
         <span
           aria-hidden="true"
           style={{
@@ -203,7 +204,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
 }
 
 interface LayoutInnerProps {
-  user: { id: number; username: string; nickname?: string; is_admin: boolean } | null
+  user: (DisplayAccount & { id: number; is_admin: boolean }) | null
   unreadCount: number
   onLogout: () => void
   renderNavLabel: (item: NavItem) => React.ReactNode
@@ -261,7 +262,7 @@ function LayoutInner({
                 {renderNavLabel(item)}
               </Link>
             ))}
-            {user && <UserMenu username={user.nickname || user.username} onLogout={onLogout} />}
+            {user && <UserMenu user={user} onLogout={onLogout} />}
           </nav>
 
           <button
@@ -293,7 +294,7 @@ function LayoutInner({
               </Link>
             ))}
             <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="text-muted text-sm">👤 {user?.nickname || user?.username}</span>
+              <span className="text-muted text-sm">{user && <AccountDisplay user={user} />}</span>
               <button className="btn-ghost btn-sm" onClick={onLogout}>
                 🚪 登出
               </button>

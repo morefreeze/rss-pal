@@ -80,6 +80,9 @@ func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	if err == nil {
+		err = r.loadQQProfile(user)
+	}
 	return user, err
 }
 
@@ -90,6 +93,9 @@ func (r *UserRepository) FindByID(id int) (*model.User, error) {
 	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom, &user.Nickname, &user.NeedsNickname)
 	if err == sql.ErrNoRows {
 		return nil, nil
+	}
+	if err == nil {
+		err = r.loadQQProfile(user)
 	}
 	return user, err
 }
@@ -314,4 +320,15 @@ func generateCode(length int) (string, error) {
 		b[i] = chars[n.Int64()]
 	}
 	return "RSS-" + string(b), nil
+}
+
+func (r *UserRepository) loadQQProfile(user *model.User) error {
+	err := r.db.QueryRow(`SELECT display_name,avatar_url FROM account_identities WHERE user_id=$1 AND provider='qq'`, user.ID).Scan(&user.QQNickname, &user.QQAvatarURL)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err == nil && user.QQNickname != "" {
+		user.NeedsNickname = false
+	}
+	return err
 }
