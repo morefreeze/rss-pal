@@ -47,7 +47,7 @@ func captureDefaultSummaryRequests(t *testing.T, content, briefReply string, str
 	var url string
 	var capturedBodies func() [][]byte
 	if stream {
-		srv, cap := newStreamCaptureServer(t)
+		srv, cap := newStreamCaptureServer(t, briefReply, "details")
 		url = srv.URL
 		capturedBodies = func() [][]byte { return cap.bodies }
 	} else {
@@ -184,6 +184,9 @@ func TestSummaryClaimBoundariesReachOutboundRequests(t *testing.T) {
 		} {
 			t.Run(tc.name+"/"+article.name, func(t *testing.T) {
 				bodies, brief := captureDefaultSummaryRequests(t, article.content, article.misleadingBrief, tc.stream, tc.vision)
+				if brief != article.misleadingBrief {
+					t.Fatalf("generated brief=%q, want the misleading fixture %q", brief, article.misleadingBrief)
+				}
 				for i, body := range bodies {
 					system, user := summaryRequestMessages(t, body)
 					assertSummaryClaimBoundaryGuidance(t, system)
