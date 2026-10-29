@@ -330,12 +330,12 @@ short_location_count=$(printf '%s\n' "$SHORT_TLS" | grep -c '^[[:space:]]*locati
 short_proxy_count=$(printf '%s\n' "$SHORT_TLS" | grep -Fc 'proxy_pass http://127.0.0.1:8082;' || true)
 [ "$short_proxy_count" -eq 7 ] || fail "every and only allowed short-host route must proxy (got $short_proxy_count)"
 
-# One main proxy plus seven short-host proxies, each forwarding the same identity headers.
-assert_count 8 'proxy_pass http://127.0.0.1:8082;' "$FINAL_CONFIG" 'all eight allowed application surfaces must use the local frontend'
-assert_count 8 'proxy_set_header Host $host;' "$FINAL_CONFIG" 'every proxy location must forward Host'
-assert_count 8 'proxy_set_header X-Real-IP $remote_addr;' "$FINAL_CONFIG" 'every proxy location must forward X-Real-IP'
-assert_count 8 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' "$FINAL_CONFIG" 'every proxy location must forward X-Forwarded-For'
-assert_count 8 'proxy_set_header X-Forwarded-Proto $scheme;' "$FINAL_CONFIG" 'every proxy location must forward X-Forwarded-Proto'
+# General and image-specific main proxies plus seven short-host proxies.
+assert_count 9 'proxy_pass http://127.0.0.1:8082;' "$FINAL_CONFIG" 'all nine allowed application surfaces must use the local frontend'
+assert_count 9 'proxy_set_header Host $host;' "$FINAL_CONFIG" 'every proxy location must forward Host'
+assert_count 9 'proxy_set_header X-Real-IP $remote_addr;' "$FINAL_CONFIG" 'every proxy location must forward X-Real-IP'
+assert_count 9 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' "$FINAL_CONFIG" 'every proxy location must forward X-Forwarded-For'
+assert_count 9 'proxy_set_header X-Forwarded-Proto $scheme;' "$FINAL_CONFIG" 'every proxy location must forward X-Forwarded-Proto'
 
 verify_nginx_templates "$BOOTSTRAP_CONFIG" "$FINAL_CONFIG"
 

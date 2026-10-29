@@ -14,14 +14,20 @@ type streamCaptured struct {
 	bodies [][]byte
 }
 
-func newStreamCaptureServer(t *testing.T) (*httptest.Server, *streamCaptured) {
+func newStreamCaptureServer(t *testing.T, replies ...string) (*httptest.Server, *streamCaptured) {
 	t.Helper()
 	cap := &streamCaptured{}
+	idx := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		cap.bodies = append(cap.bodies, body)
+		reply := "ok"
+		if idx < len(replies) {
+			reply = replies[idx]
+		}
+		idx++
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%s}}]}\n\ndata: [DONE]\n\n", jsonString(reply))
 	}))
 	t.Cleanup(srv.Close)
 	return srv, cap

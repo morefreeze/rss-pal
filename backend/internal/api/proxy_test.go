@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -38,7 +40,7 @@ func allowLoopbackValidator(raw string) (*url.URL, error) {
 func newTestProxy(validator func(string) (*url.URL, error)) *ImageProxy {
 	p := &ImageProxy{Validate: validator}
 	p.Client = &http.Client{
-		Timeout: proxyTimeout,
+		Timeout: imageProxyTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("too many redirects")
@@ -197,6 +199,85 @@ func TestProxyImageRejectsIncompleteOrOversizeStreamsBeforeCaching(t *testing.T)
 				t.Fatalf("incomplete response was successful or cacheable: status=%d headers=%v", rec.Code, rec.Header())
 			}
 		})
+	}
+}
+
+// The deployed proxy sometimes needs over 30 seconds to receive a complete
+// image (a 4.2 MB source took 40 seconds). Exercise the production request AND
+// client deadlines; a unit assertion on a timeout constant would miss either.
+func TestProxyImageCompletesBodyBeyondLegacyDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("exercises a transfer longer than the former 30-second deadline")
+	}
+	gin.SetMode(gin.TestMode)
+	body := "\x89PNG\r\n\x1a\ncomplete-image-tail"
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+		_, _ = w.Write([]byte(body[:8]))
+		w.(http.Flusher).Flush()
+		select {
+		case <-time.After(31 * time.Second):
+			_, _ = w.Write([]byte(body[8:]))
+		case <-r.Context().Done():
+		}
+	}))
+	defer origin.Close()
+	proxy := NewImageProxy()
+	proxy.Validate = allowLoopbackValidator
+	// Keep production timeout/redirect settings, replacing only the guarded
+	// network transport so this test can reach its loopback fixture.
+	proxy.Client.Transport = http.DefaultTransport
+	r := gin.New()
+	r.GET("/proxy", proxy.Handle)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/proxy?url="+url.QueryEscape(origin.URL), nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != body {
+		t.Fatalf("complete slow image failed: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Cache-Control") != "public, max-age=604800, immutable" {
+		t.Fatal("complete slow image did not receive the normal cache policy")
+	}
+}
+
+func TestProxyImageStopsReadingWhenBrowserCancels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	started := make(chan struct{})
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", "1000")
+		_, _ = w.Write([]byte("partial"))
+		w.(http.Flusher).Flush()
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer origin.Close()
+	proxy := NewImageProxy()
+	proxy.Validate = allowLoopbackValidator
+	proxy.Client.Transport = http.DefaultTransport
+	r := gin.New()
+	r.GET("/proxy", proxy.Handle)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/proxy?url="+url.QueryEscape(origin.URL), nil).WithContext(ctx))
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fixture never received image request")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("image transfer continued after browser cancellation")
+	}
+	if rec.Code != http.StatusBadGateway || rec.Header().Get("Cache-Control") != "" {
+		t.Fatalf("canceled partial image became cacheable: status=%d headers=%v", rec.Code, rec.Header())
 	}
 }
 
