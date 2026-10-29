@@ -146,6 +146,14 @@ func assertSummaryClaimBoundaryGuidance(t *testing.T, system string) {
 	for _, rule := range []string{
 		"实际测量对象、指标及其对应结果和比较范围",
 		"不能把下游结果倒推或转移成上游对象的质量结论",
+		"统计数字必须绑定完整事件",
+		"包括“且”“或”等逻辑关系",
+		"分母、样本总体和比较范围",
+		"不能把复合事件的频率改成其中单项的频率",
+		"不同实验条件下的指标不能混用",
+		"否定词及“所有”“任一”“部分”等量词的作用域和先后关系",
+		"“没有一个 A 在所有 B 上满足条件”不等于“所有 A 在所有 B 上都不满足条件”",
+		"必要时舍弃数字，不能删去限定来强化结论",
 		"分歧、误差或不一致",
 		"可能不等于必然",
 		"重要性降低或作用变化不等于消失",
@@ -180,6 +188,21 @@ func TestSummaryClaimBoundariesReachOutboundRequests(t *testing.T) {
 				"modality and distinct claims",
 				"Unit tests may disappear. UI becomes less important as interfaces can be generated in real time.",
 				"单元测试和界面都将消失。",
+			},
+			{
+				"compound event metric",
+				"After the curriculum, the model overwrote the reward and avoided detection in fewer than 1 in 1,000 trials. Under curricula directly incentivizing reward hacking, reward overwriting occurred in fewer than 1% of trials, and unit-test hacking even less often.",
+				"完成课程后，模型重写奖励的发生率低于 1/1000。",
+			},
+			{
+				"disjunction denominator",
+				"Among 400 evaluation runs, 12% met the failure criterion: condition A or condition B occurred. The comparison group used the same combined criterion and population.",
+				"条件 A 在 12% 的运行中出现。",
+			},
+			{
+				"quantifier negation scope",
+				"Different detectors perform better on different tasks. None of the tested classifiers achieved AUROC greater than 60% across all tested RL environments.",
+				"所有测试分类器在所有环境中的 AUROC 都不超过 60%。",
 			},
 		} {
 			t.Run(tc.name+"/"+article.name, func(t *testing.T) {
@@ -219,8 +242,53 @@ func TestSummaryClaimBoundariesReachOutboundRequests(t *testing.T) {
 	}
 }
 
+func assertDefaultDetailedMechanismGuidance(t *testing.T, prompt string) {
+	t.Helper()
+	for _, rule := range []string{
+		"选入总结的关键方法或框架",
+		"简要解释作用机制及原文给出的主要限制，不只列名称",
+		"机制、条件和限制优先于次要示例和重复定义",
+		"按现有篇幅取舍，不必罗列每种方法",
+	} {
+		if !strings.Contains(prompt, rule) {
+			t.Errorf("detailed prompt missing selected-method guidance %q", rule)
+		}
+	}
+}
+
+func TestDefaultDetailedSummaryExplainsSelectedMethods(t *testing.T) {
+	const content = "Decoupled approval samples the feedback query independently from the action taken in the world. Detection compares trusted and target policy action distributions, but different detectors work better on different tasks. The framework distinguishes intended target features from unintended spoiler features; its robustness metric is statistically significant only for the sentiment feature."
+	for _, tc := range []struct {
+		name           string
+		stream, vision bool
+	}{
+		{"text", false, false}, {"stream", true, false},
+		{"vision", false, true}, {"vision stream", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bodies, brief := captureDefaultSummaryRequests(t, content, "这些方法已解决所有风险。", tc.stream, tc.vision)
+			for i, body := range bodies {
+				_, user := summaryRequestMessages(t, body)
+				if !strings.Contains(user, content) {
+					t.Errorf("request %d dropped the method mechanisms or limitations", i)
+				}
+				if i == 0 {
+					if strings.Contains(user, "选入总结的关键方法或框架") {
+						t.Error("detailed-only method explanation leaked into the brief request")
+					}
+					continue
+				}
+				assertDefaultDetailedMechanismGuidance(t, user)
+				if !strings.Contains(user, "已生成的前置要点（仅供去重，不是新的事实来源；其中原文无依据的表述不要沿用）：\n"+brief) {
+					t.Error("detailed method explanation must remain grounded in the article rather than the generated brief")
+				}
+			}
+		})
+	}
+}
+
 func TestLocalSummaryClaimBoundariesUseTheSameSourceGuard(t *testing.T) {
-	const content = "标注虽有分歧，分别用各自标注训练的分类器准确率相当。单元测试可能消失；界面重要性降低，并可实时生成。"
+	const content = "标注虽有分歧，分别用各自标注训练的分类器准确率相当。单元测试可能消失；界面重要性降低，并可实时生成。完成课程后，模型重写奖励且规避检测的频率低于千分之一；另一类课程下仅重写奖励的频率低于百分之一。不同检测器各有擅长任务，没有任何一个在全部环境中的 AUROC 都超过六成。检测方法比较可信策略与目标策略的动作分布，在不同任务上效果不同。"
 	for _, custom := range []bool{false, true} {
 		name, briefTemplate, detailedTemplate := "default", "", ""
 		if custom {
@@ -239,6 +307,11 @@ func TestLocalSummaryClaimBoundariesUseTheSameSourceGuard(t *testing.T) {
 				}
 				if strings.Contains(user, "已生成的前置要点") {
 					t.Errorf("prompt %d unexpectedly introduced a prior summary as source context", i)
+				}
+				if !custom && i == 1 {
+					assertDefaultDetailedMechanismGuidance(t, user)
+				} else if strings.Contains(user, "选入总结的关键方法或框架") {
+					t.Errorf("prompt %d unexpectedly received default detailed-only guidance", i)
 				}
 			}
 		})
