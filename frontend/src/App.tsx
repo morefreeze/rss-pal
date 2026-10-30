@@ -30,7 +30,7 @@ import Layout from './components/Layout'
 import AdminLayout from './components/AdminLayout'
 import AdminStatusPage from './pages/AdminStatusPage'
 import RoutePageTitle from './components/RoutePageTitle'
-import { NicknameOnboarding } from './components/NicknameSetup'
+import AccountOnboarding from './components/AccountOnboarding'
 
 export interface User {
   qq_nickname?: string
@@ -40,6 +40,7 @@ export interface User {
   is_admin: boolean
   nickname?: string
   needs_nickname?: boolean
+  needs_password?: boolean
 }
 
 export const SHORT_SHARE_HOSTNAME = 'r.morefreeze.top'
@@ -67,7 +68,7 @@ export function ShortShareRoutes() {
   )
 }
 
-function RequireAuth({ user, onLogout, onUserUpdate }: { user: User | null; onLogout: () => void; onUserUpdate: (user: User) => void }) {
+function RequireAuth({ user, onLogout, onUserUpdate, onboardingReady }: { user: User | null; onLogout: () => void; onUserUpdate: (user: User) => void; onboardingReady: boolean }) {
   const loggedIn = isLoggedIn()
   // Mounted here rather than on the article list alone: the costliest case is
   // reading one article for a few minutes, going back, then opening another —
@@ -77,17 +78,19 @@ function RequireAuth({ user, onLogout, onUserUpdate }: { user: User | null; onLo
   if (!loggedIn) {
     return <Navigate to="/login" replace />
   }
-  return <><Layout user={user} onLogout={onLogout} />{user && <NicknameOnboarding key={user.id} user={user} onSaved={onUserUpdate} />}</>
+  return <><Layout user={user} onLogout={onLogout} />{user && onboardingReady && <AccountOnboarding key={user.id} user={user} onSaved={onUserUpdate} />}</>
 }
 
 export function AppRoutes({
   user,
   onLogin,
   onLogout,
+  onboardingReady = true,
 }: {
   user: User | null
   onLogin: (user: User) => void
   onLogout: () => void
+  onboardingReady?: boolean
 }) {
   return (
     <Routes>
@@ -97,7 +100,7 @@ export function AppRoutes({
       <Route path="/share/:token" element={<SharePage />} />
       <Route path="/extension-config" element={<ExtensionConfigPage />} />
       <Route path="/capture" element={<ShareCapturePage />} />
-      <Route element={<RequireAuth user={user} onLogout={onLogout} onUserUpdate={onLogin} />}>
+      <Route element={<RequireAuth user={user} onLogout={onLogout} onUserUpdate={onLogin} onboardingReady={onboardingReady} />}>
         <Route index element={<Navigate to="/articles" replace />} />
         <Route path="feeds" element={<FeedListPage />} />
         <Route path="feeds/health" element={<FeedHealthPage />} />
@@ -136,16 +139,19 @@ export function MainSiteApp() {
   // log the user out — the JWT in localStorage is still valid, and the 401
   // path is already handled by the response interceptor in api/client.
   const [user, setUser] = useState<User | null>(() => (isLoggedIn() ? getUser() : null))
+  const [onboardingReady, setOnboardingReady] = useState(false)
 
   useEffect(() => {
     if (!isLoggedIn()) return
+    const profileAtRequest = localStorage.getItem('user')
     getMe()
       .then(u => {
         const cached = getUser()
-        // A slow boot request must not overwrite a later login or nickname save.
-        if (cached?.id !== u.id || (cached.nickname && !u.nickname)) return
+        // A slow boot request must not overwrite a later login or profile save.
+        if (cached?.id !== u.id || localStorage.getItem('user') !== profileAtRequest) return
         localStorage.setItem('user', JSON.stringify(u))
         setUser(u)
+        setOnboardingReady(true)
       })
       .catch(() => {
         // Transient errors (network, 5xx, DNS) — keep the cached session.
@@ -153,16 +159,22 @@ export function MainSiteApp() {
       })
   }, [])
 
+  const handleLogin = (updated: User) => {
+    setUser(updated)
+    setOnboardingReady(true)
+  }
+
   const handleLogout = () => {
     clearPrivateSessionState()
     setUser(null)
+    setOnboardingReady(false)
     window.location.href = '/login'
   }
 
   return (
     <BrowserRouter>
       <RoutePageTitle />
-      <AppRoutes user={user} onLogin={setUser} onLogout={handleLogout} />
+      <AppRoutes user={user} onLogin={handleLogin} onLogout={handleLogout} onboardingReady={onboardingReady} />
     </BrowserRouter>
   )
 }

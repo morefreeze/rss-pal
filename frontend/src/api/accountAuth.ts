@@ -55,6 +55,7 @@ export function persistAccountSession(v: AccountSession) {
   if (!v?.token || !Number.isSafeInteger(v.user?.id) || v.user.id <= 0)
     throw Error('登录响应无效，请重试')
   sessionStorage.removeItem(`rsspal:nickname-skipped:${v.user.id}`)
+  sessionStorage.removeItem(`rsspal:password-skipped:${v.user.id}`)
   localStorage.setItem('token', v.token)
   localStorage.setItem('user', JSON.stringify(v.user))
   for (const key of ['refresh_token', 'refresh_token_expires_at'] as const) {

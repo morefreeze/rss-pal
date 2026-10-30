@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { User } from '../App'
-import { setNickname } from '../api/client'
+import { markNicknamePrompted, setNickname } from '../api/client'
 
 // Nested dialogs may unmount in either order. Restore scrolling after the last one.
 let scrollLocks = 0
 let previousOverflow = ''
 
-function NicknameModal({ children, title, alert = false, onClose }: { children: ReactNode; title: string; alert?: boolean; onClose?: () => void }) {
+export function AccountSetupModal({ children, title, alert = false, onClose }: { children: ReactNode; title: string; alert?: boolean; onClose?: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const titleId = useId()
   useEffect(() => {
@@ -79,23 +79,33 @@ export default function NicknameSetup({ user, onSaved }: { user: User; onSaved: 
       {error && <p role="alert" className="mb-1" style={{ color: 'var(--danger, #dc2626)' }}>{error}</p>}
       <button type="submit" disabled={saving || !trimmed}>{saving ? '保存中…' : '确认昵称'}</button>
     </form>
-    {confirming && <NicknameModal title="确认后无法修改昵称" alert onClose={() => { if (!pending.current) setConfirming(false) }}>
+    {confirming && <AccountSetupModal title="确认后无法修改昵称" alert onClose={() => { if (!pending.current) setConfirming(false) }}>
       <p className="mb-2">昵称将永久设置为「{trimmed}」，保存后无法再次修改，请确认无误。</p>
       <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
         <button type="button" className="secondary" disabled={saving} onClick={() => setConfirming(false)}>返回修改</button>
         <button type="button" disabled={saving} onClick={() => void save()}>{saving ? '保存中…' : '确认并永久保存'}</button>
       </div>
-    </NicknameModal>}
+    </AccountSetupModal>}
   </>
 }
 
 export function NicknameOnboarding({ user, onSaved }: { user: User; onSaved: (user: User) => void }) {
   const key = `rsspal:nickname-skipped:${user.id}`
-  const [skipped, setSkipped] = useState<string | null>(null)
-  if (!user.needs_nickname || user.nickname || skipped === key || sessionStorage.getItem(key)) return null
-  return <NicknameModal title="欢迎，设置你的昵称">
+  const seenKey = `rsspal:nickname-prompted:${user.id}`
+  const [visibleFor, setVisibleFor] = useState<number | null>(null)
+  useEffect(() => {
+    if (!user.needs_nickname || user.nickname) return
+    const seen = localStorage.getItem(seenKey) || sessionStorage.getItem(key)
+    if (!seen) setVisibleFor(user.id)
+    localStorage.setItem(seenKey, '1')
+    // This endpoint is idempotent. Retry when a stale cached profile still
+    // requests the prompt, without showing it again after a failed request.
+    void markNicknamePrompted().catch(() => {})
+  }, [user.id, user.needs_nickname, user.nickname, key, seenKey])
+  if (visibleFor !== user.id || user.nickname) return null
+  return <AccountSetupModal title="欢迎，设置你的昵称">
     <p className="mb-2 text-sm">昵称会显示在账号菜单中。你也可以稍后到“设置 → 账号”中设置。</p>
     <NicknameSetup key={user.id} user={user} onSaved={onSaved} />
-    <button type="button" className="secondary" style={{ marginTop: 12 }} onClick={() => { sessionStorage.setItem(key, '1'); setSkipped(key) }}>稍后设置</button>
-  </NicknameModal>
+    <button type="button" className="secondary" style={{ marginTop: 12 }} onClick={() => { sessionStorage.setItem(key, '1'); setVisibleFor(null) }}>稍后设置</button>
+  </AccountSetupModal>
 }

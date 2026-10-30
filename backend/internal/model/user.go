@@ -7,6 +7,7 @@ type User struct {
 	QQAvatarURL       string    `json:"qq_avatar_url,omitempty"`
 	Nickname          string    `json:"nickname"`
 	NeedsNickname     bool      `json:"needs_nickname"`
+	NeedsPassword     bool      `json:"needs_password"`
 	ID                int       `json:"id"`
 	Username          string    `json:"username"`
 	PasswordHash      string    `json:"-"`

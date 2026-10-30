@@ -54,7 +54,7 @@ async function tryRefreshAccessToken(): Promise<string | null> {
 // been rejected (or no refresh token was issued in the first place).
 function clearAuthLocal() {
   for (const key of Object.keys(sessionStorage)) {
-    if (key.startsWith('rsspal:nickname-skipped:')) sessionStorage.removeItem(key)
+    if (key.startsWith('rsspal:nickname-skipped:') || key.startsWith('rsspal:password-skipped:')) sessionStorage.removeItem(key)
   }
   clearLocalAISession()
   localStorage.removeItem('token')
@@ -142,6 +142,7 @@ export const initAdmin = (password: string) =>
 export const login = (username: string, password: string, remember = false) =>
   api.post('/auth/login', { username, password, remember }).then(res => {
     sessionStorage.removeItem(`rsspal:nickname-skipped:${res.data.user.id}`)
+    sessionStorage.removeItem(`rsspal:password-skipped:${res.data.user.id}`)
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('user', JSON.stringify(res.data.user))
     if (res.data.refresh_token) {
@@ -170,6 +171,9 @@ export const register = (username: string, password: string, code: string, proof
 export const getMe = () =>
   api.get<User>('/auth/me').then(res => res.data)
 
+export const markNicknamePrompted = () =>
+  api.put('/auth/nickname/prompted').then(() => undefined)
+
 export const setNickname = (nickname: string) =>
   api.put<User>('/auth/nickname', { nickname, confirmed: true }).then(res => {
     // Ignore responses from a session that has since switched accounts.
@@ -182,7 +186,11 @@ export const getServerHealth = () =>
   api.get<{ status: string; version: string }>('/health').then(res => res.data)
 
 export const changePassword = (oldPassword: string, newPassword: string) =>
-  api.put('/auth/password', { old_password: oldPassword, new_password: newPassword }).then(res => res.data)
+  api.put<{ message: string; user: User }>('/auth/password', { old_password: oldPassword, new_password: newPassword }).then(res => {
+    if (getUser()?.id !== res.data.user.id) throw new Error('账号已切换，请刷新页面')
+    localStorage.setItem('user', JSON.stringify(res.data.user))
+    return res.data
+  })
 
 export const logout = () => {
   // Best-effort server-side revoke so the refresh token can't be reused

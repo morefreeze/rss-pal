@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import NicknameSetup, { NicknameOnboarding } from '../src/components/NicknameSetup'
-import { setNickname } from '../src/api/client'
-vi.mock('../src/api/client', () => ({ setNickname: vi.fn() }))
+import { markNicknamePrompted, setNickname } from '../src/api/client'
+vi.mock('../src/api/client', () => ({ setNickname: vi.fn(), markNicknamePrompted: vi.fn().mockResolvedValue(undefined) }))
 const user = { id: 19, username: 'reader_auto', is_admin: false, nickname: '', needs_nickname: true }
-beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear() })
+beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); localStorage.clear() })
 it('warns in red, requires a second confirmation, saves once and locks', async () => {
  const onSaved = vi.fn()
  vi.mocked(setNickname).mockResolvedValue({ ...user, nickname: '小读者', needs_nickname: false })
@@ -63,4 +63,34 @@ it('restores page scrolling when both onboarding dialogs close after saving', as
  fireEvent.click(screen.getByRole('button', { name: '确认并永久保存' }))
  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
  expect(document.body.style.overflow).toBe('auto')
+})
+it('records the prompt once and does not show it after a new login even if skipped', async () => {
+ const { unmount } = render(<NicknameOnboarding user={user} onSaved={vi.fn()} />)
+ expect(screen.getByRole('dialog')).toBeTruthy()
+ await waitFor(() => expect(markNicknamePrompted).toHaveBeenCalledTimes(1))
+ // Persisting the acknowledgment must not close the currently visible form.
+ expect(screen.getByLabelText('昵称')).toBeTruthy()
+ fireEvent.click(screen.getByRole('button', { name: '稍后设置' }))
+ unmount()
+ sessionStorage.clear()
+ render(<NicknameOnboarding user={user} onSaved={vi.fn()} />)
+ expect(screen.queryByRole('dialog')).toBeNull()
+})
+it('remembers a shown prompt across reload even if the user never clicks skip', () => {
+ const { unmount } = render(<NicknameOnboarding user={user} onSaved={vi.fn()} />)
+ expect(screen.getByRole('dialog')).toBeTruthy()
+ unmount()
+ sessionStorage.clear()
+ render(<NicknameOnboarding user={user} onSaved={vi.fn()} />)
+ expect(screen.queryByRole('dialog')).toBeNull()
+})
+it('retries server acknowledgment without repeating the prompt after a network failure', async () => {
+ vi.mocked(markNicknamePrompted).mockRejectedValueOnce(new Error('offline'))
+ const { unmount } = render(<NicknameOnboarding user={user} onSaved={vi.fn()} />)
+ await waitFor(() => expect(markNicknamePrompted).toHaveBeenCalledTimes(1))
+ unmount()
+ sessionStorage.clear()
+ render(<NicknameOnboarding user={user} onSaved={vi.fn()} />)
+ expect(screen.queryByRole('dialog')).toBeNull()
+ await waitFor(() => expect(markNicknamePrompted).toHaveBeenCalledTimes(2))
 })

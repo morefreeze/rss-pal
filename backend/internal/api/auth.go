@@ -346,15 +346,19 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var req struct {
-		OldPassword string `json:"old_password" binding:"required"`
+		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请填写旧密码和新密码"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请填写新密码"})
 		return
 	}
 	if len(req.NewPassword) < 6 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码至少 6 位"})
+		return
+	}
+	if len(req.NewPassword) > 72 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码不能超过 72 字节"})
 		return
 	}
 
@@ -365,15 +369,23 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
 		return
 	}
-	if !userRepo.VerifyPassword(user, req.OldPassword) {
+	if !user.NeedsPassword && !userRepo.VerifyPassword(user, req.OldPassword) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "旧密码不正确"})
 		return
 	}
-	if err := userRepo.ChangePassword(userID, req.NewPassword); err != nil {
+	if err := userRepo.ChangePassword(userID, user.PasswordHash, req.NewPassword); errors.Is(err, repository.ErrPasswordChanged) {
+		c.JSON(http.StatusConflict, gin.H{"error": "密码已发生变化，请刷新后重试"})
+		return
+	} else if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "修改失败，请重试"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "密码已修改"})
+	updated, err := userRepo.FindByID(userID)
+	if err != nil || updated == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "账号信息读取失败，请重试"})
+		return
+	}
+	jsonAfterCommit(c, http.StatusOK, gin.H{"message": "密码已修改", "user": updated})
 }
 
 func (h *AuthHandler) CreateInviteCode(c *gin.Context) {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"unicode"
@@ -9,6 +10,19 @@ import (
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
 )
+
+func (h *AuthHandler) MarkNicknamePrompted(c *gin.Context) {
+	err := h.userRepo.WithCtx(c).MarkNicknamePrompted(getUserID(c))
+	if errors.Is(err, sql.ErrNoRows) {
+		c.JSON(404, gin.H{"error": "用户不存在"})
+		return
+	}
+	if err != nil {
+		c.JSON(500, gin.H{"error": "提示状态保存失败，请稍后重试"})
+		return
+	}
+	jsonAfterCommit(c, 200, gin.H{"ok": true})
+}
 
 func (h *AuthHandler) SetNickname(c *gin.Context) {
 	var req struct {

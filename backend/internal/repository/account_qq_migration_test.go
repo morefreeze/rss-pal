@@ -54,6 +54,10 @@ func TestQQProfileUpgradeAndPreserveChosenNickname(t *testing.T) {
 	if err != nil || got != uid {
 		t.Fatal("old QQ identity lost", err)
 	}
+	// Exercise today's user repository after completing the staged QQ upgrade.
+	if err := testdb.ExecuteMigrationFile(db, "071_account_onboarding.sql"); err != nil {
+		t.Fatal(err)
+	}
 	users := NewUserRepository(db)
 	user, err := users.FindByID(uid)
 	if err != nil || user.QQNickname != "QQ昵称" || user.Nickname != "" || user.NeedsNickname {

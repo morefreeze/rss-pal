@@ -3,6 +3,7 @@ package repository
 import (
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -15,6 +16,8 @@ import (
 type UserRepository struct {
 	db Querier
 }
+
+var ErrPasswordChanged = errors.New("password changed concurrently")
 
 func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{db: db}
@@ -75,12 +78,13 @@ func (r *UserRepository) UpdateSharedVisibleFrom(userID, daysBack int) (time.Tim
 func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '') FROM users WHERE username = $1`, username,
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '' AND nickname_prompted_at IS NULL) FROM users WHERE username = $1`, username,
 	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom, &user.Nickname, &user.NeedsNickname)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err == nil {
+		user.NeedsPassword = user.PasswordHash == "!external"
 		err = r.loadQQProfile(user)
 	}
 	return user, err
@@ -89,12 +93,13 @@ func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 func (r *UserRepository) FindByID(id int) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '') FROM users WHERE id = $1`, id,
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '' AND nickname_prompted_at IS NULL) FROM users WHERE id = $1`, id,
 	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom, &user.Nickname, &user.NeedsNickname)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err == nil {
+		user.NeedsPassword = user.PasswordHash == "!external"
 		err = r.loadQQProfile(user)
 	}
 	return user, err
@@ -110,13 +115,23 @@ func (r *UserRepository) AdminExists() (bool, error) {
 	return exists, err
 }
 
-func (r *UserRepository) ChangePassword(userID int, newPassword string) error {
+func (r *UserRepository) ChangePassword(userID int, previousHash, newPassword string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	_, err = r.db.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2`, string(hash), userID)
-	return err
+	result, err := r.db.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2 AND password_hash = $3`, string(hash), userID, previousHash)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrPasswordChanged
+	}
+	return nil
 }
 
 func (r *UserRepository) Register(username, password string, code string) (*model.User, error) {
@@ -236,11 +251,14 @@ func (r *UserRepository) GetByBookmarkletToken(token string) (*model.User, error
 	}
 	user := &model.User{}
 	err := r.db.QueryRow(
-		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '') FROM users WHERE bookmarklet_token = $1`,
+		`SELECT id, username, password_hash, is_admin, created_at, shared_visible_from, nickname, (nickname_setup_required AND nickname = '' AND nickname_prompted_at IS NULL) FROM users WHERE bookmarklet_token = $1`,
 		token,
 	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsAdmin, &user.CreatedAt, &user.SharedVisibleFrom, &user.Nickname, &user.NeedsNickname)
 	if err == sql.ErrNoRows {
 		return nil, nil
+	}
+	if err == nil {
+		user.NeedsPassword = user.PasswordHash == "!external"
 	}
 	return user, err
 }

@@ -851,6 +851,7 @@ function AppearanceTab({ readerSettings }: { readerSettings: ReturnType<typeof u
 }
 
 export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) {
+  const needsPassword = user?.needs_password === true
   const readerSettings = useReaderSettings()
   const [tab, setTab] = useSettingsTab()
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
@@ -932,10 +933,11 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
     setPwError('')
     setPwSuccess('')
     try {
-      await changePassword(oldPassword, newPassword)
+      const result = await changePassword(needsPassword ? '' : oldPassword, newPassword)
+      onUserUpdate?.(result.user)
       setOldPassword('')
       setNewPassword('')
-      setPwSuccess('密码已修改')
+      setPwSuccess(needsPassword ? '密码已设置' : '密码已修改')
     } catch (err: any) {
       setPwError(err?.response?.data?.error || '修改失败，请重试')
     } finally {
@@ -1026,23 +1028,26 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
           <AccountLoginMethods/>
           {/* 修改密码 */}
           <div className="card mb-2">
-            <h3 className="mb-2">修改密码</h3>
+            <h3 className="mb-2">{needsPassword ? '设置密码' : '修改密码'}</h3>
+            {needsPassword && <p className="text-sm mb-2">登录用户名：{user?.username}。设置密码后，可使用此用户名和密码登录。</p>}
             <form onSubmit={handleChangePassword}>
-              <div className="mb-1">
+              {!needsPassword && <div className="mb-1">
                 <input
                   type="password"
                   value={oldPassword}
                   placeholder="当前密码"
+                  autoComplete="current-password"
                   onChange={e => setOldPassword(e.target.value)}
                   style={{ width: '100%' }}
                   disabled={pwChanging}
                 />
-              </div>
+              </div>}
               <div className="mb-2">
                 <input
                   type="password"
                   value={newPassword}
                   placeholder="新密码（至少 6 位）"
+                  autoComplete="new-password"
                   onChange={e => setNewPassword(e.target.value)}
                   style={{ width: '100%' }}
                   disabled={pwChanging}
@@ -1050,8 +1055,8 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
               </div>
               {pwError && <div className="text-sm mb-1" style={{ color: '#dc2626' }}>{pwError}</div>}
               {pwSuccess && <div className="text-sm mb-1" style={{ color: '#16a34a' }}>{pwSuccess}</div>}
-              <button type="submit" disabled={pwChanging || !oldPassword || !newPassword}>
-                {pwChanging ? '修改中...' : '修改密码'}
+              <button type="submit" disabled={pwChanging || (!needsPassword && !oldPassword) || !newPassword}>
+                {pwChanging ? '保存中...' : needsPassword ? '设置密码' : '修改密码'}
               </button>
             </form>
           </div>

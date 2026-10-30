@@ -24,7 +24,7 @@ func TestNicknameMigrationExistingAccounts(t *testing.T) {
 	}
 	// Exercise the current repository against the current schema after checking
 	// the legacy nickname migration replay. Later profile columns are required.
-	for _, name := range []string{"067_local_user_ai.sql", "068_read_undo.sql", "069_qq_account_identity.sql", "070_qq_profile.sql"} {
+	for _, name := range []string{"067_local_user_ai.sql", "068_read_undo.sql", "069_qq_account_identity.sql", "070_qq_profile.sql", "071_account_onboarding.sql"} {
 		if err := testdb.ExecuteMigrationFile(db, name); err != nil {
 			t.Fatal(err)
 		}

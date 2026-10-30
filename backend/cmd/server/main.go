@@ -354,6 +354,7 @@ func main() {
 		// User
 		apiGroup.GET("/auth/me", authHandler.GetMe)
 		apiGroup.PUT("/auth/nickname", authHandler.SetNickname)
+		apiGroup.PUT("/auth/nickname/prompted", authHandler.MarkNicknamePrompted)
 		apiGroup.PUT("/auth/password", authHandler.ChangePassword)
 		apiGroup.PUT("/auth/visibility-floor", authHandler.UpdateVisibilityFloor)
 		apiGroup.POST("/auth/invite-codes", authHandler.CreateInviteCode)
