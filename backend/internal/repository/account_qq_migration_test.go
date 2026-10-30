@@ -63,8 +63,15 @@ func TestQQProfileUpgradeAndPreserveChosenNickname(t *testing.T) {
 	if err != nil || user.QQNickname != "QQ昵称" || user.Nickname != "" || user.NeedsNickname {
 		t.Fatal("bad initial profile", err)
 	}
+	byName, err := users.FindByUsername(user.Username)
+	if err != nil || byName.QQNickname != "QQ昵称" || byName.NeedsNickname {
+		t.Fatal("QQ default must also suppress nickname setup for password login", err)
+	}
 	if err = users.SetNickname(uid, "自定义昵称"); err != nil {
 		t.Fatal(err)
+	}
+	if err = users.SetNickname(uid, "再次修改"); err != ErrNicknameLocked {
+		t.Fatal("QQ default must allow exactly one custom nickname", err)
 	}
 	if _, err = repo.ResolveQQIdentity(ctx, "123:old-id", 0, false, "更新QQ昵称", ""); err != nil {
 		t.Fatal(err)

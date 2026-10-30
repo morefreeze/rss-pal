@@ -39,7 +39,8 @@ export function AccountSetupModal({ children, title, alert = false, onClose }: {
 }
 
 export default function NicknameSetup({ user, onSaved }: { user: User; onSaved: (user: User) => void }) {
-  const [name, setName] = useState('')
+  const qqName = user.qq_nickname?.trim() || ''
+  const [name, setName] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -47,7 +48,7 @@ export default function NicknameSetup({ user, onSaved }: { user: User; onSaved: 
   const pending = useRef(false)
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
-  const trimmed = name.trim()
+  const trimmed = (name ?? qqName).trim()
   const save = async () => {
     if (pending.current) return
     pending.current = true
@@ -70,14 +71,15 @@ export default function NicknameSetup({ user, onSaved }: { user: User; onSaved: 
   return <>
     <form onSubmit={e => {
       e.preventDefault()
+      if (qqName && trimmed === qqName) return
       if (!trimmed || [...trimmed].length > 32 || /[\p{Cc}\p{Cf}]/u.test(trimmed)) { setError('昵称须为 1–32 个字符，不能包含控制字符'); return }
       setError(''); setConfirming(true)
     }}>
-      <p className="mb-2 text-sm" style={{ color: 'var(--danger, #dc2626)' }}>昵称只能设置一次，确认后无法修改。</p>
+      <p className="mb-2 text-sm" style={{ color: 'var(--danger, #dc2626)' }}>{qqName ? '默认使用 QQ 昵称，可修改一次；保存后无法再次修改。' : '昵称只能设置一次，确认后无法修改。'}</p>
       <label htmlFor={inputId}>昵称</label>
-      <input id={inputId} value={name} onChange={e => setName(e.target.value)} placeholder="给自己起一个昵称" disabled={saving} style={{ width: '100%', margin: '8px 0' }} />
+      <input id={inputId} value={name ?? qqName} onChange={e => setName(e.target.value)} placeholder="给自己起一个昵称" disabled={saving} style={{ width: '100%', margin: '8px 0' }} />
       {error && <p role="alert" className="mb-1" style={{ color: 'var(--danger, #dc2626)' }}>{error}</p>}
-      <button type="submit" disabled={saving || !trimmed}>{saving ? '保存中…' : '确认昵称'}</button>
+      <button type="submit" disabled={saving || !trimmed || trimmed === qqName}>{saving ? '保存中…' : '确认昵称'}</button>
     </form>
     {confirming && <AccountSetupModal title="确认后无法修改昵称" alert onClose={() => { if (!pending.current) setConfirming(false) }}>
       <p className="mb-2">昵称将永久设置为「{trimmed}」，保存后无法再次修改，请确认无误。</p>
@@ -90,19 +92,20 @@ export default function NicknameSetup({ user, onSaved }: { user: User; onSaved: 
 }
 
 export function NicknameOnboarding({ user, onSaved }: { user: User; onSaved: (user: User) => void }) {
+  const hasNickname = Boolean(user.nickname || user.qq_nickname?.trim())
   const key = `rsspal:nickname-skipped:${user.id}`
   const seenKey = `rsspal:nickname-prompted:${user.id}`
   const [visibleFor, setVisibleFor] = useState<number | null>(null)
   useEffect(() => {
-    if (!user.needs_nickname || user.nickname) return
+    if (!user.needs_nickname || hasNickname) return
     const seen = localStorage.getItem(seenKey) || sessionStorage.getItem(key)
     if (!seen) setVisibleFor(user.id)
     localStorage.setItem(seenKey, '1')
     // This endpoint is idempotent. Retry when a stale cached profile still
     // requests the prompt, without showing it again after a failed request.
     void markNicknamePrompted().catch(() => {})
-  }, [user.id, user.needs_nickname, user.nickname, key, seenKey])
-  if (visibleFor !== user.id || user.nickname) return null
+  }, [user.id, user.needs_nickname, hasNickname, key, seenKey])
+  if (visibleFor !== user.id || hasNickname) return null
   return <AccountSetupModal title="欢迎，设置你的昵称">
     <p className="mb-2 text-sm">昵称会显示在账号菜单中。你也可以稍后到“设置 → 账号”中设置。</p>
     <NicknameSetup key={user.id} user={user} onSaved={onSaved} />
