@@ -27,9 +27,10 @@ vi.mock('../src/api/client', () => ({
   },
 }))
 vi.mock('../src/components/VerifiedAccountAccess', () => ({
-  default: ({ mode, onBound, children }: { mode: string; onBound?: () => void; children?: ReactNode }) => (
+  default: ({ mode, onBound, children, primaryForm }: { mode: string; onBound?: () => void; children?: ReactNode; primaryForm?: ReactNode }) => (
     <div>
       verified {mode}
+      {primaryForm}
       {children}
       {onBound && <button onClick={onBound}>fixture bound</button>}
     </div>

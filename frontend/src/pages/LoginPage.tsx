@@ -54,12 +54,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
   }
 
-  const passwordAccess = (
-    <>
-      {verified && <button type="button" className="login-text-action" aria-expanded={showPassword} aria-controls="password-login" onClick={() => setShowPassword(value => !value)}>
-        {showPassword ? '收起密码登录' : '使用账号密码登录'}
-      </button>}
-      {(!verified || showPassword) && <form id="password-login" className="login-password-form" onSubmit={handleSubmit}>
+  const passwordForm = (
+      <form id="password-login" className="login-password-form" onSubmit={handleSubmit}>
         <label htmlFor="login-username">用户名</label>
         <input id="login-username" placeholder="用户名" type="text" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" disabled={submitting} />
         <label htmlFor="login-password">密码</label>
@@ -71,8 +67,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         {firstRun && <p className="login-notice">首次使用，已自动创建管理员账号。用户名：admin，请使用管理员配置的密码登录</p>}
         {error && <p role="alert" className="login-error">{error}</p>}
         <button type="submit" disabled={submitting}>{submitting ? '登录中...' : '登录'}</button>
-      </form>}
-    </>
+      </form>
   )
 
   return (
@@ -85,8 +80,14 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         </header>
         {verified && methods ? <VerifiedAccountAccess
           methods={methods} mode="login" returnTo={postAuthURL(intent)}
+          primaryForm={showPassword ? passwordForm : undefined}
+          rememberSession={{ value: remember, onChange: setRemember }}
           onSuccess={user => { onLogin(user); navigate(postAuthURL(intent), { replace: true }) }}
-        >{passwordAccess}</VerifiedAccountAccess> : passwordAccess}
+        >
+          <button type="button" className="login-text-action" aria-expanded={showPassword} aria-controls="password-login" onClick={() => setShowPassword(value => !value)}>
+            {showPassword ? methods.email ? '使用邮箱验证码登录' : '使用第三方登录' : '使用账号密码登录'}
+          </button>
+        </VerifiedAccountAccess> : passwordForm}
         <footer className="login-footer">
           <p>还没有账号？ <Link to={`/register${authSearch(intent)}`}>{methods?.public_registration ? '注册账号' : intent.shareRef ? '通过分享邀请注册' : '使用邀请码注册'}</Link></p>
           <a className="login-privacy" href="/privacy.html" target="_blank" rel="noopener noreferrer">隐私政策</a>

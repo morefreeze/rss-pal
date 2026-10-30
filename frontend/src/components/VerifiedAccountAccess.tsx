@@ -19,6 +19,8 @@ type Props = {
   methods: AuthMethods
   mode: 'login' | 'register' | 'bind'
   returnTo: string
+  primaryForm?: ReactNode
+  rememberSession?: { value: boolean; onChange: (value: boolean) => void }
   children?: ReactNode
   onSuccess?: (user: {
     id: number
@@ -33,6 +35,8 @@ export default function VerifiedAccountAccess({
   returnTo,
   onSuccess,
   onBound,
+  primaryForm,
+  rememberSession,
   children,
 }: Props) {
   const binding = mode === 'bind'
@@ -40,10 +44,12 @@ export default function VerifiedAccountAccess({
     [code, setCode] = useState(''),
     [challenge, setChallenge] = useState(''),
     [cooldown, setCooldown] = useState(0),
-    [remember, setRemember] = useState(true),
+    [localRemember, setLocalRemember] = useState(true),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     [sent, setSent] = useState(false)
+  const remember = rememberSession?.value ?? localRemember
+  const setRemember = rememberSession?.onChange ?? setLocalRemember
   const [captcha, setCaptcha] = useState<{
       available: boolean
       site_key: string
@@ -221,6 +227,7 @@ export default function VerifiedAccountAccess({
           记住此设备 90 天
         </label>
       )}
+      {primaryForm ?? <>
       {methods.email && (
         <form onSubmit={verify}>
           <label htmlFor="verified-email">邮箱</label>
@@ -305,6 +312,7 @@ export default function VerifiedAccountAccess({
           记住此设备 90 天
         </label>
       )}
+      </>}
       {children}
       {(['google', 'github', 'qq', 'apple'] as const).some(provider => methods[provider]) && (
         <div className={binding ? 'account-provider-bindings' : 'account-provider-logins'}>
