@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArticleOrder,
@@ -25,6 +25,7 @@ import { writeNav, type NavContext } from '../utils/articleNav'
 
 import { toast } from '../utils/toast'
 import { recordReadArticles, showReadUndoToast } from '../utils/markReadArticles'
+import { captureReadContinuation, findReadContinuation, scrollToReadContinuation, type ReadContinuation } from '../utils/readContinuation'
 
 const PAGE_SIZE = 20
 
@@ -117,6 +118,7 @@ export default function ClipPage({
   const [focusedIdx, setFocusedIdx] = useState(-1)
   const [markingRead, setMarkingRead] = useState(false)
   const readMutationRef = useRef(false)
+  const pendingReadScrollRef = useRef<{id:number; generation:number} | null>(null)
   const generationRef = useRef(0)
   const selectionKeyRef = useRef('')
 
@@ -148,26 +150,40 @@ export default function ClipPage({
   }
 
   const loadPage = useCallback(
-    async (off: number, reset: boolean) => {
+    async (off: number, reset: boolean, restoreThrough = off, continuation?: ReadContinuation) => {
       const generation = reset ? ++generationRef.current : generationRef.current
-      if (reset) setLoading(true)
-      else setLoadingMore(true)
+      if (reset) {
+        pendingReadScrollRef.current = null
+        setLoading(true)
+      } else setLoadingMore(true)
       try {
-        const resp: ClipListResponse = await getClip({
-          ...params,
-          limit: PAGE_SIZE,
-          offset: off,
-        })
-        if (generation !== generationRef.current) return
-        const data = resp.items || []
+        const data: ClipItem[] = []
+        let lastOffset = off
+        let total = 0
+        let exhausted = false
+        for (let cursor = off; ; cursor += PAGE_SIZE) {
+          const resp: ClipListResponse = await getClip({ ...params, limit: PAGE_SIZE, offset: cursor })
+          if (generation !== generationRef.current) return
+          const page = resp.items || []
+          data.push(...page)
+          lastOffset = cursor
+          total = resp.total || 0
+          exhausted = page.length < PAGE_SIZE || cursor + page.length >= total
+          const continuationFound = !continuation || findReadContinuation(data, continuation, exhausted) !== undefined
+          if (exhausted || (cursor >= restoreThrough && continuationFound)) break
+        }
+        if (continuation) {
+          const id = findReadContinuation(data, continuation, exhausted)
+          if (id !== undefined) pendingReadScrollRef.current = {id, generation}
+        }
         if (reset) {
           setItems(data)
           setFocusedIdx(-1)
         } else {
           setItems(prev => [...prev, ...data])
         }
-        setTotal(resp.total || 0)
-        setOffset(off)
+        setTotal(total)
+        setOffset(lastOffset)
       } finally {
         if (generation === generationRef.current) {
           setLoading(false)
@@ -221,6 +237,13 @@ export default function ClipPage({
   }, [selection.kind, restrictToFeedId])
 
   const hasMore = items.length < total
+
+  useLayoutEffect(() => {
+    const pending = pendingReadScrollRef.current
+    if (!pending || loading) return
+    pendingReadScrollRef.current = null
+    if (pending.generation === generationRef.current) scrollToReadContinuation(pending.id)
+  }, [items, loading])
 
   const loadMore = () => {
     if (readMutationRef.current || loadingMore || !hasMore) return
@@ -281,6 +304,7 @@ export default function ClipPage({
     readMutationRef.current = true
     setMarkingRead(true)
     const generation = ++generationRef.current
+    const continuation = direction === 'above' ? captureReadContinuation(items, anchorId, !!unreadOnly) : undefined
     try {
       const result = await markReadRange({
         anchor_id: anchorId, direction, sort: sortField, order: sortDir,
@@ -290,7 +314,10 @@ export default function ClipPage({
       })
       recordReadArticles(result.article_ids)
       showReadUndoToast(result)
-      if (generation === generationRef.current && selectionKeyRef.current === paramsKey) await loadPage(0, true).catch(() => toast.error('列表刷新失败，请刷新重试'))
+      if (generation === generationRef.current && selectionKeyRef.current === paramsKey) {
+        await loadPage(0, true, continuation ? offset : 0, continuation)
+          .catch(() => toast.error('列表刷新失败，请刷新重试'))
+      }
     } catch {
       toast.error('标记已读失败，请重试')
       if (generation === generationRef.current && selectionKeyRef.current === paramsKey) await loadPage(0, true).catch(() => toast.error('列表刷新失败，请刷新重试'))

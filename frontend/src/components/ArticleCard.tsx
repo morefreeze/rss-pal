@@ -164,6 +164,7 @@ export default function ArticleCard({
         ref={mergedRef}
         className="card"
         data-article-card
+        data-article-id={article.id}
         style={{
           display: 'block',
           opacity: isRead ? 0.6 : 1,
@@ -187,6 +188,7 @@ export default function ArticleCard({
       ref={mergedRef}
       className="card"
       data-article-card
+      data-article-id={article.id}
       style={{
         display: 'block',
         opacity: isRead ? 0.6 : 1,

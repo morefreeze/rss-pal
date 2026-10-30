@@ -40,12 +40,28 @@ const clip = {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
   sessionStorage.clear()
   mocks.listTags.mockResolvedValue([])
   mocks.getClip.mockResolvedValue({ items: [clip], total: 100 })
   mocks.markReadRange.mockResolvedValue({ count: 80, article_ids: [10, 90] })
 })
 describe('clip range reading', () => {
+  it('keeps a continuation from a loaded later clip page through refresh', async () => {
+    const clips = Array.from({length:40}, (_, i) => ({...clip, id:i+1, title:`Clip ${i+1}`}))
+    mocks.getClip.mockImplementation(({limit, offset}:{limit:number;offset:number}) => Promise.resolve({items:clips.slice(offset, offset+limit), total:40}))
+    mocks.markReadRange.mockResolvedValue({count:25, article_ids:clips.slice(0,25).map(a => a.id)})
+    render(<MemoryRouter><ClipPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:/加载更多/}))
+    await screen.findByText('Clip 26')
+    const anchor = screen.getByText('Clip 25').closest('[data-article-card]')!
+    fireEvent.click(anchor.closest('.article-read-surface')!.querySelector('button[aria-label="文章已读操作"]')!)
+    fireEvent.click(screen.getByRole('menuitem', {name:'这篇及以上标记已读'}))
+    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances[0]).toBe(screen.getByText('Clip 26').closest('[data-article-card]'))
+    expect(screen.getByText('Clip 40')).toBeTruthy()
+  })
+
   it('forwards the embedded feed and sort/checkbox scope and reloads after server range mutation', async () => {
     render(
       <MemoryRouter>

@@ -23,6 +23,7 @@ import { saveListReturn, takeListReturn } from '../utils/articleListReturn'
 import { toast } from '../utils/toast'
 import { recordReadArticles, showReadUndoToast } from '../utils/markReadArticles'
 import { pinyinSearchIncludes } from '../utils/pinyinSearch'
+import { captureReadContinuation, findReadContinuation, scrollToReadContinuation, type ReadContinuation } from '../utils/readContinuation'
 
 const PAGE_SIZE = 20
 
@@ -390,6 +391,7 @@ export default function ArticleListPage() {
   const [markingAllRead, setMarkingAllRead] = useState(false)
   const [markingRead, setMarkingRead] = useState(false)
   const readMutationRef = useRef(false)
+  const pendingReadScrollRef = useRef<{id:number; generation:number; viewGeneration:number} | null>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const requestGenerationRef = useRef(0)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -432,6 +434,12 @@ export default function ArticleListPage() {
   // mark-all-read are hidden because /api/clip doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
   const isClippingMode = selectedFeedObj?.feed_type === 'clip'
+  const readViewKey = JSON.stringify([listReturnKey, searchQuery, grouped, isClippingMode])
+  const readViewRef = useRef({key: readViewKey, generation: 0})
+  if (readViewRef.current.key !== readViewKey) {
+    readViewRef.current = {key: readViewKey, generation: readViewRef.current.generation + 1}
+    pendingReadScrollRef.current = null
+  }
   const handleFeedSelect = useCallback((val: number | null) => {
     setSelectedFeed(val)
     try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
@@ -589,13 +597,15 @@ export default function ArticleListPage() {
     setFeeds(data || [])
   }
 
-  const loadArticles = useCallback(async (off: number, reset: boolean, restoreThrough?: number) => {
+  const loadArticles = useCallback(async (off: number, reset: boolean, restoreThrough?: number, continuation?: ReadContinuation) => {
     const generation = reset
       ? ++requestGenerationRef.current
       : requestGenerationRef.current
+    const viewGeneration = readViewRef.current.generation
 
     setListError('')
     if (reset) {
+      pendingReadScrollRef.current = null
       setLoading(restoreThrough === undefined)
       setLoadingMore(false)
       setHasMore(false)
@@ -618,16 +628,22 @@ export default function ArticleListPage() {
       let data: ArticleListItem[] = []
       let lastOffset = off
       let lastPageLength = 0
-      for (let cursor = off; cursor <= (restoreThrough ?? off); cursor += PAGE_SIZE) {
+      for (let cursor = off; ; cursor += PAGE_SIZE) {
         const page = await getArticles({ ...params, offset: cursor }) || []
         if (generation !== requestGenerationRef.current) return
         data.push(...page)
         lastOffset = cursor
         lastPageLength = page.length
-        if (page.length < PAGE_SIZE) break
+        const exhausted = page.length < PAGE_SIZE
+        const continuationFound = !continuation || findReadContinuation(data, continuation, exhausted) !== undefined
+        if (exhausted || (cursor >= (restoreThrough ?? off) && continuationFound)) break
       }
       if (generation !== requestGenerationRef.current) return
 
+      if (continuation) {
+        const id = findReadContinuation(data, continuation, lastPageLength < PAGE_SIZE)
+        if (id !== undefined) pendingReadScrollRef.current = {id, generation, viewGeneration}
+      }
       if (reset) {
         setArticles(data)
 
@@ -668,6 +684,14 @@ export default function ArticleListPage() {
     onLoadMore: loadMore,
   })
 
+  useLayoutEffect(() => {
+    const pending = pendingReadScrollRef.current
+    if (!pending || loading) return
+    pendingReadScrollRef.current = null
+    if (pending.generation !== requestGenerationRef.current || pending.viewGeneration !== readViewRef.current.generation || searchQuery || grouped || isClippingMode) return
+    scrollToReadContinuation(pending.id)
+  }, [articles, loading, searchQuery, grouped, isClippingMode])
+
   useEffect(() => {
     let active = true
     const refresh = async () => {
@@ -698,6 +722,10 @@ export default function ArticleListPage() {
     setMarkingRead(true)
     // Invalidate in-flight pagination before the server changes the result set.
     const generation = ++requestGenerationRef.current
+    const viewGeneration = readViewRef.current.generation
+    const continuation = direction === 'above'
+      ? captureReadContinuation(articles, anchorId, unreadOnly, sessionReadIds)
+      : undefined
     setLoadingMore(false)
     try {
       const result = await markReadRange({
@@ -721,7 +749,7 @@ export default function ArticleListPage() {
       // Refill the same number of pages; offsets must be recalculated after
       // removing unread rows or the next page could skip unread articles.
       const refreshGeneration = requestGenerationRef.current + 1
-      await loadArticles(0, true, offset)
+      await loadArticles(0, true, offset, viewGeneration === readViewRef.current.generation ? continuation : undefined)
       if (sidebarOpen && refreshGeneration === requestGenerationRef.current) {
         getTagSidebar({ feed_id: selectedFeed ?? undefined, unread: unreadOnly, saved: savedOnly })
           .then(data => { if (refreshGeneration === requestGenerationRef.current) setTagSidebarData(data) })

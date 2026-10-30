@@ -53,11 +53,15 @@ vi.mock('../src/components/ArticleCard', () => ({
     <div
       ref={prefetchRef}
       data-testid={`article-${article.id}`}
+      data-article-id={article.id}
       onMouseEnter={() => onPrefetch?.(article.id)}
       onClick={() => onOpen(article.id, article)}
     >
       {article.title}
-      {onMarkRead && <button aria-label={`read-below-${article.id}`} onClick={e=>{e.stopPropagation();onMarkRead('below')}}>Read below</button>}
+      {onMarkRead && <>
+        <button aria-label={`read-below-${article.id}`} onClick={e=>{e.stopPropagation();onMarkRead('below')}}>Read below</button>
+        <button aria-label={`read-above-${article.id}`} onClick={e=>{e.stopPropagation();onMarkRead('above')}}>Read above</button>
+      </>}
     </div>
   ),
 }))
@@ -161,6 +165,7 @@ describe('ArticleListPage automatic pagination', () => {
     sessionStorage.clear()
     localStorage.clear()
     vi.clearAllMocks()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
     breakpointMock.current = 'desktop'
     apiMocks.getFeeds.mockResolvedValue([])
     apiMocks.getDailyDigest.mockResolvedValue({
@@ -190,6 +195,122 @@ describe('ArticleListPage automatic pagination', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('remembers the next unread ID before above marking and scrolls after refreshed cards render', async () => {
+    const before = makeArticles(1)
+    before[10].is_read = true
+    sessionStorage.setItem('readArticles', '[12]')
+    const after = [...before.slice(0, 10), {...before[0], id: 999}, ...before.slice(10)]
+    apiMocks.getArticles.mockResolvedValueOnce(before).mockResolvedValue(after)
+    const pending = deferred<{count:number;article_ids:number[]}>()
+    apiMocks.markReadRange.mockReturnValue(pending.promise)
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:'read-above-10'}))
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+    await act(async () => pending.resolve({count:10, article_ids:Array.from({length:10}, (_, i) => i + 1)}))
+    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances[0]).toBe(screen.getByTestId('article-13'))
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({block:'start', behavior:'instant'})
+  })
+
+  it('loads a next unread beyond the loaded page in the current display order', async () => {
+    const page2 = makeArticles(21)
+    page2[0].is_read = true
+    apiMocks.getArticles.mockImplementation(({offset}:{offset:number}) => Promise.resolve(offset === 0 ? makeArticles(1) : page2))
+    apiMocks.markReadRange.mockResolvedValue({count:20, article_ids:makeArticles(1).map(a => a.id)})
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:'read-above-20'}))
+    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances[0]).toBe(screen.getByTestId('article-22'))
+    expect(apiMocks.getArticles).toHaveBeenCalledWith(expect.objectContaining({offset:20}))
+  })
+
+  it('scrolls to the first remaining unread after unread-only pages compact', async () => {
+    localStorage.setItem('unreadOnly','true')
+    apiMocks.getArticles.mockResolvedValueOnce(makeArticles(1)).mockResolvedValue(makeArticles(21))
+    apiMocks.markReadRange.mockResolvedValue({count:20, article_ids:makeArticles(1).map(a => a.id)})
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:'read-above-20'}))
+    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances[0]).toBe(screen.getByTestId('article-21'))
+    expect(screen.queryByTestId('article-20')).toBeNull()
+  })
+
+  it('does not scroll when no later unread remains or the mark fails', async () => {
+    apiMocks.getArticles.mockResolvedValue(makeArticles(1).slice(0,2))
+    apiMocks.markReadRange.mockResolvedValueOnce({count:2, article_ids:[1,2]}).mockRejectedValueOnce(new Error('offline'))
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:'read-above-2'}))
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalledTimes(2))
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', {name:'read-above-1'}))
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalledTimes(3))
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('does not scroll an above continuation after the active filter changes', async () => {
+    const pending = deferred<{count:number;article_ids:number[]}>()
+    apiMocks.getArticles.mockImplementation(({unread}:{unread?:boolean}) => Promise.resolve(unread ? makeArticles(50) : makeArticles(1)))
+    apiMocks.markReadRange.mockReturnValue(pending.promise)
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:'read-above-10'}))
+    fireEvent.click(screen.getByRole('checkbox', {name:'仅未读'}))
+    await screen.findByTestId('article-50')
+    await act(async () => pending.resolve({count:10, article_ids:makeArticles(1).slice(0,10).map(a => a.id)}))
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('cancels continuation scrolling when the filter changes during the list refresh', async () => {
+    const pending = deferred<ArticleListItem[]>()
+    apiMocks.getArticles.mockResolvedValueOnce(makeArticles(1)).mockReturnValueOnce(pending.promise).mockResolvedValue(makeArticles(50))
+    apiMocks.markReadRange.mockResolvedValue({count:10, article_ids:makeArticles(1).slice(0,10).map(a => a.id)})
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:'read-above-10'}))
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole('checkbox', {name:'仅未读'}))
+    await screen.findByTestId('article-50')
+    await act(async () => pending.resolve(makeArticles(1)))
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('article-11')).toBeNull()
+  })
+
+  it('does not scroll for below actions even when later unread articles remain', async () => {
+    apiMocks.getArticles.mockResolvedValue(makeArticles(1))
+    apiMocks.markReadRange.mockResolvedValue({count:1, article_ids:[10]})
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:'read-below-10'}))
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalledTimes(2))
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('allows the normal list request to finish after entering and clearing search', async () => {
+    const pending = deferred<ArticleListItem[]>()
+    apiMocks.getArticles.mockReturnValue(pending.promise)
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalledTimes(1))
+    const search = screen.getByRole('searchbox')
+    fireEvent.change(search, {target:{value:'query'}})
+    fireEvent.change(search, {target:{value:''}})
+    await act(async () => pending.resolve(makeArticles(1)))
+    expect(await screen.findByTestId('article-1')).toBeTruthy()
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('refreshes compacted unread pages without scrolling after search changes during marking', async () => {
+    localStorage.setItem('unreadOnly','true')
+    const pending = deferred<{count:number;article_ids:number[]}>()
+    apiMocks.getArticles.mockResolvedValueOnce(makeArticles(1)).mockResolvedValue(makeArticles(21))
+    apiMocks.markReadRange.mockReturnValue(pending.promise)
+    render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', {name:'read-above-20'}))
+    const search = screen.getByRole('searchbox')
+    fireEvent.change(search, {target:{value:'query'}})
+    await act(async () => pending.resolve({count:20, article_ids:makeArticles(1).map(a => a.id)}))
+    await waitFor(() => expect(apiMocks.getArticles).toHaveBeenCalledTimes(2))
+    fireEvent.change(search, {target:{value:''}})
+    expect(await screen.findByTestId('article-21')).toBeTruthy()
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
   })
 
   it('marks an inclusive range with server filters, refreshes pages, and records unloaded changed IDs', async () => {
