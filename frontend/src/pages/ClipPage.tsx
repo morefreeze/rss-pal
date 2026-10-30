@@ -380,7 +380,7 @@ export default function ClipPage({
 
   if (bp === 'phone') {
     return (
-      <div>
+      <div className="clip-phone-list">
         <ClipTagChipBar
           tags={tags}
           sources={sources}

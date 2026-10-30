@@ -1775,3 +1775,8 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
 .account-display img { flex-shrink: 0; border-radius: 50%; object-fit: cover; }
 .account-display-name { overflow-wrap: anywhere; min-width: 0; }
 .user-menu .account-display { max-width: 240px; }
+
+/* Keep the continuation title below the phone clip list's sticky tag bar. */
+.clip-phone-list [data-article-card] {
+  scroll-margin-top: 64px;
+}
