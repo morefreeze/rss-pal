@@ -1,3 +1,4 @@
+import { SearchText } from '../components/ArticleSearch'
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getArticles, getGroupedArticles, searchArticles, getDailyDigest, markAllRead, markReadRange, ReadDirection, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, getTagSidebar, TagSidebarData } from '../api/client'
@@ -114,6 +115,7 @@ function SearchArticleRow({
   onPlay,
   formatDate,
   stripMarkdown,
+  searchQuery,
   onNavigate,
   onFocus,
   navList,
@@ -127,6 +129,7 @@ function SearchArticleRow({
   onPlay: (a: ArticleListItem) => void
   formatDate: (d: string | null) => string
   stripMarkdown: (t: string) => string
+  searchQuery: string
   onNavigate: (id: number) => void
   onFocus: (idx: number) => void
   navList: number[]
@@ -142,7 +145,6 @@ function SearchArticleRow({
       data-article-card
       style={{
         display: 'block',
-        opacity: isRead ? 0.6 : 1,
         cursor: 'pointer',
         outline: isFocused ? '2px solid var(--accent)' : 'none',
         outlineOffset: -2,
@@ -164,11 +166,11 @@ function SearchArticleRow({
         <div className="article-card-content" style={{ flex: 1 }}>
           <div className={`article-card-title-row ${isRead ? 'text-muted' : 'text-bold'}`} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
-            <span className="article-card-title">{article.title}</span>
+            <span className="article-card-title"><SearchText text={article.title} query={searchQuery} /></span>
           </div>
-          {article.summary_brief && (
+          {(article.search_snippet || article.summary_brief) && (
             <div className="article-card-summary text-muted text-sm mt-1">
-              {stripMarkdown(article.summary_brief).slice(0, 120)}...
+              <SearchText text={article.search_snippet || stripMarkdown(article.summary_brief).slice(0, 160)} query={searchQuery} />
             </div>
           )}
           <div className="flex-between mt-1">
@@ -385,7 +387,7 @@ export default function ArticleListPage() {
   const [groupedLoading, setGroupedLoading] = useState(false)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
   const [searchResults, setSearchResults] = useState<ArticleListItem[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [markingAllRead, setMarkingAllRead] = useState(false)
@@ -445,6 +447,7 @@ export default function ArticleListPage() {
     try { sessionStorage.setItem('selectedFeed', JSON.stringify(val)) } catch {}
     const pickedClip = val != null && feeds.find(f => f.id === val)?.feed_type === 'clip'
     const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('q')
     if (val != null) nextParams.set('feed_id', String(val))
     else nextParams.delete('feed_id')
     if (pickedClip && !wantsClip) {
@@ -803,25 +806,36 @@ export default function ArticleListPage() {
     }
   }
 
+  const urlQuery = searchParams.get('q') || ''
+  useEffect(() => { setSearchQuery(urlQuery) }, [urlQuery])
+  useEffect(() => {
+    let active = true
+    if (!searchQuery.trim()) {
+      setSearchResults(null)
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    setSearchResults(null)
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const results = await searchArticles(searchQuery.trim(), 30)
+        if (active) setSearchResults(results || [])
+      } catch {
+        if (active) setSearchResults([])
+      } finally {
+        if (active) setSearching(false)
+      }
+    }, 400)
+    return () => { active = false; if (searchTimeout.current) clearTimeout(searchTimeout.current) }
+  }, [searchQuery])
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const q = e.target.value
     setSearchQuery(q)
-    if (searchTimeout.current) clearTimeout(searchTimeout.current)
-    if (!q.trim()) {
-      setSearchResults(null)
-      return
-    }
-    searchTimeout.current = setTimeout(async () => {
-      setSearching(true)
-      try {
-        const results = await searchArticles(q.trim(), 30)
-        setSearchResults(results || [])
-      } catch {
-        setSearchResults([])
-      } finally {
-        setSearching(false)
-      }
-    }, 400)
+    const next = new URLSearchParams(searchParams)
+    if (q) next.set('q', q)
+    else next.delete('q')
+    setSearchParams(next, { replace: true })
   }
 
   // Keyboard navigation: j/k moves focus, o/Enter opens focused article
@@ -879,6 +893,13 @@ export default function ArticleListPage() {
     articlePreview?: ArticleListItem | Article,
   ) => {
     reportClick(id)
+    if (searchQuery.trim()) {
+      writeNav((searchResults || []).map(a => a.id), null)
+      navigate(`/articles/${id}?q=${encodeURIComponent(searchQuery.trim())}`, {
+        state: { from: articleEntryPath, articlePreview },
+      })
+      return
+    }
     try {
       const ids = articles.map(a => a.id)
       const i = ids.indexOf(id)
@@ -1188,7 +1209,8 @@ export default function ArticleListPage() {
                   onPlay={player.playArticle}
                   formatDate={formatDate}
                   stripMarkdown={stripMarkdown}
-                  onNavigate={(id) => navigate(`/articles/${id}`, {
+                  searchQuery={searchQuery}
+                  onNavigate={(id) => navigate(`/articles/${id}?q=${encodeURIComponent(searchQuery.trim())}`, {
                     state: { from: articleEntryPath, articlePreview: article },
                   })}
                   onFocus={setFocusedIdx}

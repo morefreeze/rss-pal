@@ -1,3 +1,4 @@
+import { ArticleSearch, ExcludeArticleSearch, SearchText, useArticleSearchQuery } from '../components/ArticleSearch'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
@@ -78,6 +79,19 @@ type ArticleLocationState = {
 const LOCAL_AI_HINT_MUTE_KEY = 'rss-pal:local-ai-usage-hint-muted:v1'
 
 export default function ArticlePage() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>()
+  const query = new URLSearchParams(location.search).get('q') || ''
+  return <ArticleSearch query={query} articleKey={id || ''} onClose={() => {
+    const params = new URLSearchParams(location.search)
+    params.delete('q')
+    navigate({ pathname: location.pathname, search: params.toString() }, { replace: true, state: location.state })
+  }}><ArticlePageContent /></ArticleSearch>
+}
+
+function ArticlePageContent() {
+  const searchQuery = useArticleSearchQuery()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
@@ -100,7 +114,9 @@ export default function ArticlePage() {
   const entrySearch = extractSearchFromPath(entryPath)
   const handleBack = useCallback(() => navigate(entryPath), [navigate, entryPath])
   const handleSourceFilter = useCallback((_feedId: number, href: string) => {
-    navigate(href)
+    const target = new URL(href, window.location.origin)
+    target.searchParams.delete('q')
+    navigate(`${target.pathname}${target.search}`)
   }, [navigate])
   const [article, setArticle] = useState<Article | null>(() => initialDetail?.article ?? null)
   const [progress, setProgress] = useState<ReadingProgress | null>(() => initialDetail?.progress ?? null)
@@ -148,8 +164,8 @@ export default function ArticlePage() {
   const hasNext = !!directNextId || (atEndOfList && !!navContext)
 
   const goToArticle = useCallback((nextArticleId: number) => {
-    navigate(`/articles/${nextArticleId}`, { replace: true, state: { from: entryPath } })
-  }, [navigate, entryPath])
+    navigate(`/articles/${nextArticleId}${location.search}`, { replace: true, state: { from: entryPath } })
+  }, [navigate, entryPath, location.search])
 
   // Fetch the next page, extend navList + persist, return the first new id.
   // Returns null when the server has nothing more (also drops the context so
@@ -473,6 +489,7 @@ export default function ArticlePage() {
   // scrollable range.
   useEffect(() => {
     if (!article || article.id !== Number(id)) return
+    if (searchQuery) { scrollRestoredForRef.current = article.id; return }
     if (scrollRestoredForRef.current === article.id) return
     const saved = progress?.scroll_position ?? 0
     // Skip only when: no saved position, OR user already explicitly
@@ -538,7 +555,7 @@ export default function ArticlePage() {
     }
     // Re-run on content change (markdown body length is the cheapest stable
     // proxy that catches both initial load and worker-triggered updates).
-  }, [id, article?.id, progress?.scroll_position, article?.content?.length])
+  }, [id, article?.id, progress?.scroll_position, article?.content?.length, searchQuery])
 
   // Auto-expand stub link_set children and poll until ready/failed
   useEffect(() => {
@@ -1277,7 +1294,7 @@ export default function ArticlePage() {
             />
           )}
         </div>
-        <h2>{article.title}</h2>
+        <h2><SearchText text={article.title} /></h2>
         <div className="text-muted text-sm mb-2" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           <span>{formatDate(article.published_at)}</span>
           <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} mediaType={article.media_type} mediaDurationSeconds={article.media_duration_seconds} />
@@ -1579,14 +1596,14 @@ export default function ArticlePage() {
       />
       {draftControls}
       {(article.links_extendable === true || (linkSetChildren?.length ?? 0) > 0) && (
-        <LinkSetChildren
+        <ExcludeArticleSearch><LinkSetChildren
           parentId={article.id}
           children={linkSetChildren ?? []}
           onChildrenUpdated={(updated, fetchedURLs) => {
             setLinkSetChildren(updated)
             setFetchedLinkURLs((current) => mergeFetchedLinkURLs(current, fetchedURLs, updated))
           }}
-        />
+        /></ExcludeArticleSearch>
       )}
       {/* Bottom nav so readers don't have to scroll back up to switch articles.
           BackFab handles the back-to-list affordance. */}

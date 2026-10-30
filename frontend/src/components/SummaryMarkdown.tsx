@@ -1,3 +1,4 @@
+import { useSearchHighlightPlugin } from './ArticleSearch'
 import { useEffect, useId, useMemo, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components, ExtraProps } from 'react-markdown'
@@ -152,10 +153,13 @@ export function normalizeSummaryMarkdown(source: string): string {
 }
 
 export default function SummaryMarkdown({ source, externalLinksNewTab = false }: Props) {
+  const searchPlugin = useSearchHighlightPlugin()
+  const rehypePlugins = useMemo(() => [searchPlugin], [searchPlugin])
   const normalized = useMemo(() => normalizeSummaryMarkdown(source), [source])
   return (
     <ReactMarkdown
       remarkPlugins={REMARK_PLUGINS}
+      rehypePlugins={rehypePlugins}
       components={externalLinksNewTab ? EXTERNAL_LINK_COMPONENTS : COMPONENTS}
     >
       {normalized}

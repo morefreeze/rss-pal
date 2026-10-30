@@ -17,6 +17,7 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/captcha v1.3.52
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.179
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ses v1.3.136
+	github.com/yuin/goldmark v1.7.13
 	golang.org/x/crypto v0.44.0
 	golang.org/x/image v0.41.0
 	golang.org/x/net v0.47.0

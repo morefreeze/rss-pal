@@ -260,6 +260,7 @@ export interface ArticleSource {
 }
 
 export interface ArticleListItem {
+  search_snippet?: string
   source?: ArticleSource
   id: number
   feed_id: number

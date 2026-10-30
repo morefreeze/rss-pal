@@ -197,6 +197,32 @@ describe('ArticleListPage automatic pagination', () => {
     vi.unstubAllGlobals()
   })
 
+  it('restores the search URL, highlights context and carries q into detail', async () => {
+    apiMocks.getArticles.mockResolvedValue([])
+    const result = {...makeArticles(42)[0], title: 'Needle title', search_snippet: 'context needle after'}
+    apiMocks.searchArticles.mockResolvedValue([result])
+    function Destination() { const location = useLocation(); return <output data-testid="destination">{location.pathname}{location.search}</output> }
+    const { container } = render(<MemoryRouter initialEntries={['/articles?q=needle']}><Routes>
+      <Route path="/articles" element={<ArticleListPage />} />
+      <Route path="/articles/:id" element={<Destination />} />
+    </Routes></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.searchArticles).toHaveBeenCalledWith('needle', 30))
+    await screen.findByText('context', { exact: false })
+    expect(container.querySelectorAll('mark').length).toBe(2)
+    fireEvent.click(container.querySelector('[data-article-card]')!)
+    expect(screen.getByTestId('destination').textContent).toBe('/articles/42?q=needle')
+  })
+  it('discards results from a previous search after a newer query finishes', async () => {
+    apiMocks.getArticles.mockResolvedValue([])
+    const old = deferred<ArticleListItem[]>()
+    apiMocks.searchArticles.mockImplementation((q: string) => q === 'old' ? old.promise : Promise.resolve([{...makeArticles(42)[0], title: 'New query result'}]))
+    render(<MemoryRouter initialEntries={['/articles?q=old']}><ArticleListPage /></MemoryRouter>)
+    await waitFor(() => expect(apiMocks.searchArticles).toHaveBeenCalledWith('old', 30))
+    fireEvent.change(screen.getByRole('searchbox'), {target:{value:'new'}})
+    await waitFor(() => expect(document.querySelector('.article-card-title')?.textContent).toBe('New query result'))
+    await act(async () => old.resolve([{...makeArticles(1)[0],title:'Stale query result'}]))
+    expect(screen.queryByText('Stale query result')).toBeNull()
+  })
   it('remembers the next unread ID before above marking and scrolls after refreshed cards render', async () => {
     const before = makeArticles(1)
     before[10].is_read = true

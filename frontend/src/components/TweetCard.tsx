@@ -1,3 +1,4 @@
+import { SearchText, useSearchHighlightPlugin } from './ArticleSearch'
 import { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -73,6 +74,8 @@ function initialAvatar(handle: string, displayName: string): { char: string; bg:
 }
 
 export default function TweetCard({ article, compact = false }: Props) {
+  const searchPlugin = useSearchHighlightPlugin()
+  const rehypePlugins = useMemo(() => [searchPlugin], [searchPlugin])
   const storedContent = articleContent(article)
   const content = useMemo(() => normalizeArticleAnchorSource(storedContent), [storedContent])
   const { handle, displayName, date, body } = useMemo(() => parseByline(content), [content])
@@ -98,14 +101,15 @@ export default function TweetCard({ article, compact = false }: Props) {
       >
         <div className="tweet-card-avatar" style={{ background: avatar.bg }}>{avatar.char}</div>
         <div className="tweet-card-meta">
-          {displayName && <span className="tweet-card-name">{displayName}</span>}
-          {handle && <span className="tweet-card-handle">@{handle}</span>}
+          {displayName && <span className="tweet-card-name"><SearchText text={displayName} /></span>}
+          {handle && <span className="tweet-card-handle">@<SearchText text={handle} /></span>}
           {date && <span className="tweet-card-date"> · {date}</span>}
         </div>
       </header>
       <div className="tweet-card-body">
         <ReactMarkdown
           remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
           components={{
             a: ({ href, children, ...rest }) => {
               // Tweet text often contains links to other x.com paths as

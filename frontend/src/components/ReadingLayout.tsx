@@ -1,3 +1,4 @@
+import { SearchText, useArticleSearchQuery } from './ArticleSearch'
 import { useState } from 'react'
 import MarkdownArticle from './MarkdownArticle'
 import SummaryMarkdown from './SummaryMarkdown'
@@ -39,6 +40,8 @@ export default function ReadingLayout(props: Props) {
   const { article, fontSize, fontFamily, codeWrap, onExit, onTapBody, onPrev, onNext, onBack } = props
 
   const [summaryOpen, setSummaryOpen] = useState(false)
+  const searchQuery = useArticleSearchQuery()
+  const showSummary = summaryOpen || !!searchQuery
 
   const fmtDate = (s: string | null) => s ? new Date(s).toLocaleString('zh-CN') : ''
   const ff = fontFamily === 'serif'
@@ -65,7 +68,7 @@ export default function ReadingLayout(props: Props) {
         style={{ fontSize }}
         onClick={handleArticleClick}
       >
-        <h1 className="reading-title">{article.title}</h1>
+        <h1 className="reading-title"><SearchText text={article.title} /></h1>
         <div className="reading-meta">
           <span>{fmtDate(article.published_at)}</span>
           {article.word_count > 0 && <span> · {article.word_count} 字</span>}
@@ -77,9 +80,9 @@ export default function ReadingLayout(props: Props) {
         {(article.summary_brief || article.summary_detailed) && (
           <div className="reading-summary">
             <button className="reading-summary-toggle" onClick={() => setSummaryOpen(o => !o)}>
-              {summaryOpen ? '▼' : '▶'} AI 摘要
+              {showSummary ? '▼' : '▶'} AI 摘要
             </button>
-            {summaryOpen && (
+            {showSummary && (
               <div className="reading-summary-body">
                 {article.summary_brief && <SummaryMarkdown source={article.summary_brief} />}
                 {article.summary_detailed && (

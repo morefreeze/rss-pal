@@ -1780,3 +1780,52 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
 .clip-phone-list [data-article-card] {
   scroll-margin-top: 64px;
 }
+
+/* Search uses a red text role independently of each theme's accent. */
+body { --search-fg: #a71930; --search-current-bg: #f8cdd2; --search-current-fg: #861126; }
+body[data-theme='night'], body[data-theme='neon'] {
+  --search-fg: #ff9caa; --search-current-bg: #652333; --search-current-fg: #ffe5e9;
+}
+mark.search-match {
+  color: var(--search-fg);
+  background: transparent;
+  font-weight: 650;
+  padding: 0;
+  scroll-margin-block: 100px;
+}
+mark.search-match[data-search-current='true'] {
+  background: var(--search-current-bg);
+  color: var(--search-current-fg);
+  outline: 2px solid var(--search-fg);
+  border-radius: 2px;
+}
+.article-search-active {
+  --article-floating-bottom: calc(var(--bottom-chrome) + 70px);
+  padding-bottom: 86px;
+}
+.article-search-toolbar {
+  position: fixed;
+  z-index: 100;
+  bottom: var(--bottom-chrome);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 6px 8px 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 4px 20px #0002;
+}
+.article-search-query { min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.article-search-toolbar output { font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
+.article-search-toolbar button { flex-shrink: 0; min-width: 44px; min-height: 44px; padding: 4px 10px; font-size: 24px; background: var(--surface-hover); color: var(--fg); }
+.article-search-toolbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .article-search-toolbar { gap: 4px; }
+  .article-search-query { min-width: 0; max-width: 100px; }
+}

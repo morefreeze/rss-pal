@@ -87,7 +87,7 @@ export default function ReaderSettingsPanel({
       <div ref={ref} style={{
         position: 'fixed',
         right: 16,
-        bottom: 'calc(56px + env(safe-area-inset-bottom) + 16px)',
+        bottom: 'var(--article-floating-bottom, calc(56px + env(safe-area-inset-bottom) + 16px))',
         zIndex: 1100,
       }}>
         {fab}

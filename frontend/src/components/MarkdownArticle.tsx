@@ -1,3 +1,4 @@
+import { useSearchHighlightPlugin } from './ArticleSearch'
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components, ExtraProps } from 'react-markdown'
@@ -323,6 +324,8 @@ const COMPONENTS: Components = {
 // scroll-progress / activity-tick state change doesn't force a full
 // markdown re-parse and image remount.
 function MarkdownArticle({ source, imageDimensions, suppressVideo, originalUrl, readOnly = false }: Props) {
+  const searchPlugin = useSearchHighlightPlugin()
+  const rehypePlugins = useMemo(() => [...REHYPE_PLUGINS, searchPlugin], [searchPlugin])
   const cleaned = useMemo(
     () => prepareArticleMarkdown(source),
     [source],
@@ -345,7 +348,7 @@ function MarkdownArticle({ source, imageDimensions, suppressVideo, originalUrl, 
         <ImageDimensionsContext.Provider value={dims}>
           <ReactMarkdown
             remarkPlugins={remarkPlugins}
-            rehypePlugins={REHYPE_PLUGINS}
+            rehypePlugins={rehypePlugins}
             components={COMPONENTS}
           >
             {cleaned}

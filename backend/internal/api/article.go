@@ -239,9 +239,9 @@ func (h *ArticleHandler) Search(c *gin.Context) {
 	// Project to the lean DTO so search results carry the same weak-network
 	// budget as GET /api/articles. Search results don't ship manual tags
 	// today, so pass nil and let articleToListItem normalize to [].
-	out := make([]ArticleListItem, len(articles))
+	out := make([]ArticleSearchItem, len(articles))
 	for i, a := range articles {
-		out[i] = articleToListItem(a, nil)
+		out[i] = articleToSearchItem(a, query)
 	}
 	c.JSON(http.StatusOK, out)
 }

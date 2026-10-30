@@ -33,7 +33,7 @@ export default function BackFab({ onClick }: BackFabProps) {
       style={{
         position: 'fixed',
         left: 24,
-        bottom: 88,
+        bottom: 'var(--article-floating-bottom, 88px)',
         width: 48,
         height: 48,
         borderRadius: '50%',
