@@ -3,10 +3,8 @@ package api
 import (
 	"database/sql"
 	"errors"
-	"strings"
-	"unicode"
-	"unicode/utf8"
 
+	"github.com/bytedance/rss-pal/internal/nickname"
 	"github.com/bytedance/rss-pal/internal/repository"
 	"github.com/gin-gonic/gin"
 )
@@ -33,13 +31,12 @@ func (h *AuthHandler) SetNickname(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "请填写昵称，并确认设置后无法修改"})
 		return
 	}
-	name := strings.TrimSpace(req.Nickname)
-	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 32 || strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
-		c.JSON(400, gin.H{"error": "昵称须为 1–32 个字符，不能包含控制字符"})
+	repo := h.userRepo.WithCtx(c)
+	err := repo.SetNickname(getUserID(c), req.Nickname)
+	if errors.Is(err, nickname.ErrFormat) || errors.Is(err, nickname.ErrRestricted) {
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	repo := h.userRepo.WithCtx(c)
-	err := repo.SetNickname(getUserID(c), name)
 	if errors.Is(err, repository.ErrNicknameLocked) {
 		c.JSON(409, gin.H{"error": "昵称已设置，无法再次修改"})
 		return

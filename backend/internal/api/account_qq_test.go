@@ -189,7 +189,9 @@ func TestQQOAuthFlowAndBinding(t *testing.T) {
 					if req.Method != "GET" || req.URL.Query().Get("oauth_consumer_key") != "123456" || req.URL.Query().Get("openid") != "opaque-QQ-ID" || req.URL.Query().Get("access_token") != "ephemeral-token" {
 						t.Fatal("invalid profile request")
 					}
-					body = `{"ret":0,"nickname":"QQ读者","figureurl_qq_2":"http://thirdqq.qlogo.cn/qqapp/123456/id/100","gender":"private-ignored"}`
+					// A restricted provider nickname must not block signup/binding or
+					// enter the transient completion payload before the repository.
+					body = `{"ret":0,"nickname":"ＡＤＭＩＮ_01","figureurl_qq_2":"http://thirdqq.qlogo.cn/qqapp/123456/id/100","gender":"private-ignored"}`
 				default:
 					t.Fatal("unexpected provider endpoint", req.URL.Host+req.URL.Path)
 				}
@@ -205,7 +207,7 @@ func TestQQOAuthFlowAndBinding(t *testing.T) {
 				t.Fatal("callback failed", out.Code, out.Header().Get("Location"))
 			}
 			var pendingLeaks int
-			if err := db.QueryRow(`SELECT count(*) FROM account_auth_flows WHERE payload::text LIKE '%ephemeral-token%' OR payload::text LIKE '%qq-secret%' OR payload::text LIKE '%private-ignored%'`).Scan(&pendingLeaks); err != nil || pendingLeaks != 0 {
+			if err := db.QueryRow(`SELECT count(*) FROM account_auth_flows WHERE payload::text LIKE '%ephemeral-token%' OR payload::text LIKE '%qq-secret%' OR payload::text LIKE '%private-ignored%' OR payload::text LIKE '%ＡＤＭＩＮ_01%'`).Scan(&pendingLeaks); err != nil || pendingLeaks != 0 {
 				t.Fatal("provider credentials or extra profile fields persisted before exchange", err)
 			}
 			req := httptest.NewRequest("POST", "/exchange", strings.NewReader(`{"ticket":"`+ticket+`"}`))
@@ -292,5 +294,27 @@ func TestQQAvatarURL(t *testing.T) {
 	}
 	if got := qqAvatarURL("https://evil.example/100", "https://q.qlogo.cn/qqapp/id/40"); got != "https://q.qlogo.cn/qqapp/id/40" {
 		t.Fatal("40px fallback missing")
+	}
+}
+
+func TestQQRestrictedNicknameUsesSafeDefault(t *testing.T) {
+	for _, name := range []string{"admin", "ＡＤＭＩＮ_01", "管 理 員", "f.u.c.k", "裸聊加微信"} {
+		t.Run(name, func(t *testing.T) {
+			client := &http.Client{Transport: authFixtureTransport(func(req *http.Request) (*http.Response, error) {
+				body := `{"access_token":"ephemeral"}`
+				if req.URL.Path == "/oauth2.0/me" {
+					body = `{"client_id":"123456","openid":"id"}`
+				}
+				if req.URL.Path == "/user/get_user_info" {
+					data, _ := json.Marshal(map[string]any{"ret": 0, "nickname": name, "figureurl_qq_1": "https://q.qlogo.cn/qqapp/id/40"})
+					body = string(data)
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+			})}
+			profile, err := qqAccount(context.Background(), client, &oauth2.Config{ClientID: "123456", ClientSecret: "secret", RedirectURL: "https://app.example/callback"}, "code")
+			if err != nil || profile.Subject != "123456:id" || profile.Nickname != "QQ读者" || profile.AvatarURL == "" {
+				t.Fatalf("nickname must fall back without blocking verified QQ identity: %+v %v", profile, err)
+			}
+		})
 	}
 }

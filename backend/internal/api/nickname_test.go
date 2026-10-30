@@ -53,7 +53,7 @@ func TestNicknameSetup(t *testing.T) {
 	if w := request("PUT", "/nickname", `{"nickname":"读者","confirmed":true}`, ""); w.Code != 401 {
 		t.Fatalf("unauthorized %d", w.Code)
 	}
-	for _, body := range []string{`{}`, `{"nickname":"读者"}`, `{"nickname":"   ","confirmed":true}`, `{"nickname":"bad\nname","confirmed":true}`, `{"nickname":"` + strings.Repeat("字", 33) + `","confirmed":true}`} {
+	for _, body := range []string{`{}`, `{"nickname":"读者"}`, `{"nickname":"   ","confirmed":true}`, `{"nickname":"bad\nname","confirmed":true}`, `{"nickname":"` + strings.Repeat("字", 33) + `","confirmed":true}`, `{"nickname":"admin","confirmed":true}`, `{"nickname":"ＡＤＭＩＮ_01","confirmed":true}`, `{"nickname":"官方客服","confirmed":true}`, `{"nickname":"f.u.c.k","confirmed":true}`} {
 		if w := request("PUT", "/nickname", body, token); w.Code != 400 {
 			t.Fatalf("accepted %s: %d %s", body, w.Code, w.Body.String())
 		}

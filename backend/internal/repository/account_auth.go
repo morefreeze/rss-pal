@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	namepolicy "github.com/bytedance/rss-pal/internal/nickname"
 )
 
 var ErrAccountAuth = errors.New("authentication request invalid or expired")
@@ -70,6 +72,7 @@ func (r *AccountAuthRepository) ResolveIdentity(ctx context.Context, p, s, e str
 // ResolveQQIdentity commits display metadata together with the verified identity.
 // Updating a QQ profile must never replace a user's chosen nickname or privileges.
 func (r *AccountAuthRepository) ResolveQQIdentity(ctx context.Context, subject string, bind int, signup bool, nickname, avatar string) (int, error) {
+	nickname = namepolicy.QQ(nickname)
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err

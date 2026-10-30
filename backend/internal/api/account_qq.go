@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"golang.org/x/oauth2"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/bytedance/rss-pal/internal/nickname"
+	"golang.org/x/oauth2"
 )
 
 // QQ's documented server-side exchange requires GET parameters. All endpoints
@@ -108,5 +110,5 @@ func qqAccount(ctx context.Context, client *http.Client, o *oauth2.Config, code 
 		return qqAccountProfile{}, errors.New("invalid QQ user info")
 	}
 	// OpenID remains the sole identity key; profile fields are display metadata.
-	return qqAccountProfile{Subject: o.ClientID + ":" + identity.OpenID, Nickname: name, AvatarURL: qqAvatarURL(profile.Avatar100, profile.Avatar40, profile.QzoneAvatar)}, nil
+	return qqAccountProfile{Subject: o.ClientID + ":" + identity.OpenID, Nickname: nickname.QQ(name), AvatarURL: qqAvatarURL(profile.Avatar100, profile.Avatar40, profile.QzoneAvatar)}, nil
 }

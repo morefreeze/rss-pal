@@ -4,7 +4,7 @@ import NicknameSetup, { NicknameOnboarding } from '../src/components/NicknameSet
 import { markNicknamePrompted, setNickname } from '../src/api/client'
 vi.mock('../src/api/client', () => ({ setNickname: vi.fn(), markNicknamePrompted: vi.fn().mockResolvedValue(undefined) }))
 const user = { id: 19, username: 'reader_auto', is_admin: false, nickname: '', needs_nickname: true }
-beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); localStorage.clear() })
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(setNickname).mockReset(); sessionStorage.clear(); localStorage.clear() })
 it('warns in red, requires a second confirmation, saves once and locks', async () => {
  const onSaved = vi.fn()
  vi.mocked(setNickname).mockResolvedValue({ ...user, nickname: '小读者', needs_nickname: false })
@@ -79,6 +79,22 @@ it('keeps form usable after a save failure', async () => {
  fireEvent.click(screen.getByRole('button', { name: '确认并永久保存' }))
  await screen.findByText('暂时保存失败')
  expect(screen.getByRole('textbox').getAttribute('disabled')).toBeNull()
+})
+it('explains restrictions and lets users correct a rejected nickname', async () => {
+ const onSaved = vi.fn()
+ vi.mocked(setNickname).mockRejectedValueOnce({ response: { data: { error: '昵称包含保留名称或不当内容，请换一个' } } })
+ vi.mocked(setNickname).mockResolvedValueOnce({ ...user, nickname: '普通读者', needs_nickname: false })
+ render(<NicknameSetup user={user} onSaved={onSaved} />)
+ expect(screen.getByText('不能使用冒充官方、辱骂、色情等不当昵称。')).toBeTruthy()
+ fireEvent.change(screen.getByLabelText('昵称'), { target: { value: 'admin' } })
+ fireEvent.click(screen.getByRole('button', { name: '确认昵称' }))
+ fireEvent.click(screen.getByRole('button', { name: '确认并永久保存' }))
+ await screen.findByRole('alert')
+ expect(onSaved).not.toHaveBeenCalled()
+ fireEvent.change(screen.getByLabelText('昵称'), { target: { value: '普通读者' } })
+ fireEvent.click(screen.getByRole('button', { name: '确认昵称' }))
+ fireEvent.click(screen.getByRole('button', { name: '确认并永久保存' }))
+ await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ nickname: '普通读者' })))
 })
 it('restores page scrolling when both onboarding dialogs close after saving', async () => {
  const { useState } = await import('react')

@@ -77,6 +77,7 @@ export default function NicknameSetup({ user, onSaved }: { user: User; onSaved: 
     }}>
       <p className="mb-2 text-sm" style={{ color: 'var(--danger, #dc2626)' }}>{qqName ? '默认使用 QQ 昵称，可修改一次；保存后无法再次修改。' : '昵称只能设置一次，确认后无法修改。'}</p>
       <label htmlFor={inputId}>昵称</label>
+      <p className="mb-2 text-sm text-muted">不能使用冒充官方、辱骂、色情等不当昵称。</p>
       <input id={inputId} value={name ?? qqName} onChange={e => setName(e.target.value)} placeholder="给自己起一个昵称" disabled={saving} style={{ width: '100%', margin: '8px 0' }} />
       {error && <p role="alert" className="mb-1" style={{ color: 'var(--danger, #dc2626)' }}>{error}</p>}
       <button type="submit" disabled={saving || !trimmed || trimmed === qqName}>{saving ? '保存中…' : '确认昵称'}</button>

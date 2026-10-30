@@ -3,6 +3,8 @@ package repository
 import (
 	"database/sql"
 	"errors"
+
+	"github.com/bytedance/rss-pal/internal/nickname"
 )
 
 var ErrNicknameLocked = errors.New("nickname already set")
@@ -23,8 +25,12 @@ func (r *UserRepository) MarkNicknamePrompted(userID int) error {
 }
 
 // SetNickname is atomic so concurrent devices cannot overwrite the first choice.
-func (r *UserRepository) SetNickname(userID int, nickname string) error {
-	result, err := r.db.Exec(`UPDATE users SET nickname=$1 WHERE id=$2 AND nickname=''`, nickname, userID)
+func (r *UserRepository) SetNickname(userID int, raw string) error {
+	name, err := nickname.Validate(raw)
+	if err != nil {
+		return err
+	}
+	result, err := r.db.Exec(`UPDATE users SET nickname=$1 WHERE id=$2 AND nickname=''`, name, userID)
 	if err != nil {
 		return err
 	}
