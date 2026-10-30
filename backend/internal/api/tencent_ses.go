@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"net/mail"
 	"strconv"
 	"strings"
@@ -33,7 +32,7 @@ func newSESEmailSender(a config.AuthConfig) *sesEmailSender {
 	p.UnsafeRetryOnConnectionFailure = false
 	client, err := ses.NewClient(common.NewCredential(a.SESSecretID, a.SESSecretKey), a.SESRegion, p)
 	if err == nil {
-		client.WithHttpTransport(captchaTransport{base: http.DefaultTransport})
+		client.WithHttpTransport(newTencentAuthTransport())
 	}
 	templateID, templateErr := strconv.ParseUint(a.SESTemplateID, 10, 64)
 	_, fromErr := mail.ParseAddress(a.SESFrom)

@@ -33,7 +33,7 @@ func NewTencentCaptchaVerifier(appID uint64, appSecretKey, secretID, secretKey s
 	if err == nil {
 		// The SDK does not expose CheckRedirect. Reject non-200 responses at
 		// the transport boundary before net/http can follow a redirect.
-		c.WithHttpTransport(captchaTransport{base: http.DefaultTransport})
+		c.WithHttpTransport(newTencentAuthTransport())
 	}
 	return &TencentCaptchaVerifier{
 		client: c, appID: appID, appSecretKey: appSecretKey,
@@ -75,6 +75,19 @@ func (v *TencentCaptchaVerifier) Verify(ctx context.Context, token, ip string) e
 }
 
 type captchaTransport struct{ base http.RoundTripper }
+
+// Tencent auth APIs are reached directly from the Tencent production host.
+// Its general outbound proxy is for other upstreams and can time out these
+// requests. Clone the transport so their route does not change global policy.
+func newTencentAuthTransport() captchaTransport {
+	base := http.DefaultTransport
+	if transport, ok := base.(*http.Transport); ok {
+		direct := transport.Clone()
+		direct.Proxy = nil
+		base = direct
+	}
+	return captchaTransport{base: base}
+}
 
 func (t captchaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	response, err := t.base.RoundTrip(r)
