@@ -4,7 +4,7 @@
 
 ## Frozen inputs and acceptance
 
-The embedded, versioned suite is `backend/internal/summaryeval/testdata/fixtures.v1.json`. Version `summary-fidelity-2026-11-02-v1` has three development examples and six independently worded held-out variants, two per failure class. Every input explicitly identifies an excerpt or an authored variant; none represents a full-article evaluation. Evidence references are relative to the private QA root, `/Users/bytedance/.codex/qa/rss-pal/`. Only small public source excerpts are committed; authentication data, account state and screenshots are not copied.
+The embedded, versioned suite is `backend/internal/summaryeval/testdata/fixtures.v1.json`. Version `summary-fidelity-2026-11-02-v2` has three development examples and six independently worded held-out variants, two per failure class. Version 2 restores the unattended-execution condition missing from the 018 positive control; its rubric is unchanged. Every input explicitly identifies an excerpt or an authored variant; none represents a full-article evaluation. Evidence references are relative to the private QA root, `/Users/bytedance/.codex/qa/rss-pal/`. Only small public source excerpts are committed; authentication data, account state and screenshots are not copied.
 
 | Class | Canonical evidence | Required distinction |
 | --- | --- | --- |

@@ -15,6 +15,9 @@ func TestFrozenSuiteHasIndependentHeldOutsAndCalibrationControls(t *testing.T) {
 	if err := ValidateSuite(suite); err != nil {
 		t.Fatal(err)
 	}
+	if suite.Version != "summary-fidelity-2026-11-02-v2" {
+		t.Fatalf("fixture changes require the current input version: %s", suite.Version)
+	}
 	if len(suite.Cases) != 9 || len(suite.Controls) != 6 {
 		t.Fatalf("want 9 cases and 6 controls, got %d/%d", len(suite.Cases), len(suite.Controls))
 	}
@@ -41,6 +44,22 @@ func TestFrozenSuiteHasIndependentHeldOutsAndCalibrationControls(t *testing.T) {
 			t.Fatalf("control %s is missing a complete candidate", control.ID)
 		}
 	}
+}
+
+func TestWorkflowPositiveControlIncludesUnattendedExecution(t *testing.T) {
+	s, err := LoadSuite()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, control := range s.Controls {
+		if control.ID == "018-faithful-paraphrase" {
+			if !strings.Contains(control.Output.text(), "全程无需人类实时参与") {
+				t.Fatal("positive control must retain the explicit unattended-execution condition required by the unchanged trigger rubric")
+			}
+			return
+		}
+	}
+	t.Fatal("missing workflow positive calibration control")
 }
 
 func TestSuiteRejectsAmbiguousOrUnsupportedFixtures(t *testing.T) {

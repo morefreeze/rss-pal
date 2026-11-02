@@ -64,7 +64,7 @@ func ParseJudgment(raw []byte, c Case, output Output) (Judgment, error) {
 			return j, errors.New("invalid criterion verdict")
 		}
 		delete(expected, v.ID)
-		if v.SourceQuote == "" || !strings.Contains(c.Content, v.SourceQuote) {
+		if strings.TrimSpace(v.SourceQuote) == "" || !strings.Contains(c.Content, v.SourceQuote) {
 			return j, errors.New("source evidence must quote the frozen input")
 		}
 		if v.SummaryQuote != "" && !strings.Contains(output.text(), v.SummaryQuote) {

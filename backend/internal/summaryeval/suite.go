@@ -105,8 +105,10 @@ func checkJSONKeys(d *json.Decoder, depth int) error {
 				return err
 			}
 			name, ok := key.(string)
-			if !ok || seen[name] {
-				return errors.New("invalid or repeated object key")
+			// All evaluation schema keys are lowercase. encoding/json matches
+			// struct tags without regard to case, so aliases could override evidence.
+			if !ok || name != strings.ToLower(name) || seen[name] {
+				return errors.New("invalid, case-aliased, or repeated object key")
 			}
 			seen[name] = true
 		}

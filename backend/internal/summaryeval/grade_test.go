@@ -44,6 +44,7 @@ func TestJudgmentNeverPassesUnknownMissingOrUngroundedCriteria(t *testing.T) {
 		{"duplicate criterion", func(j *Judgment) { j.Criteria[1].ID = j.Criteria[0].ID }, true},
 		{"empty evidence", func(j *Judgment) { j.Criteria[0].SummaryQuote = "" }, true},
 		{"fabricated source quote", func(j *Judgment) { j.Criteria[0].SourceQuote = "invented source quotation" }, true},
+		{"whitespace-only source quote", func(j *Judgment) { j.Criteria[0].SourceQuote = "\n" }, true},
 		{"fabricated output quote", func(j *Judgment) { j.Criteria[0].SummaryQuote = "not in the candidate" }, true},
 		{"missing rationale", func(j *Judgment) { j.Criteria[0].Reason = "" }, true},
 		{"invalid verdict", func(j *Judgment) { j.Criteria[0].Verdict = "mostly_pass" }, true},
@@ -70,6 +71,36 @@ func TestJudgmentNeverPassesUnknownMissingOrUngroundedCriteria(t *testing.T) {
 	duplicate := strings.Replace(string(valid), `"schema_version":1`, `"schema_version":1,"schema_version":1`, 1)
 	if _, err := ParseJudgment([]byte(duplicate), c, o); err == nil {
 		t.Fatal("duplicate JSON keys must not silently overwrite grading evidence")
+	}
+}
+
+func TestJudgmentRejectsNestedCaseAliasOverridingFailWithPass(t *testing.T) {
+	s, _ := LoadSuite()
+	c, o := s.Cases[0], s.Controls[0].Output
+	j := testJudgment(c, o, Pass)
+	j.Criteria[0].Verdict = Fail
+	raw, _ := json.Marshal(j)
+	aliased := strings.Replace(string(raw), `"verdict":"fail"`, `"verdict":"fail","Verdict":"pass"`, 1)
+	got, err := ParseJudgment([]byte(aliased), c, o)
+	if err == nil {
+		t.Fatalf("case alias must not overwrite nested grading evidence: verdict=%s", got.Verdict())
+	}
+}
+
+func TestJudgmentAllowsShortNonWhitespaceMathematicalEvidence(t *testing.T) {
+	s, _ := LoadSuite()
+	var c Case
+	for _, candidate := range s.Cases {
+		if candidate.ID == "019" {
+			c = candidate
+		}
+	}
+	o := s.Controls[4].Output
+	j := testJudgment(c, o, Pass)
+	j.Criteria[1].SourceQuote, j.Criteria[1].SummaryQuote = "y", "y"
+	raw, _ := json.Marshal(j)
+	if _, err := ParseJudgment(raw, c, o); err != nil {
+		t.Fatalf("evidence needs non-whitespace content, not an arbitrary minimum length: %v", err)
 	}
 }
 
