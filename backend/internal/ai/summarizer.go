@@ -554,7 +554,7 @@ func (s *Summarizer) callVision(ctx context.Context, prompt string, imagePaths [
 		if !isTransientNetErr(callErr) {
 			return "", callErr
 		}
-		log.Printf("vision call transient error (attempt %d/3): %v", attempt+1, callErr)
+		log.Printf("vision call transient error (attempt %d/3)", attempt+1)
 	}
 	return "", lastErr
 }
@@ -625,7 +625,7 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 		if terminalSummaryError(err) {
 			return nil, err
 		}
-		log.Printf("vision summary failed, falling back to text: %v", err)
+		log.Print("vision summary failed, falling back to text")
 		return s.Summarize(ctx, title, originalContent)
 	}
 
@@ -638,7 +638,7 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 			return nil, err
 		}
 		// Brief already succeeded; fall back only the detailed half.
-		log.Printf("vision detailed failed, falling back to text detailed: %v", err)
+		log.Print("vision detailed failed, falling back to text detailed")
 		detText, derr := s.generateDetailed(ctx, title, content, brief)
 		if derr != nil {
 			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%w text=%w", err, derr)
@@ -775,7 +775,7 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 		if brief != "" || terminalSummaryError(err) {
 			return nil, err
 		}
-		log.Printf("vision stream brief failed, falling back to text stream: %v", err)
+		log.Print("vision stream brief failed, falling back to text stream")
 		return s.SummarizeStream(ctx, title, originalContent, onBriefDelta, onDetailedDelta)
 	}
 
@@ -787,7 +787,7 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 		if detailed != "" || terminalSummaryError(err) {
 			return nil, err
 		}
-		log.Printf("vision stream detailed failed, falling back to text stream detailed: %v", err)
+		log.Print("vision stream detailed failed, falling back to text stream detailed")
 		dText, derr := s.callStream(ctx, detailedPrompt, detailedMaxTokens, onDetailedDelta)
 		if derr != nil {
 			return nil, fmt.Errorf("vision detailed + text-fallback both failed: vision=%w text=%w", err, derr)

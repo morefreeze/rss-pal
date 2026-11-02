@@ -1,15 +1,51 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type summaryErrorTransport func(*http.Request) (*http.Response, error)
+
+func (f summaryErrorTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSummaryVisionFallbackLogsOmitProviderEndpoint(t *testing.T) {
+	var captured bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&captured)
+	defer log.SetOutput(previous)
+	endpoint := "https://provider.example/private-endpoint"
+	s := NewSummarizerWithModel("test-key", endpoint, "text-model")
+	s.SetVisionModel("vision-model")
+	calls := 0
+	s.SetHTTPClient(&http.Client{Transport: summaryErrorTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("safe transport failure")
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"finish_reason":"stop","message":{"content":"summary"}}]}`))}, nil
+	})})
+	path := filepath.Join(t.TempDir(), "image.jpg")
+	writeTestJPEG(t, path)
+	if _, err := s.SummarizeWithImages(t.Context(), "Title", "body", []string{path}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(captured.String(), endpoint) {
+		t.Fatal("fallback log exposed provider endpoint")
+	}
+	if captured.Len() == 0 {
+		t.Fatal("expected operational fallback message")
+	}
+}
 
 func TestSummaryGenerationUsesAcceptedWireRequestAfterTokenRetry(t *testing.T) {
 	var bodies [][]byte
