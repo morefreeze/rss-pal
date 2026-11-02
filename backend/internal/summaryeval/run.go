@@ -65,24 +65,26 @@ type Counts struct {
 }
 
 type CaseResult struct {
-	Case      Case      `json:"input"`
-	InputHash string    `json:"input_sha256"`
-	Route     Route     `json:"route"`
-	Output    Output    `json:"output"`
-	Counts    Counts    `json:"counts"`
-	Status    string    `json:"status"`
-	Judgment  *Judgment `json:"judgment,omitempty"`
-	ErrorCode string    `json:"error_code,omitempty"`
-	Calls     []int     `json:"call_numbers"`
+	Case         Case      `json:"input"`
+	InputHash    string    `json:"input_sha256"`
+	Route        Route     `json:"route"`
+	Output       Output    `json:"output"`
+	Counts       Counts    `json:"counts"`
+	Status       string    `json:"status"`
+	Judgment     *Judgment `json:"judgment,omitempty"`
+	JudgmentText string    `json:"judgment_text,omitempty"`
+	ErrorCode    string    `json:"error_code,omitempty"`
+	Calls        []int     `json:"call_numbers"`
 }
 
 type CalibrationResult struct {
-	ControlID string    `json:"control_id"`
-	CaseID    string    `json:"case_id"`
-	Expected  Verdict   `json:"expected"`
-	Matched   bool      `json:"matched"`
-	Judgment  *Judgment `json:"judgment,omitempty"`
-	ErrorCode string    `json:"error_code,omitempty"`
+	ControlID    string    `json:"control_id"`
+	CaseID       string    `json:"case_id"`
+	Expected     Verdict   `json:"expected"`
+	Matched      bool      `json:"matched"`
+	Judgment     *Judgment `json:"judgment,omitempty"`
+	JudgmentText string    `json:"judgment_text,omitempty"`
+	ErrorCode    string    `json:"error_code,omitempty"`
 }
 
 type ImageInput struct {
@@ -263,10 +265,10 @@ func Run(ctx context.Context, cfg Config, suite Suite, base http.RoundTripper) (
 					fixture = c
 				}
 			}
-			j, gradeErr := judge(withScope(ctx, "calibration", control.CaseID, ""), client, tr, cfg.Judge, fixture, control.Output)
-			cr := CalibrationResult{ControlID: control.ID, CaseID: control.CaseID, Expected: control.Expected}
+			j, text, gradeErr := judge(withScope(ctx, "calibration", control.CaseID, ""), client, tr, cfg.Judge, fixture, control.Output)
+			cr := CalibrationResult{ControlID: control.ID, CaseID: control.CaseID, Expected: control.Expected, JudgmentText: text}
 			if gradeErr != nil {
-				cr.ErrorCode = "control_grading_incomplete"
+				cr.ErrorCode = judgmentErrorCode(gradeErr, "control_grading_incomplete")
 			} else {
 				cr.Judgment, cr.Matched = &j, ControlAccepted(control, j)
 			}
@@ -299,9 +301,10 @@ loop:
 			} else if !cfg.Grade {
 				r.Status = "ungraded"
 			} else {
-				j, gradeErr := judge(withScope(ctx, "grading", fixture.ID, route), client, tr, cfg.Judge, fixture, output)
+				j, text, gradeErr := judge(withScope(ctx, "grading", fixture.ID, route), client, tr, cfg.Judge, fixture, output)
+				r.JudgmentText = text
 				if gradeErr != nil {
-					r.ErrorCode = "grading_incomplete"
+					r.ErrorCode = judgmentErrorCode(gradeErr, "grading_incomplete")
 				} else {
 					r.Judgment = &j
 					r.Status = "failed"
@@ -362,7 +365,7 @@ func generate(ctx context.Context, s *ai.Summarizer, c Case, route Route, cfg Co
 	return Output{Brief: result.Brief, Detailed: result.Detailed}, nil
 }
 
-func judge(ctx context.Context, client *http.Client, tr *BudgetTransport, p Provider, c Case, output Output) (Judgment, error) {
+func judge(ctx context.Context, client *http.Client, tr *BudgetTransport, p Provider, c Case, output Output) (Judgment, string, error) {
 	start := tr.CallCount()
 	payload := map[string]any{"model": p.Model, "max_tokens": 4000, "response_format": map[string]string{"type": "json_object"},
 		"messages": []map[string]string{{"role": "system", "content": "You independently grade source faithfulness. Return only the requested JSON schema."}, {"role": "user", "content": JudgePrompt(c, output)}}}
@@ -377,18 +380,18 @@ func judge(ctx context.Context, client *http.Client, tr *BudgetTransport, p Prov
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(p.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return Judgment{}, errors.New("unable to create grading request")
+		return Judgment{}, "", errors.New("unable to create grading request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.Key)
 	resp, err := client.Do(req)
 	if err != nil {
-		return Judgment{}, errors.New("grading request failed; raw error omitted")
+		return Judgment{}, "", errors.New("grading request failed; raw error omitted")
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, captureLimit+1))
 	resp.Body.Close()
 	if resp.StatusCode != 200 || readErr != nil || len(raw) > captureLimit || !FinalCompletionsOK(tr.Records()[start:]) {
-		return Judgment{}, errors.New("grading completion incomplete")
+		return Judgment{}, "", errors.New("grading completion incomplete")
 	}
 	var response struct {
 		Choices []struct {
@@ -398,9 +401,13 @@ func judge(ctx context.Context, client *http.Client, tr *BudgetTransport, p Prov
 		} `json:"choices"`
 	}
 	if json.Unmarshal(raw, &response) != nil || len(response.Choices) != 1 {
-		return Judgment{}, errors.New("invalid grading response")
+		return Judgment{}, "", errors.New("invalid grading response")
 	}
-	return ParseJudgment([]byte(response.Choices[0].Message.Content), c, output)
+	// The provider envelope is bounded by captureLimit. Preserve only the actual
+	// message text (including invalid grading JSON), never the envelope/headers.
+	text := response.Choices[0].Message.Content
+	j, err := ParseJudgment([]byte(text), c, output)
+	return j, text, err
 }
 
 // CountText is diagnostic only. Cross-language character ratios are never a
@@ -431,13 +438,22 @@ func SaveArtifact(path string, a *Artifact, secrets []string) error {
 	if err != nil {
 		return errors.New("unable to encode evaluation artifact")
 	}
-	ordered := append([]string(nil), secrets...)
-	sort.SliceStable(ordered, func(i, j int) bool { return len(ordered[i]) > len(ordered[j]) })
-	for _, secret := range ordered {
+	var patterns []string
+	for _, secret := range secrets {
 		if secret != "" {
-			quoted, _ := json.Marshal(secret)
-			raw = bytes.ReplaceAll(raw, quoted[1:len(quoted)-1], []byte("[REDACTED]"))
+			// Values have one JSON layer; retained model JSON text has two.
+			// Match both before replacing shorter overlapping credentials.
+			encoded := secret
+			for depth := 0; depth < 2; depth++ {
+				quoted, _ := json.Marshal(encoded)
+				encoded = string(quoted[1 : len(quoted)-1])
+				patterns = append(patterns, encoded)
+			}
 		}
+	}
+	sort.SliceStable(patterns, func(i, j int) bool { return len(patterns[i]) > len(patterns[j]) })
+	for _, pattern := range patterns {
+		raw = bytes.ReplaceAll(raw, []byte(pattern), []byte("[REDACTED]"))
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {

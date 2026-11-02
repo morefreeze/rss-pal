@@ -4,13 +4,13 @@
 
 ## Frozen inputs and acceptance
 
-The embedded, versioned suite is `backend/internal/summaryeval/testdata/fixtures.v1.json`. Version `summary-fidelity-2026-11-02-v2` has three development examples and six independently worded held-out variants, two per failure class. Version 2 restores the unattended-execution condition missing from the 018 positive control; its rubric is unchanged. Every input explicitly identifies an excerpt or an authored variant; none represents a full-article evaluation. Evidence references are relative to the private QA root, `/Users/bytedance/.codex/qa/rss-pal/`. Only small public source excerpts are committed; authentication data, account state and screenshots are not copied.
+The embedded, versioned suite is `backend/internal/summaryeval/testdata/fixtures.v1.json`. Version `summary-fidelity-2026-11-02-v3` has three development examples and six independently worded held-out variants, two per failure class. The seven controls comprise three faithful paraphrases and four known-wrong summaries. Version 3 adds a separate assigned-label-as-verified-truth negative control and strengthens the assigned-class rubric; version 2 had restored the unattended-execution condition in the 018 positive control. Every input explicitly identifies an excerpt or an authored variant; none represents a full-article evaluation. Evidence references are relative to the private QA root, `/Users/bytedance/.codex/qa/rss-pal/`. Only small public source excerpts are committed; authentication data, account state and screenshots are not copied.
 
 | Class | Canonical evidence | Required distinction |
 | --- | --- | --- |
 | 017, metric attribution | `2026-11-01/heartbeat-1503/articles/weekly414-original.json`, `data.result.text`, 言论/2; companion review | Axel's **book-sales** income was enough to live on in 2024 and zero in 2026. The source gives no six-figure amount. Crawler visits producing no advertising income is a separate statement; it does not prove crawlers uniquely caused the book-sales decline. |
 | 018, nested termination | Same QA directory, `loops-original.json`, 主动式循环 and its worked example; companion review | Events or schedules trigger work. Each goal-bounded task/current batch exits, while the enclosing routine remains active until the user switches it off. “Stop when done” alone loses a material boundary. |
-| 019, excluded domain | `2026-11-02/heartbeat-0908/articles/human-data-original.json`, AUM text and `data.result.math`; companion review | `z_y - max_{i != y} z_i`, averaged across epochs. Assigned `y` need not win. The maximum of the other classes is then the global maximum, so “global second-highest” is not a valid general replacement. |
+| 019, excluded domain | `2026-11-02/heartbeat-0908/articles/human-data-original.json`, AUM text and `data.result.math`; companion review | `z_y - max_{i != y} z_i`, averaged across epochs. Assigned `y` need not win and is not necessarily the verified true class: the source explicitly describes a bird annotated as dog. Calling that assigned class “correct” falsely upgrades an annotation into verified truth. The maximum of the other classes is then the global maximum, so “global second-highest” is not a valid general replacement. |
 
 The authored variants change names, units, language, workflow/error branches and numerical examples. They are transfer checks, not quotations or claims about real people. The checked-in split is a development convention, not a permanently blind benchmark. Add genuinely unseen cases and bump the suite version when policy development has used the held-outs.
 
@@ -53,18 +53,18 @@ go run ./cmd/summary-eval --live --grade --max-calls 40 \
   --out /private/evaluation-output/default-graded.json
 ```
 
-A retry-free run uses six calibration calls plus nine times two generation stages and one grading call: **33 requests**. `--max-calls` must be explicitly set from 1 to 256 and is shared by generation, retries, control grading, candidate grading and any vision fallback. Once exhausted, additional underlying transport calls are denied. Failed attempts consume the cap. Grader requests have no automatic retry. The total deadline defaults to 15 minutes; `--timeout` can change it.
+A retry-free run uses seven calibration calls plus nine times two generation stages and one grading call: **34 requests**. `--max-calls` must be explicitly set from 1 to 256 and is shared by generation, retries, control grading, candidate grading and any vision fallback. Once exhausted, additional underlying transport calls are denied. Failed attempts consume the cap. Grader requests have no automatic retry. The total deadline defaults to 15 minutes; `--timeout` can change it.
 
 The optional grader defaults to the generator provider/model. Set `SUMMARY_EVAL_JUDGE_MODEL`, `SUMMARY_EVAL_JUDGE_BASE_URL` and `SUMMARY_EVAL_JUDGE_API_KEY` for a separate grader. A different endpoint requires its own explicit key. `--model`, `--base-url`, `--judge-model` and `--judge-base-url` override the non-secret configuration. This tool currently supports OpenAI-compatible JSON/SSE responses, not the native Anthropic protocol.
 
 Useful selections:
 
 ```sh
-# All held-outs; calibration still includes the six fixed development controls.
+# All held-outs; calibration still includes the seven fixed development controls.
 go run ./cmd/summary-eval --live --grade --split held_out --max-calls 30 \
   --out /private/evaluation-output/held-out.json
 
-# One canonical case across four text APIs; 6 + 4 * 3 = 18 calls before retries.
+# One canonical case across four text APIs; 7 + 4 * 3 = 19 calls before retries.
 go run ./cmd/summary-eval --live --grade --cases 018 \
   --routes default,stream,custom,custom-stream --max-calls 24 \
   --out /private/evaluation-output/text-routes.json
@@ -74,9 +74,9 @@ go run ./cmd/summary-eval --live --grade --cases 018 \
 
 ## Grading and durable evidence
 
-Before generating graded candidates, the grader must classify three faithful paraphrase controls as passing and three known-wrong controls as failing the specified criteria. Expected control labels are withheld from its prompt. A failure or uncertainty in calibration stops the experiment; it cannot certify candidate outputs.
+Before generating graded candidates, the grader must classify three faithful paraphrase controls as passing and four known-wrong controls as failing the specified criteria. Expected control labels are withheld from its prompt. A failure or uncertainty in calibration stops the experiment; it cannot certify candidate outputs.
 
-Each judgment must contain exactly one verdict per criterion, a literal source quote, a literal output quote when passing, and an explanation of the semantic comparison. Duplicate/unknown JSON keys, fabricated quotations, missing criteria, invalid verdicts and malformed JSON are rejected. An omission can fail with an empty output quote and an explanation. A verdict of `unknown` is never accepted as a pass. Calibration is a sanity check, not proof of an infallible judge; independent human review remains required even for `graded_pass`, particularly if generator and grader are the same model.
+Grader version `semantic-evidence-v2` explicitly separates assigned/reference labels, predicted winners and verified ground truth, judges their meaning in context, and checks both summary stages for contradictions. Each judgment must contain exactly one verdict per criterion, a literal source quote, a literal output quote when passing, and an explanation of the semantic comparison. Duplicate/unknown JSON keys, fabricated quotations, missing criteria, invalid verdicts and malformed JSON are rejected. An omission can fail with an empty output quote and an explanation. A verdict of `unknown` is never accepted as a pass. Calibration is a sanity check, not proof of an infallible judge; independent human review remains required even for `graded_pass`, particularly if generator and grader are the same model.
 
 The final attempt for each effective prompt must have an explicit `finish_reason=stop`. A provider that omits the reason cannot produce a completed evaluation, even though the serving client supports some older reason-less providers. `length`, filtering, interrupted SSE, invalid metadata, exhausted budgets and malformed grading fail closed. A successful replacement of a truncated request can recover that prompt; both attempts remain recorded. Vision fallback cannot hide an unresolved failed visual request.
 
@@ -89,6 +89,8 @@ The final attempt for each effective prompt must have an explicit `finish_reason
 | Configuration/artifact error | No usable completed experiment can be reported. | 1 |
 
 Artifacts include suite/policy/grader versions, frozen input and rubric snapshots, input/suite/template/request/message SHA-256 hashes, source scope/evidence reference, source/build revision and dirty state from Git or compiled Go VCS build settings, selected routes, outputs, descriptive counts, control and per-criterion verdicts, timestamps, requested/reported models, every request number, finish reasons and provider-reported token usage. If both Git and embedded VCS settings are unavailable, the revision remains `unknown` with dirty state true. Missing usage remains unknown. Cost is not inferred from token counts or an assumed price.
+
+Both calibration and candidate results retain `judgment_text`: the actual model message text, including invalid grading JSON or invalid evidence quotes, before parsing. It is bounded by the 8 MiB response limit and excludes the provider envelope and headers. Safe `judgment_*` error categories distinguish invalid JSON, coverage, criterion values and source/output quotations; original exact-quote validation remains unchanged. This permits offline diagnosis and replay with `ParseJudgment` without additional model requests. Model text is untrusted and may require the same secret redaction as summary output.
 
 Files are created exclusively with mode `0600`, synced, and never silently overwrite an older run. Configured secret values are redacted even if a provider echoes them into output or metadata. Endpoints, credentials, headers, request bodies and raw provider errors are excluded; errors are replaced before they can reach the summarizer's fallback logs. Request hashes identify effective prompts without persisting transport payloads. SIGINT/SIGTERM cancels the run and allows an incomplete artifact to be saved; a force-killed process or unwritable output path can still prevent final persistence.
 

@@ -15,11 +15,11 @@ func TestFrozenSuiteHasIndependentHeldOutsAndCalibrationControls(t *testing.T) {
 	if err := ValidateSuite(suite); err != nil {
 		t.Fatal(err)
 	}
-	if suite.Version != "summary-fidelity-2026-11-02-v2" {
+	if suite.Version != "summary-fidelity-2026-11-02-v3" {
 		t.Fatalf("fixture changes require the current input version: %s", suite.Version)
 	}
-	if len(suite.Cases) != 9 || len(suite.Controls) != 6 {
-		t.Fatalf("want 9 cases and 6 controls, got %d/%d", len(suite.Cases), len(suite.Controls))
+	if len(suite.Cases) != 9 || len(suite.Controls) != 7 {
+		t.Fatalf("want 9 cases and 7 controls, got %d/%d", len(suite.Cases), len(suite.Controls))
 	}
 	heldOut := map[string]int{}
 	for _, c := range suite.Cases {
@@ -42,6 +42,37 @@ func TestFrozenSuiteHasIndependentHeldOutsAndCalibrationControls(t *testing.T) {
 	for _, control := range suite.Controls {
 		if strings.TrimSpace(control.Output.Brief) == "" || strings.TrimSpace(control.Output.Detailed) == "" {
 			t.Fatalf("control %s is missing a complete candidate", control.ID)
+		}
+	}
+}
+
+func TestAssignedClassRubricHasDistinctGroundTruthNegativeControl(t *testing.T) {
+	s, err := LoadSuite()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundAssigned, foundRunnerUp bool
+	for _, control := range s.Controls {
+		if control.ID == "019-global-runner-up" {
+			foundRunnerUp = true
+		}
+		if control.ID == "019-assigned-as-correct" {
+			foundAssigned = true
+			if control.Expected != Fail || len(control.MustFail) != 1 || control.MustFail[0] != "assigned_class" || !strings.Contains(control.Output.Brief, "正确类") || !strings.Contains(control.Output.Detailed, "真实类别") {
+				t.Fatal("assigned-as-correct control must independently fail the label/ground-truth distinction")
+			}
+		}
+	}
+	if !foundAssigned || !foundRunnerUp {
+		t.Fatal("both assigned-as-correct and global-runner-up negative controls are required")
+	}
+	for _, c := range s.Cases {
+		if c.ID == "019" {
+			for _, cr := range c.Criteria {
+				if cr.ID == "assigned_class" && !strings.Contains(cr.Expected, "verified ground truth") {
+					t.Fatal("rubric must distinguish annotations from verified ground truth")
+				}
+			}
 		}
 	}
 }

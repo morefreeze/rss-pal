@@ -123,9 +123,9 @@ func TestRunGeneratesFrozenOutputsButNeverCallsUngradedPassing(t *testing.T) {
 func TestRunCalibratesPositiveAndNegativeControlsBeforeAcceptingGrades(t *testing.T) {
 	suite, _ := LoadSuite()
 	cfg := testConfig()
-	cfg.Grade, cfg.MaxCalls = true, 9 // six controls + two summary stages + one judge
+	cfg.Grade, cfg.MaxCalls = true, len(suite.Controls)+3 // controls + two summary stages + one judge
 	a, err := Run(context.Background(), cfg, suite, scriptedProvider(t, suite, false, false))
-	if err != nil || a.Status != "graded_pass" || !a.Calibrated || a.CallCount != 9 || len(a.Calibration) != 6 || a.Results[0].Judgment.Verdict() != Pass {
+	if err != nil || a.Status != "graded_pass" || !a.Calibrated || a.CallCount != len(suite.Controls)+3 || len(a.Calibration) != len(suite.Controls) || a.Results[0].Judgment.Verdict() != Pass {
 		t.Fatalf("expected calibrated grade: %v %+v", err, a)
 	}
 	for _, tc := range []struct {
@@ -147,9 +147,9 @@ func TestRunCalibratesPositiveAndNegativeControlsBeforeAcceptingGrades(t *testin
 func TestRunBudgetIncludesJudgesAndLengthRetries(t *testing.T) {
 	suite, _ := LoadSuite()
 	cfg := testConfig()
-	cfg.Grade, cfg.MaxCalls = true, 8
+	cfg.Grade, cfg.MaxCalls = true, len(suite.Controls)+2
 	a, err := Run(context.Background(), cfg, suite, scriptedProvider(t, suite, false, false))
-	if err != nil || a.Status != "incomplete" || a.CallCount != 8 || a.BudgetDenied == 0 {
+	if err != nil || a.Status != "incomplete" || a.CallCount != len(suite.Controls)+2 || a.BudgetDenied == 0 {
 		t.Fatalf("judge must share hard budget: %v %+v", err, a)
 	}
 	cfg.Grade, cfg.MaxCalls = false, 1
@@ -158,6 +158,49 @@ func TestRunBudgetIncludesJudgesAndLengthRetries(t *testing.T) {
 	}))
 	if err != nil || a.Status != "incomplete" || a.CallCount != 1 || a.BudgetDenied == 0 || a.Results[0].Status != "incomplete" {
 		t.Fatalf("retry escaped request budget: %v %+v", err, a)
+	}
+}
+
+func TestRunPersistsModelJudgmentTextForInvalidQuotesAndRedactsCredentials(t *testing.T) {
+	suite, _ := LoadSuite()
+	for _, phase := range []string{"calibration", "grading"} {
+		t.Run(phase, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.Grade = true
+			base := scriptedProvider(t, suite, false, false)
+			j := testJudgment(suite.Cases[0], suite.Controls[0].Output, Pass)
+			j.Criteria[0].SourceQuote = "invented quote"
+			j.Criteria[0].Reason = "invalid citation; provider echoed test-secret"
+			raw, _ := json.Marshal(j)
+			a, err := Run(context.Background(), cfg, suite, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				scope, _ := r.Context().Value(scopeKey{}).(callScope)
+				if scope.kind != phase {
+					return base.RoundTrip(r)
+				}
+				answer, _ := json.Marshal(string(raw))
+				return wireResponse(fmt.Sprintf(`{"model":"judge","choices":[{"message":{"content":%s},"finish_reason":"stop"}],"provider_debug":"must not persist"}`, answer)), nil
+			}))
+			if err != nil || a.Status != "incomplete" {
+				t.Fatalf("bad evidence must remain incomplete: %v %+v", err, a)
+			}
+			var saved, code string
+			if phase == "calibration" {
+				saved, code = a.Calibration[0].JudgmentText, a.Calibration[0].ErrorCode
+			} else {
+				saved, code = a.Results[0].JudgmentText, a.Results[0].ErrorCode
+			}
+			if saved != string(raw) || code != "judgment_source_quote_invalid" {
+				t.Fatalf("model text/category lost before parser rejected quote: text=%q code=%q", saved, code)
+			}
+			path := filepath.Join(t.TempDir(), "raw-judge.json")
+			if err := SaveArtifact(path, a, []string{cfg.Generator.Key}); err != nil {
+				t.Fatal(err)
+			}
+			persisted, _ := os.ReadFile(path)
+			if strings.Contains(string(persisted), "test-secret") || strings.Contains(string(persisted), "provider_debug") || !strings.Contains(string(persisted), "[REDACTED]") || !strings.Contains(string(persisted), "judgment_text") {
+				t.Fatal("safe model message text must persist with secret redaction, without the provider wrapper")
+			}
+		})
 	}
 }
 
@@ -186,6 +229,9 @@ func TestRunUncertainOrMalformedLiveGradeCannotPassAfterCalibration(t *testing.T
 		}
 		if err != nil || !a.Calibrated || a.Status != want {
 			t.Fatalf("unknown/malformed grading escaped fail-closed policy: %v %+v", err, a)
+		}
+		if malformed && (a.Results[0].JudgmentText != `{"overall":"pass"}` || a.Results[0].ErrorCode != "judgment_json_invalid") {
+			t.Fatal("malformed model JSON must remain available with a safe parser category")
 		}
 	}
 }
@@ -276,6 +322,27 @@ func TestArtifactRedactsOverlappingAndEscapedSecretValuesCompletely(t *testing.T
 	var restored Artifact
 	if json.Unmarshal(raw, &restored) != nil || restored.Results[0].Output.Brief != "[REDACTED]" || restored.Results[0].Output.Detailed != "[REDACTED]" {
 		t.Fatalf("incomplete secret redaction: %s", raw)
+	}
+}
+
+func TestArtifactRedactsEscapedCredentialsInsideJudgmentJSONText(t *testing.T) {
+	secret := "test\"secret\\suffix"
+	message, _ := json.Marshal(map[string]string{"reason": secret})
+	a := &Artifact{Calibration: []CalibrationResult{{JudgmentText: string(message)}}, Results: []CaseResult{{JudgmentText: string(message)}}}
+	path := filepath.Join(t.TempDir(), "nested-secret.json")
+	if err := SaveArtifact(path, a, []string{secret}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	var restored Artifact
+	if json.Unmarshal(raw, &restored) != nil {
+		t.Fatal("artifact must remain valid JSON")
+	}
+	for _, text := range []string{restored.Calibration[0].JudgmentText, restored.Results[0].JudgmentText} {
+		var decoded map[string]string
+		if json.Unmarshal([]byte(text), &decoded) != nil || decoded["reason"] != "[REDACTED]" {
+			t.Fatal("configured credentials must be redacted even inside the model’s JSON message text")
+		}
 	}
 }
 

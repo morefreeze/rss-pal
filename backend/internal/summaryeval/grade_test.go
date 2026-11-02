@@ -30,6 +30,19 @@ func TestJudgmentAcceptsEvidenceBackedParaphrasesWithoutExactAnswerMatching(t *t
 	}
 }
 
+func TestGraderVersionAndInstructionsSeparateAssignedLabelsFromVerifiedTruth(t *testing.T) {
+	s, _ := LoadSuite()
+	if GraderVersion != "semantic-evidence-v2" {
+		t.Fatal("changed semantic grading needs a new grader version")
+	}
+	prompt := JudgePrompt(s.Cases[6], s.Controls[4].Output)
+	for _, required := range []string{"verified ground truth", "assigned/reference", "an accurate detail cannot cancel a contradictory brief", "Do not reward rubric keywords alone"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("missing semantic distinction: %s", required)
+		}
+	}
+}
+
 func TestJudgmentNeverPassesUnknownMissingOrUngroundedCriteria(t *testing.T) {
 	s, _ := LoadSuite()
 	c, o := s.Cases[0], s.Controls[0].Output

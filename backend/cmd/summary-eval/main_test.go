@@ -24,7 +24,7 @@ func TestValidationIsOfflineAndDoesNotClaimSemanticAcceptance(t *testing.T) {
 			t.Fatal("schema validation must be offline")
 			return nil, nil
 		}))
-	if code != 0 || !strings.Contains(out.String(), "9 cases") || !strings.Contains(out.String(), "semantic evaluation not run") || strings.Contains(out.String(), "graded_pass") {
+	if code != 0 || !strings.Contains(out.String(), "9 cases") || !strings.Contains(out.String(), "7 controls") || !strings.Contains(out.String(), "semantic evaluation not run") || strings.Contains(out.String(), "graded_pass") {
 		t.Fatalf("unexpected validation: %d %s %s", code, out.String(), stderr.String())
 	}
 }

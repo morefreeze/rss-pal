@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "summary-fidelity-2026-11-02-v2",
+  "version": "summary-fidelity-2026-11-02-v3",
   "cases": [
     {
       "id": "017",
@@ -253,8 +253,10 @@
       "criteria": [
         {
           "id": "assigned_class",
-          "expected": "Preserve y as the assigned label, which need not be the winning predicted class.",
+          "expected": "Preserve y as the data-assigned annotation, not verified ground truth and not necessarily the winning prediction. The source explicitly describes a BIRD mislabeled as DOG: calling assigned y the correct/true class falsely upgrades annotation status unless the source confirms correctness.",
           "prohibited": [
+            "Calling the assigned class the correct/true/verified ground-truth class, or implying the annotation is known correct.",
+            "Treating agreement with a supplied label as proof of ground-truth correctness.",
             "Replacing the assigned-class logit with the global maximum."
           ],
           "source_evidence": "BIRD image is mistakenly marked as DOG"
@@ -293,8 +295,9 @@
       "criteria": [
         {
           "id": "assigned_class",
-          "expected": "Retain the annotated B score as the minuend even when A wins.",
+          "expected": "Retain annotated B as the minuend even when A wins. A dataset annotation is not verified ground truth; do not relabel it as the correct/true class without evidence that the annotation is correct.",
           "prohibited": [
+            "Calling assigned B the verified true/correct class merely because it is annotated.",
             "Using the winning A score as the minuend."
           ],
           "source_evidence": "assigned label is a dataset annotation, not necessarily the model winner"
@@ -332,9 +335,10 @@
       "criteria": [
         {
           "id": "assigned_class",
-          "expected": "Keep k as the fixed designated monitored port rather than the minute’s winner.",
+          "expected": "Keep k as the designated monitored reference port rather than the minute’s winner. Designation alone is not verified ground truth about which port is correct, best, or fault-free.",
           "prohibited": [
-            "Reassigning k to the largest score each minute."
+            "Reassigning k to the largest score each minute.",
+            "Treating the designated port as independently verified correct/best or fault-free."
           ],
           "source_evidence": "指定端口k作为监测对象，而不是每分钟都重新选择分数最高的端口"
         },
@@ -422,6 +426,18 @@
       "must_fail": [
         "excluded_max"
       ]
+    },
+    {
+      "id": "019-assigned-as-correct",
+      "case_id": "019",
+      "expected": "fail",
+      "must_fail": [
+        "assigned_class"
+      ],
+      "output": {
+        "brief": "margin为正确类logit减去其他类别最大logit，跨epoch平均得到AUM。",
+        "detailed": "这里y代表已经确认的真实类别，因而就是正确类；margin用该正确类logit减去其余类别最大logit，跨epoch取均值即AUM。AUM用于筛查潜在错标，负margin本身不能直接确认错标。"
+      }
     }
   ]
 }
