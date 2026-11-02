@@ -147,18 +147,29 @@ func readTemplate(path string) (string, error) {
 
 func sourceRevision() (string, bool) {
 	// Only fixed read-only commands; never a shell or credential-bearing config.
-	b, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		if info, ok := debug.ReadBuildInfo(); ok {
-			return buildRevision(info)
+	info, _ := debug.ReadBuildInfo()
+	return resolveSourceRevision(info, func(args ...string) ([]byte, error) {
+		return exec.Command("git", args...).Output()
+	})
+}
+
+func resolveSourceRevision(info *debug.BuildInfo, git func(...string) ([]byte, error)) (string, bool) {
+	// A deployed binary can run inside a different checkout. Its embedded VCS
+	// settings describe the executing code; the current directory cannot replace them.
+	if info != nil {
+		if revision, dirty := buildRevision(info); revision != "unknown" {
+			return revision, dirty
 		}
+	}
+	b, err := git("rev-parse", "HEAD")
+	if err != nil {
 		return "unknown", true
 	}
 	revision := strings.TrimSpace(string(b))
 	if !validRevision(revision) {
 		return "unknown", true
 	}
-	b, err = exec.Command("git", "status", "--porcelain").Output()
+	b, err = git("status", "--porcelain")
 	return revision, err != nil || len(b) != 0
 }
 

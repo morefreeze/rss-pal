@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -88,5 +89,45 @@ func TestCompiledRevisionFallbackPreservesRevisionAndDirtyEvidence(t *testing.T)
 				t.Fatalf("wrong compiled provenance: %q/%t", got, dirty)
 			}
 		})
+	}
+}
+
+func TestCompiledRevisionWinsOverDifferentAmbientCheckout(t *testing.T) {
+	compiled, ambient := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	for _, modified := range []bool{false, true} {
+		info := &debug.BuildInfo{Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: compiled},
+			{Key: "vcs.modified", Value: map[bool]string{false: "false", true: "true"}[modified]},
+		}}
+		var gitCalls int
+		got, dirty := resolveSourceRevision(info, func(args ...string) ([]byte, error) {
+			gitCalls++
+			if args[0] == "rev-parse" {
+				return []byte(ambient + "\n"), nil
+			}
+			return nil, nil // the ambient checkout is clean
+		})
+		if got != compiled || dirty != modified || gitCalls != 0 {
+			t.Fatalf("binary provenance replaced by ambient Git: got=%s dirty=%t git_calls=%d", got, dirty, gitCalls)
+		}
+	}
+}
+
+func TestGitRevisionFallbackWhenBuildHasNoUsableVCSRevision(t *testing.T) {
+	ambient := strings.Repeat("b", 40)
+	for _, info := range []*debug.BuildInfo{nil, {}, {Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: "invalid"}}}} {
+		got, dirty := resolveSourceRevision(info, func(args ...string) ([]byte, error) {
+			if args[0] == "rev-parse" {
+				return []byte(ambient), nil
+			}
+			return []byte(" M file.go\n"), nil
+		})
+		if got != ambient || !dirty {
+			t.Fatalf("missing/invalid embedded VCS must fall back to Git: %s/%t", got, dirty)
+		}
+	}
+	got, dirty := resolveSourceRevision(nil, func(...string) ([]byte, error) { return nil, errors.New("git unavailable") })
+	if got != "unknown" || !dirty {
+		t.Fatalf("unavailable provenance must remain unknown: %s/%t", got, dirty)
 	}
 }
