@@ -87,6 +87,20 @@ func TestJudgmentRejectsNestedCaseAliasOverridingFailWithPass(t *testing.T) {
 	}
 }
 
+func TestJudgmentRejectsUnicodeSchemaAliasOverridingFabricatedEvidence(t *testing.T) {
+	s, _ := LoadSuite()
+	c, o := s.Cases[0], s.Controls[0].Output
+	j := testJudgment(c, o, Pass)
+	j.Criteria[0].SourceQuote = "invented evidence"
+	raw, _ := json.Marshal(j)
+	validQuote, _ := json.Marshal(c.Criteria[0].SourceEvidence)
+	aliased := strings.Replace(string(raw), `"source_quote":"invented evidence"`, `"source_quote":"invented evidence","ſource_quote":`+string(validQuote), 1)
+	got, err := ParseJudgment([]byte(aliased), c, o)
+	if err == nil {
+		t.Fatalf("non-ASCII schema alias must not overwrite fabricated evidence: verdict=%s", got.Verdict())
+	}
+}
+
 func TestJudgmentAllowsShortNonWhitespaceMathematicalEvidence(t *testing.T) {
 	s, _ := LoadSuite()
 	var c Case
