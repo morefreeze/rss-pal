@@ -32,13 +32,41 @@ func TestJudgmentAcceptsEvidenceBackedParaphrasesWithoutExactAnswerMatching(t *t
 
 func TestGraderVersionAndInstructionsSeparateAssignedLabelsFromVerifiedTruth(t *testing.T) {
 	s, _ := LoadSuite()
-	if GraderVersion != "semantic-evidence-v2" {
+	if GraderVersion != "semantic-evidence-v3" {
 		t.Fatal("changed semantic grading needs a new grader version")
 	}
 	prompt := JudgePrompt(s.Cases[6], s.Controls[4].Output)
 	for _, required := range []string{"verified ground truth", "assigned/reference", "an accurate detail cannot cancel a contradictory brief", "Do not reward rubric keywords alone"} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("missing semantic distinction: %s", required)
+		}
+	}
+}
+
+func TestJudgePromptSuppliesExactEvidenceAndRequestsVerbatimMathCopy(t *testing.T) {
+	s, _ := LoadSuite()
+	var c Case
+	for _, candidate := range s.Cases {
+		if candidate.ID == "019" {
+			c = candidate
+		}
+	}
+	prompt := JudgePrompt(c, s.Controls[4].Output)
+	_, input, ok := strings.Cut(prompt, "INPUT:\n")
+	var decoded struct {
+		Criteria []Criterion `json:"criteria"`
+	}
+	if !ok || json.Unmarshal([]byte(input), &decoded) != nil || len(decoded.Criteria) != len(c.Criteria) {
+		t.Fatal("grader must receive the frozen evidence spans")
+	}
+	for i, criterion := range decoded.Criteria {
+		if criterion.SourceEvidence != c.Criteria[i].SourceEvidence {
+			t.Fatal("evidence must reach the grader without mathematical rewriting")
+		}
+	}
+	for _, required := range []string{"copy criterion.source_evidence verbatim", "Do not render, simplify, or rewrite LaTeX macros", "shorter exact contiguous substring"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("missing literal-copy instruction: %s", required)
 		}
 	}
 }
