@@ -467,7 +467,11 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			updated, err := articleRepo.CompleteSummary(id, token, article.Content, brief, detailed)
+			if article.SummaryGeneration != nil {
+				article.SummaryGeneration.EntryPoint = "api-manual"
+			}
+			article.SummaryGeneration.BindTemplate(bodyReq.TemplateID, tpl.BriefPrompt, tpl.DetailedPrompt)
+			updated, err := articleRepo.CompleteSummary(id, token, article.Content, brief, detailed, article.SummaryGeneration)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
@@ -497,7 +501,10 @@ func (h *ArticleHandler) GenerateSummary(c *gin.Context) {
 		return
 	}
 
-	updated, err := articleRepo.CompleteSummary(id, token, article.Content, brief, detailed)
+	if article.SummaryGeneration != nil {
+		article.SummaryGeneration.EntryPoint = "api-manual"
+	}
+	updated, err := articleRepo.CompleteSummary(id, token, article.Content, brief, detailed, article.SummaryGeneration)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -578,6 +585,9 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 				brief, detailed, serr = summarizerToUse.SummarizeWithTemplateStream(
 					c.Request.Context(), article, tpl.BriefPrompt, tpl.DetailedPrompt, onBrief, onDetailed,
 				)
+				if serr == nil {
+					article.SummaryGeneration.BindTemplate(templateID, tpl.BriefPrompt, tpl.DetailedPrompt)
+				}
 			} else {
 				brief, detailed, serr = summarizerToUse.SummarizeStream(c.Request.Context(), article, onBrief, onDetailed)
 			}
@@ -600,7 +610,10 @@ func (h *ArticleHandler) streamSummary(c *gin.Context, id int, article *model.Ar
 		return false
 	}
 
-	updated, err := h.articleRepo.WithCtx(c).CompleteSummary(id, token, article.Content, brief, detailed)
+	if article.SummaryGeneration != nil {
+		article.SummaryGeneration.EntryPoint = "api-manual-stream"
+	}
+	updated, err := h.articleRepo.WithCtx(c).CompleteSummary(id, token, article.Content, brief, detailed, article.SummaryGeneration)
 	stream.stopHeartbeat()
 	if err != nil {
 		writeAndFlush(map[string]any{"type": "error", "msg": err.Error()})

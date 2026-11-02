@@ -997,18 +997,20 @@ export async function generateSummaryStream(
       if (localAIAccount() !== account) throw new Error('账号已切换，本次生成已停止')
     }
     try {
-      const input = await api.get<{ content_hash: string; summary_version: string; brief_prompt: string; detailed_prompt: string }>(`/articles/${articleId}/summary/input`, {
+      const input = await api.get<{ content_hash: string; summary_version: string; generation_binding: string; template_id: number; brief_prompt: string; detailed_prompt: string }>(`/articles/${articleId}/summary/input`, {
         params: templateId ? { template_id: templateId } : {}, signal,
       }).then(r => r.data)
       ensureCurrent()
-      const brief = await callLocalAI(localConfig, input.brief_prompt, signal)
+      const requestHashes: string[] = []
+      const brief = await callLocalAI(localConfig, input.brief_prompt, signal, false, hash => requestHashes.push(hash))
       ensureCurrent()
       handlers.onBriefDone?.(brief)
       handlers.onBriefPhaseDone?.()
-      const detailed = await callLocalAI(localConfig, input.detailed_prompt + '\n\n前置要点（仅供去重，不作为新的事实来源）：\n' + brief, signal)
+      const detailed = await callLocalAI(localConfig, input.detailed_prompt + '\n\n前置要点（仅供去重，不作为新的事实来源）：\n' + brief, signal, false, hash => requestHashes.push(hash))
       ensureCurrent()
+      if (localConfig.model.includes(localConfig.api_key)) throw new Error('模型名称包含敏感凭证，本次结果已丢弃')
       await api.put(`/articles/${articleId}/summary/result`, {
-        content_hash: input.content_hash, summary_version: input.summary_version, summary_brief: brief, summary_detailed: detailed,
+        content_hash: input.content_hash, summary_version: input.summary_version, generation_binding: input.generation_binding, template_id: input.template_id, model: localConfig.model, request_hashes: requestHashes, summary_brief: brief, summary_detailed: detailed,
       }, { signal })
       ensureCurrent()
       handlers.onDetailedDone?.(detailed)

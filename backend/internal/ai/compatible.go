@@ -33,5 +33,6 @@ func (s *Summarizer) doCompatible(req *http.Request) (*http.Response, error) {
 	if s.articleRouted {
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	}
+	s.captureSummaryWireRequest(req)
 	return client.Do(req)
 }

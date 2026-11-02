@@ -33,10 +33,11 @@ func TestLocalSummaryResultsAreOwnedBoundedAndContentChecked(t *testing.T) {
 		t.Fatalf("input %d %s", input.Code, input.Body)
 	}
 	var prompts struct {
-		ContentHash    string `json:"content_hash"`
-		SummaryVersion string `json:"summary_version"`
-		Brief          string `json:"brief_prompt"`
-		Detailed       string `json:"detailed_prompt"`
+		ContentHash       string `json:"content_hash"`
+		SummaryVersion    string `json:"summary_version"`
+		GenerationBinding string `json:"generation_binding"`
+		Brief             string `json:"brief_prompt"`
+		Detailed          string `json:"detailed_prompt"`
 	}
 	if err := json.Unmarshal(input.Body.Bytes(), &prompts); err != nil {
 		t.Fatal(err)
@@ -53,7 +54,7 @@ func TestLocalSummaryResultsAreOwnedBoundedAndContentChecked(t *testing.T) {
 		f.router.ServeHTTP(w, req)
 		return w
 	}
-	body := map[string]any{"content_hash": prompts.ContentHash, "summary_version": prompts.SummaryVersion, "summary_brief": "new brief", "summary_detailed": "new detailed"}
+	body := map[string]any{"content_hash": prompts.ContentHash, "summary_version": prompts.SummaryVersion, "generation_binding": prompts.GenerationBinding, "model": "browser-model", "request_hashes": []string{strings.Repeat("a", 64), strings.Repeat("b", 64)}, "summary_brief": "new brief", "summary_detailed": "new detailed"}
 	if w := f.do(t, "GET", path+"/input", f.userB); w.Code != 404 {
 		t.Fatalf("input leak %d %s", w.Code, w.Body)
 	}
@@ -79,8 +80,38 @@ func TestLocalSummaryResultsAreOwnedBoundedAndContentChecked(t *testing.T) {
 		t.Fatalf("stale %d %s", w.Code, w.Body)
 	}
 	body["content_hash"] = prompts.ContentHash
+	body["generation_binding"] = "stale-policy"
+	if w := save(f.userA, body); w.Code != 409 {
+		t.Fatalf("stale binding %d %s", w.Code, w.Body)
+	}
+	body["generation_binding"] = prompts.GenerationBinding
+	if _, err := f.privDB.Exec(`UPDATE articles SET title=title || ' changed' WHERE id=$1`, f.articleA); err != nil {
+		t.Fatal(err)
+	}
+	if w := save(f.userA, body); w.Code != 409 {
+		t.Fatalf("stale title %d %s", w.Code, w.Body)
+	}
+	input = f.do(t, "GET", path+"/input", f.userA)
+	if err := json.Unmarshal(input.Body.Bytes(), &prompts); err != nil {
+		t.Fatal(err)
+	}
+	body["generation_binding"] = prompts.GenerationBinding
 	if w := save(f.userA, body); w.Code != 200 {
 		t.Fatalf("save %d %s", w.Code, w.Body)
+	}
+	var provenance struct {
+		Execution     string `json:"execution"`
+		PolicyVersion string `json:"policy_version"`
+		Stages        []struct {
+			ModelSource string `json:"model_source"`
+		} `json:"stages"`
+	}
+	var rawProvenance []byte
+	if err := f.privDB.QueryRow(`SELECT summary_generation FROM articles WHERE id=$1`, f.articleA).Scan(&rawProvenance); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(rawProvenance, &provenance); err != nil || provenance.Execution != "client-reported" || provenance.PolicyVersion == "" || len(provenance.Stages) != 2 || provenance.Stages[0].ModelSource != "client-reported" {
+		t.Fatalf("invalid lineage %s %v", rawProvenance, err)
 	}
 	// A second tab still carrying the old summary revision must not overwrite it.
 	if w := save(f.userA, body); w.Code != 409 {
@@ -122,6 +153,8 @@ func TestLocalSummaryCommitFailurePreservesPreviousResult(t *testing.T) {
 	}
 	delete(body, "brief_prompt")
 	delete(body, "detailed_prompt")
+	body["model"] = "browser-model"
+	body["request_hashes"] = []string{strings.Repeat("a", 64), strings.Repeat("b", 64)}
 	body["summary_brief"] = "new brief"
 	body["summary_detailed"] = "new detailed"
 	raw, _ := json.Marshal(body)

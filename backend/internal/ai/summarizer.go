@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/bytedance/rss-pal/internal/aiusage"
+	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/taskbudget"
 	"io"
 	"log"
@@ -20,6 +21,8 @@ import (
 const DefaultModel = "glm-5.3"
 
 type Summarizer struct {
+	lastSummaryRequest      *model.SummaryGenerationStage
+	generation              *model.SummaryGeneration
 	defaultSummaryReasoning bool
 	providerProtocol        string
 	articleResolver         ArticleResolver
@@ -166,6 +169,7 @@ func (s *Summarizer) call(ctx context.Context, prompt string, maxTokens int) (st
 		}
 		result, err := s.doCall(ctx, body, maxTokens)
 		if err == nil {
+			s.recordSummaryRequest(body)
 			return result, nil
 		}
 		if taskbudget.IsDenied(err) || isCompletionError(err) {
@@ -255,16 +259,22 @@ func (s *Summarizer) callStream(ctx context.Context, prompt string, maxTokens in
 		return "", fmt.Errorf("AI API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	return readCompletionStream(resp.Body, onDelta)
+	result, err := readCompletionStream(resp.Body, onDelta)
+	if err == nil {
+		s.recordSummaryRequest(body)
+	}
+	return result, err
 }
 
 type SummaryResult struct {
-	Brief    string
-	Detailed string
+	Generation *model.SummaryGeneration
+	Brief      string
+	Detailed   string
 }
 
 func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*SummaryResult, error) {
 	s = s.forArticle(ctx, content).forDefaultSummary()
+	s = s.beginSummary(title, content, "", "")
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
@@ -278,10 +288,7 @@ func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*Sum
 		return nil, fmt.Errorf("failed to generate detailed summary: %w", err)
 	}
 
-	return &SummaryResult{
-		Brief:    brief,
-		Detailed: detailed,
-	}, nil
+	return s.summaryResult(brief, detailed), nil
 }
 
 // SummarizeStream generates brief then detailed summaries, invoking
@@ -289,6 +296,7 @@ func (s *Summarizer) Summarize(ctx context.Context, title, content string) (*Sum
 func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
 	s = s.forArticle(ctx, content).forDefaultSummary()
+	s = s.beginSummary(title, content, "", "")
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
@@ -324,7 +332,7 @@ func (s *Summarizer) SummarizeStream(ctx context.Context, title, content string,
 		return nil, fmt.Errorf("failed to stream detailed summary: %w", err)
 	}
 
-	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+	return s.summaryResult(brief, detailed), nil
 }
 
 // SummarizeWithTemplateStream is the streaming counterpart of SummarizeWithTemplate.
@@ -332,6 +340,7 @@ func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, con
 	briefPromptTpl, detailedPromptTpl string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
 	s = s.forArticle(ctx, content)
+	s = s.beginSummary(title, content, briefPromptTpl, detailedPromptTpl)
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
@@ -349,7 +358,7 @@ func (s *Summarizer) SummarizeWithTemplateStream(ctx context.Context, title, con
 		return nil, fmt.Errorf("failed to stream detailed with template: %w", err)
 	}
 
-	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+	return s.summaryResult(brief, detailed), nil
 }
 
 func (s *Summarizer) generateBrief(ctx context.Context, title, content string) (string, error) {
@@ -434,6 +443,7 @@ func (s *Summarizer) ExtractTopics(ctx context.Context, title, content string) (
 // Templates may contain {title} and {content} placeholders which are replaced before calling the AI.
 func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, briefPromptTpl, detailedPromptTpl string) (*SummaryResult, error) {
 	s = s.forArticle(ctx, content)
+	s = s.beginSummary(title, content, briefPromptTpl, detailedPromptTpl)
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
@@ -452,10 +462,7 @@ func (s *Summarizer) SummarizeWithTemplate(ctx context.Context, title, content, 
 		return nil, fmt.Errorf("failed to generate detailed summary with template: %w", err)
 	}
 
-	return &SummaryResult{
-		Brief:    brief,
-		Detailed: detailed,
-	}, nil
+	return s.summaryResult(brief, detailed), nil
 }
 
 // loadImageBlock reads an on-disk image file and returns an image_url content
@@ -540,6 +547,7 @@ func (s *Summarizer) callVision(ctx context.Context, prompt string, imagePaths [
 		}
 		result, callErr := s.doCall(ctx, body, maxTokens)
 		if callErr == nil {
+			s.recordSummaryRequest(body)
 			return result, nil
 		}
 		lastErr = callErr
@@ -600,12 +608,14 @@ const imageEmbedInstruction = `如果某张附图能直观说明总结中的某�
 // if the model is reachable in any form.
 func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content string, imagePaths, imageURLs []string) (*SummaryResult, error) {
 	s = s.forArticle(ctx, content).forDefaultSummary()
+	s = s.beginSummary(title, content, "", "")
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
 	if len(imagePaths) == 0 {
 		return s.Summarize(ctx, title, content)
 	}
+	originalContent := content
 	content = s.truncateArticle(content)
 	urlList := buildImageURLList(imageURLs)
 
@@ -616,7 +626,7 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 			return nil, err
 		}
 		log.Printf("vision summary failed, falling back to text: %v", err)
-		return s.Summarize(ctx, title, content)
+		return s.Summarize(ctx, title, originalContent)
 	}
 
 	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
@@ -636,7 +646,7 @@ func (s *Summarizer) SummarizeWithImages(ctx context.Context, title, content str
 		detailed = detText
 	}
 
-	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+	return s.summaryResult(brief, detailed), nil
 }
 
 func buildVisionBriefPrompt(title, content, urlList string) string {
@@ -733,7 +743,11 @@ func (s *Summarizer) callVisionStream(ctx context.Context, prompt string, imageP
 		return "", fmt.Errorf("vision stream error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	return readCompletionStream(resp.Body, onDelta)
+	result, err := readCompletionStream(resp.Body, onDelta)
+	if err == nil {
+		s.recordSummaryRequest(body)
+	}
+	return result, err
 }
 
 // SummarizeWithImagesStream is the streaming variant of SummarizeWithImages.
@@ -744,12 +758,14 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 	imagePaths, imageURLs []string,
 	onBriefDelta, onDetailedDelta func(string)) (*SummaryResult, error) {
 	s = s.forArticle(ctx, content).forDefaultSummary()
+	s = s.beginSummary(title, content, "", "")
 	if s.routingErr != nil {
 		return nil, s.routingErr
 	}
 	if len(imagePaths) == 0 {
 		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
 	}
+	originalContent := content
 	content = s.truncateArticle(content)
 	urlList := buildImageURLList(imageURLs)
 
@@ -760,7 +776,7 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 			return nil, err
 		}
 		log.Printf("vision stream brief failed, falling back to text stream: %v", err)
-		return s.SummarizeStream(ctx, title, content, onBriefDelta, onDetailedDelta)
+		return s.SummarizeStream(ctx, title, originalContent, onBriefDelta, onDetailedDelta)
 	}
 
 	detailedContent, anchorInstruction := buildDetailedArticlePromptInput(content)
@@ -779,7 +795,7 @@ func (s *Summarizer) SummarizeWithImagesStream(ctx context.Context, title, conte
 		detailed = dText
 	}
 
-	return &SummaryResult{Brief: brief, Detailed: detailed}, nil
+	return s.summaryResult(brief, detailed), nil
 }
 
 // Polish takes a prompt template text and returns an improved version using the AI model.

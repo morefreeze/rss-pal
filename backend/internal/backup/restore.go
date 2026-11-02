@@ -134,6 +134,10 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 				continue
 			}
 			var newID int
+			var generation any
+			if len(ar.SummaryGeneration) > 0 {
+				generation = string(ar.SummaryGeneration)
+			}
 			if ar.ParentExportID != nil {
 				parentID, ok := idMap[*ar.ParentExportID]
 				if !ok {
@@ -143,12 +147,12 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 				err := tx.QueryRowContext(ctx, `INSERT INTO articles (
       feed_id,title,url,content,published_at,summary_brief,summary_detailed,fetched_at,
       word_count,reading_minutes,editor_note,media_url,media_type,media_duration_seconds,
-      is_clip,parent_article_id,links_extendable)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+      is_clip,parent_article_id,links_extendable,summary_generation)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      ON CONFLICT (parent_article_id,url) WHERE parent_article_id IS NOT NULL
      DO NOTHING RETURNING id`, feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
 					ar.SummaryBrief, ar.SummaryDetailed, ar.FetchedAt, ar.WordCount, ar.ReadingMinutes,
-					ar.EditorNote, ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.IsClip, parentID, ar.LinksExtendable).Scan(&newID)
+					ar.EditorNote, ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.IsClip, parentID, ar.LinksExtendable, generation).Scan(&newID)
 				if err == sql.ErrNoRows {
 					err = tx.QueryRowContext(ctx, `SELECT id FROM articles WHERE parent_article_id=$1 AND url=$2`, parentID, ar.URL).Scan(&newID)
 				}
@@ -170,13 +174,13 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 						summary_brief, summary_detailed, fetched_at,
 						word_count, reading_minutes, editor_note,
 						media_url, media_type, media_duration_seconds,
-						is_clip,links_extendable
-					) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14, TRUE,$15)
+						is_clip,links_extendable,summary_generation
+					) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14, TRUE,$15,$16)
 					RETURNING id`,
 					feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
 					ar.SummaryBrief, ar.SummaryDetailed, ar.FetchedAt,
 					ar.WordCount, ar.ReadingMinutes, ar.EditorNote,
-					ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.LinksExtendable,
+					ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.LinksExtendable, generation,
 				).Scan(&newID)
 				if err != nil {
 					return stats, fmt.Errorf("insert saved clip %s: %w", ar.URL, err)
@@ -191,15 +195,15 @@ func Restore(ctx context.Context, db *sql.DB, s *Snapshot, ss *SavedSnapshot) (R
 					feed_id, title, url, content, published_at,
 					summary_brief, summary_detailed, fetched_at,
 					word_count, reading_minutes, editor_note,
-					media_url, media_type, media_duration_seconds,links_extendable
-				) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14,$15)
+					media_url, media_type, media_duration_seconds,links_extendable,summary_generation
+				) VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11, $12,$13,$14,$15,$16)
 				ON CONFLICT (feed_id, url) WHERE parent_article_id IS NULL AND NOT is_clip
 				DO NOTHING
 				RETURNING id`,
 				feedID, ar.Title, ar.URL, ar.Content, ar.PublishedAt,
 				ar.SummaryBrief, ar.SummaryDetailed, ar.FetchedAt,
 				ar.WordCount, ar.ReadingMinutes, ar.EditorNote,
-				ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.LinksExtendable,
+				ar.MediaURL, ar.MediaType, ar.MediaDurationSeconds, ar.LinksExtendable, generation,
 			).Scan(&newID)
 			if err == sql.ErrNoRows {
 				// Conflict — row exists; look it up. is_clip filter mirrors

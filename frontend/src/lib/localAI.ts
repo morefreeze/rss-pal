@@ -72,7 +72,7 @@ export function clearLocalAISession(): void {
   try { sessionStorage.removeItem(storageKey()) } catch { /* already signed out */ }
 }
 
-export async function callLocalAI(config: LocalAIConfig, prompt: string, signal?: AbortSignal, test = false): Promise<string> {
+export async function callLocalAI(config: LocalAIConfig, prompt: string, signal?: AbortSignal, test = false, onRequestHash?: (hash: string) => void): Promise<string> {
   const cfg = validateLocalAIConfig(config)
   const nativeClaude = findLocalAIPreset(cfg.base_url)?.protocol === 'anthropic'
   signal?.throwIfAborted()
@@ -81,6 +81,7 @@ export async function callLocalAI(config: LocalAIConfig, prompt: string, signal?
   signal?.addEventListener('abort', abort, { once: true })
   const timer = setTimeout(abort, test ? 30000 : 180000)
   try {
+    const requestBody = JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], max_tokens: test ? 16 : 8192, stream: false })
     let response: Response
     try {
       response = await fetch(`${cfg.base_url}/${nativeClaude ? 'messages' : 'chat/completions'}`, {
@@ -89,7 +90,7 @@ export async function callLocalAI(config: LocalAIConfig, prompt: string, signal?
           'Content-Type': 'application/json', 'x-api-key': cfg.api_key,
           'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true',
         } : { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
-        body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], max_tokens: test ? 16 : 8192, stream: false }),
+        body: requestBody,
         signal: ctrl.signal,
       })
     } catch {
@@ -109,6 +110,10 @@ export async function callLocalAI(config: LocalAIConfig, prompt: string, signal?
     if (!test && !complete) throw new Error('AI 未返回完整结果，本次不会保存，请手动重试')
     // A provider can echo request credentials. Never upload or display that echo.
     if (content.includes(cfg.api_key)) throw new Error('AI 响应包含敏感凭证，本次结果已丢弃')
+    if (onRequestHash) {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(requestBody))
+      onRequestHash(Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join(''))
+    }
     return content.trim()
   } finally {
     clearTimeout(timer)

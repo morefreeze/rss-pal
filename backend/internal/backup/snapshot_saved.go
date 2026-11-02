@@ -38,24 +38,25 @@ const savedFileSuffix = ".saved.json.gz"
 // (reading_progress.is_completed) and the SavedSnapshot exports
 // ReadingProgress rows separately.
 type SavedArticleRow struct {
-	ExportID             int        `json:"export_id"`
-	FeedURL              string     `json:"feed_url"`
-	FeedOwnerID          *int       `json:"feed_owner_id,omitempty"`
-	ParentExportID       *int       `json:"parent_export_id,omitempty"`
-	LinksExtendable      *bool      `json:"links_extendable,omitempty"`
-	Title                string     `json:"title"`
-	URL                  string     `json:"url"`
-	Content              string     `json:"content"`
-	PublishedAt          *time.Time `json:"published_at,omitempty"`
-	SummaryBrief         string     `json:"summary_brief,omitempty"`
-	SummaryDetailed      string     `json:"summary_detailed,omitempty"`
-	FetchedAt            time.Time  `json:"fetched_at"`
-	WordCount            int        `json:"word_count"`
-	ReadingMinutes       int        `json:"reading_minutes"`
-	EditorNote           string     `json:"editor_note,omitempty"`
-	MediaURL             string     `json:"media_url,omitempty"`
-	MediaType            string     `json:"media_type,omitempty"`
-	MediaDurationSeconds int        `json:"media_duration_seconds,omitempty"`
+	SummaryGeneration    json.RawMessage `json:"summary_generation,omitempty"`
+	ExportID             int             `json:"export_id"`
+	FeedURL              string          `json:"feed_url"`
+	FeedOwnerID          *int            `json:"feed_owner_id,omitempty"`
+	ParentExportID       *int            `json:"parent_export_id,omitempty"`
+	LinksExtendable      *bool           `json:"links_extendable,omitempty"`
+	Title                string          `json:"title"`
+	URL                  string          `json:"url"`
+	Content              string          `json:"content"`
+	PublishedAt          *time.Time      `json:"published_at,omitempty"`
+	SummaryBrief         string          `json:"summary_brief,omitempty"`
+	SummaryDetailed      string          `json:"summary_detailed,omitempty"`
+	FetchedAt            time.Time       `json:"fetched_at"`
+	WordCount            int             `json:"word_count"`
+	ReadingMinutes       int             `json:"reading_minutes"`
+	EditorNote           string          `json:"editor_note,omitempty"`
+	MediaURL             string          `json:"media_url,omitempty"`
+	MediaType            string          `json:"media_type,omitempty"`
+	MediaDurationSeconds int             `json:"media_duration_seconds,omitempty"`
 	// Older backups predate the is_clip column; absence decodes to false,
 	// matching the pre-migration-025 world where all articles were non-clip.
 	IsClip bool `json:"is_clip,omitempty"`
@@ -217,7 +218,7 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
  )
  SELECT a.id, f.url, f.owner_id, a.parent_article_id, a.links_extendable,
         COALESCE(a.title, ''), a.url, COALESCE(a.content, ''), a.published_at,
-        COALESCE(a.summary_brief, ''), COALESCE(a.summary_detailed, ''),
+        COALESCE(a.summary_brief, ''), COALESCE(a.summary_detailed, ''), a.summary_generation,
         a.fetched_at, a.word_count, a.reading_minutes, COALESCE(a.editor_note, ''),
         COALESCE(a.media_url, ''), COALESCE(a.media_type, ''), COALESCE(a.media_duration_seconds, 0), a.is_clip
  FROM articles a JOIN feeds f ON a.feed_id=f.id
@@ -231,15 +232,17 @@ func buildSaved(ctx context.Context, tx *sql.Tx, createdAt time.Time) (*SavedSna
 	var savedIDs []int
 	for rows.Next() {
 		var r SavedArticleRow
+		var generation []byte
 		if err := rows.Scan(&r.ExportID, &r.FeedURL, &r.FeedOwnerID, &r.ParentExportID, &r.LinksExtendable, &r.Title, &r.URL, &r.Content,
 			&r.PublishedAt,
-			&r.SummaryBrief, &r.SummaryDetailed,
+			&r.SummaryBrief, &r.SummaryDetailed, &generation,
 			&r.FetchedAt, &r.WordCount, &r.ReadingMinutes,
 			&r.EditorNote,
 			&r.MediaURL, &r.MediaType, &r.MediaDurationSeconds,
 			&r.IsClip); err != nil {
 			return nil, err
 		}
+		r.SummaryGeneration = generation
 		ss.SavedArticles = append(ss.SavedArticles, r)
 		savedIDs = append(savedIDs, r.ExportID)
 	}

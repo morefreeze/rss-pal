@@ -154,6 +154,7 @@ func (s *Summarizer) doAnthropic(req *http.Request) (*http.Response, error) {
 	// native credentials to a redirect target, including another port.
 	client := *s.httpClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	s.captureSummaryWireRequest(native)
 	response, err := client.Do(native)
 	if err != nil {
 		return nil, safeAnthropicError("anthropic request failed", err)

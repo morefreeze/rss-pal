@@ -3,10 +3,13 @@ package repository
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/bytedance/rss-pal/internal/model"
 	"strings"
 	"time"
 
@@ -69,20 +72,43 @@ func (r *ArticleRepository) GetSummaryJob(ctx context.Context, id int) (*Summary
 
 // CompleteSummary locks the lease before checking content; superseded or expired
 // owners cannot overwrite either summaries or a newer owner's job state.
-func (r *ArticleRepository) CompleteSummary(id int, token, content, brief, detailed string) (bool, error) {
-	return r.completeSummary(id, token, content, brief, detailed, nil)
+func (r *ArticleRepository) CompleteSummary(id int, token, content, brief, detailed string, generation ...*model.SummaryGeneration) (bool, error) {
+	return r.completeSummary(id, token, content, brief, detailed, nil, generation...)
 }
 
 // Browser results may arrive after another generation finished. Compare the
 // prior summary atomically with the write, in addition to content and lease.
-func (r *ArticleRepository) CompleteLocalSummary(id int, token, content, brief, detailed, priorBrief, priorDetailed string) (bool, error) {
-	return r.completeSummary(id, token, content, brief, detailed, &[2]string{priorBrief, priorDetailed})
+func (r *ArticleRepository) CompleteLocalSummary(id int, token, content, brief, detailed, priorBrief, priorDetailed string, generation ...*model.SummaryGeneration) (bool, error) {
+	return r.completeSummary(id, token, content, brief, detailed, &[2]string{priorBrief, priorDetailed}, generation...)
 }
 
-func (r *ArticleRepository) completeSummary(id int, token, content, brief, detailed string, prior *[2]string) (bool, error) {
+func (r *ArticleRepository) completeSummary(id int, token, content, brief, detailed string, prior *[2]string, generation ...*model.SummaryGeneration) (bool, error) {
 	if strings.TrimSpace(brief) == "" || strings.TrimSpace(detailed) == "" {
 		return false, errors.New("AI 返回了空总结，请重试")
 	}
+	var provenance any
+	var sourceTitle any
+	var templateID any
+	var templateBrief, templateDetailed string
+	if len(generation) > 0 && generation[0] != nil {
+		g := generation[0]
+		sum := sha256.Sum256([]byte(content))
+		if g.ContentHash != hex.EncodeToString(sum[:]) {
+			return false, errors.New("summary provenance input mismatch")
+		}
+		if g.TemplateID > 0 {
+			templateID = g.TemplateID
+			templateBrief = g.SourceTemplateBrief
+			templateDetailed = g.SourceTemplateDetailed
+		}
+		raw, err := json.Marshal(g)
+		if err != nil {
+			return false, err
+		}
+		provenance = string(raw)
+		sourceTitle = g.SourceTitle
+	}
+
 	var priorBrief, priorDetailed string
 	if prior != nil {
 		priorBrief, priorDetailed = prior[0], prior[1]
@@ -90,15 +116,18 @@ func (r *ArticleRepository) completeSummary(id int, token, content, brief, detai
 	var saved bool
 	err := r.db.QueryRow(`WITH lease AS MATERIALIZED (
  SELECT article_id FROM article_summary_jobs WHERE article_id=$1 AND lease_token=$2 AND state='running' AND lease_expires_at>clock_timestamp() FOR UPDATE
+ ), template_guard AS MATERIALIZED (
+ SELECT id FROM summary_templates WHERE id=$11 AND brief_prompt=$12 AND detailed_prompt=$13 FOR SHARE
  ), saved AS (
- UPDATE articles SET summary_brief=$4,summary_detailed=$5,
+ UPDATE articles SET summary_brief=$4,summary_detailed=$5,summary_generation=$9::jsonb,
  processing_state=CASE WHEN processing_state='processing' THEN 'ready' ELSE processing_state END
- WHERE id=$1 AND content IS NOT DISTINCT FROM $3 AND EXISTS(SELECT 1 FROM lease)
+ WHERE id=$1 AND content IS NOT DISTINCT FROM $3 AND ($10::text IS NULL OR title=$10) AND EXISTS(SELECT 1 FROM lease)
+ AND ($11::integer IS NULL OR EXISTS(SELECT 1 FROM template_guard))
  AND (NOT $6 OR (COALESCE(summary_brief,'')=$7 AND COALESCE(summary_detailed,'')=$8)) RETURNING id
  ), finished AS (
  UPDATE article_summary_jobs SET state='done',lease_expires_at=NULL,retry_at=NULL,last_error='',attempts=0,updated_at=clock_timestamp()
  WHERE article_id IN(SELECT id FROM saved) AND lease_token=$2 RETURNING article_id)
- SELECT EXISTS(SELECT 1 FROM finished)`, id, token, content, brief, detailed, prior != nil, priorBrief, priorDetailed).Scan(&saved)
+ SELECT EXISTS(SELECT 1 FROM finished)`, id, token, content, brief, detailed, prior != nil, priorBrief, priorDetailed, provenance, sourceTitle, templateID, templateBrief, templateDetailed).Scan(&saved)
 	return saved, err
 }
 

@@ -215,7 +215,8 @@ type Feed struct {
 }
 
 type Article struct {
-	Source *ArticleSource `json:"source,omitempty"`
+	SummaryGeneration *SummaryGeneration `json:"summary_generation,omitempty" db:"summary_generation"`
+	Source            *ArticleSource     `json:"source,omitempty"`
 
 	CaptureNote          string     `json:"capture_note"`
 	ID                   int        `json:"id" db:"id"`

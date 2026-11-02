@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -38,22 +39,23 @@ func (h *ArticleHandler) LocalSummaryInput(c *gin.Context) {
 		c.JSON(422, gin.H{"error": "暂无可总结的正文或字幕，请先获取正文后再手动生成"})
 		return
 	}
-	briefTemplate, detailedTemplate := "", ""
-	if template := c.Query("template_id"); template != "" {
-		tid, terr := strconv.Atoi(template)
-		if terr != nil || tid <= 0 || h.templateRepo == nil {
+	templateID := 0
+	if raw := c.Query("template_id"); raw != "" {
+		templateID, err = strconv.Atoi(raw)
+		if err != nil || templateID <= 0 {
 			c.JSON(400, gin.H{"error": "invalid template"})
 			return
 		}
-		tpl, terr := h.templateRepo.WithCtx(c).GetByID(tid)
-		if terr != nil || tpl == nil || (!tpl.IsSystem && (tpl.UserID == nil || *tpl.UserID != getUserID(c))) {
-			c.JSON(404, gin.H{"error": "template not found"})
-			return
-		}
-		briefTemplate, detailedTemplate = tpl.BriefPrompt, tpl.DetailedPrompt
+	}
+	briefTemplate, detailedTemplate, status := h.localSummaryTemplates(c, templateID)
+	if status != 0 {
+		c.JSON(status, gin.H{"error": "template not found"})
+		return
 	}
 	brief, detailed := ai.LocalSummaryPrompts(article.Title, article.Content, briefTemplate, detailedTemplate)
-	c.JSON(200, gin.H{"content_hash": localSummaryHash(article.Content), "summary_version": localSummaryHash(article.SummaryBrief + "\x00" + article.SummaryDetailed), "brief_prompt": brief, "detailed_prompt": detailed})
+	generation := ai.LocalSummaryGeneration(article.Title, article.Content, briefTemplate, detailedTemplate, templateID)
+	c.JSON(200, gin.H{"content_hash": localSummaryHash(article.Content), "summary_version": localSummaryHash(article.SummaryBrief + "\x00" + article.SummaryDetailed), "brief_prompt": brief, "detailed_prompt": detailed, "generation_binding": generation.BindingHash, "template_id": templateID})
+
 }
 
 // SaveLocalSummary receives an allowlist of results, never configuration or keys.
@@ -70,10 +72,14 @@ func (h *ArticleHandler) SaveLocalSummary(c *gin.Context) {
 		return
 	}
 	var result struct {
-		ContentHash    string `json:"content_hash"`
-		SummaryVersion string `json:"summary_version"`
-		Brief          string `json:"summary_brief"`
-		Detailed       string `json:"summary_detailed"`
+		ContentHash       string   `json:"content_hash"`
+		SummaryVersion    string   `json:"summary_version"`
+		GenerationBinding string   `json:"generation_binding"`
+		TemplateID        int      `json:"template_id"`
+		Model             string   `json:"model"`
+		RequestHashes     []string `json:"request_hashes"`
+		Brief             string   `json:"summary_brief"`
+		Detailed          string   `json:"summary_detailed"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 200000)
 	dec := json.NewDecoder(c.Request.Body)
@@ -98,6 +104,28 @@ func (h *ArticleHandler) SaveLocalSummary(c *gin.Context) {
 		c.JSON(409, gin.H{"error": "摘要已被其他任务更新，请刷新文章后重新生成"})
 		return
 	}
+	if len(result.RequestHashes) != 2 || !localSummaryRequestHashRE.MatchString(result.RequestHashes[0]) || !localSummaryRequestHashRE.MatchString(result.RequestHashes[1]) {
+		c.JSON(400, gin.H{"error": "缺少有效的请求指纹，请刷新后重新生成"})
+		return
+	}
+	if !localSummaryModelRE.MatchString(result.Model) {
+		c.JSON(400, gin.H{"error": "请输入有效的模型名称"})
+		return
+	}
+	briefTemplate, detailedTemplate, status := h.localSummaryTemplates(c, result.TemplateID)
+	if status != 0 {
+		c.JSON(status, gin.H{"error": "template not found"})
+		return
+	}
+	generation := ai.LocalSummaryGeneration(article.Title, article.Content, briefTemplate, detailedTemplate, result.TemplateID)
+	if result.GenerationBinding != generation.BindingHash {
+		c.JSON(409, gin.H{"error": "总结输入或规则已更新，请刷新文章后重新生成"})
+		return
+	}
+	briefPrompt, detailedPrompt := ai.LocalSummaryPrompts(article.Title, article.Content, briefTemplate, detailedTemplate)
+	ai.CompleteLocalSummaryGeneration(generation, result.Model, briefPrompt, detailedPrompt, result.Brief, result.RequestHashes)
+	generation.BindTemplate(result.TemplateID, briefTemplate, detailedTemplate)
+
 	token, err := h.articleRepo.ClaimSummary(c.Request.Context(), id, true)
 	if err != nil {
 		if errors.Is(err, repository.ErrSummaryInProgress) {
@@ -119,7 +147,7 @@ func (h *ArticleHandler) SaveLocalSummary(c *gin.Context) {
 		defer fail()
 	}
 	afterRollback(c, func() { _ = h.articleRepo.FailSummary(id, token, errors.New("本地摘要提交失败")) })
-	saved, err := repo.CompleteLocalSummary(id, token, article.Content, result.Brief, result.Detailed, article.SummaryBrief, article.SummaryDetailed)
+	saved, err := repo.CompleteLocalSummary(id, token, article.Content, result.Brief, result.Detailed, article.SummaryBrief, article.SummaryDetailed, generation)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "摘要保存失败，请重试"})
 		return
@@ -129,5 +157,22 @@ func (h *ArticleHandler) SaveLocalSummary(c *gin.Context) {
 		return
 	}
 	settled = true
-	jsonAfterCommit(c, 200, gin.H{"summary_brief": result.Brief, "summary_detailed": result.Detailed})
+	jsonAfterCommit(c, 200, gin.H{"summary_brief": result.Brief, "summary_detailed": result.Detailed, "summary_generation": generation})
+}
+
+var localSummaryRequestHashRE = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var localSummaryModelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,127}$`)
+
+func (h *ArticleHandler) localSummaryTemplates(c *gin.Context, id int) (string, string, int) {
+	if id == 0 {
+		return "", "", 0
+	}
+	if id < 0 || h.templateRepo == nil {
+		return "", "", 400
+	}
+	tpl, err := h.templateRepo.WithCtx(c).GetByID(id)
+	if err != nil || tpl == nil || (!tpl.IsSystem && (tpl.UserID == nil || *tpl.UserID != getUserID(c))) {
+		return "", "", 404
+	}
+	return tpl.BriefPrompt, tpl.DetailedPrompt, 0
 }

@@ -21,6 +21,7 @@ func (s *SummarizerService) Summarize(ctx context.Context, article *model.Articl
 		return "", "", err
 	}
 
+	article.SummaryGeneration = result.Generation
 	return result.Brief, result.Detailed, nil
 }
 
@@ -30,6 +31,7 @@ func (s *SummarizerService) SummarizeWithTemplate(ctx context.Context, article *
 		return "", "", err
 	}
 
+	article.SummaryGeneration = result.Generation
 	return result.Brief, result.Detailed, nil
 }
 
@@ -39,6 +41,7 @@ func (s *SummarizerService) SummarizeStream(ctx context.Context, article *model.
 	if err != nil {
 		return "", "", err
 	}
+	article.SummaryGeneration = result.Generation
 	return result.Brief, result.Detailed, nil
 }
 
@@ -49,6 +52,7 @@ func (s *SummarizerService) SummarizeWithTemplateStream(ctx context.Context, art
 	if err != nil {
 		return "", "", err
 	}
+	article.SummaryGeneration = result.Generation
 	return result.Brief, result.Detailed, nil
 }
 
@@ -70,6 +74,7 @@ func (s *SummarizerService) SummarizeWithImages(ctx context.Context, article *mo
 	if err != nil {
 		return "", "", err
 	}
+	article.SummaryGeneration = result.Generation
 	return result.Brief, result.Detailed, nil
 }
 
@@ -80,6 +85,7 @@ func (s *SummarizerService) SummarizeWithImagesStream(ctx context.Context, artic
 	if err != nil {
 		return "", "", err
 	}
+	article.SummaryGeneration = result.Generation
 	return result.Brief, result.Detailed, nil
 }
 

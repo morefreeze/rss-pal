@@ -1,3 +1,4 @@
+import { createHash, webcrypto } from 'node:crypto'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { readLocalAIConfig, saveLocalAIConfig, clearLocalAIConfig, callLocalAI } from '../src/lib/localAI'
 
@@ -96,4 +97,14 @@ describe('native Claude browser calls', () => {
     expect(fetch.mock.calls[0][0]).toBe('https://api.anthropic.com.example/v1/chat/completions')
     expect(fetch.mock.calls[0][1].headers['x-api-key']).toBeUndefined()
   })
+})
+
+it('reports the exact completed provider request hash without credentials', async () => {
+ vi.stubGlobal('crypto',webcrypto)
+ const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify({choices:[{message:{content:'summary'},finish_reason:'stop'}]})))
+ vi.stubGlobal('fetch',fetch)
+ const capture=vi.fn()
+ await callLocalAI(cfg,'prompt',undefined,false,capture)
+ expect(capture).toHaveBeenCalledWith(createHash('sha256').update(fetch.mock.calls[0][1].body).digest('hex'))
+ expect(JSON.stringify(capture.mock.calls)).not.toContain(cfg.api_key)
 })

@@ -393,7 +393,7 @@ JOIN feeds ON articles.feed_id = feeds.id` + joins
 
 func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions, a.summary_generation
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		WHERE a.id = $1 AND (f.owner_id = $2)`
@@ -404,14 +404,17 @@ func (r *ArticleRepository) GetByID(id, userID int) (*model.Article, error) {
 	var parentArticleID sql.NullInt64
 	var processingState, processingError, editorNote sql.NullString
 	var prerankScore sql.NullFloat64
-	var imageDimensions []byte
-	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions)
+	var imageDimensions, summaryGeneration []byte
+	err := r.db.QueryRow(query, id, userID).Scan(&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt, &summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes, &mediaURL, &mediaType, &mediaDuration, &feedTitle, &linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions, &summaryGeneration)
 	if err != nil {
 		return nil, err
 	}
 	a.Content = content.String
 	a.SummaryBrief = summaryBrief.String
 	a.SummaryDetailed = summaryDetailed.String
+	if len(summaryGeneration) > 0 {
+		_ = json.Unmarshal(summaryGeneration, &a.SummaryGeneration)
+	}
 	a.FeedTitle = feedTitle.String
 	a.Kind = kind.String
 	if linksExtendable.Valid {
@@ -460,7 +463,7 @@ func decodeImageDimensions(raw []byte) map[string][2]int {
 // the from_bookmarklet response field without modifying model.Article.
 func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article, string, error) {
 	query := `
-		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions, p.title, COALESCE(cn.capture_note, '')
+		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, f.title as feed_title, f.feed_type, a.links_extendable, a.link_set_suggested, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind, a.image_dimensions, a.summary_generation, p.title, COALESCE(cn.capture_note, '')
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
 		LEFT JOIN articles p ON p.id = a.parent_article_id AND p.feed_id = a.feed_id
@@ -473,14 +476,14 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	var parentArticleID sql.NullInt64
 	var processingState, processingError, editorNote sql.NullString
 	var prerankScore sql.NullFloat64
-	var imageDimensions []byte
+	var imageDimensions, summaryGeneration []byte
 	var parentTitle sql.NullString
 	err := r.db.QueryRow(query, id, userID).Scan(
 		&a.ID, &a.FeedID, &a.Title, &a.URL, &content, &a.PublishedAt,
 		&summaryBrief, &summaryDetailed, &a.FetchedAt, &a.WordCount, &a.ReadingMinutes,
 		&mediaURL, &mediaType, &mediaDuration,
 		&feedTitle, &feedType,
-		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions, &parentTitle, &a.CaptureNote,
+		&linksExtendable, &linkSetSuggested, &parentArticleID, &processingState, &processingError, &prerankScore, &editorNote, &kind, &imageDimensions, &summaryGeneration, &parentTitle, &a.CaptureNote,
 	)
 	if err != nil {
 		return nil, "", err
@@ -489,6 +492,9 @@ func (r *ArticleRepository) GetByIDWithFeedType(id, userID int) (*model.Article,
 	a.Content = content.String
 	a.SummaryBrief = summaryBrief.String
 	a.SummaryDetailed = summaryDetailed.String
+	if len(summaryGeneration) > 0 {
+		_ = json.Unmarshal(summaryGeneration, &a.SummaryGeneration)
+	}
 	a.FeedTitle = feedTitle.String
 	a.Kind = kind.String
 	if linksExtendable.Valid {
@@ -673,7 +679,7 @@ func (r *ArticleRepository) FindByOwnerAndURL(ownerID int, exactURL string) (*mo
 func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed string) error {
 	_, err := r.db.Exec(`
 		UPDATE articles
-		SET summary_brief = $1,
+		SET summary_generation = NULL, summary_brief = $1,
 		    summary_detailed = $2,
 		    processing_state = CASE
 		        WHEN processing_state = 'processing' THEN 'ready'
@@ -689,7 +695,7 @@ func (r *ArticleRepository) UpdateSummary(id int, summaryBrief, summaryDetailed 
 func (r *ArticleRepository) UpdateSummaryIfContentUnchanged(id int, expectedContent, summaryBrief, summaryDetailed string) (bool, error) {
 	result, err := r.db.Exec(`
 		UPDATE articles
-		SET summary_brief = $1,
+		SET summary_generation = NULL, summary_brief = $1,
 		    summary_detailed = $2,
 		    processing_state = CASE
 		        WHEN processing_state = 'processing' THEN 'ready'

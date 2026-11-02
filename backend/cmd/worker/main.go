@@ -293,7 +293,10 @@ func asyncSummarize(summarizer *ai.Summarizer, articleRepo *repository.ArticleRe
 			log.Printf("Failed to summarize article %d: %v", articleID, err)
 			return
 		}
-		updated, err := articleRepo.CompleteSummary(articleID, token, content, result.Brief, result.Detailed)
+		if result.Generation != nil {
+			result.Generation.EntryPoint = "worker-auto"
+		}
+		updated, err := articleRepo.CompleteSummary(articleID, token, content, result.Brief, result.Detailed, result.Generation)
 		if err != nil {
 			log.Printf("Failed to save summary for article %d: %v", articleID, err)
 		} else if !updated {
@@ -370,7 +373,10 @@ func backfillSummaries(ctx context.Context, cfg *config.Config, articleRepo *rep
 				log.Printf("Failed to backfill summary for article %d: %v", article.ID, err)
 				return
 			}
-			updated, err := articleRepo.CompleteSummary(article.ID, token, article.Content, result.Brief, result.Detailed)
+			if result.Generation != nil {
+				result.Generation.EntryPoint = "worker-auto"
+			}
+			updated, err := articleRepo.CompleteSummary(article.ID, token, article.Content, result.Brief, result.Detailed, result.Generation)
 			if err != nil {
 				log.Printf("Failed to save backfill summary for article %d: %v", article.ID, err)
 			} else if !updated {
