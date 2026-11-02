@@ -1,0 +1,427 @@
+{
+  "schema_version": 1,
+  "version": "summary-fidelity-2026-11-02-v1",
+  "cases": [
+    {
+      "id": "017",
+      "split": "train",
+      "failure_class": "metric_attribution",
+      "title": "技术作家网站下线：收入与爬虫（节选）",
+      "content": "我的收入来自图书销售，2024年还足以维持我的生活，2026年却变为零。\n\n我的博客和书籍都是免费在线阅读，它们的访问量增长迅猛，已经超出了我的承受能力。几乎所有流量都来自 AI 爬虫，所以没有任何广告收入。\n\n因此，我决定将我的博客和书籍下线，以便决定下一步该怎么做。\n\n-- Axel Rauschmayer，著名的技术作家，解释为什么将自己的网站下线",
+      "source": {
+        "scope": "frozen_excerpt",
+        "evidence_ref": "2026-11-01/heartbeat-1503/articles/weekly414-original.json#data.result.text:言论/2; weekly414-review.md:017",
+        "note": "Exact frozen quotation from the weekly digest, not the complete article or independently verified business figures.",
+        "url": "https://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html"
+      },
+      "criteria": [
+        {
+          "id": "book_metric",
+          "expected": "Bind 2024 enough-to-live-on and 2026 zero specifically to book sales, attributed to Axel; no invented amount.",
+          "prohibited": [
+            "Changing this trajectory to advertising income.",
+            "Inventing a six-figure amount."
+          ],
+          "source_evidence": "我的收入来自图书销售，2024年还足以维持我的生活，2026年却变为零。"
+        },
+        {
+          "id": "separate_ad_claim",
+          "expected": "Keep the distinct claim that crawler traffic brings no advertising income; do not transfer the book-sales time series to ads.",
+          "prohibited": [
+            "Advertising revenue fell from enough-to-live-on in 2024 to zero in 2026."
+          ],
+          "source_evidence": "几乎所有流量都来自 AI 爬虫，所以没有任何广告收入。"
+        },
+        {
+          "id": "causal_attribution",
+          "expected": "Keep this as the writer’s account of income/traffic pressures and the decision to take the site offline; do not establish crawlers as the sole proven cause of book-sales decline.",
+          "prohibited": [
+            "Claiming proven sole causation for the decline in book sales."
+          ],
+          "source_evidence": "因此，我决定将我的博客和书籍下线，以便决定下一步该怎么做。"
+        }
+      ]
+    },
+    {
+      "id": "017-h1",
+      "split": "held_out",
+      "failure_class": "metric_attribution",
+      "title": "A forum maintainer’s two income streams",
+      "content": "Mira reports that printed handbook royalties were €18,000 in 2021 and €0 in 2023. Her forum is free to read. She says automated indexing now consumes most of its bandwidth and these visits produce no sponsor impressions. She suspects automation affects demand for the handbook but has not tested that explanation. She pauses the forum while reviewing hosting costs.",
+      "source": {
+        "scope": "independent_variant",
+        "evidence_ref": "fixture-authored:017-h1",
+        "note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+        "based_on": "017"
+      },
+      "criteria": [
+        {
+          "id": "book_metric",
+          "expected": "Keep €18,000 in 2021 and €0 in 2023 attached to handbook royalties and to Mira’s report.",
+          "prohibited": [
+            "Assigning the amounts to sponsorship revenue."
+          ],
+          "source_evidence": "printed handbook royalties were €18,000 in 2021 and €0 in 2023"
+        },
+        {
+          "id": "separate_ad_claim",
+          "expected": "Keep bandwidth/indexing and missing sponsor impressions distinct from royalty amounts.",
+          "prohibited": [
+            "Saying sponsorship fell from €18,000 to €0."
+          ],
+          "source_evidence": "these visits produce no sponsor impressions"
+        },
+        {
+          "id": "causal_attribution",
+          "expected": "Preserve suspicion and lack of testing rather than proving automation caused the royalty decline.",
+          "prohibited": [
+            "Stating automation is the established sole cause."
+          ],
+          "source_evidence": "She suspects automation affects demand for the handbook but has not tested that explanation."
+        }
+      ]
+    },
+    {
+      "id": "017-h2",
+      "split": "held_out",
+      "failure_class": "metric_attribution",
+      "title": "独立讲师的课程费与赞助位",
+      "content": "林讲师复盘：2022年线下课程报名费收入为12万元，2025年报名费收入为零。免费资料站的页面访问却上升了，主要是自动采集程序；这类访问不给赞助位带来点击。他认为读者习惯变化可能影响报名，但没有分离价格、课程安排等因素。他暂时关闭资料站来控制带宽开支。",
+      "source": {
+        "scope": "independent_variant",
+        "evidence_ref": "fixture-authored:017-h2",
+        "note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+        "based_on": "017"
+      },
+      "criteria": [
+        {
+          "id": "book_metric",
+          "expected": "Keep 12万元/2022 and zero/2025 tied to course enrollment fees, not sponsorship.",
+          "prohibited": [
+            "Recasting the time series as sponsor income."
+          ],
+          "source_evidence": "2022年线下课程报名费收入为12万元，2025年报名费收入为零"
+        },
+        {
+          "id": "separate_ad_claim",
+          "expected": "Keep automated traffic’s lack of sponsor clicks separate from course enrollment fees.",
+          "prohibited": [
+            "Treating zero sponsor clicks as a measured historical sponsorship-revenue decline."
+          ],
+          "source_evidence": "这类访问不给赞助位带来点击"
+        },
+        {
+          "id": "causal_attribution",
+          "expected": "Attribute the interpretation to the lecturer and retain the unresolved alternative factors.",
+          "prohibited": [
+            "Asserting automated collection alone demonstrably eliminated enrollment revenue."
+          ],
+          "source_evidence": "他认为读者习惯变化可能影响报名，但没有分离价格、课程安排等因素。"
+        }
+      ]
+    },
+    {
+      "id": "018",
+      "split": "train",
+      "failure_class": "nested_termination",
+      "title": "从零开始玩转循环：主动式循环（节选）",
+      "content": "主动式循环 (Proactive loops)\n\n触发方式：事件触发或定时计划，全程无需人类实时参与。\n停止条件：每个子任务在达成其具体目标时退出。但整个例行程序本身会一直运行，直到你主动将它关闭。\n最佳适用场景：定义清晰、源源不断的重复性工作流：比如用户漏洞报告 (bug reports)、工单分诊处理 (issue triage)、数据迁移、代码依赖项升级等。\n如何控制消耗：将常规的、简单的流程分配给更小、更快的模型，把能力最强的大模型留给需要做复杂判断的环节。\n\n上面提到的那些基础指令，结合 Claude Code 的其他进阶功能（比如自动模式 auto mode 和动态工作流 dynamic workflows，目前为研究预览版），可以被组合成一个处理长期复杂任务的“超级循环”。\n\n例如，为了处理不断涌入的用户反馈，你可以这样搭配组合：\n\n使用 /schedule（研究预览版）运行一个例行程序，定时检查有没有新的反馈报告。\n使用 /goal 定义任务完成的最终目标，并利用技能 (skills) 记录下应该如何验证结果。\n利用动态工作流 (Dynamic workflows) 来统筹多个 AI 智能体，让它们分别负责给报告分类、修复问题，以及审查代码。\n开启自动模式 (Auto mode)，这样整个流程就能全自动无缝运转，无需停下来等你点击确认。\n\n把这些组合在一起，你的提示词可能会长这样：\n\n# 每小时执行一次：检查 project-feedback 频道中的 bug 报告。目标：直到本次运行发现的所有报告都已被分类、处理并回复，才停止运行。在修复 bug 时，使用工作流在平行的工作区中探索三种不同的解决方案，并让一个专门作为“裁判”的模型对它们进行对抗性的严格审查。\n/schedule every hour: check the project-feedback channel for bug reports. /goal: don't stop until every report found this run is triaged, actioned, and responded to. When fixing a bug, use a workflow to explore three solutions in parallel worktrees and have a judge adversarially review them.",
+      "source": {
+        "scope": "frozen_excerpt",
+        "evidence_ref": "2026-11-01/heartbeat-1503/articles/loops-original.json#data.result.text:主动式循环; loops-review.md:018",
+        "note": "Exact frozen subsection and worked example, not the full tutorial or a claim about current product availability.",
+        "url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033"
+      },
+      "criteria": [
+        {
+          "id": "triggers",
+          "expected": "Retain that proactive routines can be event-triggered or scheduled, without live human participation.",
+          "prohibited": [
+            "Presenting each run as requiring a new manual prompt."
+          ],
+          "source_evidence": "触发方式：事件触发或定时计划，全程无需人类实时参与。"
+        },
+        {
+          "id": "nested_exit",
+          "expected": "Distinguish a subtask exiting on its goal from the enclosing routine continuing until the user explicitly turns it off. Both levels are required.",
+          "prohibited": [
+            "Saying the routine stops permanently when one subtask or one batch finishes.",
+            "Mentioning a generic stop condition while omitting the persistent routine’s manual stop."
+          ],
+          "source_evidence": "停止条件：每个子任务在达成其具体目标时退出。但整个例行程序本身会一直运行，直到你主动将它关闭。"
+        },
+        {
+          "id": "current_batch",
+          "expected": "Keep the example goal scoped to reports found in the current run, with classification/action/reply, rather than all future incoming reports.",
+          "prohibited": [
+            "An unbounded goal requiring every future report to be handled before the current run can finish."
+          ],
+          "source_evidence": "直到本次运行发现的所有报告都已被分类、处理并回复，才停止运行。"
+        }
+      ]
+    },
+    {
+      "id": "018-h1",
+      "split": "held_out",
+      "failure_class": "nested_termination",
+      "title": "A support inbox watcher",
+      "content": "A registered watcher wakes every 20 minutes or on an incoming-ticket event. An invocation snapshots the tickets then present. It labels each ticket, attempts a repair when needed, and records the reply. A repair error is reported and ends that ticket’s attempt. Once every ticket in that snapshot has a reply or a recorded failure, that invocation exits. The watcher remains registered for future events and timers until its owner disables it; an empty inbox does not unregister it.",
+      "source": {
+        "scope": "independent_variant",
+        "evidence_ref": "fixture-authored:018-h1",
+        "note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+        "based_on": "018"
+      },
+      "criteria": [
+        {
+          "id": "triggers",
+          "expected": "Retain the timer-or-event alternatives and the snapshot per invocation.",
+          "prohibited": [
+            "Requiring both an event and the timer simultaneously."
+          ],
+          "source_evidence": "wakes every 20 minutes or on an incoming-ticket event"
+        },
+        {
+          "id": "nested_exit",
+          "expected": "Retain invocation/ticket completion or recorded failure while the outer watcher continues until owner disablement.",
+          "prohibited": [
+            "Treating a repair failure or an empty snapshot as permanent watcher shutdown."
+          ],
+          "source_evidence": "The watcher remains registered for future events and timers until its owner disables it"
+        },
+        {
+          "id": "current_batch",
+          "expected": "Keep completion bounded to the snapshot; preserve repair-error handling rather than endless retry.",
+          "prohibited": [
+            "Waiting for all future incoming tickets before exiting."
+          ],
+          "source_evidence": "Once every ticket in that snapshot has a reply or a recorded failure, that invocation exits."
+        }
+      ]
+    },
+    {
+      "id": "018-h2",
+      "split": "held_out",
+      "failure_class": "nested_termination",
+      "title": "馆藏索引的常驻调度器",
+      "content": "馆藏调度器收到新书事件就启动一次索引作业，也可以在夜间定时启动。每次作业只处理启动时截取的书目清单；索引校验通过即结束，遇到无法读取的书目则记录错误后结束该项，不反复重试。一次清单处理完不会注销调度器：它继续等待下一批事件或定时器，只有管理员关闭注册项才停止后续调度。",
+      "source": {
+        "scope": "independent_variant",
+        "evidence_ref": "fixture-authored:018-h2",
+        "note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+        "based_on": "018"
+      },
+      "criteria": [
+        {
+          "id": "triggers",
+          "expected": "Preserve new-book event or nightly timer as alternative triggers.",
+          "prohibited": [
+            "Saying each job requires a person to start it."
+          ],
+          "source_evidence": "收到新书事件就启动一次索引作业，也可以在夜间定时启动"
+        },
+        {
+          "id": "nested_exit",
+          "expected": "Separate per-item/job termination from the registered scheduler lifetime, including the error branch.",
+          "prohibited": [
+            "Deleting future scheduling after one successful or failed job."
+          ],
+          "source_evidence": "只有管理员关闭注册项才停止后续调度"
+        },
+        {
+          "id": "current_batch",
+          "expected": "Keep a finite launch-time list and error recording without endless retries.",
+          "prohibited": [
+            "The current job must process every future book before it can finish."
+          ],
+          "source_evidence": "每次作业只处理启动时截取的书目清单"
+        }
+      ]
+    },
+    {
+      "id": "019",
+      "split": "train",
+      "failure_class": "excluded_domain",
+      "title": "AUM 的 margin 定义（节选）",
+      "content": "Pleiss, et al. (2020) developed a method named AUM (Area under the Margin) to spot wrong labels based on such an assumption: Say, a BIRD image is mistakenly marked as DOG. The gradient update would encourage generalization from other BIRD images to this BIRD image, while the DOG label provides an incorrect supervised signal to encourage the update to go another way. Hence, there exists tension between generalization and (wrong) prediction in gradient update signals.\n\nM^{(t)}(\\mathbf{x}, y) = z_y^{(t)}(\\mathbf{x}) - \\max_{i \\neq y} z^{(t)}_i(\\mathbf{x}),\\quad\n\\text{AUM}(\\mathbf{x}, y) = \\frac{1}{T} \\sum^T_{t=1} M^{(t)}(\\mathbf{x}, y)\n\nA negative margin indicates a wrong prediction and a large positive margin suggests high confidence in a correct prediction. The hypothesis is that mislabeled samples would have a smaller margin than correct samples due to the tension of generalization via SGD triggered by other samples.",
+      "source": {
+        "scope": "frozen_excerpt",
+        "evidence_ref": "2026-11-02/heartbeat-0908/articles/human-data-original.json#data.result.text:AUM; data.result.math:AUM; human-data-review.md:019",
+        "note": "Frozen introductory prose, display formula, and interpretation only; TeX backslash escaping normalized, not the full research overview. Formula excludes assigned y even when y is not the largest logit.",
+        "url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/"
+      },
+      "criteria": [
+        {
+          "id": "assigned_class",
+          "expected": "Preserve y as the assigned label, which need not be the winning predicted class.",
+          "prohibited": [
+            "Replacing the assigned-class logit with the global maximum."
+          ],
+          "source_evidence": "BIRD image is mistakenly marked as DOG"
+        },
+        {
+          "id": "excluded_max",
+          "expected": "Define the competitor as the maximum over every class other than y; a global second-highest shortcut is invalid when y is not highest.",
+          "prohibited": [
+            "Defining the margin as assigned logit minus the global second-highest logit."
+          ],
+          "source_evidence": "\\max_{i \\neq y}"
+        },
+        {
+          "id": "epoch_average",
+          "expected": "Keep AUM as the arithmetic mean of these margins across training epochs, with the mislabeling hypothesis stated as a hypothesis.",
+          "prohibited": [
+            "Using one epoch as AUM.",
+            "Treating a negative margin as definitive proof that the assigned label is wrong."
+          ],
+          "source_evidence": "\\frac{1}{T} \\sum^T_{t=1}"
+        }
+      ]
+    },
+    {
+      "id": "019-h1",
+      "split": "held_out",
+      "failure_class": "excluded_domain",
+      "title": "A training diagnostic with a losing assigned class",
+      "content": "For a sample assigned label B, define m_t = s_B(t) - max_{c != B} s_c(t), then average m_t over epochs. The assigned label is a dataset annotation, not necessarily the model winner. At epoch 1 the scores are A=8, B=3, C=5, giving m_1=-5. At epoch 2 they are A=2, B=3, C=1, giving m_2=1. The two-epoch diagnostic is -2. This is a screening signal, not proof of a wrong label.",
+      "source": {
+        "scope": "independent_variant",
+        "evidence_ref": "fixture-authored:019-h1",
+        "note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+        "based_on": "019"
+      },
+      "criteria": [
+        {
+          "id": "assigned_class",
+          "expected": "Retain the annotated B score as the minuend even when A wins.",
+          "prohibited": [
+            "Using the winning A score as the minuend."
+          ],
+          "source_evidence": "assigned label is a dataset annotation, not necessarily the model winner"
+        },
+        {
+          "id": "excluded_max",
+          "expected": "Maximize over non-B classes. In epoch 1 the competing score is 8, yielding -5 rather than subtracting the global runner-up 5.",
+          "prohibited": [
+            "Giving 3-5=-2 as the first-epoch margin."
+          ],
+          "source_evidence": "A=8, B=3, C=5, giving m_1=-5"
+        },
+        {
+          "id": "epoch_average",
+          "expected": "Preserve the two-epoch average -2 and screening-only interpretation.",
+          "prohibited": [
+            "Equating a negative screening value with proven label error."
+          ],
+          "source_evidence": "The two-epoch diagnostic is -2. This is a screening signal, not proof of a wrong label."
+        }
+      ]
+    },
+    {
+      "id": "019-h2",
+      "split": "held_out",
+      "failure_class": "excluded_domain",
+      "title": "监测端口与其余端口的差值",
+      "content": "诊断程序指定端口k作为监测对象，而不是每分钟都重新选择分数最高的端口。每分钟计算d_k=q_k-max_{j≠k}q_j，再对十分钟的d_k取算术平均。若某分钟q_k=1，其余端口分数是6和4，该分钟差值为-5，竞争值是其余端口中的6。负值只说明该分钟监测对象落后于某个其他端口，不能据此断言端口故障。",
+      "source": {
+        "scope": "independent_variant",
+        "evidence_ref": "fixture-authored:019-h2",
+        "note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+        "based_on": "019"
+      },
+      "criteria": [
+        {
+          "id": "assigned_class",
+          "expected": "Keep k as the fixed designated monitored port rather than the minute’s winner.",
+          "prohibited": [
+            "Reassigning k to the largest score each minute."
+          ],
+          "source_evidence": "指定端口k作为监测对象，而不是每分钟都重新选择分数最高的端口"
+        },
+        {
+          "id": "excluded_max",
+          "expected": "Keep the maximum among j≠k, giving 1-6=-5; do not use the global second-highest 4.",
+          "prohibited": [
+            "Computing 1-4=-3 for the supplied example."
+          ],
+          "source_evidence": "若某分钟q_k=1，其余端口分数是6和4，该分钟差值为-5"
+        },
+        {
+          "id": "epoch_average",
+          "expected": "Preserve the arithmetic average over ten minute-level differences and limited interpretation.",
+          "prohibited": [
+            "Calling a single-minute difference the ten-minute metric.",
+            "Asserting a negative value proves a port failure."
+          ],
+          "source_evidence": "再对十分钟的d_k取算术平均"
+        }
+      ]
+    }
+  ],
+  "controls": [
+    {
+      "id": "017-faithful-paraphrase",
+      "case_id": "017",
+      "expected": "pass",
+      "output": {
+        "brief": "Axel称图书销售收入2024年够生活，2026年归零；爬虫流量不带来广告收益。",
+        "detailed": "他免费开放博客和书籍，但流量与费用难以承受，决定暂时下线。收入变化与无广告收益是两项陈述，材料没有证明爬虫是图书销量下降的唯一原因。"
+      }
+    },
+    {
+      "id": "017-metric-swap",
+      "case_id": "017",
+      "expected": "fail",
+      "output": {
+        "brief": "Axel的广告收入从2024年足以维生跌至2026年零收入。",
+        "detailed": "AI爬虫占据绝大多数访问，不产生广告收益，流量负担促使他下线网站。"
+      },
+      "must_fail": [
+        "book_metric",
+        "separate_ad_claim"
+      ]
+    },
+    {
+      "id": "018-faithful-paraphrase",
+      "case_id": "018",
+      "expected": "pass",
+      "output": {
+        "brief": "事件或定时计划触发主动式循环；子任务达到目标退出，常驻例行程序要由用户关闭。",
+        "detailed": "示例每小时检查反馈，当前轮找到的报告完成分类、处理和回复后，这一轮结束；它不会因此取消以后各轮的调度。"
+      }
+    },
+    {
+      "id": "018-outer-stops-with-batch",
+      "case_id": "018",
+      "expected": "fail",
+      "output": {
+        "brief": "事件或定时计划触发后，流程分类、修复并回复当前轮发现的报告。",
+        "detailed": "所有当前报告处理完毕，整个例行程序即永久结束，不再等待后续反馈，无需用户主动关闭。"
+      },
+      "must_fail": [
+        "nested_exit"
+      ]
+    },
+    {
+      "id": "019-faithful-paraphrase",
+      "case_id": "019",
+      "expected": "pass",
+      "output": {
+        "brief": "每个epoch用指定标签y的logit减去其余类别中最大的logit，再跨epoch求均值得到AUM。",
+        "detailed": "y来自数据标注，错标的鸟也可能标为狗，因而y并不保证是预测最高类。竞争项排除y，不能一律写全局次大值。研究假设错标样本的margin倾向较小，负margin表示预测未选指定类，并非单凭它就确认标注错了。"
+      }
+    },
+    {
+      "id": "019-global-runner-up",
+      "case_id": "019",
+      "expected": "fail",
+      "output": {
+        "brief": "AUM先计算每个epoch指定类别logit减去全局次大logit，再取均值。",
+        "detailed": "即使指定类不是模型预测最高类，也都使用同一个全局第二高值。该指标用于筛查潜在错标，不是单独确认错标的证据。"
+      },
+      "must_fail": [
+        "excluded_max"
+      ]
+    }
+  ]
+}
