@@ -145,7 +145,7 @@ func TestSummaryGenerationTracksEveryProviderRoute(t *testing.T) {
 					t.Fatalf("stage mismatch: %+v", stage)
 				}
 				system, _ := summaryRequestMessages(t, body)
-				for _, required := range []string{"收入类别", "生命周期", "排除的对象"} {
+				for _, required := range []string{"收入类别", "生命周期", "排除的对象", "真实或正确标签", "不要输出生成计划"} {
 					if !strings.Contains(system, required) {
 						t.Fatalf("missing general policy %q", required)
 					}

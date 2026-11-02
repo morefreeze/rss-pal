@@ -12,7 +12,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/model"
 )
 
-const SummaryPolicyVersion = "faithfulness-2026-11-02-v1"
+const SummaryPolicyVersion = "faithfulness-2026-11-02-v2"
 const SummaryPromptVersion = "summary-prompts-2026-11-02-v1"
 
 func summaryHash(value string) string {

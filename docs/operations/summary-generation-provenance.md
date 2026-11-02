@@ -37,4 +37,6 @@ summary-eval-site --binary /tmp/summary-eval --source-runes 500 -- \
 
 Choose a source length matching the evaluated inputs' routing bucket. Frozen excerpts are short inputs; testing them through the short route does not validate long-article context selection. The wrapper resolves the protected admin configuration using a read-only database session, checks that its revision did not change during resolution, and hands only the selected provider credentials and network environment to the evaluator. It does not run migrations, write usage/article rows or start background processing. `--inspect` makes no model call. The current wrapper supports the evaluator's OpenAI-compatible protocol; unsupported native protocols fail before calls.
 
+Build from a clean checkout outside an enclosing repository and verify the binary with `go version -m` before use. Some Go toolchains stamp a nested linked worktree with its enclosing repository revision; reject a mismatched revision or dirty build.
+
 Keep source commit, executable SHA256, route-selection metadata, model outputs, completion evidence and human semantic review together. A graded pass is limited to the tested fixtures/model/settings; it does not close an unchanged historical article's cached-summary defect. Do not bulk recompute old summaries as part of this workflow.
