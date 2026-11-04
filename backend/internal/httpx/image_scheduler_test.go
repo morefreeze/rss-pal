@@ -309,6 +309,113 @@ func TestBufferedImageSchedulerPreservesQuietNonLastHealthyAlternative(t *testin
 	}
 }
 
+func TestBufferedImageSchedulerDribbleDoesNotHideHealthyAlternative(t *testing.T) {
+	for _, phase := range []string{"headers", "body"} {
+		t.Run(phase, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				primaryReady, stopDribble := make(chan struct{}), make(chan struct{})
+				var primaryBytes, healthyCalls, active atomic.Int32
+				fixture, dialer := bufferedGETFixture(t, publicGETAddresses(4), func(_ string, req *http.Request, conn net.Conn) {
+					switch req.URL.Hostname() {
+					case "93.184.216.34":
+						wire := strings.Repeat("x", 1000)
+						if phase == "body" {
+							if _, err := io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n"); err != nil {
+								return
+							}
+						} else {
+							wire = "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n" + wire
+						}
+						if _, err := io.WriteString(conn, wire[:1]); err != nil {
+							return
+						}
+						primaryBytes.Add(1)
+						close(primaryReady)
+						for index := 1; index < len(wire); index++ {
+							select {
+							case <-time.After(time.Second):
+							case <-stopDribble:
+								return
+							}
+							if _, err := io.WriteString(conn, wire[index:index+1]); err != nil {
+								return
+							}
+							primaryBytes.Add(1)
+						}
+					case "8.8.8.8":
+						<-primaryReady
+						healthyCalls.Add(1)
+						_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+					default:
+						_, _ = io.WriteString(conn, "HTTP/1.1 500 Error\r\nContent-Length: 0\r\n\r\n")
+					}
+				})
+				dial := dialer.dial
+				dialer.dial = func(ctx context.Context, network, target string) (net.Conn, error) {
+					conn, err := dial(ctx, network, target)
+					if err != nil {
+						return nil, err
+					}
+					active.Add(1)
+					return &bufferedGETTrackedConn{Conn: conn, active: &active}, nil
+				}
+				client := imageSchedulerFixture(fixture)
+				transport := client.Transport.(*bufferedGETTransport)
+				start := time.Now()
+				response, err := client.Get("http://safe.example/image.png")
+				var body []byte
+				if response != nil {
+					body, _ = io.ReadAll(response.Body)
+					_ = response.Body.Close()
+				}
+				t.Logf("phase=%s elapsed=%v err=%v body=%q primary_bytes=%d healthy_calls=%d dials=%v active=%d permits=%d", phase, time.Since(start), err, body, primaryBytes.Load(), healthyCalls.Load(), dialer.addresses(), active.Load(), len(transport.slots))
+				if err != nil || string(body) != "ok" || time.Since(start) >= 90*time.Second || healthyCalls.Load() != 1 {
+					t.Error("tiny continuous traffic suppressed a complete healthy alternative")
+				}
+				if active.Load() != 0 || len(transport.slots) != 0 || len(transport.imageLanes.primary) != 0 || len(transport.imageLanes.secondary) != 0 {
+					t.Error("dribble/hedge retained sockets or lane permits at return")
+				}
+				close(stopDribble)
+				synctest.Wait()
+			})
+		})
+	}
+}
+
+func TestBufferedImageSchedulerAccumulatesUsefulSmallReads(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const chunks, chunkBytes = 320, 256
+		var alternatives atomic.Int32
+		fixture, dialer := bufferedGETFixture(t, publicGETAddresses(4), func(_ string, req *http.Request, conn net.Conn) {
+			if req.URL.Hostname() != "93.184.216.34" {
+				alternatives.Add(1)
+				_, _ = io.WriteString(conn, "HTTP/1.1 500 Error\r\nContent-Length: 0\r\n\r\n")
+				return
+			}
+			if _, err := fmt.Fprintf(conn, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n", chunks*chunkBytes); err != nil {
+				return
+			}
+			for range chunks {
+				time.Sleep(125 * time.Millisecond)
+				if _, err := io.WriteString(conn, strings.Repeat("x", chunkBytes)); err != nil {
+					return
+				}
+			}
+		})
+		client := imageSchedulerFixture(fixture)
+		start := time.Now()
+		response, err := client.Get("http://safe.example/image.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil || len(body) != chunks*chunkBytes || time.Since(start) != 40*time.Second || alternatives.Load() != 0 || len(dialer.addresses()) != 1 {
+			t.Fatalf("fragmented useful progress caused needless hedging: body=%d err=%v elapsed=%v alternatives=%d dials=%v", len(body), err, time.Since(start), alternatives.Load(), dialer.addresses())
+		}
+	})
+}
+
 func TestBufferedImageSchedulerSharesLanesAndCancelsQueuedWork(t *testing.T) {
 	first := NewBufferedImageGETClient(time.Minute).Transport.(*bufferedGETTransport)
 	second := NewBufferedImageGETClient(time.Minute).Transport.(*bufferedGETTransport)

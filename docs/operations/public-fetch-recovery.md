@@ -13,8 +13,13 @@ simultaneous distinct primary image requests, reserving the fourth connection
 for a stalled peer's alternative; a fourth image waits within its original
 budget even when that spare lane is idle.
 
-After two seconds without connection I/O, the scheduler may add one secondary.
-Progress covers CONNECT, TLS, response headers and body reads/writes. The
+After two seconds without useful connection progress, the scheduler may add one
+secondary. Connection startup begins the clock; subsequent reads/writes across
+CONNECT, TLS, response headers and body accumulate a 1 KiB watermark before
+refreshing it. Smaller packets count cumulatively, while a one-byte-per-second
+dribble cannot suppress an alternative indefinitely. The watermark is a hedge
+hint, not a minimum response size or a transfer-rate validity check: complete
+small responses still win normally and a slow primary keeps its budget. The
 primary retains its original deadline and is never cancelled merely for
 inactivity. A first secondary may yield after inactivity when another checked
 peer is pending; its sockets close and permits return before replacement. A

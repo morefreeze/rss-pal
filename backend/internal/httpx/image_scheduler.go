@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const imageHedgeIdle = 2 * time.Second
+const (
+	imageHedgeIdle         = 2 * time.Second
+	imageProgressWatermark = 1 << 10
+)
 
 // Three image requests can start their primary before any hedge can consume
 // the fourth physical connection. A lane is acquired before the global slot.
@@ -266,25 +269,41 @@ func (t *bufferedGETTransport) runImageAttempt(req *http.Request, a *imageAttemp
 	return t.fetchCandidate(req.Clone(a.ctx), a.peer.address, a.progress)
 }
 
-// Track actual connection I/O, including CONNECT and TLS, rather than only
-// body reads. The same wrapper is used by direct, HTTP and SOCKS transports.
+// Track cumulative connection I/O, including CONNECT and TLS. Tiny dribbling
+// reads must not keep hiding a healthy alternate: refresh the idle clock only
+// after a useful 1 KiB step. This is a hedge hint, not a response-size/rate
+// requirement; the protected primary still has its original full budget.
 type imageProgressConn struct {
 	net.Conn
 	progress func()
+	mu       sync.Mutex
+	bytes    int
+}
+
+func (c *imageProgressConn) recordProgress(n int) {
+	if n <= 0 {
+		return
+	}
+	c.mu.Lock()
+	c.bytes += n
+	useful := c.bytes >= imageProgressWatermark
+	if useful {
+		c.bytes %= imageProgressWatermark
+	}
+	c.mu.Unlock()
+	if useful {
+		c.progress()
+	}
 }
 
 func (c *imageProgressConn) Read(buffer []byte) (int, error) {
 	n, err := c.Conn.Read(buffer)
-	if n > 0 {
-		c.progress()
-	}
+	c.recordProgress(n)
 	return n, err
 }
 
 func (c *imageProgressConn) Write(buffer []byte) (int, error) {
 	n, err := c.Conn.Write(buffer)
-	if n > 0 {
-		c.progress()
-	}
+	c.recordProgress(n)
 	return n, err
 }
