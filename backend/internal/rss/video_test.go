@@ -210,6 +210,39 @@ func TestRewriteVideoLinksPreservesTitledNewsletterLinks(t *testing.T) {
 	}
 }
 
+func TestRewriteVideoLinksPreservesSourceLabels(t *testing.T) {
+	for _, tc := range []struct {
+		label, url, id string
+		start          int
+	}{
+		{"games", "https://youtu.be/vFr3K2DORc8", "vFr3K2DORc8", 0},
+		{"Nuts and Bolts of Applying Deep Learning", "https://youtu.be/F1ka6a13S9I", "F1ka6a13S9I", 0},
+		{"https://youtu.be/F1ka6a13S9I", "https://youtu.be/F1ka6a13S9I", "F1ka6a13S9I", 0},
+		{"Godfather of deep learning!", "https://youtu.be/uAu3jQWaN6E", "uAu3jQWaN6E", 0},
+		{"“Information Theory in Deep Learning”", "https://youtu.be/bLqJHjXihK8", "bLqJHjXihK8", 0},
+		{"nice video", "https://youtu.be/P1A1yNsxMjc", "P1A1yNsxMjc", 0},
+		{"Tishby’ talk 15:15", "https://youtu.be/bLqJHjXihK8?t=15m15s", "bLqJHjXihK8", 915},
+		// The original label says 24:50 but intentionally links to 24m56s.
+		{"Tishby’ talk 24:50", "https://youtu.be/bLqJHjXihK8?t=24m56s", "bLqJHjXihK8", 1496},
+		{"Information Theory of Deep Learning", "https://youtu.be/bLqJHjXihK8", "bLqJHjXihK8", 0},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			link := "[" + tc.label + "](" + tc.url + ")"
+			input := "Read " + link + " for more."
+			if got := RewriteVideoLinks(input); got != input {
+				t.Errorf("source label lost: got %q, want %q", got, input)
+			}
+			video, ok := ExtractVideo(tc.url)
+			if !ok || video.ID != tc.id || video.Start != tc.start {
+				t.Fatalf("video target changed: %+v, recognized %v", video, ok)
+			}
+			if got := RewriteVideoLinks(RewriteVideoLinks(input)); got != input {
+				t.Fatalf("repeat normalization changed source link: %q", got)
+			}
+		})
+	}
+}
+
 func TestRewriteVideoLinks(t *testing.T) {
 	cases := []struct {
 		name string
@@ -224,7 +257,7 @@ func TestRewriteVideoLinks(t *testing.T) {
 		{
 			"markdown_link",
 			"See [the video](https://youtu.be/dQw4w9WgXcQ) for more.",
-			"See [[video:youtube:dQw4w9WgXcQ]] for more.",
+			"See [the video](https://youtu.be/dQw4w9WgXcQ) for more.",
 		},
 		{
 			"bilibili_with_page",

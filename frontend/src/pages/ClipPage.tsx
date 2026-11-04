@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { parsePublicationDate } from '../utils/publicationDate'
 import {
   ArticleOrder,
   ArticleSort,
@@ -30,14 +31,12 @@ import { captureReadContinuation, findReadContinuation, scrollToReadContinuation
 const PAGE_SIZE = 20
 
 const formatDate = (dateStr: string | null) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('zh-CN', {
+  return parsePublicationDate(dateStr)?.toLocaleDateString('zh-CN', {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  })
+  }) ?? ''
 }
 
 const stripMarkdown = (text: string) =>

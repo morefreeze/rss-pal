@@ -1,4 +1,5 @@
 import { SearchText } from '../components/ArticleSearch'
+import { parsePublicationDate } from '../utils/publicationDate'
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getArticles, getGroupedArticles, searchArticles, getDailyDigest, markAllRead, markReadRange, ReadDirection, Article, ArticleListItem, ArticleSort, ArticleOrder, Feed, GroupedArticles, getFeeds, getTagSidebar, TagSidebarData } from '../api/client'
@@ -937,9 +938,7 @@ export default function ArticleListPage() {
   }
 
   const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return ''
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    return parsePublicationDate(dateStr)?.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? ''
   }
 
   const stripMarkdown = (text: string) =>

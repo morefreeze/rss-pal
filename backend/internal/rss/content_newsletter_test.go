@@ -80,7 +80,7 @@ func TestBestBlogsNewsletterHTTPExtractionRetainsResolvedLinks(t *testing.T) {
 	if err != nil || status != http.StatusOK {
 		t.Fatalf("status=%d error=%v", status, err)
 	}
-	for _, want := range []string{"大家好！", "年轻人在社会中的效用", server.URL + "/article/21ef025d3a?entry=newsletter_page", "[[video:youtube:Q8yFrGwIftE]]"} {
+	for _, want := range []string{"大家好！", "年轻人在社会中的效用", server.URL + "/article/21ef025d3a?entry=newsletter_page", "[youtube.com](https://www.youtube.com/watch?v=Q8yFrGwIftE)"} {
 		if !strings.Contains(got.Content, want) {
 			t.Errorf("missing %q", want)
 		}

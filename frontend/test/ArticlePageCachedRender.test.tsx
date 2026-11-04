@@ -134,6 +134,27 @@ class TestResizeObserver implements ResizeObserver {
 }
 
 describe('ArticlePage immediate loading', () => {
+  it.each([null, '', '0001-01-01T00:00:00Z', '0001-01-01T00:00:00+08:00', 'invalid date'])('hides unknown publication dates (%s)', published => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    const cached = detail(42)
+    cached.article.published_at = published
+    putArticleDetail(cached)
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+    const publication = screen.getByRole('link', { name: '原文链接' }).parentElement!.querySelector('span')!
+    expect(publication.textContent).toBe('')
+  })
+
+  it('keeps a valid publication date in the article reader', () => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+    expect(screen.getByText(new Date('2026-07-27T00:00:00Z').toLocaleString('zh-CN'))).toBeTruthy()
+  })
+
   it('polls a queued capture until the fetched body arrives', async () => {
     vi.useFakeTimers()
     try {

@@ -40,6 +40,11 @@ const article: ExploreArticleListItem = {
 }
 
 describe('ExploreArticleCard exposure tracking', () => {
+  it.each([null, '0001-01-01T00:00:00Z', 'invalid date'])('shows unknown for unavailable publication dates (%s)', published_at => {
+    render(<ExploreArticleCard article={{ ...article, published_at }} sort="published" onOpen={vi.fn()} onExposure={vi.fn()} onHideSource={vi.fn()} onDampenTopic={vi.fn()} />)
+    expect(screen.getByText('时间未知')).toBeTruthy()
+  })
+
   beforeEach(() => {
     vi.useFakeTimers()
     FakeIntersectionObserver.instances = []

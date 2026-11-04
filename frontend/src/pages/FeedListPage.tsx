@@ -1,4 +1,5 @@
 import SourceDirectory from '../components/SourceDirectory'
+import { parsePublicationDate } from '../utils/publicationDate'
 import OPMLTransfer from '../components/OPMLTransfer'
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
@@ -471,18 +472,21 @@ export default function FeedListPage() {
                   <br />建议尝试该网站的 RSS 直接地址（通常在页脚或设置中可找到）。
                 </div>
               ) : (
-                (preview.items ?? []).map((item, i) => (
-                  <div key={i} style={{ padding: '5px 0', borderBottom: i < (preview.items ?? []).length - 1 ? '1px solid var(--border)' : 'none' }}>
-                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm" style={{ color: 'var(--link)' }}>
-                      {item.title}
-                    </a>
-                    {item.published_at && (
-                      <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
-                        {new Date(item.published_at).toLocaleDateString('zh-CN')}
-                      </span>
-                    )}
-                  </div>
-                ))
+                (preview.items ?? []).map((item, i) => {
+                  const published = parsePublicationDate(item.published_at)
+                  return (
+                    <div key={i} style={{ padding: '5px 0', borderBottom: i < (preview.items ?? []).length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm" style={{ color: 'var(--link)' }}>
+                        {item.title}
+                      </a>
+                      {published && (
+                        <span className="text-muted text-sm" style={{ marginLeft: 8 }}>
+                          {published.toLocaleDateString('zh-CN')}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })
               )}
             </div>
           </div>

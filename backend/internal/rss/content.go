@@ -476,7 +476,7 @@ func ExtractMarkdown(selection *goquery.Selection) string {
 	if err != nil {
 		return strings.TrimSpace(selection.Text())
 	}
-	// Post-conversion: catch YouTube/Bilibili URLs that were links rather than iframes.
+	// Post-conversion: catch bare YouTube/Bilibili URLs; retain labelled links.
 	md = RewriteVideoLinks(md)
 	md = reinsertMathPlaceholders(md, mathPHs)
 	md = escapeAmbiguousMathDollars(md)

@@ -13,6 +13,17 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+// PublishedTime preserves the feed's existing published/updated preference,
+// treating year-one timestamps emitted for absent dates as unknown.
+func PublishedTime(published, updated *time.Time) *time.Time {
+	for _, candidate := range []*time.Time{published, updated} {
+		if candidate != nil && candidate.Year() > 1 {
+			return candidate
+		}
+	}
+	return nil
+}
+
 // ExtractPublishedAt reads explicit publication metadata before content cleanup.
 // It never uses modification dates, URL dates, or arbitrary dates in the body.
 func ExtractPublishedAt(doc *goquery.Document, pageURL string) *time.Time {

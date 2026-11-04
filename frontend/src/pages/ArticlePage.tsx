@@ -1,4 +1,5 @@
 import { ArticleSearch, ExcludeArticleSearch, SearchText, useArticleSearchQuery } from '../components/ArticleSearch'
+import { parsePublicationDate } from '../utils/publicationDate'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
@@ -1102,8 +1103,7 @@ function ArticlePageContent() {
   }
 
   const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return ''
-    return new Date(dateStr).toLocaleString('zh-CN')
+    return parsePublicationDate(dateStr)?.toLocaleString('zh-CN') ?? ''
   }
 
   const progressDisplay = deriveProgressDisplay({

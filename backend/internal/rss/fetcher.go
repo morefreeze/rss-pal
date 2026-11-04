@@ -693,10 +693,7 @@ func rssToPreview(feed *gofeed.Feed, feedURL string) *PreviewResult {
 }
 
 func publishedTimeStr(published, updated *time.Time) string {
-	t := published
-	if t == nil {
-		t = updated
-	}
+	t := PublishedTime(published, updated)
 	if t == nil {
 		return ""
 	}

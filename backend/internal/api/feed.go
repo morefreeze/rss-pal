@@ -420,10 +420,7 @@ func (h *FeedHandler) FetchNow(c *gin.Context) {
 }
 
 func publishedTime(published, updated *time.Time) *time.Time {
-	if published != nil {
-		return published
-	}
-	return updated
+	return rss.PublishedTime(published, updated)
 }
 
 func (h *FeedHandler) ExportOPML(c *gin.Context) {

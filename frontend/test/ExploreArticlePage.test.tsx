@@ -114,6 +114,12 @@ function deferred<T>() {
 }
 
 describe('ExploreArticlePage', () => {
+  it.each([null, '0001-01-01T00:00:00Z', 'invalid date'])('shows unknown for unavailable publication dates (%s)', async published_at => {
+    api.getExploreArticle.mockResolvedValue({ ...detail, published_at })
+    renderPage()
+    expect(await screen.findByText(/发布时间未知/)).toBeTruthy()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     nextAnimationFrameID = 1

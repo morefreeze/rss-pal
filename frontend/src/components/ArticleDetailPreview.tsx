@@ -1,5 +1,6 @@
 import type { ArticleListItem } from '../api/client'
 import SummaryMarkdown from './SummaryMarkdown'
+import { parsePublicationDate } from '../utils/publicationDate'
 
 export default function ArticleDetailPreview({
   article,
@@ -8,9 +9,7 @@ export default function ArticleDetailPreview({
 }) {
   const metadata = [
     article.source?.title || article.feed_title,
-    article.published_at
-      ? new Date(article.published_at).toLocaleString('zh-CN')
-      : '',
+    parsePublicationDate(article.published_at)?.toLocaleString('zh-CN') ?? '',
   ].filter(Boolean).join(' · ')
 
   return (

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { parsePublicationDate } from '../utils/publicationDate'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getDailyDigest, DailyDigest } from '../api/client'
 import ReadingMeta from '../components/ReadingMeta'
@@ -145,27 +146,30 @@ export default function DailyPage() {
             <div className="card text-muted">当日无候选文章。</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {digest.articles.map(a => (
-                <Link
-                  key={a.id}
-                  to={`/articles/${a.id}`}
-                  onClick={onClickArticle}
-                  className="card"
-                  style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}
-                >
-                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{a.title}</div>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-                    {(a.source || a.feed_title) && <span className="text-muted text-sm">{a.source?.title || a.feed_title}</span>}
-                    {a.published_at && <span className="text-muted text-sm">{new Date(a.published_at).toLocaleDateString('zh-CN')}</span>}
-                    <ReadingMeta wordCount={a.word_count} readingMinutes={a.reading_minutes} mediaType={a.media_type} mediaDurationSeconds={a.media_duration_seconds} />
-                  </div>
-                  {a.summary_brief && (
-                    <div className="summary-markdown text-muted" style={{ fontSize: 13 }}>
-                      <SummaryMarkdown source={a.summary_brief} />
+              {digest.articles.map(a => {
+                const published = parsePublicationDate(a.published_at)
+                return (
+                  <Link
+                    key={a.id}
+                    to={`/articles/${a.id}`}
+                    onClick={onClickArticle}
+                    className="card"
+                    style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}
+                  >
+                    <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{a.title}</div>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+                      {(a.source || a.feed_title) && <span className="text-muted text-sm">{a.source?.title || a.feed_title}</span>}
+                      {published && <span className="text-muted text-sm">{published.toLocaleDateString('zh-CN')}</span>}
+                      <ReadingMeta wordCount={a.word_count} readingMinutes={a.reading_minutes} mediaType={a.media_type} mediaDurationSeconds={a.media_duration_seconds} />
                     </div>
-                  )}
-                </Link>
-              ))}
+                    {a.summary_brief && (
+                      <div className="summary-markdown text-muted" style={{ fontSize: 13 }}>
+                        <SummaryMarkdown source={a.summary_brief} />
+                      </div>
+                    )}
+                  </Link>
+                )
+              })}
             </div>
           )}
         </>

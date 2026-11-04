@@ -1,4 +1,5 @@
 import ExploreArticleActions from '../components/ExploreArticleActions'
+import { parsePublicationDate } from '../utils/publicationDate'
 import { useExploreArticleActions } from '../hooks/useExploreArticleActions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -37,8 +38,7 @@ function safeExploreReturnPath(value: unknown): string {
 }
 
 function formatDate(value: string | null): string {
-  if (!value) return '发布时间未知'
-  return new Date(value).toLocaleString('zh-CN')
+  return parsePublicationDate(value)?.toLocaleString('zh-CN') ?? '发布时间未知'
 }
 
 export default function ExploreArticlePage() {

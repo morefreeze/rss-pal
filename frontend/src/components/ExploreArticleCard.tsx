@@ -1,4 +1,5 @@
 import ExploreArticleActions from './ExploreArticleActions'
+import { parsePublicationDate } from '../utils/publicationDate'
 import { useExploreArticleActions } from '../hooks/useExploreArticleActions'
 import { useArticleImageSource } from '../util/useArticleImageSource'
 import { useEffect, useRef, useState } from 'react'
@@ -16,10 +17,9 @@ interface Props {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return '时间未知'
-  return new Date(value).toLocaleDateString('zh-CN', {
+  return parsePublicationDate(value)?.toLocaleDateString('zh-CN', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
+  }) ?? '时间未知'
 }
 
 export default function ExploreArticleCard({

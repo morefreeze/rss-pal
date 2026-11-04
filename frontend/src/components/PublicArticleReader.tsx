@@ -1,4 +1,5 @@
 import MarkdownArticle from './MarkdownArticle'
+import { parsePublicationDate } from '../utils/publicationDate'
 import ReadingMeta from './ReadingMeta'
 import SummaryMarkdown from './SummaryMarkdown'
 import VideoEmbed from './VideoEmbed'
@@ -39,9 +40,7 @@ type Props = ArticleProps & {
 const MAIN_SITE_ORIGIN = 'https://rss.morefreeze.top'
 
 function formatDate(value?: string | null): string {
-  if (!value) return ''
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN')
+  return parsePublicationDate(value)?.toLocaleString('zh-CN') ?? ''
 }
 
 function formatDuration(seconds?: number): string {

@@ -109,6 +109,13 @@ afterEach(() => {
 })
 
 describe('SharePage public reader', () => {
+  it.each([null, '', '0001-01-01T00:00:00Z', 'invalid date'])('omits unknown publication dates (%s)', async published_at => {
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ published_at }) })
+    const { container } = renderSharePage()
+    await screen.findByRole('heading', { name: 'Shared title' })
+    expect(container.querySelector('.public-reader-meta time')).toBeNull()
+  })
+
   it('shows short video duration beside reading metrics on a public share', async () => {
     axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ media_type:'video/youtube', media_duration_seconds:97 }) })
     renderSharePage()

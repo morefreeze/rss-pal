@@ -4,6 +4,15 @@ import ArticleDetailPreview from '../src/components/ArticleDetailPreview'
 import type { ArticleListItem } from '../src/api/client'
 
 describe('ArticleDetailPreview', () => {
+  it.each([null, '0001-01-01T00:00:00Z', 'invalid date'])('omits an unknown publication date (%s)', published_at => {
+    const { container } = render(<ArticleDetailPreview article={{
+      id: 7, feed_id: 1, feed_title: 'Example Feed', title: 'FAQ',
+      url: 'https://example.com/faq', published_at,
+      summary_brief: '', fetched_at: '2026-07-27T00:00:00Z',
+    }} />)
+    expect(container.querySelector('.text-muted')?.textContent).toBe('Example Feed')
+  })
+
   it('shows list metadata without pretending the body is loaded', () => {
     const preview: ArticleListItem = {
       id: 7,

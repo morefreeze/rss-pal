@@ -311,20 +311,17 @@ var videoURLRegex = regexp.MustCompile(
 var markdownLinkRegex = regexp.MustCompile(`\[([^\]]*)\]\((https?://[^)\s]+)(?:[ \t]+("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\([^)]*\)))?[ \t]*\)`)
 var videoLinkOrURLRegex = regexp.MustCompile(markdownLinkRegex.String() + `|` + videoURLRegex.String())
 
-// RewriteVideoLinks turns video links and bare URLs into placeholders.
-// Titled links, used by newsletters for vote/comment metadata, remain links
-// with their original text, URL and title. A single pass keeps their URLs
-// out of the bare-URL rewrite and is idempotent for existing placeholders.
+// RewriteVideoLinks turns bare video URLs into placeholders. Markdown links
+// retain their source text, URL and optional title: replacing them with an
+// unlabelled placeholder discards words that can be part of a sentence.
+// A single pass keeps their URLs out of the bare-URL rewrite and is
+// idempotent for existing placeholders.
 func RewriteVideoLinks(md string) string {
 	return videoLinkOrURLRegex.ReplaceAllStringFunc(md, func(match string) string {
-		rawURL := match
 		if sub := markdownLinkRegex.FindStringSubmatch(match); len(sub) == 4 {
-			if sub[3] != "" {
-				return match
-			}
-			rawURL = sub[2]
+			return match
 		}
-		v, ok := ExtractVideo(rawURL)
+		v, ok := ExtractVideo(match)
 		if !ok {
 			return match
 		}

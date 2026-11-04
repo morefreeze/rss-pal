@@ -54,7 +54,11 @@ func extractRawTextMath(selection *goquery.Selection, phs []mathPlaceholder) []m
 						body := s[start:end]
 						valid := strings.TrimSpace(body) != ""
 						if open == "$" {
-							valid = valid && body == strings.TrimSpace(body) && !strings.ContainsAny(body, "\n\r") && !shouldEscapeProseDollarPair([]rune(body))
+							// MathJax accepts delimiter-adjacent spaces. Protect the
+							// trimmed TeX before Markdown escapes its commands and
+							// subscripts; keep the price check on that same body.
+							body = strings.TrimSpace(body)
+							valid = valid && !strings.ContainsAny(s[start:end], "\n\r") && !shouldEscapeProseDollarPair([]rune(body))
 						}
 						if valid {
 							key := fmt.Sprintf("⁣RSSPALMATH%d⁣", len(phs))
@@ -98,8 +102,15 @@ func dollarStartsMath(r []rune) bool {
 			continue
 		}
 		if r[j] == '$' {
-			body := string(r[1:j])
-			return body != "" && body == strings.TrimSpace(body) && !shouldEscapeProseDollarPair(r[1:j])
+			raw := string(r[1:j])
+			body := strings.TrimSpace(raw)
+			// Between a rejected price pair and another formula, "$ and $"
+			// is prose. Padded lookahead needs a math signal or a compact
+			// numeric/single-symbol expression before reusing that dollar.
+			if body != raw && !numericMathBody.MatchString(body) && !strings.ContainsAny(body, `\{}_^=<>`) && len([]rune(body)) != 1 {
+				return false
+			}
+			return body != "" && !shouldEscapeProseDollarPair([]rune(body))
 		}
 	}
 	return false

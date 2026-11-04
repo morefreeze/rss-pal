@@ -108,6 +108,45 @@ func TestRejectedPricePairDoesNotConsumeFollowingFormula(t *testing.T) {
 	}
 }
 
+// These source expressions include delimiter-adjacent spaces accepted by
+// MathJax. They must bypass Markdown escaping just like unpadded formulas.
+// https://lilianweng.github.io/posts/2017-06-21-overview/ (Autoencoders)
+// https://lilianweng.github.io/posts/2017-09-28-information-bottleneck/ (Markov chain)
+func TestPaddedRawMathPreservesSourceTeX(t *testing.T) {
+	for _, tc := range []struct{ source, want string }{
+		{`The approximation function $ f(x) \approx x $ reproduces the input.`, `The approximation function $f(x) \approx x$ reproduces the input.`},
+		{`One state of a Markov Chain: $ h_i \to h_{i+1}$. According to DPI.`, `One state of a Markov Chain: $h_i \to h_{i+1}$. According to DPI.`},
+		{`Compare $2ND $, $ 6N$, $ C \approx 6ND $ and price $9 and $200.`, `Compare $2ND$, $6N$, $C \approx 6ND$ and price \$9 and \$200.`},
+		{`Cost $9; use $ x \in B $ or $ 2x=0 $.`, `Cost \$9; use $x \in B$ or $2x=0$.`},
+	} {
+		for _, pipeline := range []string{"feed", "page"} {
+			t.Run(pipeline+"/"+tc.source, func(t *testing.T) {
+				raw := "<article><p>" + tc.source + "</p></article>"
+				got := NormalizeFeedContent(raw, "https://example.org/post")
+				if pipeline == "page" {
+					var err error
+					got, err = NewContentFetcher().FetchContentFromReader(strings.NewReader(raw))
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if got != tc.want {
+					t.Fatalf("got %q, want %q", got, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestPaddedMathPreservesMatrixRowSeparators(t *testing.T) {
+	tex := `\begin{pmatrix}a_i & b \\ c & d\end{pmatrix}`
+	raw := `<article><p>Matrix $ ` + tex + ` $ and <code>$ x_i \to y $</code>.</p>`
+	got := NormalizeFeedContent(raw, "https://example.org")
+	if !strings.Contains(got, "$"+tex+"$") || !strings.Contains(got, "`$ x_i \\to y $`") {
+		t.Fatalf("source math or literal code changed: %q", got)
+	}
+}
+
 func TestSubscriptionFallbackPreservesMath(t *testing.T) {
 	raw := `<p>Ring $x \in B$.</p><script type="math/tex; mode=display">2x=0</script>`
 	for _, tt := range []struct{ description, content string }{{raw, ""}, {"", raw}, {"Brief summary", raw}} {

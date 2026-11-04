@@ -5,6 +5,17 @@ import MarkdownArticle from '../src/components/MarkdownArticle'
 
 describe('MarkdownArticle video placeholders', () => {
   it.each([
+    ['games', 'https://youtu.be/vFr3K2DORc8'],
+    ['Nuts and Bolts of Applying Deep Learning', 'https://youtu.be/F1ka6a13S9I'],
+    ['Godfather of deep learning!', 'https://youtu.be/uAu3jQWaN6E'],
+    ['Tishby’ talk 15:15', 'https://youtu.be/bLqJHjXihK8?t=15m15s'],
+    ['Tishby’ talk 24:50', 'https://youtu.be/bLqJHjXihK8?t=24m56s'],
+  ])('keeps source video label %s and its original destination', (label, url) => {
+    render(<MarkdownArticle source={`Read [${label}](${url}) for more.`} />)
+    expect(screen.getByRole('link', { name: label }).getAttribute('href')).toBe(url)
+  })
+
+  it.each([
     ['youtube', 'Ndftcft6XhU', '', 'https://www.youtube.com/watch?v=Ndftcft6XhU'],
     ['youtube', 'LKrwhjOI8Nc', '?start=112', 'https://www.youtube.com/watch?v=LKrwhjOI8Nc&t=112'],
     ['bilibili', 'BV1xx411c7mD', '?page=2&start=42', 'https://www.bilibili.com/video/BV1xx411c7mD?p=2&t=42'],

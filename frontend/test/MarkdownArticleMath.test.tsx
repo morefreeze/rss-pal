@@ -4,6 +4,17 @@ import MarkdownArticle from '../src/components/MarkdownArticle'
 import { escapeAmbiguousMathDollars } from '../src/util/mathShadow'
 
 describe('math extraction rendering', () => {
+ it('renders preserved source commands, subscripts and matrix row breaks', () => {
+  const matrix = String.raw`\begin{pmatrix}a_i & b \\ c & d\end{pmatrix}`
+  const { container } = render(<MarkdownArticle source={`Autoencoders: $f(x) \\approx x$. Markov Chain: $h_i \\to h_{i+1}$. Numeric: $2ND$.\n\n$$\n${matrix}\n$$`} />)
+  expect(Array.from(container.querySelectorAll('annotation[encoding="application/x-tex"]')).map(node => node.textContent?.trim())).toEqual([
+   String.raw`f(x) \approx x`, String.raw`h_i \to h_{i+1}`, '2ND', matrix,
+  ])
+  expect(container.querySelectorAll('.katex')).toHaveLength(4)
+  expect(container.querySelector('.katex-error')).toBeNull()
+  expect(container.querySelector('.katex-html')?.textContent).toContain('≈')
+ })
+
  it('keeps digit-led equations and escapes prices', () => {
   expect(escapeAmbiguousMathDollars('$2x=0$')).toBe('$2x=0$')
   expect(escapeAmbiguousMathDollars('modulo $2$, degree $4$')).toBe('modulo $2$, degree $4$')
