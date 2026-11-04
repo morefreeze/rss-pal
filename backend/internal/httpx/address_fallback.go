@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -36,10 +37,12 @@ func NewBufferedGETClient(timeout time.Duration) *http.Client {
 }
 
 // NewBufferedImageGETClient applies the same checked-address recovery with a
-// 10 MiB body limit and a separate bounded image workload.
+// 10 MiB body limit and a separate bounded image workload. If all candidates
+// fail, pre-body EOF/reset failures get at most one fresh connection to the
+// same checked address, within the original request's deadline and permits.
 func NewBufferedImageGETClient(timeout time.Duration) *http.Client {
 	client := NewClient(timeout)
-	client.Transport = &bufferedGETTransport{base: client.Transport.(*safeRoundTripper), slots: bufferedImageSlots, bodyLimit: bufferedImageBodyLimit}
+	client.Transport = &bufferedGETTransport{base: client.Transport.(*safeRoundTripper), slots: bufferedImageSlots, bodyLimit: bufferedImageBodyLimit, retryPreBodyFailures: true}
 	return client
 }
 
@@ -49,15 +52,23 @@ func withBufferedGETAddressFallback(client *http.Client) *http.Client {
 }
 
 type bufferedGETTransport struct {
-	base      *safeRoundTripper
-	slots     chan struct{}
-	bodyLimit int64
+	base                 *safeRoundTripper
+	slots                chan struct{}
+	bodyLimit            int64
+	retryPreBodyFailures bool
 }
 
 type bufferedGETResult struct {
 	response *http.Response
 	err      error
+	address  net.IPAddr
 }
+
+// Only failures before response headers can start a fresh image attempt. Body
+// truncation, size limits, rejected redirects and HTTP errors are not retried.
+type bufferedGETPreBodyError struct{ error }
+
+func (e *bufferedGETPreBodyError) Unwrap() error { return e.error }
 
 func (t *bufferedGETTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Method != http.MethodGet || (req.Body != nil && req.Body != http.NoBody) ||
@@ -71,6 +82,33 @@ func (t *bufferedGETTransport) RoundTrip(req *http.Request) (*http.Response, err
 	if err != nil {
 		return nil, err
 	}
+	response, retryAddresses, err := t.roundTripCandidates(req, addresses)
+	if contextErr := req.Context().Err(); contextErr != nil {
+		return nil, contextErr
+	}
+	if !t.retryPreBodyFailures || len(retryAddresses) == 0 || bufferedGETWinner(response) {
+		return response, err
+	}
+	// The initial wave has joined and released every socket/permit. Retry only
+	// its transient peers, pinned to their previously checked IPs; failed HTTP
+	// statuses (including CONNECT failures) never gain a fresh attempt.
+	retried, _, retryErr := t.roundTripCandidates(req, retryAddresses)
+	if bufferedGETWinner(retried) {
+		return retried, nil
+	}
+	if contextErr := req.Context().Err(); contextErr != nil {
+		return nil, contextErr
+	}
+	if response != nil {
+		return response, nil
+	}
+	if retried != nil {
+		return retried, nil
+	}
+	return nil, errors.Join(err, retryErr)
+}
+
+func (t *bufferedGETTransport) roundTripCandidates(req *http.Request, addresses []net.IPAddr) (*http.Response, []net.IPAddr, error) {
 	ctx, cancel := context.WithCancel(req.Context())
 	results := make(chan bufferedGETResult, len(addresses))
 	var attempts sync.WaitGroup
@@ -94,26 +132,31 @@ func (t *bufferedGETTransport) RoundTrip(req *http.Request) (*http.Response, err
 				return
 			}
 			response, err := t.fetchCandidate(req.Clone(ctx), address)
-			results <- bufferedGETResult{response: response, err: err}
+			results <- bufferedGETResult{response: response, err: err, address: address}
 		}(address)
 	}
 	var firstResponse *http.Response
 	var failures []error
+	var retryAddresses []net.IPAddr
 	for range addresses {
 		select {
 		case <-req.Context().Done():
-			return nil, req.Context().Err()
+			return nil, nil, req.Context().Err()
 		case result := <-results:
 			if err := req.Context().Err(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if result.err != nil {
 				failures = append(failures, result.err)
+				var preBody *bufferedGETPreBodyError
+				if errors.As(result.err, &preBody) && (errors.Is(preBody, io.EOF) || errors.Is(preBody, io.ErrUnexpectedEOF) || errors.Is(preBody, syscall.ECONNRESET)) {
+					retryAddresses = append(retryAddresses, result.address)
+				}
 				continue
 			}
 			result.response.Request = req
-			if result.response.StatusCode == http.StatusOK || result.response.StatusCode == http.StatusNotModified || bufferedGETRedirect(result.response) {
-				return result.response, nil
+			if bufferedGETWinner(result.response) {
+				return result.response, nil, nil
 			}
 			// A quick CDN error must not beat a complete 200 from another IP.
 			// If every address fails, retain a complete HTTP error for the caller.
@@ -123,9 +166,13 @@ func (t *bufferedGETTransport) RoundTrip(req *http.Request) (*http.Response, err
 		}
 	}
 	if firstResponse != nil {
-		return firstResponse, nil
+		return firstResponse, retryAddresses, nil
 	}
-	return nil, fmt.Errorf("all public addresses failed: %w", errors.Join(failures...))
+	return nil, retryAddresses, fmt.Errorf("all public addresses failed: %w", errors.Join(failures...))
+}
+
+func bufferedGETWinner(response *http.Response) bool {
+	return response != nil && (response.StatusCode == http.StatusOK || response.StatusCode == http.StatusNotModified || bufferedGETRedirect(response))
 }
 
 func (t *bufferedGETTransport) addresses(req *http.Request) ([]net.IPAddr, error) {
@@ -179,7 +226,7 @@ func (t *bufferedGETTransport) fetchCandidate(req *http.Request, address net.IPA
 	base.dialer = connections
 	response, err := base.RoundTrip(req)
 	if err != nil {
-		return nil, err
+		return nil, &bufferedGETPreBodyError{err}
 	}
 	defer closeBufferedGETBody(response.Body)
 	// A 304 has no message body. Its Content-Length may describe the complete

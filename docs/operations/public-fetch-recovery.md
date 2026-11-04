@@ -7,6 +7,18 @@ bodyless 304. EOF, failed proxy CONNECT, and stalled partial responses do not
 prevent another checked address from completing. The caller's total deadline
 still applies; this is not an additional round of retries after that deadline.
 
+If no candidate produces an accepted response, images allow one fresh connection
+to each checked IP that failed with a pre-body EOF, unexpected EOF, or connection
+reset. The initial connections close and release their permits before this
+second wave. It uses the same original request deadline and pinned public IPs:
+at most four unique addresses and eight candidate attempts per URL hop, under
+the existing redirect limit. A complete winner stops recovery. HTTP error
+statuses (including proxy CONNECT 500), body truncation, oversize responses,
+blocked redirects, cancelled requests, and authenticated/non-GET requests do
+not themselves trigger a retry. This mitigates transient pre-body connection
+failures; it does not repair an unavailable proxy address family. HTML/feed
+clients retain their single wave.
+
 The image workload has four shared active candidate permits and a 10 MiB body
 limit. HTML captures and public feeds share a separate four-permit workload,
 so slow images cannot consume preview/capture permits. HTML captures retain
