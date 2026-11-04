@@ -60,6 +60,11 @@ def parse(source):
             if token in ("{", ";"):
                 if not words:
                     raise Refused("empty nginx directive")
+                # Classifiers require plain keywords. Check every node before
+                # descending or dispatching, so quoted server/location/include
+                # names cannot hide routes. Quoted arguments remain untouched.
+                if any(character in words[0] for character in ("'", '"', "\\")):
+                    raise Refused("quoted or escaped directive names require review")
                 node = Node(words, start, end)
                 if token == "{":
                     node.opening = begin

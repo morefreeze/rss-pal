@@ -114,6 +114,21 @@ class ImageProxyNginxTest(unittest.TestCase):
                 source = source.replace("location ^~ /api {", "location /api {")
                 self.assert_refused_without_write(source)
 
+    def test_refuses_quoted_directive_names_recursively_before_classification(self):
+        routes = [
+            '"location" ^~ /api/proxy/ { return 403; }',
+            "'location' ^~ /api/proxy/ { return 403; }",
+            '"include" private-routes.conf;',
+            "'include' private-routes.conf;",
+            'location /custom { "location" /custom/private { return 403; } }',
+            'location /custom { "return" 204; }',
+        ]
+        sources = [self.original.replace("    # API proxy.", "    " + route + "\n\n    # API proxy.") for route in routes]
+        sources += [self.original + quoted + ' { location /api/proxy/ { return 403; } }\n' for quoted in ['"server"', "'server'"]]
+        for source in sources:
+            with self.subTest(source=source[-180:]):
+                self.assert_refused_without_write(source)
+
     def test_refuses_proxy_pass_uri_components_before_backup(self):
         for suffix in ["/", "/base", "?query=1", "#fragment"]:
             for variable in [False, True]:
@@ -132,11 +147,13 @@ class ImageProxyNginxTest(unittest.TestCase):
     location ~ "^/unrelated$" { return 204; }
     location ~ ^/api/media/ { return 204; }
     location ~* \\.(png|css)$ { return 404; }
+    location "~*" "^/quoted-unrelated$" { return 200 "quoted argument"; }
 
 '''
         source = self.original.replace("    # API proxy.", routes + "    # API proxy.")
         source = source.replace("        set $upstream_api http://api:8080;\n", "")
         source = source.replace("proxy_pass $upstream_api;", "proxy_pass http://127.0.0.1:18080;")
+        source = source.replace("server_name localhost;", 'server_name "localhost";')
         self.path.write_text(source)
         result = self.run_helper(self.path)
         self.assertEqual(result.returncode, 0, result.stderr)
