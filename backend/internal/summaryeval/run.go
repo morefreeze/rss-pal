@@ -50,6 +50,7 @@ type Config struct {
 	ImagePaths                      []string
 	Revision                        string
 	Dirty                           bool
+	SuiteFileHash                   string
 }
 
 type TextCounts struct {
@@ -96,7 +97,9 @@ type Artifact struct {
 	SchemaVersion       int                 `json:"schema_version"`
 	SuiteVersion        string              `json:"suite_version"`
 	SuiteHash           string              `json:"suite_sha256"`
+	SuiteFileHash       string              `json:"suite_file_sha256,omitempty"`
 	PolicyVersion       string              `json:"policy_version"`
+	PromptVersion       string              `json:"prompt_version,omitempty"`
 	GraderVersion       string              `json:"grader_version"`
 	CodeRevision        string              `json:"code_revision"`
 	WorkingTreeDirty    bool                `json:"working_tree_dirty"`
@@ -248,8 +251,8 @@ func Run(ctx context.Context, cfg Config, suite Suite, base http.RoundTripper) (
 	tr := NewBudgetTransport(base, cfg.MaxCalls)
 	client := &http.Client{Transport: tr, Timeout: 3 * time.Minute,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	a := &Artifact{SchemaVersion: 1, SuiteVersion: suite.Version, SuiteHash: suite.Hash(), PolicyVersion: ai.SummaryPolicyVersion,
-		GraderVersion: GraderVersion, CodeRevision: cfg.Revision, WorkingTreeDirty: cfg.Dirty, StartedAt: time.Now().UTC(),
+	a := &Artifact{SchemaVersion: 1, SuiteVersion: suite.Version, SuiteHash: suite.Hash(), SuiteFileHash: cfg.SuiteFileHash, PolicyVersion: ai.SummaryPolicyVersion,
+		PromptVersion: ai.SummaryPromptVersion, GraderVersion: GraderVersion, CodeRevision: cfg.Revision, WorkingTreeDirty: cfg.Dirty, StartedAt: time.Now().UTC(),
 		RequestedModel: cfg.Generator.Model, BriefTemplateHash: hashText(cfg.BriefTemplate), DetailTemplateHash: hashText(cfg.DetailedTemplate),
 		ImageInputs: images, Status: "incomplete", HumanReviewRequired: true, PlannedResults: len(cases) * len(cfg.Routes), MaxCalls: cfg.MaxCalls}
 	defer func() {

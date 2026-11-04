@@ -32,13 +32,25 @@ func execute(ctx context.Context, args []string, getenv func(string) string, std
 	validate := f.Bool("validate", false, "validate frozen suite offline; no semantic acceptance")
 	live := f.Bool("live", false, "explicitly allow bounded provider requests")
 	grade := f.Bool("grade", false, "also run calibrated semantic model grading")
+	suiteFile := f.String("suite-file", "", "explicit frozen suite JSON file; never modifies the embedded default")
+	suiteSHA := f.String("suite-sha256", "", "expected SHA-256 of exact suite file bytes; required with --suite-file for --live")
+	var expectedRevision string
+	// Narrow opt-in guard ported from 88e316b; no serving behavior is imported.
+	f.Func("expected-revision", "require a clean executing binary built at this 40-hex revision", func(value string) error {
+		value = strings.ToLower(value)
+		if !validRevision(value) {
+			return fmt.Errorf("expected revision must be 40 hexadecimal characters")
+		}
+		expectedRevision = value
+		return nil
+	})
 	maxCalls := f.Int("max-calls", 0, "required hard cap on physical requests, including retries and judges (1–256)")
 	out := f.String("out", "", "new private JSON artifact path; existing files are never overwritten")
 	model := f.String("model", envOr(getenv, "AI_MODEL", ai.DefaultModel), "pinned generator model ID (or AI_MODEL)")
 	baseURL := f.String("base-url", getenv("AI_BASE_URL"), "OpenAI-compatible base URL (or AI_BASE_URL)")
 	judgeModel := f.String("judge-model", getenv("SUMMARY_EVAL_JUDGE_MODEL"), "optional separate grader model")
 	judgeBase := f.String("judge-base-url", getenv("SUMMARY_EVAL_JUDGE_BASE_URL"), "optional separate grader endpoint")
-	cases := f.String("cases", "", "comma-separated case IDs; default all nine")
+	cases := f.String("cases", "", "comma-separated case IDs; default all cases in the selected suite")
 	split := f.String("split", "all", "all, train, or held_out")
 	routes := f.String("routes", "default", "comma-separated default, stream, custom, custom-stream, vision, vision-stream")
 	images := f.String("images", "", "explicit source JPEG image paths for vision routes; comma-separated")
@@ -47,29 +59,56 @@ func execute(ctx context.Context, args []string, getenv func(string) string, std
 	timeout := f.Duration("timeout", 15*time.Minute, "total run deadline; interrupted runs are saved as incomplete")
 	if err := f.Parse(args); err != nil {
 		if err == flag.ErrHelp {
-			fmt.Fprintln(stdout, "summary-eval --validate | --live --max-calls N --out NEW.json [--grade] [--cases IDs] [--routes ROUTES]")
+			fmt.Fprintln(stdout, "summary-eval --validate [--suite-file FILE] | --live --max-calls N --out NEW.json [--suite-file FILE --suite-sha256 SHA] [--expected-revision SHA] [--grade] [--cases IDs] [--routes ROUTES]")
 			fmt.Fprintln(stdout, "Credentials: AI_API_KEY; optional SUMMARY_EVAL_JUDGE_API_KEY. No key flags or implicit .env loading.")
 			return 0
 		}
 		fmt.Fprintln(stderr, "Invalid flags. Use --help; values omitted.")
 		return 1
 	}
-	if f.NArg() != 0 || *validate && (*live || *grade) {
+	fileSet, shaSet := false, false
+	f.Visit(func(value *flag.Flag) {
+		fileSet = fileSet || value.Name == "suite-file"
+		shaSet = shaSet || value.Name == "suite-sha256"
+	})
+	if f.NArg() != 0 || *validate && (*live || *grade || expectedRevision != "") {
 		fmt.Fprintln(stderr, "Use either --validate or an explicitly bounded --live run.")
 		return 1
 	}
-	suite, err := summaryeval.LoadSuite()
+	if fileSet && *suiteFile == "" || shaSet && (!fileSet || *suiteSHA == "") || *live && fileSet && !shaSet {
+		fmt.Fprintln(stderr, "A live --suite-file requires --suite-sha256; checksum flags require a nonempty explicit suite file.")
+		return 1
+	}
+	var suite summaryeval.Suite
+	var suiteFileHash string
+	var err error
+	if fileSet {
+		suite, suiteFileHash, err = summaryeval.LoadSuiteFile(*suiteFile, *suiteSHA)
+	} else {
+		suite, err = summaryeval.LoadSuite()
+	}
 	if err != nil {
-		fmt.Fprintln(stderr, "Frozen fixture schema is invalid.")
+		fmt.Fprintln(stderr, "Frozen suite rejected:", err)
 		return 1
 	}
 	if *validate {
 		fmt.Fprintf(stdout, "Fixture schema valid: %s, %d cases, %d controls; semantic evaluation not run.\n", suite.Version, len(suite.Cases), len(suite.Controls))
+		fmt.Fprintf(stdout, "suite_sha256=%s\n", suite.Hash())
+		if suiteFileHash != "" {
+			fmt.Fprintf(stdout, "suite_file_sha256=%s\n", suiteFileHash)
+		}
 		return 0
 	}
 	if !*live || *maxCalls < 1 || *maxCalls > 256 || *out == "" || *timeout <= 0 {
 		fmt.Fprintln(stderr, "Provider calls require --live, --max-calls 1–256, --out NEW.json, and a positive timeout.")
 		return 1
+	}
+	if expectedRevision != "" {
+		info, _ := debug.ReadBuildInfo()
+		if err := checkExpectedRevision(expectedRevision, info); err != nil {
+			fmt.Fprintln(stderr, "Expected revision guard rejected:", err)
+			return 1
+		}
 	}
 	if _, statErr := os.Lstat(*out); !os.IsNotExist(statErr) {
 		fmt.Fprintln(stderr, "Artifact path must be new and accessible.")
@@ -89,7 +128,7 @@ func execute(ctx context.Context, args []string, getenv func(string) string, std
 	cfg := summaryeval.Config{Live: *live, Grade: *grade, MaxCalls: *maxCalls, CaseIDs: csv(*cases), Split: *split,
 		Generator:     summaryeval.Provider{Key: getenv("AI_API_KEY"), BaseURL: *baseURL, Model: *model},
 		Judge:         summaryeval.Provider{Key: getenv("SUMMARY_EVAL_JUDGE_API_KEY"), BaseURL: *judgeBase, Model: *judgeModel},
-		BriefTemplate: brief, DetailedTemplate: detailed, ImagePaths: csv(*images), Revision: revision, Dirty: dirty}
+		BriefTemplate: brief, DetailedTemplate: detailed, ImagePaths: csv(*images), Revision: revision, Dirty: dirty, SuiteFileHash: suiteFileHash}
 	for _, route := range csv(*routes) {
 		cfg.Routes = append(cfg.Routes, summaryeval.Route(route))
 	}
@@ -183,6 +222,29 @@ func validRevision(revision string) bool {
 		}
 	}
 	return true
+}
+
+// This opt-in guard trusts only the executing binary's embedded source metadata.
+// Ambient Git cannot attest the code in a previously compiled binary.
+func checkExpectedRevision(expected string, info *debug.BuildInfo) error {
+	expected = strings.ToLower(expected)
+	if !validRevision(expected) {
+		return fmt.Errorf("expected revision must be 40 hexadecimal characters")
+	}
+	if info == nil {
+		return fmt.Errorf("executing binary has no embedded VCS revision")
+	}
+	revision, dirty := buildRevision(info)
+	if revision == "unknown" {
+		return fmt.Errorf("executing binary has no valid embedded VCS revision")
+	}
+	if dirty {
+		return fmt.Errorf("embedded source is not clean")
+	}
+	if revision != expected {
+		return fmt.Errorf("embedded source revision does not match the expected revision")
+	}
+	return nil
 }
 
 func buildRevision(info *debug.BuildInfo) (string, bool) {

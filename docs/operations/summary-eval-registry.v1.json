@@ -1,0 +1,676 @@
+{
+  "corpora": [
+    {
+      "case_count": 9,
+      "cases": [
+        {
+          "content_sha256": "41ddd2295bf9dcccac29aa1d594056fc509fe159cd45bdb727847fc608e0efc4",
+          "failure_class": "metric_attribution",
+          "id": "017",
+          "input_sha256": "13efd5fef94a9ee5f6d98e199bff95bb666560cff3b92a169ce39c3210828d2f",
+          "provenance_note": "Exact frozen quotation from the weekly digest, not the complete article or independently verified business figures.",
+          "rubric_sha256": "91e04929868b29a6742ad6e419d3263159d8785700db044aef1296fe41213811",
+          "source_metadata_sha256": "110bf45c6cff01dfcabca57a8598e4675a7175092590859873e8d5d026691eac",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html",
+          "split": "train",
+          "title_sha256": "27ad4df6bdba6d0164907a3604e7b65f262712672dc725f24e22151ab361f34c"
+        },
+        {
+          "based_on": "017",
+          "content_sha256": "8eea9e97ba2017367d8bb08f69c2b8406049965051dfbe841ec1714274706b2b",
+          "failure_class": "metric_attribution",
+          "id": "017-h1",
+          "input_sha256": "30faac0528bc9fa9da6e7f13c861e4d80c61ff2bb422565742f945a91560f138",
+          "parent_source_url": "https://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "3ef76f4afd27f1240482d40fefb4df733c44ece7c47e7d7972f61d15df878236",
+          "source_metadata_sha256": "efbd76cd80c8925b7beb53df40600066858a3d198221a1a13a60636609631c50",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "98896aa537141011f34e6a7b200b494006dc2d8dfb4d92b44c2d4ca96f27a4f4"
+        },
+        {
+          "based_on": "017",
+          "content_sha256": "0744abefe45a984fc1377fdd15d1c3ab0b6a39d1f99a0cddaa4c9908e8bb1794",
+          "failure_class": "metric_attribution",
+          "id": "017-h2",
+          "input_sha256": "4cb372fcf10be9be3183c74c4a8b45a4ff83e81ee15e3dc7451125141e8e09ec",
+          "parent_source_url": "https://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "50121c8bf2b273122517fc0de2c4d8dfd3c6e5243f511b2b745d036b2862475c",
+          "source_metadata_sha256": "e3d66cbace4a1af80ff7214e90fa827afa26d6cfe165b9d77bbcf75458c82700",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "15b7d994d7b22db3b3d49e715bf04dbc80dc33766d9b68049ccf445e0d0039f1"
+        },
+        {
+          "content_sha256": "ee81d0a2f8ab905e34fbf929a653da3a6b03e849b14b8c58ff8834061bd27556",
+          "failure_class": "nested_termination",
+          "id": "018",
+          "input_sha256": "1f437b482b70c0092ed12b5b27254549a19813409c8117da73907b28bf1be50a",
+          "provenance_note": "Exact frozen subsection and worked example, not the full tutorial or a claim about current product availability.",
+          "rubric_sha256": "bb96c862954a97ea6800d471edc606e5182b873a5eec89e9a4910d31db7f9020",
+          "source_metadata_sha256": "8a31e03b9dddf871d6967ef1adb2e6623f547b488b7e4f1c0983eb7629f0c1f7",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033",
+          "split": "train",
+          "title_sha256": "f067d95bd6e69488fd131748b270e294965cf7db1fa15d1aabd3b78e88ebd70b"
+        },
+        {
+          "based_on": "018",
+          "content_sha256": "a6a8313a05fee76b8a7a0f0dfa86484e8d50fd8b7ff302e969d5c040b4687d6e",
+          "failure_class": "nested_termination",
+          "id": "018-h1",
+          "input_sha256": "2987aa4fcc805c8b4d4cc27f377304ae4d3b42591ed447796aaf359f32adca5e",
+          "parent_source_url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "38799ce100f781d53eb5874f602627828e189fdd84202ecba6d8d91c6ae90f84",
+          "source_metadata_sha256": "6250670dccba15e0d17e86d586ab96ce0bd8900e28516020e8b41c93fe2f7908",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "245712262636cbe6e4044dec3ecf37e34e8956221c7aaceabcf7d8bf7e05686f"
+        },
+        {
+          "based_on": "018",
+          "content_sha256": "7c3d4286d4b51d4e44fc7cc37f47b60981e7fa90c8cb06e913137b1876f7510e",
+          "failure_class": "nested_termination",
+          "id": "018-h2",
+          "input_sha256": "42f32929d39a205f2b8f164729bc993cc9a0a942ffca899214a52bc442fc7b5d",
+          "parent_source_url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "7e262d3743666f3dde319f7dd5da61314ce5f7e0fefeb2e00af21d3b1e390e74",
+          "source_metadata_sha256": "7e5ebad69b5e2567acd313c789cb7bb3ba77809fa468343d4ae8e67b58b6b7b2",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "7b9f20547832fa38c153a0378ef5165f17386a4700d30d68802f37259e91f857"
+        },
+        {
+          "content_sha256": "c1171a994a66d52ecca9fb46152a75a236166edd54cff7a1b8baecfeb6e689dc",
+          "failure_class": "excluded_domain",
+          "id": "019",
+          "input_sha256": "ac671069b7d7f70eab72a0c15dcac767db6004c16cf220b221ba388b8d2710f7",
+          "provenance_note": "Frozen introductory prose, display formula, and interpretation only; TeX backslash escaping normalized, not the full research overview. Formula excludes assigned y even when y is not the largest logit.",
+          "rubric_sha256": "28140fe29c0e2e6386b933490d3a48b6a957920bba63d769947f1be8907bf5b5",
+          "source_metadata_sha256": "b464b18e9ce37240367f72b08d0d33101c4b9c01fddac2226e7e1b68374cdbe1",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/",
+          "split": "train",
+          "title_sha256": "3a64c8992aece397c419ba03bcefc8c06910fb6b4a6f0b2b8d45df0e69e39881"
+        },
+        {
+          "based_on": "019",
+          "content_sha256": "6e0e4dde35580bff5f7a357b3b448707d13bccddeda83d59afbe810425bb925a",
+          "failure_class": "excluded_domain",
+          "id": "019-h1",
+          "input_sha256": "abce6f48714a6aed962e753290662a76758b43cde957a23cba831de3ef89c1a4",
+          "parent_source_url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "903ab00110865a26b0db77599f72cc5eb5cf2611c79943799945253ef9a3e884",
+          "source_metadata_sha256": "2f059cfe60ffdf6571e414fd402ec6150bee91427c799eaad68579c6409293e8",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "c27760eb3db33ed1b0558292d8c2c07d063f1d842513c6788f1362385e4bf97c"
+        },
+        {
+          "based_on": "019",
+          "content_sha256": "8c3e15339c9ecd238467fff53c87b9d411394331ae98a18a8e6a19c99e82d972",
+          "failure_class": "excluded_domain",
+          "id": "019-h2",
+          "input_sha256": "95658a1b9337284abb374c74282c8acc2a2b250db1122a176358b926d127330a",
+          "parent_source_url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "d61dbc1a3513ed4151c1a4879a86a00912d1abcf37f00115db459582b8fcc023",
+          "source_metadata_sha256": "f0b4bfbd3b9bf896496186e8eca02d93bba41781eb0920ea417b985a32c6c302",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "5c5e057f8fdcf676ee79b24621280b33cf50e3a72268728bc3695039be3786b3"
+        }
+      ],
+      "cli_loadable": true,
+      "control_count": 7,
+      "controls": [
+        {
+          "case_id": "017",
+          "control_sha256": "d24e363e01b7de783123cddfff3af3581bee0688d326c7e61f95b1d6b39ab020",
+          "expected_verdict": "pass",
+          "id": "017-faithful-paraphrase"
+        },
+        {
+          "case_id": "017",
+          "control_sha256": "ad5b2b739d35414907e1d4af025da91b840d624e33823387a42fdaa146fc94e0",
+          "expected_verdict": "fail",
+          "id": "017-metric-swap"
+        },
+        {
+          "case_id": "018",
+          "control_sha256": "d23678a91ec0dceed0765eb52124e4eabf719e4104946667dc7814547ef6b635",
+          "expected_verdict": "pass",
+          "id": "018-faithful-paraphrase"
+        },
+        {
+          "case_id": "018",
+          "control_sha256": "cd2625dfc700d2bd7ff228c302ef6d40f522e08fa8af2a6c689a7783b6654b0d",
+          "expected_verdict": "fail",
+          "id": "018-outer-stops-with-batch"
+        },
+        {
+          "case_id": "019",
+          "control_sha256": "36f1cf73fa4d9b68f038859925e0817267200d3582265aca2faca7d08823fa16",
+          "expected_verdict": "pass",
+          "id": "019-faithful-paraphrase"
+        },
+        {
+          "case_id": "019",
+          "control_sha256": "f13386a15c54ba1da578e8c7641bf6f0ccd78ae4a586c443d2ade867db0a6521",
+          "expected_verdict": "fail",
+          "id": "019-global-runner-up"
+        },
+        {
+          "case_id": "019",
+          "control_sha256": "a2958ef301eefb0ec014da78c8acee46427568d3c0e14d0c547addd314edeef7",
+          "expected_verdict": "fail",
+          "id": "019-assigned-as-correct"
+        }
+      ],
+      "exposure_note": "Development-heldout convention only; the original eight development holdouts were already exposed. The FAQ topic and cached defect were known. No blind unseen claim or semantic acceptance follows from this registry.",
+      "file_sha256": "7b10cd7398af09f05d372fc3326d666fa4d6de9150c5d723519b39804a955f19",
+      "id": "builtin-9-v3",
+      "kind": "summaryeval_suite",
+      "relative_file": "backend/internal/summaryeval/testdata/fixtures.v1.json",
+      "storage": "repository",
+      "suite_sha256": "97729a33efaf4995ea3809c72b86dd2654ab7c058b2ced1afc5cc895df75aab2",
+      "version": "summary-fidelity-2026-11-02-v3"
+    },
+    {
+      "case_count": 17,
+      "cases": [
+        {
+          "content_sha256": "41ddd2295bf9dcccac29aa1d594056fc509fe159cd45bdb727847fc608e0efc4",
+          "failure_class": "metric_attribution",
+          "id": "017",
+          "input_sha256": "13efd5fef94a9ee5f6d98e199bff95bb666560cff3b92a169ce39c3210828d2f",
+          "provenance_note": "Exact frozen quotation from the weekly digest, not the complete article or independently verified business figures.",
+          "rubric_sha256": "1cc33162208c7b807d00b1d8ff8f73e981d8705807f9f2beb3fa97bc58aa800c",
+          "source_metadata_sha256": "110bf45c6cff01dfcabca57a8598e4675a7175092590859873e8d5d026691eac",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html",
+          "split": "train",
+          "title_sha256": "27ad4df6bdba6d0164907a3604e7b65f262712672dc725f24e22151ab361f34c"
+        },
+        {
+          "based_on": "017",
+          "content_sha256": "8eea9e97ba2017367d8bb08f69c2b8406049965051dfbe841ec1714274706b2b",
+          "failure_class": "metric_attribution",
+          "id": "017-h1",
+          "input_sha256": "30faac0528bc9fa9da6e7f13c861e4d80c61ff2bb422565742f945a91560f138",
+          "parent_source_url": "https://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "e16dbe367b401512d81ba254b0504bc90aaa23c5ded85ff056f3c68c6caa5bcd",
+          "source_metadata_sha256": "efbd76cd80c8925b7beb53df40600066858a3d198221a1a13a60636609631c50",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "98896aa537141011f34e6a7b200b494006dc2d8dfb4d92b44c2d4ca96f27a4f4"
+        },
+        {
+          "based_on": "017",
+          "content_sha256": "0744abefe45a984fc1377fdd15d1c3ab0b6a39d1f99a0cddaa4c9908e8bb1794",
+          "failure_class": "metric_attribution",
+          "id": "017-h2",
+          "input_sha256": "4cb372fcf10be9be3183c74c4a8b45a4ff83e81ee15e3dc7451125141e8e09ec",
+          "parent_source_url": "https://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "50121c8bf2b273122517fc0de2c4d8dfd3c6e5243f511b2b745d036b2862475c",
+          "source_metadata_sha256": "e3d66cbace4a1af80ff7214e90fa827afa26d6cfe165b9d77bbcf75458c82700",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "15b7d994d7b22db3b3d49e715bf04dbc80dc33766d9b68049ccf445e0d0039f1"
+        },
+        {
+          "content_sha256": "ee81d0a2f8ab905e34fbf929a653da3a6b03e849b14b8c58ff8834061bd27556",
+          "failure_class": "nested_termination",
+          "id": "018",
+          "input_sha256": "1f437b482b70c0092ed12b5b27254549a19813409c8117da73907b28bf1be50a",
+          "provenance_note": "Exact frozen subsection and worked example, not the full tutorial or a claim about current product availability.",
+          "rubric_sha256": "80c45fb3e5c46ccbec31e5ea8874b47b598903e1a90c85fc9994310bdb9c7e12",
+          "source_metadata_sha256": "8a31e03b9dddf871d6967ef1adb2e6623f547b488b7e4f1c0983eb7629f0c1f7",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033",
+          "split": "train",
+          "title_sha256": "f067d95bd6e69488fd131748b270e294965cf7db1fa15d1aabd3b78e88ebd70b"
+        },
+        {
+          "based_on": "018",
+          "content_sha256": "a6a8313a05fee76b8a7a0f0dfa86484e8d50fd8b7ff302e969d5c040b4687d6e",
+          "failure_class": "nested_termination",
+          "id": "018-h1",
+          "input_sha256": "2987aa4fcc805c8b4d4cc27f377304ae4d3b42591ed447796aaf359f32adca5e",
+          "parent_source_url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "fdccfbbcc6869ccb6c15c57dd191cfcdf1e929354eaf50c0d5820eca9216cb38",
+          "source_metadata_sha256": "6250670dccba15e0d17e86d586ab96ce0bd8900e28516020e8b41c93fe2f7908",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "245712262636cbe6e4044dec3ecf37e34e8956221c7aaceabcf7d8bf7e05686f"
+        },
+        {
+          "based_on": "018",
+          "content_sha256": "7c3d4286d4b51d4e44fc7cc37f47b60981e7fa90c8cb06e913137b1876f7510e",
+          "failure_class": "nested_termination",
+          "id": "018-h2",
+          "input_sha256": "42f32929d39a205f2b8f164729bc993cc9a0a942ffca899214a52bc442fc7b5d",
+          "parent_source_url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "7e262d3743666f3dde319f7dd5da61314ce5f7e0fefeb2e00af21d3b1e390e74",
+          "source_metadata_sha256": "7e5ebad69b5e2567acd313c789cb7bb3ba77809fa468343d4ae8e67b58b6b7b2",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "7b9f20547832fa38c153a0378ef5165f17386a4700d30d68802f37259e91f857"
+        },
+        {
+          "content_sha256": "c1171a994a66d52ecca9fb46152a75a236166edd54cff7a1b8baecfeb6e689dc",
+          "failure_class": "excluded_domain",
+          "id": "019",
+          "input_sha256": "ac671069b7d7f70eab72a0c15dcac767db6004c16cf220b221ba388b8d2710f7",
+          "provenance_note": "Frozen introductory prose, display formula, and interpretation only; TeX backslash escaping normalized, not the full research overview. Formula excludes assigned y even when y is not the largest logit. The displayed mean indexes t=1..T; this frozen excerpt does not name the index unit.",
+          "rubric_sha256": "c4c8113b3e78ebe6e1255bd047106a9848dfe142a68920e977f448466525990b",
+          "source_metadata_sha256": "4c6b673fff32c47e7c4043168329e953517ff41518c275ca99293068581fdf73",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/",
+          "split": "train",
+          "title_sha256": "3a64c8992aece397c419ba03bcefc8c06910fb6b4a6f0b2b8d45df0e69e39881"
+        },
+        {
+          "based_on": "019",
+          "content_sha256": "6e0e4dde35580bff5f7a357b3b448707d13bccddeda83d59afbe810425bb925a",
+          "failure_class": "excluded_domain",
+          "id": "019-h1",
+          "input_sha256": "abce6f48714a6aed962e753290662a76758b43cde957a23cba831de3ef89c1a4",
+          "parent_source_url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "903ab00110865a26b0db77599f72cc5eb5cf2611c79943799945253ef9a3e884",
+          "source_metadata_sha256": "2f059cfe60ffdf6571e414fd402ec6150bee91427c799eaad68579c6409293e8",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "c27760eb3db33ed1b0558292d8c2c07d063f1d842513c6788f1362385e4bf97c"
+        },
+        {
+          "based_on": "019",
+          "content_sha256": "8c3e15339c9ecd238467fff53c87b9d411394331ae98a18a8e6a19c99e82d972",
+          "failure_class": "excluded_domain",
+          "id": "019-h2",
+          "input_sha256": "95658a1b9337284abb374c74282c8acc2a2b250db1122a176358b926d127330a",
+          "parent_source_url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/",
+          "provenance_note": "Independently authored held-out transfer example; fictional entities and values, not a quotation or full article.",
+          "rubric_sha256": "4fe2f962fffe9194b6f5502038088e07015e90a4234b7b96476b5d523182af71",
+          "source_metadata_sha256": "f0b4bfbd3b9bf896496186e8eca02d93bba41781eb0920ea417b985a32c6c302",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "5c5e057f8fdcf676ee79b24621280b33cf50e3a72268728bc3695039be3786b3"
+        },
+        {
+          "content_sha256": "7eace7747a62b06c1640aabc73bccc69b7fecb1689f4b833c16741f9df1a22e1",
+          "failure_class": "conditional_cardinality",
+          "id": "022",
+          "input_sha256": "a12ace67e6652187f69f2794ac64fe5f55c84b68afc60fe2aea419aea5534e13",
+          "provenance_note": "Frozen input-compression prose and display formulas, excluding the image reference. This is not the full article. Binary prediction outputs are the explicit premise of the cardinality substitution used in the bound.",
+          "rubric_sha256": "731efd8ab23273b151f2ba5cd0919c5dd682ad2d8b46b099b4887759b941e6cf",
+          "source_metadata_sha256": "d3c40750cdf5be33c321ee89d788662e7e5ed8f6bd663e32a29924d0e7c20e46",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://lilianweng.github.io/posts/2017-09-28-information-bottleneck/",
+          "split": "train",
+          "title_sha256": "081c56d494ca88a9f812a1ee75a2cffa13fcbc71cc7942af79325294c63e1483"
+        },
+        {
+          "based_on": "022",
+          "content_sha256": "3af7dd7efe486b23c3a1a825d2835d0eb80834ebade5534bdf4f3e82ec67f5cb",
+          "failure_class": "conditional_cardinality",
+          "id": "022-h1",
+          "input_sha256": "e5d16f1b95155533490cf4cfb6eb66e248f534195c3c0c8d4421d93821af1adc",
+          "parent_source_url": "https://lilianweng.github.io/posts/2017-09-28-information-bottleneck/",
+          "provenance_note": "Independently authored held-out transfer example; fictional context, not a quotation or full article.",
+          "rubric_sha256": "b4083c1622b27a5b5ce039bd2803b7c05e6acf6b5eb322ce7bdfd3e2460d8a19",
+          "source_metadata_sha256": "f92b42c0a23fa8ceb951fa5b019df279a41c64ddb2a93f7b300c7c90236b9fb7",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "8d6654254e1846db99e581a9ca2fff6f65a55ed990b27105589cb5f476804619"
+        },
+        {
+          "based_on": "022",
+          "content_sha256": "4165f86fc85cc73522c57b33eeff5ef2ba5c70cce35294e7749dcaeddca08bf4",
+          "failure_class": "conditional_cardinality",
+          "id": "022-h2",
+          "input_sha256": "779aee980a51bedbd0fbbf879dabd7d4d6983da0a1136cea1bad9b64160a8b26",
+          "parent_source_url": "https://lilianweng.github.io/posts/2017-09-28-information-bottleneck/",
+          "provenance_note": "Independently authored held-out transfer example; fictional context, not a quotation or full article.",
+          "rubric_sha256": "8b6c731ebcb5b34c91e759b7baf0ed6399225b9d05caca87ff750c4ce2ad0b04",
+          "source_metadata_sha256": "40728e5b198f3831e78fa113e73c0f38f6e490d0ed8eaba3d6ece45f49796518",
+          "source_scope": "independent_variant",
+          "split": "held_out",
+          "title_sha256": "bb41cdafecd9627162f06341af4f518d53a74c883b6ce860e6fcfe3bfa9f1928"
+        },
+        {
+          "content_sha256": "db2c5607d322b80145a2d22a2e33dbebcce12b0d3b3026bc928876324d5dd185",
+          "failure_class": "claim_status",
+          "id": "023-transfer-status",
+          "input_sha256": "ce6ac45c0d112595dfe2cfc143ff922585b9b9c15e0f98982119c935ac1ec875",
+          "provenance_note": "Exact contiguous first-step subsection including requested spatial constraints, reported HTML/scenes/modes delivery, and first-version TTS complaint. Does not test whether the actual 3D application satisfies its requirements.",
+          "rubric_sha256": "9c7b9d23d9f057a6261f95573424e07cdba00ae0b805737a96fe9821cd155ef1",
+          "source_metadata_sha256": "c8c4fa49b5dbf59d4c4c2eb4aee373989bf71ca9deb206a1df66ecdd30410e04",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://baoyu.io/blog/gpt-6-astra-peach-blossom-land",
+          "split": "train",
+          "title_sha256": "bc75c8fa5f3f26dba060e0c40efc581194066309c1f8d9ea9ffdf3ffe45e0ca8"
+        },
+        {
+          "content_sha256": "2ec235d1838b2a07a4750503632738e4aabbd41750fc431001ef518dfd3142c1",
+          "failure_class": "nested_termination",
+          "id": "018-transfer-testing-exception",
+          "input_sha256": "09dbe60d88f368995268ac27214f7ae63e9eef7007ada5b71a5da982fc1c8311",
+          "provenance_note": "Exact contiguous ordinary-user advice subsection: model-spending capacity, the testing exception to installation advice, iterative authoring, and management advice. Existing018 condition/scope transfer, not a new product-availability claim.",
+          "rubric_sha256": "abeb855cca090470efe677e138c7ad316eb2f2e551d905617d6457b9a836aff3",
+          "source_metadata_sha256": "002161532ef93d1c8426d69e905e91616c84d9ffe42b0039399786fd0bb61c78",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://baoyu.io/blog/2026-07-28/agent-judgments",
+          "split": "train",
+          "title_sha256": "7c1f446f150282a86d8521ead212454342a6682c4037a6240b8afb808a4bbaf4"
+        },
+        {
+          "based_on": "023-transfer-status",
+          "content_sha256": "2162e6c9b404ff83f1c61c048e813fd0db97f6aced20f7a1262c13ce2c2ebd89",
+          "failure_class": "claim_status",
+          "id": "023-h1",
+          "input_sha256": "483b03642e3e2c42dda48268c1c7e42ee44715268f16645d85518d03115f5098",
+          "parent_source_url": "https://baoyu.io/blog/gpt-6-astra-peach-blossom-land",
+          "provenance_note": "Exact contiguous prompt-example excerpt from a different captured article. Independent source-grounded status variant, not a rewrite of peach wording; based_on identifies the failure-pattern parent. This source material was exposed in prior development; only this exact input is prospectively frozen.",
+          "rubric_sha256": "1f4dc1b334bad5936b5b0d5dee1f35bd54e0b13d699412c3eb8211a59730a469",
+          "source_metadata_sha256": "ee13e0a6825ba84d3639c7392f07647bbf2aef136f3928c7e3af1ce39d27bad9",
+          "source_scope": "independent_variant",
+          "source_url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033",
+          "split": "held_out",
+          "title_sha256": "8a8601a43fab11d1d3de00c30fa9f130c7cc544ca98fbeba244a5a9e08891226"
+        },
+        {
+          "based_on": "023-transfer-status",
+          "content_sha256": "b52f87488f55a8e2123f2c75b3749ff18b48cfa430f336e2cb93eb8abd3a26c6",
+          "failure_class": "claim_status",
+          "id": "023-h2",
+          "input_sha256": "41a60442c2705851018905be358b22a1da6fd18afa09cb7f8de5a500893a03f6",
+          "parent_source_url": "https://baoyu.io/blog/gpt-6-astra-peach-blossom-land",
+          "provenance_note": "Exact contiguous research paragraph from a different captured article, retaining both a learning-informativeness hypothesis and narrower observed OOD results. Independent source-grounded status variant; based_on is the failure-pattern parent, not fabricated source derivation. Related source material was available during development; this exact input is prospectively frozen.",
+          "rubric_sha256": "dd546fe2f7f39f6f320d6411b9c9cec35a737a1c720ebb43ad410e93e2ce994d",
+          "source_metadata_sha256": "a39e3a13f7e8aae12fe923c1587a106d8eca55c22bb8a5a884b9843ce16882b0",
+          "source_scope": "independent_variant",
+          "source_url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/",
+          "split": "held_out",
+          "title_sha256": "e87cbc863d578031cb7380ad93bbea57fade31103ad90524e1619a218d8d9cd3"
+        },
+        {
+          "content_sha256": "0e4e5a5ff35b449ebbd2719436534accd6c4222fa4a78b75f6e2019a916f515d",
+          "failure_class": "nested_termination",
+          "id": "018-transfer-faq-translation-placement",
+          "input_sha256": "a7499d3ef5bdc99c6698cc3cbe8c90fc9d911f4265caa4fc022f3e97daf8d800",
+          "provenance_note": "Exact complete native-captured FAQ body, all seven Q/A pairs, with no abridgment or injected evaluation text. Existing018 condition/scope transfer. frozen_excerpt is the existing schema enum; this input contains the full captured FAQ body. Known cached production summary and its omission were already inspected; this is a prospective frozen transfer input, not a blind unseen topic.",
+          "rubric_sha256": "495ece76fb84e226cded202ff6b1e38de327d967adae95ec79160838e9d1c312",
+          "source_metadata_sha256": "9576d3671de9bb2e72e993809fb87c22320ff9cb4c62d1bab45ad09ea0c7c82c",
+          "source_scope": "frozen_excerpt",
+          "source_url": "https://lilianweng.github.io/faq/",
+          "split": "train",
+          "title_sha256": "dbc468a14b601d5d9240aeb72b9fcd2f8aed2f4e30932876edf8d16ec313846b"
+        }
+      ],
+      "cli_loadable": true,
+      "control_count": 17,
+      "controls": [
+        {
+          "case_id": "017",
+          "control_sha256": "d12541784d642ae2f4c943f43b80df07d809f1961d1b12c7e430471fec3b027a",
+          "expected_verdict": "pass",
+          "id": "017-faithful-paraphrase"
+        },
+        {
+          "case_id": "017",
+          "control_sha256": "2e21295004b62f28bff1cae3b5446d7ae08b23f36bb0bd1c97905813c446c658",
+          "expected_verdict": "fail",
+          "id": "017-metric-swap"
+        },
+        {
+          "case_id": "018",
+          "control_sha256": "d23678a91ec0dceed0765eb52124e4eabf719e4104946667dc7814547ef6b635",
+          "expected_verdict": "pass",
+          "id": "018-faithful-paraphrase"
+        },
+        {
+          "case_id": "018",
+          "control_sha256": "cd2625dfc700d2bd7ff228c302ef6d40f522e08fa8af2a6c689a7783b6654b0d",
+          "expected_verdict": "fail",
+          "id": "018-outer-stops-with-batch"
+        },
+        {
+          "case_id": "019",
+          "control_sha256": "23069474bac9c99e0f48d5ec93a70079d7365b56ea2a975ed3987f82fb90623f",
+          "expected_verdict": "pass",
+          "id": "019-faithful-paraphrase"
+        },
+        {
+          "case_id": "019",
+          "control_sha256": "f5254c3d5304d7eefca9285c9db420ae53762766d19aeeb756cc251c0af3b3dc",
+          "expected_verdict": "fail",
+          "id": "019-global-runner-up"
+        },
+        {
+          "case_id": "019",
+          "control_sha256": "58c05b7587e44fd622f431bf25e3f890da5c6c64a033e4582c0befb8df561d7d",
+          "expected_verdict": "fail",
+          "id": "019-assigned-as-correct"
+        },
+        {
+          "case_id": "022",
+          "control_sha256": "929920e98322edb83eeaa96ca83ddc5b272046826dbee3a268ec6e6061e3966b",
+          "expected_verdict": "pass",
+          "id": "022-faithful-paraphrase"
+        },
+        {
+          "case_id": "022",
+          "control_sha256": "0e31c8ab320db081561675211526ec64dc2749cba87884139cdde55059ee12a9",
+          "expected_verdict": "fail",
+          "id": "022-output-assumption-omitted"
+        },
+        {
+          "case_id": "018",
+          "control_sha256": "67398bfd46fc26acd77fc0df54343b374b9d92f1c608e3a4a3b88127d7b1d5d9",
+          "expected_verdict": "pass",
+          "id": "018-preview-scope-faithful"
+        },
+        {
+          "case_id": "018",
+          "control_sha256": "9440c5bddb903ed77ebc8bcc7c44184e87a9084f18122dea7a5ef53f85bd3978",
+          "expected_verdict": "fail",
+          "id": "018-preview-scope-overgrouped"
+        },
+        {
+          "case_id": "023-transfer-status",
+          "control_sha256": "28f5cd1f3b3785b95eeaa7995df0cfb50500d499de79b52625cd765e8d807388",
+          "expected_verdict": "pass",
+          "id": "023-transfer-status-positive"
+        },
+        {
+          "case_id": "023-transfer-status",
+          "control_sha256": "61776f108a20e599e236597b2b8a0a2a39c9dffa4c4338bd27ee95c4c2b99a27",
+          "expected_verdict": "fail",
+          "id": "023-transfer-status-isolated-negative"
+        },
+        {
+          "case_id": "018-transfer-testing-exception",
+          "control_sha256": "d5e7272716bb434d33a81635813031c155f8c3491e5e3979e83ce74ace05735b",
+          "expected_verdict": "pass",
+          "id": "018-transfer-testing-exception-positive"
+        },
+        {
+          "case_id": "018-transfer-testing-exception",
+          "control_sha256": "b78397867bdd260add3ebc8d68fee3ff676cffa969c02a382d6c2333df752402",
+          "expected_verdict": "fail",
+          "id": "018-transfer-testing-exception-isolated-negative"
+        },
+        {
+          "case_id": "018-transfer-faq-translation-placement",
+          "control_sha256": "8bbd0ccb01248d08f6bd09b4d3e9e582cf43ec56f5136b5f91387cc8c2ba74be",
+          "expected_verdict": "pass",
+          "id": "018-transfer-faq-translation-placement-constructed-positive"
+        },
+        {
+          "case_id": "018-transfer-faq-translation-placement",
+          "control_sha256": "9734016ffa9d5f0e0e5298f8a847de5b04fd7a607bed58ca803df9030779db2c",
+          "expected_verdict": "fail",
+          "id": "018-transfer-faq-translation-placement-constructed-negative"
+        }
+      ],
+      "exposure_note": "Development-heldout convention only; the original eight development holdouts were already exposed. The FAQ topic and cached defect were known. No blind unseen claim or semantic acceptance follows from this registry.",
+      "file_sha256": "03b9d11cddf47e31067063aa3cdd6bfa44fd6bfc27b34da8e9c444f54b44dd7a",
+      "id": "private-transfer-17-v3",
+      "kind": "summaryeval_suite",
+      "relative_file": "quality-first-transfer-suite-proposal-v3.json",
+      "storage": "private_task2_root",
+      "suite_sha256": "07e186f1238e92da91495e91ce9f99e4403135e50838cf11652568b8a1723806",
+      "version": "summary-fidelity-transfer-proposal-2026-11-04-v3"
+    },
+    {
+      "case_count": 7,
+      "cases": [
+        {
+          "article_id": 3346,
+          "content_sha256": "07ad50aa97f42b0dacbd942eea7e580ad9e93de5d8f7be53dda229b20738f89c",
+          "id": "full-3346",
+          "input_file_sha256": "6837380e282b486a0b9ccaadafe6bd2e1f61ea4e0cb3f358a27908547d37a67d",
+          "input_sha256": "ca66b87af0e259f5e079e0b06a72c535b00f910bdba77a346309071d493167a6",
+          "provenance_note": "Private exact stored input; source quote criteria and raw captures remain private. Additional manual full-source regression, not a summaryeval Suite.",
+          "relative_input_file": "full-article-regression-v1/inputs/3346.input.json",
+          "rubric_sha256": "3235ed114fe75c0b5a0fcf7e2b411bdca2662221b6bfa8df78aae28870989f8b",
+          "source_scope": "complete_exact_stored_title_and_content",
+          "source_url": "https://baoyu.io/blog/gpt-6-astra-peach-blossom-land",
+          "title_sha256": "bc75c8fa5f3f26dba060e0c40efc581194066309c1f8d9ea9ffdf3ffe45e0ca8"
+        },
+        {
+          "article_id": 3352,
+          "content_sha256": "b1e503b522d64b6a92094a4ce5ba92cf9806f4d1b534e5733b95aef02b028ca8",
+          "id": "full-3352",
+          "input_file_sha256": "e893258d492ed3fcfcf288545ab1fdf229c6d6337e3925267c376fd87fdd04ba",
+          "input_sha256": "44dbb91e299f0f0355e743de37af8e944ea36cff2c0a00a548ac9bfc2ac56ffe",
+          "provenance_note": "Private exact stored input; source quote criteria and raw captures remain private. Additional manual full-source regression, not a summaryeval Suite.",
+          "relative_input_file": "full-article-regression-v1/inputs/3352.input.json",
+          "rubric_sha256": "84c45bf659335c7c9b6645fe88202d6e3fd2d9a8ab63ae6b59f6e8d4f80c6fee",
+          "source_scope": "complete_exact_stored_title_and_content",
+          "source_url": "https://baoyu.io/blog/2026-07-28/agent-judgments",
+          "title_sha256": "7c1f446f150282a86d8521ead212454342a6682c4037a6240b8afb808a4bbaf4"
+        },
+        {
+          "article_id": 3360,
+          "content_sha256": "515abadf28ae94e5f15ccc403d6c280007307c67a879574968011711cf21ff8b",
+          "id": "full-3360",
+          "input_file_sha256": "a0281ae17d7278c1af7c8bb7d6de31e741cac93f742bafe1329acf9ff4daac1e",
+          "input_sha256": "72b96cb9f6da3a5dc682d3219035d0763f8084c857a44486f68a7b75a8ab9358",
+          "provenance_note": "Private exact stored input; source quote criteria and raw captures remain private. Additional manual full-source regression, not a summaryeval Suite.",
+          "relative_input_file": "full-article-regression-v1/inputs/3360.input.json",
+          "rubric_sha256": "b8748e58ba8995c9354e06ac0ee99475002a27c096b55fb492ec2025af4cd436",
+          "source_scope": "complete_exact_stored_title_and_content",
+          "source_url": "https://baoyu.io/blog/2026-07-06/claudedevs-2074208949205881033",
+          "title_sha256": "8a8601a43fab11d1d3de00c30fa9f130c7cc544ca98fbeba244a5a9e08891226"
+        },
+        {
+          "article_id": 3401,
+          "content_sha256": "41c9b286a79e6c1acadf1c4d473aff1bd3fc366aae63032191abea6be0ac5afc",
+          "id": "full-3401",
+          "input_file_sha256": "04db724a87e611b0df920fd96aefcbf22a64912a54ef365d9a7358fa4c8dfe4a",
+          "input_sha256": "3868b7b1a1808ebe7c9efa021ba4aa78c106478d6265eb70e9730aac5123f4a1",
+          "provenance_note": "Private exact stored input; source quote criteria and raw captures remain private. Additional manual full-source regression, not a summaryeval Suite.",
+          "relative_input_file": "full-article-regression-v1/inputs/3401.input.json",
+          "rubric_sha256": "7bd9550bd3a12c2b198751afa4b67a237a057c3dbcf092183df2e23994a56eb5",
+          "source_scope": "complete_exact_stored_title_and_content",
+          "source_url": "http://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html",
+          "title_sha256": "4eff9ca930db679258730815d7fc9aa5792fa9528b5adbde522f23963d1ae020"
+        },
+        {
+          "article_id": 3420,
+          "content_sha256": "9bf1fa1c46c7b2d3076f5b7670bc180a0b1f4969c627728517727d0ab85512b9",
+          "id": "full-3420",
+          "input_file_sha256": "03f06e38987f4994407228258abb59f6d205bade343f0afe741bde99c9eb17d6",
+          "input_sha256": "3a443aacb54d1fdd58e213f87e88145b264fac9f0255f31c29e1d7b005f27c94",
+          "provenance_note": "Private exact stored input; source quote criteria and raw captures remain private. Additional manual full-source regression, not a summaryeval Suite.",
+          "relative_input_file": "full-article-regression-v1/inputs/3420.input.json",
+          "rubric_sha256": "7a667f0936cc4ec75745184458e248e632529346075c93c006a48dd29d485871",
+          "source_scope": "complete_exact_stored_title_and_content",
+          "source_url": "https://lilianweng.github.io/posts/2024-02-05-human-data-quality/",
+          "title_sha256": "e87cbc863d578031cb7380ad93bbea57fade31103ad90524e1619a218d8d9cd3"
+        },
+        {
+          "article_id": 3460,
+          "content_sha256": "f9f76853d80ddc57e204b21e0c1410a6d51802547a41b3d97529835cddc95864",
+          "id": "full-3460",
+          "input_file_sha256": "b290d9d4b7d7c6f800b71284ad00f2a49be5bc20e32d874afe39e4a1ee8c4bea",
+          "input_sha256": "7a9693368bee8fc1873547941de4cf93036fc2deb751f921bc2bbad6bf4745c8",
+          "provenance_note": "Private exact stored input; source quote criteria and raw captures remain private. Additional manual full-source regression, not a summaryeval Suite.",
+          "relative_input_file": "full-article-regression-v1/inputs/3460.input.json",
+          "rubric_sha256": "df610d97c514d7c5ebdb632ece2d7d7b88637913ae073051c2f8d0a912378b45",
+          "source_scope": "complete_exact_stored_title_and_content",
+          "source_url": "https://lilianweng.github.io/posts/2017-09-28-information-bottleneck/",
+          "title_sha256": "cfcb85b8e5171f052402a253a84a3769b20140a39ca3399a899a1bfcfbca1b68"
+        },
+        {
+          "article_id": 3464,
+          "content_sha256": "fee9ac76ab88aa4440e4d5c67d1ef4b885c6c943faaf9208bdb8726b9c2c2042",
+          "id": "full-3464",
+          "input_file_sha256": "f42ccb57a0af0476688b8a62a0d0197d13e53d05f149ce154b92caf34ada76f4",
+          "input_sha256": "10277f348ec6a92e4b8c6fb508ca4ea216dfe058bad52ca587d1580a697c8e59",
+          "provenance_note": "Private exact stored input; source quote criteria and raw captures remain private. Additional manual full-source regression, not a summaryeval Suite.",
+          "relative_input_file": "full-article-regression-v1/inputs/3464.input.json",
+          "rubric_sha256": "a0b8d182e77e829622122ca0447b68820c1dcc246ae32b6505084f0e8245f9fe",
+          "source_scope": "complete_exact_stored_title_and_content",
+          "source_url": "https://lilianweng.github.io/faq/",
+          "title_sha256": "dbc468a14b601d5d9240aeb72b9fcd2f8aed2f4e30932876edf8d16ec313846b"
+        }
+      ],
+      "cli_loadable": false,
+      "context_boundary": "Full3420 explicitly names epoch t; old 930-rune 019 excerpt does not name the index unit. Preserve each frozen source boundary without transplanting the claim between them.",
+      "control_count": 0,
+      "controls": [],
+      "exposure_note": "Seven already known source topics; additional private full-source manual regression, not a blind holdout or an executable --suite-file. No model or provider requests performed by registry construction.",
+      "file_sha256": "8dca54322a0e254a574e156bc037bebeecc8d3a2280b96a78351cd9516622a75",
+      "frozen_at": "2026-11-04T11:30:11.010813+00:00",
+      "id": "private-full-source-7-v1",
+      "kind": "manual_full_source_regression",
+      "ordered_input_set_sha256": "c5400b428bd2c73f98d854a0fc45ca13907a7a6408250bee9b3d83981e9dfde2",
+      "relative_file": "full-article-regression-v1/manifest.json",
+      "relative_review_file": "full-article-regression-v1/review-criteria.json",
+      "review_criteria_file_sha256": "c01bc00ebe0a947348125235fea8c79f08a054072a0c3d0b26b2e21fa51717f6",
+      "storage": "private_task2_root",
+      "version": "full-article-regression-v1"
+    }
+  ],
+  "hash_definitions": {
+    "content_sha256": "SHA-256 of exact UTF-8 content string.",
+    "control_sha256": "SHA-256 of encoding/json.Marshal on typed Control, including its complete output; only the digest is published.",
+    "file_sha256": "SHA-256 of exact file bytes, including whitespace and encoding.",
+    "input_sha256": "SHA-256 of UTF-8(title + U+0000 + content), as Case.InputHash.",
+    "rubric_sha256": "SHA-256 of encoding/json.Marshal of ordered []Criterion. Full-source review uses the corresponding frozen criteria array as json.RawMessage, compacted by encoding/json.Marshal while preserving field order.",
+    "source_metadata_sha256": "SHA-256 of encoding/json.Marshal on typed Source; private evidence references are not published.",
+    "suite_sha256": "Suite.Hash: SHA-256 of encoding/json.Marshal on validated typed Suite; distinct from exact file hash.",
+    "title_sha256": "SHA-256 of exact UTF-8 title string."
+  },
+  "private_root_convention": "R/task2, where R is the operator private QA root; no absolute account path is required by this registry",
+  "schema_version": 1,
+  "serving_baseline": {
+    "embedded_dataset_version": "summary-fidelity-2026-11-02-v3",
+    "grader_version": "semantic-evidence-v3",
+    "model_roles": {
+      "configuration_revision": 3,
+      "large": "glm-5.3",
+      "provider": "zai",
+      "small": "glm-5.3-flash",
+      "verification_note": "Recorded task baseline, not refreshed by registry generation; resolve current configuration read-only before any future model comparison."
+    },
+    "policy_version": "faithfulness-2026-11-02-v2",
+    "prompt_version": "summary-prompts-2026-11-02-v1",
+    "revision": "6e3f5372691f583128d91e3e1c6b8223034a82f5"
+  },
+  "version": "summary-eval-registry-2026-11-04-v1"
+}

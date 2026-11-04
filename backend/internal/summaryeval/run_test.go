@@ -109,7 +109,7 @@ func TestRunGeneratesFrozenOutputsButNeverCallsUngradedPassing(t *testing.T) {
 	suite, _ := LoadSuite()
 	suite.Cases[0].Criteria[0].Expected += " RUBRIC_ONLY_NEVER_GENERATE"
 	a, err := Run(context.Background(), testConfig(), suite, scriptedProvider(t, suite, false, false))
-	if err != nil || a.Status != "ungraded" || a.CallCount != 2 || len(a.Results) != 1 || a.PolicyVersion != ai.SummaryPolicyVersion || !a.HumanReviewRequired {
+	if err != nil || a.Status != "ungraded" || a.CallCount != 2 || len(a.Results) != 1 || a.PolicyVersion != ai.SummaryPolicyVersion || a.PromptVersion != ai.SummaryPromptVersion || !a.HumanReviewRequired {
 		t.Fatalf("unexpected ungraded run: %v %+v", err, a)
 	}
 	if a.Results[0].Output.Brief != suite.Controls[0].Output.Brief || a.Results[0].Judgment != nil || a.Results[0].InputHash != suite.Cases[0].InputHash() {

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 )
 
 //go:embed testdata/fixtures.v1.json
@@ -65,8 +66,11 @@ type Control struct {
 }
 
 func strictJSON(raw []byte, dst any) error {
-	if len(raw) > 2<<20 {
+	if len(raw) > suiteJSONLimit {
 		return errors.New("JSON exceeds evaluation limit")
+	}
+	if !utf8.Valid(raw) || !validJSONUnicode(raw) {
+		return errors.New("evaluation JSON must contain lossless Unicode")
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	if err := checkJSONKeys(json.NewDecoder(bytes.NewReader(raw)), 0); err != nil {
@@ -136,7 +140,9 @@ func ValidateSuite(s Suite) error {
 		return errors.New("unsupported or empty suite")
 	}
 	cases := map[string]Case{}
-	held := map[string]int{}
+	classes := map[string]bool{}
+	held := map[string]map[string]bool{}
+	trainInputs := map[string]bool{}
 	for _, c := range s.Cases {
 		if c.ID == "" || cases[c.ID].ID != "" || c.Title == "" || c.Content == "" || len(c.Content) > 256<<10 || len(c.Criteria) == 0 {
 			return errors.New("case has duplicate ID or incomplete input/rubric")
@@ -144,6 +150,10 @@ func ValidateSuite(s Suite) error {
 		if c.Split != "train" && c.Split != "held_out" {
 			return errors.New("case must declare train or held_out")
 		}
+		if strings.TrimSpace(c.FailureClass) == "" {
+			return errors.New("case must declare a nonblank failure class")
+		}
+		classes[c.FailureClass] = true
 		if c.Source.EvidenceRef == "" || c.Source.Note == "" || (c.Source.Scope != "frozen_excerpt" && c.Source.Scope != "independent_variant") {
 			return errors.New("case must identify excerpt/variant provenance")
 		}
@@ -158,13 +168,26 @@ func ValidateSuite(s Suite) error {
 			ids[cr.ID] = true
 		}
 		cases[c.ID] = c
-		if c.Split == "held_out" {
-			held[c.FailureClass]++
+		if c.Split == "train" {
+			trainInputs[independentInput(c.Content)] = true
 		}
 	}
 	for _, c := range s.Cases {
-		if c.Source.Scope == "independent_variant" && cases[c.Source.BasedOn].ID == "" {
-			return errors.New("variant references unknown source case")
+		input := independentInput(c.Content)
+		if c.Source.Scope == "independent_variant" {
+			parent, ok := cases[c.Source.BasedOn]
+			if !ok || parent.Split != "train" || parent.FailureClass != c.FailureClass || independentInput(parent.Content) == input {
+				return errors.New("variant requires a same-class training parent and distinct source content")
+			}
+		}
+		if c.Split == "held_out" {
+			if held[c.FailureClass] == nil {
+				held[c.FailureClass] = map[string]bool{}
+			}
+			if trainInputs[input] || held[c.FailureClass][input] {
+				return errors.New("held-out source content must be distinct from training and other held-outs")
+			}
+			held[c.FailureClass][input] = true
 		}
 	}
 	controls := map[string]bool{}
@@ -192,13 +215,17 @@ func ValidateSuite(s Suite) error {
 		calibrated[c.FailureClass][ctrl.Expected] = true
 		controls[ctrl.ID] = true
 	}
-	for _, class := range []string{"metric_attribution", "nested_termination", "excluded_domain"} {
-		if held[class] < 2 || !calibrated[class][Pass] || !calibrated[class][Fail] {
+	for class := range classes {
+		if len(held[class]) < 2 || !calibrated[class][Pass] || !calibrated[class][Fail] {
 			return fmt.Errorf("%s requires two held-outs and positive/negative controls", class)
 		}
 	}
 	return nil
 }
+
+// Independence checks ignore spacing only; source bytes and evaluation hashes
+// are never normalized or rewritten. A title edit cannot create a new input.
+func independentInput(content string) string { return strings.Join(strings.Fields(content), " ") }
 
 func hashText(s string) string {
 	h := sha256.Sum256([]byte(s))
