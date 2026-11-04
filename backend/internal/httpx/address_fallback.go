@@ -37,12 +37,13 @@ func NewBufferedGETClient(timeout time.Duration) *http.Client {
 }
 
 // NewBufferedImageGETClient applies the same checked-address recovery with a
-// 10 MiB body limit and a separate bounded image workload. If all candidates
-// fail, pre-body EOF/reset failures get at most one fresh connection to the
-// same checked address, within the original request's deadline and permits.
+// 10 MiB body limit and a separate bounded image workload. It starts one
+// protected primary, adding a secondary after inactivity rather than eagerly
+// copying every body. EOF/reset recovery and scheduler-yield resumes share at
+// most two attempts per checked IP within the original request's deadline.
 func NewBufferedImageGETClient(timeout time.Duration) *http.Client {
 	client := NewClient(timeout)
-	client.Transport = &bufferedGETTransport{base: client.Transport.(*safeRoundTripper), slots: bufferedImageSlots, bodyLimit: bufferedImageBodyLimit, retryPreBodyFailures: true}
+	client.Transport = &bufferedGETTransport{base: client.Transport.(*safeRoundTripper), slots: bufferedImageSlots, bodyLimit: bufferedImageBodyLimit, retryPreBodyFailures: true, imageLanes: bufferedImageLanes}
 	return client
 }
 
@@ -56,6 +57,7 @@ type bufferedGETTransport struct {
 	slots                chan struct{}
 	bodyLimit            int64
 	retryPreBodyFailures bool
+	imageLanes           *imageCandidateLanes
 }
 
 type bufferedGETResult struct {
@@ -70,6 +72,11 @@ type bufferedGETPreBodyError struct{ error }
 
 func (e *bufferedGETPreBodyError) Unwrap() error { return e.error }
 
+func transientPreBodyFailure(err error) bool {
+	var preBody *bufferedGETPreBodyError
+	return errors.As(err, &preBody) && (errors.Is(preBody, io.EOF) || errors.Is(preBody, io.ErrUnexpectedEOF) || errors.Is(preBody, syscall.ECONNRESET))
+}
+
 func (t *bufferedGETTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Method != http.MethodGet || (req.Body != nil && req.Body != http.NoBody) ||
 		req.Header.Get("Authorization") != "" || req.Header.Get("Cookie") != "" {
@@ -82,30 +89,14 @@ func (t *bufferedGETTransport) RoundTrip(req *http.Request) (*http.Response, err
 	if err != nil {
 		return nil, err
 	}
-	response, retryAddresses, err := t.roundTripCandidates(req, addresses)
+	if t.retryPreBodyFailures {
+		return t.roundTripImages(req, addresses)
+	}
+	response, _, err := t.roundTripCandidates(req, addresses)
 	if contextErr := req.Context().Err(); contextErr != nil {
 		return nil, contextErr
 	}
-	if !t.retryPreBodyFailures || len(retryAddresses) == 0 || bufferedGETWinner(response) {
-		return response, err
-	}
-	// The initial wave has joined and released every socket/permit. Retry only
-	// its transient peers, pinned to their previously checked IPs; failed HTTP
-	// statuses (including CONNECT failures) never gain a fresh attempt.
-	retried, _, retryErr := t.roundTripCandidates(req, retryAddresses)
-	if bufferedGETWinner(retried) {
-		return retried, nil
-	}
-	if contextErr := req.Context().Err(); contextErr != nil {
-		return nil, contextErr
-	}
-	if response != nil {
-		return response, nil
-	}
-	if retried != nil {
-		return retried, nil
-	}
-	return nil, errors.Join(err, retryErr)
+	return response, err
 }
 
 func (t *bufferedGETTransport) roundTripCandidates(req *http.Request, addresses []net.IPAddr) (*http.Response, []net.IPAddr, error) {
@@ -131,7 +122,7 @@ func (t *bufferedGETTransport) roundTripCandidates(req *http.Request, addresses 
 				results <- bufferedGETResult{err: err}
 				return
 			}
-			response, err := t.fetchCandidate(req.Clone(ctx), address)
+			response, err := t.fetchCandidate(req.Clone(ctx), address, nil)
 			results <- bufferedGETResult{response: response, err: err, address: address}
 		}(address)
 	}
@@ -148,8 +139,7 @@ func (t *bufferedGETTransport) roundTripCandidates(req *http.Request, addresses 
 			}
 			if result.err != nil {
 				failures = append(failures, result.err)
-				var preBody *bufferedGETPreBodyError
-				if errors.As(result.err, &preBody) && (errors.Is(preBody, io.EOF) || errors.Is(preBody, io.ErrUnexpectedEOF) || errors.Is(preBody, syscall.ECONNRESET)) {
+				if transientPreBodyFailure(result.err) {
 					retryAddresses = append(retryAddresses, result.address)
 				}
 				continue
@@ -208,10 +198,10 @@ func (t *bufferedGETTransport) addresses(req *http.Request) ([]net.IPAddr, error
 	return candidates, nil
 }
 
-func (t *bufferedGETTransport) fetchCandidate(req *http.Request, address net.IPAddr) (*http.Response, error) {
+func (t *bufferedGETTransport) fetchCandidate(req *http.Request, address net.IPAddr, progress func()) (*http.Response, error) {
 	selected := candidateResolver{host: req.URL.Hostname(), address: address, fallback: t.base.resolver}
 	dialCtx, cancelDial := context.WithCancel(req.Context())
-	connections := &candidateDialer{ctx: dialCtx, cancel: cancelDial, base: t.base.dialer}
+	connections := &candidateDialer{ctx: dialCtx, cancel: cancelDial, base: t.base.dialer, progress: progress}
 	defer connections.close()
 	transport := t.base.direct.Clone()
 	// This transport serves one candidate only. Tie even its connection dial
@@ -240,6 +230,11 @@ func (t *bufferedGETTransport) fetchCandidate(req *http.Request, address net.IPA
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, t.bodyLimit+1))
 	if err != nil {
+		if progress != nil && req.Context().Err() != nil {
+			// Keep a scheduler-owned cancellation distinct from an upstream
+			// body failure, even if closing its socket reports EOF/ErrClosed.
+			err = req.Context().Err()
+		}
 		return nil, fmt.Errorf("read complete response: %w", err)
 	}
 	if int64(len(body)) > t.bodyLimit {
@@ -267,13 +262,14 @@ func (t *bufferedGETTransport) fetchCandidate(req *http.Request, address net.IPA
 // candidateDialer owns the actual sockets, including sockets created by an
 // inner SOCKS transport. Its lifetime ends before the candidate permit is freed.
 type candidateDialer struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	base    dialer
-	mu      sync.Mutex
-	closed  bool
-	conns   []net.Conn
-	pending sync.WaitGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
+	base     dialer
+	mu       sync.Mutex
+	closed   bool
+	conns    []net.Conn
+	pending  sync.WaitGroup
+	progress func()
 }
 
 func (d *candidateDialer) DialContext(_ context.Context, network, address string) (net.Conn, error) {
@@ -294,6 +290,10 @@ func (d *candidateDialer) DialContext(_ context.Context, network, address string
 			_ = conn.Close()
 		}
 		return nil, err
+	}
+	if d.progress != nil {
+		conn = &imageProgressConn{Conn: conn, progress: d.progress}
+		d.progress()
 	}
 	d.mu.Lock()
 	if d.closed || d.ctx.Err() != nil {

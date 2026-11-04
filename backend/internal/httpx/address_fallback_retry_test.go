@@ -266,66 +266,69 @@ func TestBufferedImageWinnerCancelsRealProxyAtEveryPendingPhase(t *testing.T) {
 	for _, phase := range []string{"CONNECT headers", "TLS handshake", "origin headers", "body"} {
 		t.Run(phase, func(t *testing.T) {
 			certificate, roots := testCertificate(t)
-			pending, closed := make(chan struct{}), make(chan struct{})
-			fixture, dialer := bufferedGETFixture(t, publicGETAddresses(2), func(_ string, connect *http.Request, conn net.Conn) {
-				loser := connect.Host == "8.8.8.8:443"
-				if loser {
-					defer close(closed)
-				}
-				if loser && phase == "CONNECT headers" {
-					close(pending)
-					_, _ = io.Copy(io.Discard, conn)
-					return
-				}
-				_, _ = io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
-				if loser && phase == "TLS handshake" {
-					header := make([]byte, 5)
-					if _, err := io.ReadFull(conn, header); err == nil {
-						_, _ = io.CopyN(io.Discard, conn, int64(binary.BigEndian.Uint16(header[3:5])))
+			certificateTime := time.Now()
+			synctest.Test(t, func(t *testing.T) {
+				pending, closed := make(chan struct{}), make(chan struct{})
+				fixture, dialer := bufferedGETFixture(t, publicGETAddresses(2), func(_ string, connect *http.Request, conn net.Conn) {
+					loser := connect.Host == "8.8.8.8:443"
+					if loser {
+						defer close(closed)
 					}
-					close(pending)
-					_, _ = io.Copy(io.Discard, conn)
-					return
-				}
-				origin := tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{certificate}})
-				if err := origin.Handshake(); err != nil {
-					return
-				}
-				if _, err := http.ReadRequest(bufio.NewReader(origin)); err != nil {
-					return
-				}
-				if loser {
-					if phase == "body" {
-						_, _ = io.WriteString(origin, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nprefix")
+					if loser && phase == "CONNECT headers" {
+						close(pending)
+						_, _ = io.Copy(io.Discard, conn)
+						return
 					}
-					close(pending)
-					_, _ = io.Copy(io.Discard, origin)
-					return
+					_, _ = io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
+					if loser && phase == "TLS handshake" {
+						header := make([]byte, 5)
+						if _, err := io.ReadFull(conn, header); err == nil {
+							_, _ = io.CopyN(io.Discard, conn, int64(binary.BigEndian.Uint16(header[3:5])))
+						}
+						close(pending)
+						_, _ = io.Copy(io.Discard, conn)
+						return
+					}
+					origin := tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{certificate}})
+					if err := origin.Handshake(); err != nil {
+						return
+					}
+					if _, err := http.ReadRequest(bufio.NewReader(origin)); err != nil {
+						return
+					}
+					if loser {
+						if phase == "body" {
+							_, _ = io.WriteString(origin, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nprefix")
+						}
+						close(pending)
+						_, _ = io.Copy(io.Discard, origin)
+						return
+					}
+					<-pending
+					_, _ = io.WriteString(origin, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+				})
+				client := imageRetryFixture(fixture)
+				transport := client.Transport.(*bufferedGETTransport)
+				proxyURL, _ := url.Parse("http://proxy.example:8888")
+				transport.base.proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+				transport.base.tlsConfig = &tls.Config{RootCAs: roots, Time: func() time.Time { return certificateTime }}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://safe.example/image.png", nil)
+				response, err := client.Do(req)
+				if err != nil {
+					t.Fatalf("pending %s held the complete winner: %v", phase, err)
 				}
-				<-pending
-				_, _ = io.WriteString(origin, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+				_ = response.Body.Close()
+				select {
+				case <-closed:
+				case <-ctx.Done():
+					t.Fatal("loser socket was not closed before the original deadline")
+				}
+				if ctx.Err() != nil || len(dialer.addresses()) != 2 || len(transport.slots) != 0 {
+					t.Fatalf("winner waited for loser deadline or started recovery: err=%v dials=%v permits=%d", ctx.Err(), dialer.addresses(), len(transport.slots))
+				}
 			})
-			client := imageRetryFixture(fixture)
-			transport := client.Transport.(*bufferedGETTransport)
-			proxyURL, _ := url.Parse("http://proxy.example:8888")
-			transport.base.proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
-			transport.base.tlsConfig = &tls.Config{RootCAs: roots}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://safe.example/image.png", nil)
-			response, err := client.Do(req)
-			if err != nil {
-				t.Fatalf("pending %s held the complete winner: %v", phase, err)
-			}
-			_ = response.Body.Close()
-			select {
-			case <-closed:
-			case <-ctx.Done():
-				t.Fatal("loser socket was not closed before the original deadline")
-			}
-			if ctx.Err() != nil || len(dialer.addresses()) != 2 || len(transport.slots) != 0 {
-				t.Fatalf("winner waited for loser deadline or started recovery: err=%v dials=%v permits=%d", ctx.Err(), dialer.addresses(), len(transport.slots))
-			}
 		})
 	}
 }
@@ -358,8 +361,8 @@ func TestBufferedImageRecoveryDoesNotExposePartialOversizeOrBlockedRedirect(t *t
 	}
 }
 
-func TestBufferedImageRecoverySharesFourSocketLimitAcrossClients(t *testing.T) {
-	firstFour := make(chan struct{})
+func TestBufferedImageRecoverySharesPrimaryLaneLimitAcrossClients(t *testing.T) {
+	firstThree := make(chan struct{})
 	var started, active, peak atomic.Int32
 	var mu sync.Mutex
 	counts := make(map[string]int)
@@ -369,10 +372,10 @@ func TestBufferedImageRecoverySharesFourSocketLimitAcrossClients(t *testing.T) {
 		counts[key]++
 		attempt := counts[key]
 		mu.Unlock()
-		if started.Add(1) == 4 {
-			close(firstFour)
+		if started.Add(1) == 3 {
+			close(firstThree)
 		}
-		<-firstFour
+		<-firstThree
 		if attempt == 1 {
 			return
 		}
@@ -392,8 +395,8 @@ func TestBufferedImageRecoverySharesFourSocketLimitAcrossClients(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	results := make(chan error, 2)
-	for index := range 2 {
+	results := make(chan error, 3)
+	for index := range 3 {
 		client := NewBufferedImageGETClient(90 * time.Second)
 		client.Transport.(*bufferedGETTransport).base = fixture.Transport.(*bufferedGETTransport).base
 		go func() {
@@ -405,12 +408,12 @@ func TestBufferedImageRecoverySharesFourSocketLimitAcrossClients(t *testing.T) {
 			results <- err
 		}()
 	}
-	for range 2 {
+	for range 3 {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
 	}
-	if peak.Load() != 4 || active.Load() != 0 || len(bufferedImageSlots) != 0 || len(dialer.addresses()) > 16 {
+	if peak.Load() != 3 || active.Load() != 0 || len(bufferedImageSlots) != 0 || len(dialer.addresses()) > 24 {
 		t.Fatalf("recovery exceeded or retained shared resources: peak=%d active=%d permits=%d dials=%v", peak.Load(), active.Load(), len(bufferedImageSlots), dialer.addresses())
 	}
 	mu.Lock()
@@ -474,6 +477,7 @@ func imageRetryFixture(fixture *http.Client) *http.Client {
 	transport := client.Transport.(*bufferedGETTransport)
 	transport.base = fixture.Transport.(*bufferedGETTransport).base
 	transport.slots = make(chan struct{}, maxGETAddressCandidates)
+	transport.imageLanes = newImageCandidateLanes()
 	client.CheckRedirect = fixture.CheckRedirect
 	return client
 }

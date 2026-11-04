@@ -162,13 +162,19 @@ func TestBufferedImageWorkloadDoesNotStarveHTMLAndFeeds(t *testing.T) {
 			closed.Add(1)
 		})
 		imageTransport.base = fixture.Transport.(*bufferedGETTransport).base
+		imageTransport.slots = make(chan struct{}, 4)
+		imageTransport.imageLanes = newImageCandidateLanes()
 		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan error, 1)
-		go func() {
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://safe.example/image.png", nil)
-			_, err := image.Do(req)
-			done <- err
-		}()
+		done := make(chan error, 3)
+		for index := range 3 {
+			go func() {
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://safe.example/image%d.png", index), nil)
+				_, err := image.Do(req)
+				done <- err
+			}()
+		}
+		synctest.Wait()
+		time.Sleep(imageHedgeIdle) // Three primaries plus one stalled-peer hedge.
 		synctest.Wait()
 		if len(dialer.addresses()) != 4 || len(imageTransport.slots) != 4 {
 			t.Fatal("image fixture did not saturate its four permits")
@@ -183,7 +189,9 @@ func TestBufferedImageWorkloadDoesNotStarveHTMLAndFeeds(t *testing.T) {
 			_ = response.Body.Close()
 		}
 		cancel()
-		<-done
+		for range 3 {
+			<-done
+		}
 		synctest.Wait()
 		if closed.Load() != 4 || len(imageTransport.slots) != 0 {
 			t.Errorf("cancelled images retained sockets=%d permits=%d", 4-closed.Load(), len(imageTransport.slots))

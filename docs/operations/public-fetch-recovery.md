@@ -1,23 +1,41 @@
 # Public feed and image fetch recovery
 
-Image proxy requests and public subscription previews use the existing
-checked-address, complete-response transport. Each GET tries at most four
-unique public IPs and accepts the first complete 200, validated redirect, or
-bodyless 304. EOF, failed proxy CONNECT, and stalled partial responses do not
-prevent another checked address from completing. The caller's total deadline
-still applies; this is not an additional round of retries after that deadline.
+Image proxy requests and public subscription previews validate the complete DNS
+answer before choosing at most four unique public IPs. Only a complete bounded
+200, validated redirect, or bodyless 304 can win. HTML/feed clients retain their
+single race of checked addresses.
 
-If no candidate produces an accepted response, images allow one fresh connection
-to each checked IP that failed with a pre-body EOF, unexpected EOF, or connection
-reset. The initial connections close and release their permits before this
-second wave. It uses the same original request deadline and pinned public IPs:
-at most four unique addresses and eight candidate attempts per URL hop, under
-the existing redirect limit. A complete winner stops recovery. HTTP error
-statuses (including proxy CONNECT 500), body truncation, oversize responses,
-blocked redirects, cancelled requests, and authenticated/non-GET requests do
-not themselves trigger a retry. This mitigates transient pre-body connection
-failures; it does not repair an unavailable proxy address family. HTML/feed
-clients retain their single wave.
+Images start one protected primary per request. Three shared primary lanes and
+one shared secondary lane bound physical concurrency to four and prevent a
+hedge from taking the three primary admissions. Lane waiting happens before a
+global candidate permit or socket is acquired. The trade-off is at most three
+simultaneous distinct primary image requests, reserving the fourth connection
+for a stalled peer's alternative; a fourth image waits within its original
+budget even when that spare lane is idle.
+
+After two seconds without connection I/O, the scheduler may add one secondary.
+Progress covers CONNECT, TLS, response headers and body reads/writes. The
+primary retains its original deadline and is never cancelled merely for
+inactivity. A first secondary may yield after inactivity when another checked
+peer is pending; its sockets close and permits return before replacement. A
+yielded peer can resume once after the untried peers. This scheduler-owned
+yield is distinct from caller cancellation or an upstream body failure. A final
+attempt is not repeatedly discarded for being quiet, preserving the remaining
+budget for a legitimate slow alternative. If a primary fails, its secondary
+can become the protected primary and release the spare lane.
+
+Pre-body EOF, unexpected EOF and connection reset also permit one fresh attempt
+to the same pinned IP. Scheduler resumes and EOF recovery share the same total
+allowance: at most two attempts per checked address and eight per URL hop,
+under the existing redirect limit and original deadline. HTTP error statuses
+(including CONNECT 500), genuine body truncation, oversize responses, blocked
+redirects, caller cancellation, and authenticated/non-GET requests do not
+themselves grant another attempt. A complete winner stops all remaining work.
+This mitigates bounded scheduling/connection failures; it does not repair an
+unavailable proxy address family or guarantee that every possible timing of
+four peers is equivalent to eager racing. With only two active candidates per
+image, a final quiet peer can still consume the remaining budget before other
+alternatives get another turn.
 
 The image workload has four shared active candidate permits and a 10 MiB body
 limit. HTML captures and public feeds share a separate four-permit workload,
