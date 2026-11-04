@@ -7,6 +7,7 @@ import { CodeWrapContext } from './CodeWrapContext'
 import type { ReaderFontFamily } from '../hooks/useReaderSettings'
 import { ReaderActionContext } from '../reader/ReaderActionContext'
 import type { ReaderActionContextValue } from '../reader/types'
+import { parsePublicationDate } from '../utils/publicationDate'
 
 type ArticleLite = {
   title: string
@@ -43,7 +44,7 @@ export default function ReadingLayout(props: Props) {
   const searchQuery = useArticleSearchQuery()
   const showSummary = summaryOpen || !!searchQuery
 
-  const fmtDate = (s: string | null) => s ? new Date(s).toLocaleString('zh-CN') : ''
+  const published = parsePublicationDate(article.published_at)
   const ff = fontFamily === 'serif'
     ? 'var(--font-serif)'
     : 'var(--font-sans)'
@@ -70,7 +71,7 @@ export default function ReadingLayout(props: Props) {
       >
         <h1 className="reading-title"><SearchText text={article.title} /></h1>
         <div className="reading-meta">
-          <span>{fmtDate(article.published_at)}</span>
+          {published && <time dateTime={article.published_at ?? undefined}>{published.toLocaleString('zh-CN')}</time>}
           {article.word_count > 0 && <span> · {article.word_count} 字</span>}
           {article.reading_minutes > 0 && <span> · 约 {article.reading_minutes} 分钟</span>}
           <span> · </span>

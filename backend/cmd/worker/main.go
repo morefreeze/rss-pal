@@ -687,7 +687,11 @@ func shouldAsyncSummarizeAfterCreate(mediaType string) bool {
 	return !strings.HasPrefix(mediaType, "video/") && !strings.HasPrefix(mediaType, "audio/")
 }
 
-func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, feed model.Feed) {
+type feedBodyFetcher interface {
+	FetchContent(context.Context, string) (string, error)
+}
+
+func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, articleRepo *repository.ArticleRepository, fetcher *rss.Fetcher, contentFetcher feedBodyFetcher, summarizer *ai.Summarizer, feed model.Feed) {
 	htmlFeed, err := fetcher.FetchHTML(ctx, feed.URL)
 	if err != nil {
 		log.Printf("Failed to scrape HTML feed %s: %v", feed.URL, err)
@@ -712,13 +716,14 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 		if item.Link == "" {
 			continue
 		}
+		publishedAt := parsePublishedTime(item.PublishedParsed, item.UpdatedParsed)
 		exists, existsErr := articleRepo.Exists(feed.ID, item.Link)
 		if existsErr != nil {
 			storageFailed.Store(true)
 			break
 		}
 		if exists {
-			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, item.PublishedParsed)
+			articleRepo.UpdatePublishedAtIfNull(feed.ID, item.Link, publishedAt)
 			continue
 		}
 		if queuedCount >= maxNewArticlesPerFeed {
@@ -749,7 +754,7 @@ func processHTMLFeed(ctx context.Context, feedRepo *repository.FeedRepository, a
 					asyncSummarize(summarizer, articleRepo, article.ID, article.Title, article.Content)
 				}
 			}
-		}(item.Link, item.Title, item.PublishedParsed)
+		}(item.Link, item.Title, publishedAt)
 	}
 
 	wg.Wait()

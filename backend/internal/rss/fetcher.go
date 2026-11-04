@@ -449,7 +449,7 @@ func (f *Fetcher) FetchHTML(ctx context.Context, feedURL string) (*gofeed.Feed, 
 			}
 			for _, format := range dateFormats {
 				if t, err := time.Parse(format, *item.PublishedAt); err == nil {
-					gi.PublishedParsed = &t
+					gi.PublishedParsed = PublishedTime(&t, nil)
 					break
 				}
 			}
