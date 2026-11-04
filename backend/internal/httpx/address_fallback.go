@@ -16,12 +16,18 @@ import (
 const (
 	maxGETAddressCandidates = 4
 	bufferedGETBodyLimit    = 8 << 20
+	bufferedImageBodyLimit  = 10 << 20
 )
 
-// Bound candidate connections across clients and concurrent manual captures.
+// Bound candidate connections across clients and concurrent HTML/feed fetches.
 var bufferedGETSlots = make(chan struct{}, maxGETAddressCandidates)
 
-// NewBufferedGETClient is an opt-in client for manual public HTML captures.
+// Large, slow image transfers must not occupy the permits needed by interactive
+// HTML captures and subscription previews. Each workload has four active
+// candidates across all its clients, rather than four per caller.
+var bufferedImageSlots = make(chan struct{}, maxGETAddressCandidates)
+
+// NewBufferedGETClient is an opt-in client for public HTML captures and feeds.
 // It races at most four checked addresses and buffers a complete, bounded
 // response before choosing a winner. Other methods and authenticated requests
 // retain NewClient's single-address, streaming behavior.
@@ -29,14 +35,23 @@ func NewBufferedGETClient(timeout time.Duration) *http.Client {
 	return withBufferedGETAddressFallback(NewClient(timeout))
 }
 
+// NewBufferedImageGETClient applies the same checked-address recovery with a
+// 10 MiB body limit and a separate bounded image workload.
+func NewBufferedImageGETClient(timeout time.Duration) *http.Client {
+	client := NewClient(timeout)
+	client.Transport = &bufferedGETTransport{base: client.Transport.(*safeRoundTripper), slots: bufferedImageSlots, bodyLimit: bufferedImageBodyLimit}
+	return client
+}
+
 func withBufferedGETAddressFallback(client *http.Client) *http.Client {
-	client.Transport = &bufferedGETTransport{base: client.Transport.(*safeRoundTripper), slots: bufferedGETSlots}
+	client.Transport = &bufferedGETTransport{base: client.Transport.(*safeRoundTripper), slots: bufferedGETSlots, bodyLimit: bufferedGETBodyLimit}
 	return client
 }
 
 type bufferedGETTransport struct {
-	base  *safeRoundTripper
-	slots chan struct{}
+	base      *safeRoundTripper
+	slots     chan struct{}
+	bodyLimit int64
 }
 
 type bufferedGETResult struct {
@@ -97,7 +112,7 @@ func (t *bufferedGETTransport) RoundTrip(req *http.Request) (*http.Response, err
 				continue
 			}
 			result.response.Request = req
-			if result.response.StatusCode == http.StatusOK || bufferedGETRedirect(result.response) {
+			if result.response.StatusCode == http.StatusOK || result.response.StatusCode == http.StatusNotModified || bufferedGETRedirect(result.response) {
 				return result.response, nil
 			}
 			// A quick CDN error must not beat a complete 200 from another IP.
@@ -167,15 +182,21 @@ func (t *bufferedGETTransport) fetchCandidate(req *http.Request, address net.IPA
 		return nil, err
 	}
 	defer closeBufferedGETBody(response.Body)
-	if response.ContentLength > bufferedGETBodyLimit {
-		return nil, fmt.Errorf("HTML response exceeds %d bytes", bufferedGETBodyLimit)
+	// A 304 has no message body. Its Content-Length may describe the complete
+	// cached representation, which is neither downloaded nor buffered here.
+	if response.StatusCode == http.StatusNotModified {
+		response.Body = http.NoBody
+		return response, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, bufferedGETBodyLimit+1))
+	if response.ContentLength > t.bodyLimit {
+		return nil, fmt.Errorf("response exceeds %d bytes", t.bodyLimit)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, t.bodyLimit+1))
 	if err != nil {
-		return nil, fmt.Errorf("read complete HTML response: %w", err)
+		return nil, fmt.Errorf("read complete response: %w", err)
 	}
-	if len(body) > bufferedGETBodyLimit {
-		return nil, fmt.Errorf("HTML response exceeds %d bytes", bufferedGETBodyLimit)
+	if int64(len(body)) > t.bodyLimit {
+		return nil, fmt.Errorf("response exceeds %d bytes", t.bodyLimit)
 	}
 	if bufferedGETRedirect(response) {
 		// Resolve against the public source URL, before any candidate can win

@@ -52,7 +52,7 @@ func newTrustedClient() *http.Client {
 // resolver derives a target on the configured RSSHub origin use the trusted
 // client.
 func NewPublicFetcher(rsshubBase string) *Fetcher {
-	return newPublicFetcherWithClients(rsshubBase, httpx.NewClient(30*time.Second), newTrustedRSSHubClient(rsshubBase))
+	return newPublicFetcherWithClients(rsshubBase, httpx.NewBufferedGETClient(30*time.Second), newTrustedRSSHubClient(rsshubBase))
 }
 
 func newPublicFetcherWithClients(rsshubBase string, publicClient, trustedClient *http.Client) *Fetcher {

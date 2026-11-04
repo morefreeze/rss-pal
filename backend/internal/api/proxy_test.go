@@ -202,6 +202,31 @@ func TestProxyImageRejectsIncompleteOrOversizeStreamsBeforeCaching(t *testing.T)
 	}
 }
 
+func TestProxyImageKeepsTenMiBContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, size := range []int{(8 << 20) + 1, 10 << 20, (10 << 20) + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "image/png")
+				w.Header().Set("Content-Length", fmt.Sprint(size))
+				_, _ = w.Write([]byte(strings.Repeat("x", size)))
+			}))
+			defer origin.Close()
+			r := gin.New()
+			r.GET("/proxy", newTestProxy(allowLoopbackValidator).Handle)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/proxy?url="+url.QueryEscape(origin.URL), nil))
+			if size > proxyMaxBytes {
+				if rec.Code != http.StatusBadGateway || rec.Header().Get("Cache-Control") != "" {
+					t.Fatalf("oversize image succeeded: status=%d headers=%v", rec.Code, rec.Header())
+				}
+			} else if rec.Code != http.StatusOK || rec.Body.Len() != size || rec.Header().Get("Cache-Control") == "" {
+				t.Fatalf("valid image rejected: status=%d bytes=%d", rec.Code, rec.Body.Len())
+			}
+		})
+	}
+}
+
 // The deployed proxy sometimes needs over 30 seconds to receive a complete
 // image (a 4.2 MB source took 40 seconds). Exercise the production request AND
 // client deadlines; a unit assertion on a timeout constant would miss either.

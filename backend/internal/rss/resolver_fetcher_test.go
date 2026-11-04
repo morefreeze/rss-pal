@@ -288,6 +288,26 @@ func TestPublicFetcherKeepsAutodiscoveredFeedOnPublicClient(t *testing.T) {
 	}
 }
 
+func TestPublicFetcherPreservesConditionalNotModified(t *testing.T) {
+	requests := 0
+	public := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.Header.Get("If-None-Match") != `"feed-v1"` || req.Header.Get("If-Modified-Since") != "Wed, 04 Nov 2026 00:00:00 GMT" {
+			t.Error("conditional feed request lost validators")
+		}
+		return &http.Response{StatusCode: http.StatusNotModified, ContentLength: 20 << 20, Header: make(http.Header), Body: http.NoBody}, nil
+	})}
+	trusted := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("public conditional feed escaped to trusted client")
+		return nil, nil
+	})}
+	fetcher := newPublicFetcherWithClients("http://rsshub.internal:1200", public, trusted)
+	result, err := fetcher.Fetch(context.Background(), "https://ordinary.example/feed.xml", `"feed-v1"`, "Wed, 04 Nov 2026 00:00:00 GMT")
+	if err != nil || result != nil || requests != 1 {
+		t.Fatalf("304 must mean unchanged: result=%v err=%v requests=%d", result, err, requests)
+	}
+}
+
 func TestPublicFetcherKeepsDerivedWeiboFallbackOnTrustedClient(t *testing.T) {
 	var publicURLs, trustedURLs []string
 	publicClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

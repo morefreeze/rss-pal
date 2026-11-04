@@ -70,6 +70,9 @@ select_deploy_services() {
       frontend/*|extension/*|certs/*|nginx.prod.conf|rss-pal.nginx)
         add_deploy_service frontend
         ;;
+      scripts/ensure_image_proxy_nginx.py)
+        add_deploy_service frontend
+        ;;
       status-monitor/*)
         add_deploy_service status-monitor
         ;;
@@ -81,6 +84,32 @@ EOF_CHANGED_FILES
   if [ "$DEPLOY_ALL" = "true" ]; then
     DEPLOY_SERVICES=()
   fi
+}
+
+prepare_frontend_nginx() {
+  FRONTEND_FORCE_RECREATE=false
+  FRONTEND_NGINX_VERIFY=false
+  FRONTEND_NGINX_BACKUP=""
+  # Production may bind this private single-host template over the image's
+  # config. Keep its custom routes and upstreams; never copy nginx.conf over it.
+  if [ ! -e "$PROJECT_DIR/nginx.prod.conf" ] && [ ! -L "$PROJECT_DIR/nginx.prod.conf" ]; then
+    return 0
+  fi
+  FRONTEND_NGINX_BACKUP=$(python3 "$PROJECT_DIR/scripts/ensure_image_proxy_nginx.py" "$PROJECT_DIR/nginx.prod.conf") || return
+  FRONTEND_NGINX_VERIFY=true
+  if [ -n "$FRONTEND_NGINX_BACKUP" ]; then
+    FRONTEND_FORCE_RECREATE=true
+    add_deploy_service frontend
+    log "Prepared mounted image proxy timeout; backup: $FRONTEND_NGINX_BACKUP"
+  fi
+}
+
+verify_frontend_nginx() {
+  $COMPOSE "${COMPOSE_FILES[@]}" exec -T frontend nginx -t || return
+  # Inspect the configuration nginx actually parses, not the built image or
+  # merely the host pathname (an existing bind can retain the replaced inode).
+  $COMPOSE "${COMPOSE_FILES[@]}" exec -T frontend nginx -T |
+    python3 "$PROJECT_DIR/scripts/ensure_image_proxy_nginx.py" --check-stdin
 }
 
 configure_outbound_proxy() {
@@ -250,10 +279,17 @@ deploy_runtime_services() {
   local service
   local independent_services=()
   local deploy_frontend=false
+  local frontend_up=(up -d --no-deps)
+  if [ "${FRONTEND_FORCE_RECREATE:-false}" = "true" ]; then
+    frontend_up+=(--force-recreate)
+  fi
 
   if [ "$DEPLOY_ALL" = "true" ]; then
     $COMPOSE "${COMPOSE_FILES[@]}" build || return
-    $COMPOSE "${COMPOSE_FILES[@]}" up -d --no-deps frontend || return
+    $COMPOSE "${COMPOSE_FILES[@]}" "${frontend_up[@]}" frontend || return
+    if [ "${FRONTEND_NGINX_VERIFY:-false}" = "true" ]; then
+      verify_frontend_nginx || return
+    fi
     $COMPOSE "${COMPOSE_FILES[@]}" up -d || return
     return
   fi
@@ -269,7 +305,13 @@ deploy_runtime_services() {
   if [ "$deploy_frontend" = "true" ]; then
     # Replace the frontend before dependency-aware backend startup so the old
     # frontend never observes an already-upgraded API contract.
-    $COMPOSE "${COMPOSE_FILES[@]}" up -d --no-deps frontend || return
+    $COMPOSE "${COMPOSE_FILES[@]}" "${frontend_up[@]}" frontend || return
+    if [ "${FRONTEND_NGINX_VERIFY:-false}" = "true" ]; then
+      verify_frontend_nginx || return
+    fi
+  fi
+  if [ "$deploy_frontend" != "true" ] && [ "${FRONTEND_NGINX_VERIFY:-false}" = "true" ]; then
+    verify_frontend_nginx || return
   fi
 
   if [ "$DEPLOY_BACKEND" = "true" ]; then
@@ -292,6 +334,13 @@ deploy_runtime_services() {
 
 rollback_deployment() {
   log "Rolling back to $PREV_COMMIT..."
+  if [ -n "${FRONTEND_NGINX_BACKUP:-}" ]; then
+    # Restore before checking out the old revision, which may predate the
+    # helper. Recreate again because restoration also replaces the inode.
+    python3 "$PROJECT_DIR/scripts/ensure_image_proxy_nginx.py" --restore "$FRONTEND_NGINX_BACKUP" "$PROJECT_DIR/nginx.prod.conf" || return
+    FRONTEND_FORCE_RECREATE=true
+    FRONTEND_NGINX_VERIFY=false
+  fi
   git checkout "$PREV_COMMIT"
   configure_compose_files
   if deploy_runtime_services 2>&1 | tee -a "$LOG_FILE"; then
@@ -356,6 +405,13 @@ fi
 
 configure_compose_files
 select_deploy_services "$CHANGED_FILES" "$PREV_COMMIT" "$(git rev-parse HEAD)"
+if [ "$DEPLOY_ALL" = "true" ] || [ "${#DEPLOY_SERVICES[@]}" -gt 0 ]; then
+  if ! prepare_frontend_nginx; then
+    log "ERROR: mounted frontend nginx preparation failed before container changes"
+    git checkout "$PREV_COMMIT"
+    exit 1
+  fi
+fi
 RUNTIME_CHANGED=false
 if [ "$DEPLOY_ALL" = "true" ] || [ "${#DEPLOY_SERVICES[@]}" -gt 0 ]; then
   RUNTIME_CHANGED=true

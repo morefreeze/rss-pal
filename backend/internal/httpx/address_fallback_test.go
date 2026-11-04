@@ -288,7 +288,7 @@ func TestBufferedGETSharesCandidatePermitsAcrossClients(t *testing.T) {
 }
 
 func TestBufferedGETPreservesLegacyAndNonPublicStreaming(t *testing.T) {
-	for _, scenario := range []string{"legacy GET", "POST", "authenticated GET", "GET body"} {
+	for _, scenario := range []string{"legacy GET", "POST", "authenticated GET", "cookie GET", "GET body"} {
 		t.Run(scenario, func(t *testing.T) {
 			client, dialer := bufferedGETFixture(t, publicGETAddresses(2), func(_ string, request *http.Request, conn net.Conn) {
 				if request.Body != nil {
@@ -311,6 +311,9 @@ func TestBufferedGETPreservesLegacyAndNonPublicStreaming(t *testing.T) {
 			req, _ := http.NewRequest(method, "http://safe.example/article", body)
 			if scenario == "authenticated GET" {
 				req.Header.Set("Authorization", "test-authentication")
+			}
+			if scenario == "cookie GET" {
+				req.Header.Set("Cookie", "session=test")
 			}
 			response, err := client.Do(req)
 			if err != nil {

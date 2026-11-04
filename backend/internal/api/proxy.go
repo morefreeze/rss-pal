@@ -44,7 +44,7 @@ type MediaProxy struct {
 func NewImageProxy() *ImageProxy {
 	return &ImageProxy{
 		Validate: httpx.ValidateURL,
-		Client:   httpx.NewClient(imageProxyTimeout),
+		Client:   httpx.NewBufferedImageGETClient(imageProxyTimeout),
 	}
 }
 

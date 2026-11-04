@@ -38,7 +38,13 @@ bash scripts/tests/tencent_short_domain_nginx_test.sh
 bash scripts/tests/auto_deploy_direct_network_test.sh
 bash scripts/tests/auto_deploy_proxy_ready_test.sh
 bash scripts/tests/auto_deploy_service_selection_test.sh
+python3 scripts/tests/image_proxy_nginx_test.py
+bash scripts/tests/auto_deploy_image_proxy_test.sh
 ```
+
+The private frontend bind source `nginx.prod.conf` is repaired and checked
+through this deployment path. See [public fetch recovery](public-fetch-recovery.md)
+for the image timeout, atomic replacement/recreation, and rollback contract.
 
 ## Runtime dependency downloads
 
