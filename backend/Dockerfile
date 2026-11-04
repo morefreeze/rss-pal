@@ -35,11 +35,10 @@ RUN sed -i "s@https://dl-cdn.alpinelinux.org/alpine@https://${ALPINE_MIRROR}/alp
 
 ARG BGUTIL_PROVIDER_VERSION=1.3.1
 ARG BGUTIL_PROVIDER_SHA256=b8ceec7f76143da172aaf5ebeec0c2d218e5680c063b931586bca48567069b38
-RUN mkdir -p /root/.config/yt-dlp/plugins \
-    && wget -qO /root/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip \
-        "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/${BGUTIL_PROVIDER_VERSION}/bgutil-ytdlp-pot-provider.zip" \
-    && echo "${BGUTIL_PROVIDER_SHA256}  /root/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip" \
-        | sha256sum -c -
+COPY build_assets/bgutil-ytdlp-pot-provider/bgutil-ytdlp-pot-provider-${BGUTIL_PROVIDER_VERSION}.zip /root/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip
+COPY build_assets/bgutil-ytdlp-pot-provider/LICENSE /root/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.LICENSE
+RUN echo "${BGUTIL_PROVIDER_SHA256}  /root/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip" \
+    | sha256sum -c -
 
 WORKDIR /app
 
