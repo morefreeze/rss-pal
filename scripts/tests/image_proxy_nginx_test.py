@@ -22,6 +22,21 @@ class ImageProxyNginxTest(unittest.TestCase):
     def run_helper(self, *args, stdin=None):
         return subprocess.run(["python3", str(HELPER), *map(str, args)], input=stdin, capture_output=True, text=True)
 
+    def assert_refused_without_write(self, source):
+        with tempfile.TemporaryDirectory(dir=self.path.parent) as directory:
+            path = pathlib.Path(directory) / "nginx.prod.conf"
+            original = source.encode("utf-8")
+            path.write_bytes(original)
+            path.chmod(0o640)
+            inode = path.stat().st_ino
+            result = self.run_helper(path)
+            self.assertNotEqual(result.returncode, 0, "unsafe configuration accepted")
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(path.stat().st_ino, inode)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(list(path.parent.glob("*.bak")), [])
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
     def test_actual_mounted_template_backup_atomic_idempotent_and_restore(self):
         inode = self.path.stat().st_ino
         result = self.run_helper(self.path)
@@ -74,6 +89,64 @@ class ImageProxyNginxTest(unittest.TestCase):
         dump = "# configuration file /etc/nginx/nginx.conf:\nhttp { include /etc/nginx/conf.d/*.conf; }\n" + tracked
         result = self.run_helper("--check-stdin", stdin=dump)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_refuses_more_specific_prefix_and_matching_or_unknown_regex(self):
+        for route in [
+            'location ^~ /api/proxy/ { return 403; }',
+            'location /api/proxy/ { return 403; }',
+            'location /api/proxy/im { return 403; }',
+            'location "^~" "/api/proxy/" { return 403; }',
+            'location ~ ^/api/proxy/image$ { return 403; }',
+            'location ~ "^/api/proxy/image$" { return 403; }',
+            'location "~*" "^/API/PROXY/IMAGE$" { return 403; }',
+            'location ~ "(?i)^/api/proxy/image$" { return 403; }',
+            'location ~ "^/not-image$|/api/proxy/image" { return 403; }',
+            'location ~ "(?i)^/unrelated$" { return 403; }',
+            r'location ~ "\x2fapi/proxy/image" { return 403; }',
+            r'location ~ \\x2fapi/proxy/image { return 403; }',
+            'location ~ [[:alpha:]] { return 403; }',
+            'include private-routes.conf;',
+        ]:
+            with self.subTest(route=route):
+                source = self.original.replace("    # API proxy.", "    " + route + "\n\n    # API proxy.")
+                # A plain generic prefix permits nginx regex locations to
+                # override it; inserting an exact route must not erase that.
+                source = source.replace("location ^~ /api {", "location /api {")
+                self.assert_refused_without_write(source)
+
+    def test_refuses_proxy_pass_uri_components_before_backup(self):
+        for suffix in ["/", "/base", "?query=1", "#fragment"]:
+            for variable in [False, True]:
+                with self.subTest(suffix=suffix, variable=variable):
+                    source = self.original.replace("location ^~ /api {", "location /api/ {")
+                    if variable:
+                        source = source.replace("http://api:8080", "http://api:8080" + suffix)
+                    else:
+                        source = source.replace("        set $upstream_api http://api:8080;\n", "")
+                        source = source.replace("proxy_pass $upstream_api;", "proxy_pass http://127.0.0.1:18080" + suffix + ";")
+                    self.assert_refused_without_write(source)
+
+    def test_unrelated_routes_and_origin_only_static_upstream_are_preserved(self):
+        routes = '''    location /api/proxy/health { return 204; }
+    location /api/proxy/image-extra { return 204; }
+    location ~ "^/unrelated$" { return 204; }
+    location ~ ^/api/media/ { return 204; }
+    location ~* \\.(png|css)$ { return 404; }
+
+'''
+        source = self.original.replace("    # API proxy.", routes + "    # API proxy.")
+        source = source.replace("        set $upstream_api http://api:8080;\n", "")
+        source = source.replace("proxy_pass $upstream_api;", "proxy_pass http://127.0.0.1:18080;")
+        self.path.write_text(source)
+        result = self.run_helper(self.path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        updated = self.path.read_text()
+        exact = updated[updated.index("    location = /api/proxy/image {"):updated.index("    location ^~ /api {")]
+        self.assertEqual(updated.replace(exact, ""), source)
+        self.assertIn("proxy_pass http://127.0.0.1:18080;", exact)
+        again = self.run_helper(self.path)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(again.stdout, "")
 
     def test_refuses_unknown_ambiguous_or_symlink_without_overwrite(self):
         cases = [

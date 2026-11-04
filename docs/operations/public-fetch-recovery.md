@@ -8,10 +8,12 @@ prevent another checked address from completing. The caller's total deadline
 still applies; this is not an additional round of retries after that deadline.
 
 The image workload has four shared active candidate permits and a 10 MiB body
-limit. HTML captures and public feeds share a separate four-permit workload
-with the existing 8 MiB limit, so slow images cannot consume preview/capture
-permits. Each candidate is bounded, and cancelled/losing connections close
-before their permits are released. Conditional feed headers and 304 metadata
+limit. HTML captures and public feeds share a separate four-permit workload,
+so slow images cannot consume preview/capture permits. HTML captures retain
+their existing 8 MiB limit. Public feed requests, including subscription
+previews, now gain an 8 MiB complete-response limit; they previously had no
+response-size cap. Each candidate is bounded, and cancelled/losing connections
+close before their permits are released. Conditional feed headers and 304 metadata
 are retained; a 304's declared representation size is not a response body.
 
 The image handler retains its 90-second full-response budget and sends success
@@ -31,6 +33,14 @@ template's flat API proxy and adds an exact `/api/proxy/image` location with a
 120-second read timeout, using its existing upstream and headers. Other bytes,
 custom routes, generic API deadlines, and file mode/ownership remain intact.
 Unknown, ambiguous, conflicting, or symlinked input is rejected without overwrite.
+More-specific prefixes and matching regex locations are conflicts. Regex
+syntax outside the helper's small equivalent ASCII subset requires manual
+review, including inline PCRE flags and escaped quoted patterns.
+Server-level includes also require review because they can contain routes the
+helper cannot inspect. Static `proxy_pass` values must contain only the origin:
+a trailing slash or other URI
+component would change prefix replacement semantics when copied to an exact
+location and is refused before backup or file changes.
 
 A change creates `nginx.prod.conf.image-proxy-<UTC timestamp>.bak` and atomically
 replaces the source file. The deploy script adds only frontend to the existing

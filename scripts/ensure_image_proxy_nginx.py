@@ -98,8 +98,11 @@ def proxy_contract(node):
         upstream = settings[0].words[2]
     elif settings:
         raise Refused("unrecognized API variable settings")
-    if not re.fullmatch(r"https?://[A-Za-z0-9_.:\[\]-]+(?::[0-9]+)?/?", upstream):
-        raise Refused("unrecognized API upstream")
+    # A URI suffix, even '/', changes proxy_pass's prefix replacement when
+    # copied into an exact location. Accept origin-only upstreams, never infer
+    # how a private path-rewriting proxy should be transformed.
+    if not re.fullmatch(r"https?://[A-Za-z0-9_.:\[\]-]+(?::[0-9]+)?", upstream):
+        raise Refused("API upstream must be an origin without URI components")
     headers = {}
     for header in directives.get("proxy_set_header", []):
         if len(header.words) != 3 or header.words[1].lower() in headers:
@@ -114,6 +117,71 @@ def proxy_contract(node):
     if len(timeouts) != 1 or len(timeouts[0].words) != 2 or not re.fullmatch(r"\d+[smh]?", timeouts[0].words[1]):
         raise Refused("API read timeout is not explicit")
     return upstream, headers, timeouts[0]
+
+
+IMAGE_PATH = "/api/proxy/image"
+
+
+def location_token(token):
+    if token[0] in ("'", '"'):
+        # nginx and Python do not share string/regex escape semantics. Simple
+        # quoted tokens are unambiguous; escaped quoted tokens need review.
+        if token[-1] != token[0] or "\\" in token[1:-1]:
+            raise Refused("unsupported escaped location token")
+        return token[1:-1]
+    return token
+
+
+def regex_matches_image(pattern, insensitive):
+    # Only a small ASCII regex subset has equivalent nginx PCRE/Python
+    # semantics here. Inline flags, lookarounds, verbs, character classes,
+    # backreferences and PCRE escapes are unknown, even if Python accepts them.
+    # Retain the established unquoted static-extension regex and simple
+    # unrelated path regexes; refuse everything we cannot prove disjoint.
+    if not pattern.isascii() or any(marker in pattern for marker in ("(?", "(*", "[", "]")):
+        raise Refused("unsupported regex location could match image endpoint")
+    cursor = 0
+    while cursor < len(pattern):
+        if pattern[cursor] == "\\":
+            cursor += 1
+            if cursor == len(pattern) or pattern[cursor] not in ".-+*?^$(){}|/":
+                raise Refused("unsupported PCRE escape could match image endpoint")
+        cursor += 1
+    try:
+        flags = re.ASCII | (re.IGNORECASE if insensitive else 0)
+        return re.search(pattern, IMAGE_PATH, flags) is not None
+    except re.error as error:
+        raise Refused("unsupported regex location could match image endpoint") from error
+
+
+def check_image_location_conflicts(server, api, image):
+    api_path = api.words[-1]
+    for node in server.children:
+        if node.words[0] == "include":
+            raise Refused("included server routes could conflict with image endpoint")
+        if node.words[0] != "location" or node is api or node in image:
+            continue
+        words = [location_token(token) for token in node.words]
+        if len(words) == 3 and words[1] in ("~", "~*"):
+            if regex_matches_image(words[2], words[1] == "~*"):
+                raise Refused("regex location conflicts with image endpoint")
+            continue
+        if len(words) == 2:
+            modifier, path = "", words[1]
+            if path.startswith("@"):
+                continue  # Named locations are not selected by request URI.
+        elif len(words) == 3 and words[1] in ("=", "^~"):
+            modifier, path = words[1:]
+        else:
+            raise Refused("unrecognized location could match image endpoint")
+        if not path.startswith("/") or "\\" in path:
+            raise Refused("unrecognized location URI")
+        if modifier == "=":
+            conflict = path == IMAGE_PATH
+        else:
+            conflict = IMAGE_PATH.startswith(path) and len(path) > len(api_path)
+        if conflict:
+            raise Refused("more-specific location conflicts with image endpoint")
 
 
 def patched(source):
@@ -140,8 +208,7 @@ def patched(source):
         image = [node for node in server.children if node.words == ["location", "=", "/api/proxy/image"]]
         if len(image) > 1:
             raise Refused("duplicate exact image locations")
-        if any(node.words[0] == "location" and "/api/proxy/image" in node.words and node not in image for node in server.children):
-            raise Refused("conflicting custom image location")
+        check_image_location_conflicts(server, api, image)
         if image:
             image_upstream, image_headers, image_timeout = proxy_contract(image[0])
             # Upgrade/Connection are websocket-only. All origin identity
