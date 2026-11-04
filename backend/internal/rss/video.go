@@ -308,7 +308,8 @@ var videoURLRegex = regexp.MustCompile(
 // Match complete Markdown links before bare URLs so the bare-URL rewrite
 // cannot put a video placeholder inside a link destination. Group 3 is the
 // optional CommonMark title (double/single quoted or parenthesized).
-var markdownLinkRegex = regexp.MustCompile(`\[([^\]]*)\]\((https?://[^)\s]+)(?:[ \t]+("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\([^)]*\)))?[ \t]*\)`)
+// Backslash escapes in the label keep an escaped ] from closing it early.
+var markdownLinkRegex = regexp.MustCompile(`\[((?:\\.|[^\]\\])*)\]\((https?://[^)\s]+)(?:[ \t]+("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\([^)]*\)))?[ \t]*\)`)
 var videoLinkOrURLRegex = regexp.MustCompile(markdownLinkRegex.String() + `|` + videoURLRegex.String())
 
 // RewriteVideoLinks turns bare video URLs into placeholders. Markdown links

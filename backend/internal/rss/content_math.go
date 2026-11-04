@@ -107,7 +107,8 @@ func dollarStartsMath(r []rune) bool {
 			// Between a rejected price pair and another formula, "$ and $"
 			// is prose. Padded lookahead needs a math signal or a compact
 			// numeric/single-symbol expression before reusing that dollar.
-			if body != raw && !numericMathBody.MatchString(body) && !strings.ContainsAny(body, `\{}_^=<>`) && len([]rune(body)) != 1 {
+			// Parentheses and arithmetic also qualify (f(x), a+b, a/b).
+			if body != raw && !numericMathBody.MatchString(body) && !strings.ContainsAny(body, `\{}_^=<>()+-*/`) && len([]rune(body)) != 1 {
 				return false
 			}
 			return body != "" && !shouldEscapeProseDollarPair([]rune(body))

@@ -243,6 +243,29 @@ func TestRewriteVideoLinksPreservesSourceLabels(t *testing.T) {
 	}
 }
 
+func TestVideoLinksPreserveEscapedLabelBrackets(t *testing.T) {
+	const raw = `<article><p>Read <a href="https://youtu.be/dQw4w9WgXcQ">A [beginner] tutorial</a> for more.</p></article>`
+	const want = `Read [A \[beginner\] tutorial](https://youtu.be/dQw4w9WgXcQ) for more.`
+	for _, pipeline := range []string{"feed", "page"} {
+		t.Run(pipeline, func(t *testing.T) {
+			got := NormalizeFeedContent(raw, "https://example.org/post")
+			if pipeline == "page" {
+				var err error
+				got, err = NewContentFetcher().FetchContentFromReader(strings.NewReader(raw))
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got != want {
+				t.Fatalf("escaped video label or destination changed: got %q, want %q", got, want)
+			}
+			if again := RewriteVideoLinks(got); again != want {
+				t.Fatalf("repeated conversion changed the video destination: %q", again)
+			}
+		})
+	}
+}
+
 func TestRewriteVideoLinks(t *testing.T) {
 	cases := []struct {
 		name string

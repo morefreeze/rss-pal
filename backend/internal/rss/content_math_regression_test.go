@@ -118,6 +118,10 @@ func TestPaddedRawMathPreservesSourceTeX(t *testing.T) {
 		{`One state of a Markov Chain: $ h_i \to h_{i+1}$. According to DPI.`, `One state of a Markov Chain: $h_i \to h_{i+1}$. According to DPI.`},
 		{`Compare $2ND $, $ 6N$, $ C \approx 6ND $ and price $9 and $200.`, `Compare $2ND$, $6N$, $C \approx 6ND$ and price \$9 and \$200.`},
 		{`Cost $9; use $ x \in B $ or $ 2x=0 $.`, `Cost \$9; use $x \in B$ or $2x=0$.`},
+		{`Cost $9; use $ f(x) $ and $g_i$.`, `Cost \$9; use $f(x)$ and $g_i$.`},
+		{`Cost $9; use $ a+b $ and $h_i \to y$.`, `Cost \$9; use $a+b$ and $h_i \to y$.`},
+		{`Cost $9; use $ a - b $ or $ a/b $ and $g_i$.`, `Cost \$9; use $a - b$ or $a/b$ and $g_i$.`},
+		{`Cost $9; use $ a*b $ then $ f(g(x)) $ and $h_i \to y$.`, `Cost \$9; use $a*b$ then $f(g(x))$ and $h_i \to y$.`},
 	} {
 		for _, pipeline := range []string{"feed", "page"} {
 			t.Run(pipeline+"/"+tc.source, func(t *testing.T) {
