@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bytedance/rss-pal/internal/httpx"
+	"github.com/mmcdole/gofeed"
 )
 
 type sourceFetchRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -46,6 +47,39 @@ func rssItem(title, link string, published time.Time) string {
 
 func validConfidenceRequest(rawURL string) SourceFetchRequest {
 	return SourceFetchRequest{URL: rawURL, Mode: SourceFetchValidate, DirectProfile: true}
+}
+
+func TestExploreArticleSkipsZeroPublicationDates(t *testing.T) {
+	now := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	zero := time.Time{}
+	valid := now.Add(-time.Hour)
+	older := valid.Add(-time.Hour)
+	base, _ := url.Parse("https://8.8.8.8/feed")
+	for _, tc := range []struct {
+		name               string
+		published, updated *time.Time
+		want               *time.Time
+	}{
+		{"missing", nil, nil, nil},
+		{"both zero", &zero, &zero, nil},
+		{"zero published valid updated", &zero, &valid, &valid},
+		{"valid published zero updated", &valid, &zero, &valid},
+		{"newer valid updated", &older, &valid, &valid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			article, ok := exploreArticleFromItem(&gofeed.Item{Title: "FAQ", Link: "https://9.9.9.9/faq", PublishedParsed: tc.published, UpdatedParsed: tc.updated}, base, now)
+			if !ok {
+				t.Fatal("date normalization should retain the article")
+			}
+			if tc.want == nil {
+				if article.PublishedAt != nil {
+					t.Fatalf("zero publication date retained: %v", article.PublishedAt)
+				}
+			} else if article.PublishedAt == nil || !article.PublishedAt.Equal(*tc.want) {
+				t.Fatalf("valid publication date lost: got %v, want %v", article.PublishedAt, tc.want)
+			}
+		})
+	}
 }
 
 func TestSourceFetchDirectRSSAndAtom(t *testing.T) {

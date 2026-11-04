@@ -486,12 +486,12 @@ func exploreArticleFromItem(item *gofeed.Item, base *url.URL, fetchedAt time.Tim
 		FetchedAt:     fetchedAt,
 	}
 	var effective *time.Time
-	if item.PublishedParsed != nil {
-		published := *item.PublishedParsed
+	if known := rss.PublishedTime(item.PublishedParsed, nil); known != nil {
+		published := *known
 		effective = &published
 	}
-	if item.UpdatedParsed != nil && (effective == nil || item.UpdatedParsed.After(*effective)) {
-		updated := *item.UpdatedParsed
+	if known := rss.PublishedTime(item.UpdatedParsed, nil); known != nil && (effective == nil || known.After(*effective)) {
+		updated := *known
 		effective = &updated
 	}
 	if effective != nil {
