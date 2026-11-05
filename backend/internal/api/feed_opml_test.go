@@ -110,3 +110,47 @@ func TestOPMLTitlePersistenceAndOwnerExport(t *testing.T) {
 		t.Fatalf("duplicate: %d", duplicate.Code)
 	}
 }
+
+func TestFeedBurnerCreateCanonicalIdentityScopedByOwner(t *testing.T) {
+	f, cleanup := newHTTPLeakFixture(t)
+	defer cleanup()
+	auth := api.NewAuthHandler(f.cfg, repository.NewUserRepository(f.appDB), nil)
+	feeds := api.NewFeedHandler(repository.NewFeedRepository(f.appDB), repository.NewArticleRepository(f.appDB), "")
+	r := gin.New()
+	r.Use(auth.AuthMiddleware(), api.RLSTxMiddleware(f.appDB))
+	r.POST("/feeds", feeds.Create)
+	create := func(rawURL string, owner int) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"url": rawURL, "title": "FeedBurner test"})
+		req := httptest.NewRequest(http.MethodPost, "/feeds", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+signTestJWT(t, httpTestJWTSecret, owner, false))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	const canonical = "https://feeds.feedburner.com/RockPaperShotgun?format=xml"
+	first := create("http://feeds.feedburner.com/RockPaperShotgun?format=xml", f.userA)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("create legacy HTTP: %d %s", first.Code, first.Body.String())
+	}
+	var added model.Feed
+	if err := json.Unmarshal(first.Body.Bytes(), &added); err != nil {
+		t.Fatal(err)
+	}
+	if added.URL != canonical || added.OwnerID == nil || *added.OwnerID != f.userA {
+		t.Fatalf("created feed identity/owner = %+v", added)
+	}
+	stored, err := repository.NewFeedRepository(f.privDB).GetByID(added.ID)
+	if err != nil || stored.URL != canonical || stored.OwnerID == nil || *stored.OwnerID != f.userA {
+		t.Fatalf("stored identity/owner = %+v, %v", stored, err)
+	}
+	if duplicate := create(canonical, f.userA); duplicate.Code != http.StatusConflict {
+		t.Fatalf("same-owner HTTPS duplicate status = %d", duplicate.Code)
+	}
+	if independent := create("http://feeds.feedburner.com:80/RockPaperShotgun?format=xml", f.userB); independent.Code != http.StatusCreated {
+		t.Fatalf("second owner's independent subscription = %d", independent.Code)
+	}
+	if other := f.do(t, http.MethodGet, "/api/feeds/"+itoa(added.ID), f.userB); other.Code != http.StatusNotFound {
+		t.Fatalf("other owner's feed visibility = %d", other.Code)
+	}
+}

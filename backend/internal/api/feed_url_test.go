@@ -16,6 +16,13 @@ func TestNormalizeFeedURLCanonicalizesUppercaseHTTPS(t *testing.T) {
 	}
 }
 
+func TestNormalizeFeedURLUpgradesLegacyFeedBurnerForCreationAndImport(t *testing.T) {
+	got, err := normalizeFeedURL(" HTTP://Feeds.FeedBurner.com:80/RockPaperShotgun?format=xml ")
+	if err != nil || got != "https://feeds.feedburner.com/RockPaperShotgun?format=xml" {
+		t.Fatalf("normalizeFeedURL() = %q, %v; want canonical HTTPS identity", got, err)
+	}
+}
+
 func TestNormalizeFeedURLRejectsInternalSourceSchemes(t *testing.T) {
 	for _, raw := range []string{"extension://twitter:user/1/alice", "bookmarklet://user/1", "https://extension://twitter:user/1/alice", "https://bookmarklet://user/1"} {
 		if normalized, err := normalizeFeedURL(raw); err == nil {

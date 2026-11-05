@@ -251,6 +251,7 @@ func (f *Fetcher) fetchTarget(ctx context.Context, client *http.Client, feedURL,
 // Preview fetches a URL and returns up to 10 articles without saving anything.
 // Tries RSS/Atom first, then auto-discovers RSS link in HTML, then falls back to scraping.
 func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, error) {
+	rawURL = CanonicalFeedURL(rawURL)
 	fetchURL, client := f.resolveTarget(rawURL)
 	resp, err := f.getFeedResponse(ctx, client, fetchURL, func(req *http.Request) {
 		req.Header.Set("User-Agent", userAgent)

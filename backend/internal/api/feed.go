@@ -839,7 +839,7 @@ func normalizeFeedURL(rawURL string) (string, error) {
 	if !rss.IsNetworkFeedURL(u.String()) {
 		return "", fmt.Errorf("invalid feed URL")
 	}
-	return u.String(), nil
+	return rss.CanonicalFeedURL(u.String()), nil
 }
 
 // validatePublicURL blocks SSRF by rejecting non-HTTP(S) schemes and private/loopback IPs.

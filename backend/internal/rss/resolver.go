@@ -33,6 +33,7 @@ func ResolveFeedURL(input, rsshubBase string) string {
 // select the explicitly trusted RSSHub transport; a direct RSSHub URL never
 // receives that trust bit.
 func resolveFeedURL(input, rsshubBase string) (string, bool) {
+	input = CanonicalFeedURL(input)
 	if rsshubBase == "" || input == "" {
 		return input, false
 	}
