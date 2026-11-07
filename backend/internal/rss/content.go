@@ -47,11 +47,13 @@ const (
 )
 
 type ContentFetcher struct {
-	client      *http.Client
-	freshClient *http.Client // Used only for explicit manual source HTML fetches.
-	jinaAPIKey  string
-	jinaBaseURL string
-	reader      *zaiReader
+	client           *http.Client
+	freshClient      *http.Client // Used only for explicit manual source HTML fetches.
+	hnDirectClient   *http.Client // Direct, guarded requests to the fixed HN API.
+	hnRecoveryClient *http.Client // Checked-address recovery when a direct HN connection fails.
+	jinaAPIKey       string
+	jinaBaseURL      string
+	reader           *zaiReader
 }
 
 type ContentResult struct {
@@ -138,11 +140,13 @@ func SelectArticleContent(doc *goquery.Document, minChars int) (*goquery.Selecti
 func NewContentFetcher() *ContentFetcher {
 	client := httpx.NewClient(30 * time.Second)
 	return &ContentFetcher{
-		client:      client,
-		freshClient: httpx.NewBufferedGETClient(30 * time.Second),
-		jinaAPIKey:  os.Getenv("JINA_API_KEY"),
-		jinaBaseURL: defaultJinaReaderBaseURL,
-		reader:      newZAIReader(os.Getenv("ZAI_READER_API_KEY"), os.Getenv("ZAI_READER_MCP_URL"), client),
+		client:           client,
+		freshClient:      httpx.NewBufferedGETClient(30 * time.Second),
+		hnDirectClient:   httpx.NewDirectClient(30 * time.Second),
+		hnRecoveryClient: httpx.NewDirectBufferedGETClient(30 * time.Second),
+		jinaAPIKey:       os.Getenv("JINA_API_KEY"),
+		jinaBaseURL:      defaultJinaReaderBaseURL,
+		reader:           newZAIReader(os.Getenv("ZAI_READER_API_KEY"), os.Getenv("ZAI_READER_MCP_URL"), client),
 	}
 }
 

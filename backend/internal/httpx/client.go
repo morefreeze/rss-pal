@@ -233,6 +233,13 @@ func NewClient(timeout time.Duration) *http.Client {
 	)
 }
 
+// NewDirectClient bypasses environment proxies but retains public-address
+// validation, IP pinning and redirect checks. Connections can be reused.
+func NewDirectClient(timeout time.Duration) *http.Client {
+	return newClient(timeout, net.DefaultResolver,
+		&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second})
+}
+
 func newClientWithProxyFallback(timeout time.Duration, system, trusted resolver, dialer dialer, proxy func(*http.Request) (*url.URL, error)) *http.Client {
 	return newClientWithProxy(timeout, proxyFallbackResolver{system: system, trusted: trusted}, dialer, proxy)
 }

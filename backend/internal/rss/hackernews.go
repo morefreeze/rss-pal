@@ -48,11 +48,39 @@ type hnItem struct {
 }
 
 func (f *ContentFetcher) fetchHNItem(ctx context.Context, id int64) (*hnItem, error) {
+	if f.hnDirectClient != nil {
+		// Reserve time for the existing proxy route. A stalled direct endpoint
+		// must not consume the complete 25-second story-and-discussion budget.
+		budget := 4 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(deadline) / 2; remaining < budget {
+				budget = remaining
+			}
+		}
+		directCtx, cancel := context.WithTimeout(ctx, budget)
+		primaryCtx, primaryCancel := f.fetchStageContext(directCtx, 2)
+		item, err := fetchHNItemWithClient(primaryCtx, id, f.hnDirectClient)
+		primaryCancel()
+		if err != nil && !errors.Is(err, ErrHackerNewsUnavailable) && ctx.Err() == nil && f.hnRecoveryClient != nil {
+			item, err = fetchHNItemWithClient(directCtx, id, f.hnRecoveryClient)
+		}
+		cancel()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err == nil || errors.Is(err, ErrHackerNewsUnavailable) {
+			return item, err
+		}
+	}
+	return fetchHNItemWithClient(ctx, id, f.client)
+}
+
+func fetchHNItemWithClient(ctx context.Context, id int64, client *http.Client) (*hnItem, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://hacker-news.firebaseio.com/v0/item/%d.json", id), nil)
 	if err != nil {
 		return nil, err
 	}
-	res, err := f.client.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +161,7 @@ func (f *ContentFetcher) fetchHackerNews(ctx context.Context, canonical string) 
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 		var firstErr error
-		sem := make(chan struct{}, 6)
+		sem := make(chan struct{}, 10)
 		for _, cid := range batch {
 			wg.Add(1)
 			go func(cid int64) {

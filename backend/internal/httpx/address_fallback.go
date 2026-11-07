@@ -36,6 +36,13 @@ func NewBufferedGETClient(timeout time.Duration) *http.Client {
 	return withBufferedGETAddressFallback(NewClient(timeout))
 }
 
+// NewDirectBufferedGETClient bypasses environment proxies while retaining the
+// same public-address, redirect and response-size guards. Callers must bound
+// the direct attempt and explicitly provide any proxy fallback they need.
+func NewDirectBufferedGETClient(timeout time.Duration) *http.Client {
+	return withBufferedGETAddressFallback(NewDirectClient(timeout))
+}
+
 // NewBufferedImageGETClient applies the same checked-address recovery with a
 // 10 MiB body limit and a separate bounded image workload. It starts one
 // protected primary, adding a secondary after inactivity rather than eagerly
