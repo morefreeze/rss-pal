@@ -401,6 +401,10 @@ a.card:hover, div.card[style*="cursor: pointer"]:hover {
 .card-clickable { cursor: pointer; }
 .card-clickable:hover { background: var(--surface-hover); }
 
+.feed-source-address { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.feed-source-address > span { min-width: 0; overflow-wrap: anywhere; }
+.feed-source-copy { flex-shrink: 0; padding: 2px 8px; font-size: 12px; }
+
 /* === Public article reader === */
 .public-reader {
   width: min(100%, var(--content-max));
@@ -1289,6 +1293,7 @@ body.reading-mode-active:not(.reading-chrome-visible) .mobile-tab-bar {
 }
 
 @media (max-width: 640px) {
+  .feed-source-summary { flex-basis: 100% !important; }
   #root { padding: 12px; }
   .card { padding: 12px; }
   .public-reader { margin: 12px auto 24px; padding: 0; }

@@ -308,6 +308,16 @@ export default function FeedListPage() {
     }
   }
 
+  const handleCopyURL = async (url: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+      await navigator.clipboard.writeText(url)
+      toast.success('订阅地址已复制')
+    } catch {
+      toast.error('复制失败，请手动复制订阅地址')
+    }
+  }
+
   const handleCardClick = (feedId: number) => {
     try { sessionStorage.setItem('selectedFeed', JSON.stringify(feedId)) } catch {}
     navigate('/articles')
@@ -524,30 +534,40 @@ export default function FeedListPage() {
             onClick={() => handleCardClick(feed.id)}
           >
             <div className="flex-between">
-              <Link
-                to="/articles"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  try { sessionStorage.setItem('selectedFeed', JSON.stringify(feed.id)) } catch {}
-                }}
-                style={{ display: 'block', color: 'inherit', textDecoration: 'none', flex: 1, minWidth: 0 }}
-              >
-                <div className="text-bold" style={!feed.is_active ? { color: 'var(--fg-muted)' } : {}}>
-                  {feed.title?.trim() || feed.url}
-                  {feed.feed_type && feed.feed_type !== 'rss' && (
-                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>{feedTypeLabel(feed.feed_type)}</span>
-                  )}
-                  {!feed.is_active && (
-                    <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>已暂停</span>
-                  )}
+              <div className="feed-source-summary" style={{ flex: 1, minWidth: 0 }}>
+                <Link
+                  to="/articles"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    try { sessionStorage.setItem('selectedFeed', JSON.stringify(feed.id)) } catch {}
+                  }}
+                  style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}
+                >
+                  <div className="text-bold" style={!feed.is_active ? { color: 'var(--fg-muted)' } : {}}>
+                    {feed.title?.trim() || feed.url}
+                    {feed.feed_type && feed.feed_type !== 'rss' && (
+                      <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>{feedTypeLabel(feed.feed_type)}</span>
+                    )}
+                    {!feed.is_active && (
+                      <span className="text-sm" style={{ marginLeft: 6, padding: '1px 6px', background: 'var(--surface-hover)', borderRadius: 4, color: 'var(--fg-muted)' }}>已暂停</span>
+                    )}
+                  </div>
+                </Link>
+                <div className="feed-source-address">
+                  <span className="text-muted text-sm">{feed.url}</span>
+                  <button
+                    type="button"
+                    className="secondary feed-source-copy"
+                    aria-label={`复制订阅地址：${feed.title?.trim() || feed.url}`}
+                    onClick={(e) => { e.stopPropagation(); void handleCopyURL(feed.url) }}
+                  >复制地址</button>
                 </div>
-                <div className="text-muted text-sm">{feed.url}</div>
                 <div className="text-muted text-sm mt-1">
                   个人订阅 · 仅自己可见 · {feed.article_count} 篇
                   {feed.unread_count > 0 && <span style={{ color: 'var(--accent)', fontWeight: 500 }}> · {feed.unread_count} 未读</span>}
                   {' '}· 上次成功检查：{formatDate(feed.last_fetched_at)}
                 </div>
-              </Link>
+              </div>
               <div className="flex gap-1">
                 {feed.is_active ? (
                   <button
