@@ -57,7 +57,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/briefing',           icon: '📅', label: '简报' },
   { to: '/interests',          icon: '💡', label: '兴趣' },
   { to: '/stats',              icon: '📊', label: '统计' },
-  { to: '/settings',           icon: '⚙️', label: '设置' },
 ]
 
 function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => void }) {
@@ -131,6 +130,9 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
         >
           <Link role="menuitem" className="user-menu-item" to="/history" onClick={() => setOpen(false)}>
             历史记录
+          </Link>
+          <Link role="menuitem" className="user-menu-item" to="/settings" onClick={() => setOpen(false)}>
+            设置
           </Link>
           <button
             role="menuitem"

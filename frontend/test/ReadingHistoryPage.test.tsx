@@ -12,7 +12,7 @@ vi.mock('../src/api/client', async importOriginal => ({
   getServerHealth: async () => ({}),
 }))
 
-it('opens history from the desktop account menu and loads older articles', async () => {
+it('opens settings and history from the desktop account menu and loads older articles', async () => {
   const item = { id: 1, available: true, article_id: 12, title: '重新打开的网摘', kind: 'clip', source_title: '网摘', opened_at: '2026-11-09T01:00:00Z' }
   getReadingHistory
     .mockResolvedValueOnce({ items: [item], next_cursor: 'next' })
@@ -25,12 +25,19 @@ it('opens history from the desktop account menu and loads older articles', async
     <Routes>
       <Route element={<Layout user={{ id: 1, username: 'reader', is_admin: false }} onLogout={() => {}} />}>
         <Route path="/articles" element={<div />} />
+        <Route path="/settings" element={<h2>设置页面</h2>} />
         <Route path="/history" element={<ReadingHistoryPage />} />
       </Route>
     </Routes>
   </MemoryRouter>)
 
+  expect(screen.queryByRole('link', { name: /设置/ })).toBeNull()
   const account = screen.getByRole('button', { name: '我的' })
+  fireEvent.click(account)
+  fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: '设置' }))
+  expect(screen.getByRole('heading', { name: '设置页面' })).toBeTruthy()
+  expect(screen.queryByRole('menu')).toBeNull()
+
   fireEvent.click(account)
   fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: '历史记录' }))
   expect((await screen.findByRole('link', { name: /重新打开的网摘/ })).getAttribute('href')).toBe('/articles/12')
