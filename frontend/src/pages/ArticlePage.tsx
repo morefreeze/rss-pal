@@ -38,6 +38,7 @@ import BackFab from '../components/BackFab'
 import { ArticleDetailSkeleton } from '../components/ArticleDetailSkeleton'
 import ArticleDetailPreview from '../components/ArticleDetailPreview'
 import { useArticleCaptureDrafts } from '../hooks/useArticleCaptureDrafts'
+import { useRecordReadingHistory } from '../hooks/useRecordReadingHistory'
 import { useReaderSettings } from '../hooks/useReaderSettings'
 import { useReadingChrome } from '../hooks/useReadingChrome'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
@@ -120,6 +121,7 @@ function ArticlePageContent() {
     navigate(`${target.pathname}${target.search}`)
   }, [navigate])
   const [article, setArticle] = useState<Article | null>(() => initialDetail?.article ?? null)
+  useRecordReadingHistory('article', article?.id === articleID ? articleID : undefined)
   const [progress, setProgress] = useState<ReadingProgress | null>(() => initialDetail?.progress ?? null)
   const [currentScrollPosition, setCurrentScrollPosition] = useState(
     () => Math.min(1, initialDetail?.progress?.scroll_position ?? 0),

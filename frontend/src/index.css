@@ -1780,6 +1780,25 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
 .account-display img { flex-shrink: 0; border-radius: 50%; object-fit: cover; }
 .account-display-name { overflow-wrap: anywhere; min-width: 0; }
 .user-menu .account-display { max-width: 240px; }
+.user-menu-item {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  height: auto;
+  background: transparent;
+  color: var(--fg);
+  border: 0;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  text-align: left;
+}
+.user-menu-item:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
+}
 
 /* Keep the continuation title below the phone clip list's sticky tag bar. */
 .clip-phone-list [data-article-card] {

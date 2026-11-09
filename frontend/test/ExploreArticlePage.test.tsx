@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   fetchExploreArticleContent: vi.fn(),
   updateExploreArticleState: vi.fn(),
   recordExploreArticleEvent: vi.fn(),
+  recordReadingHistory: vi.fn().mockResolvedValue(undefined),
   subscribeExploreSource: vi.fn(),
   saveArticle: vi.fn(),
   unsaveArticle: vi.fn(),
@@ -144,6 +145,12 @@ describe('ExploreArticlePage', () => {
     api.getExploreArticle.mockResolvedValue(detail)
     api.recordExploreArticleEvent.mockResolvedValue({ recorded: true })
     api.subscribeExploreSource.mockResolvedValue({ feed_id: 70, created: true, copied_articles: 4 })
+  })
+
+  it('records the opened Explore article only once while its detail stays mounted', async () => {
+    api.getExploreArticle.mockResolvedValue(detail)
+    renderPage()
+    await waitFor(() => expect(api.recordReadingHistory).toHaveBeenCalledExactlyOnceWith('explore', detail.id))
   })
 
   it('keeps the feed preview visible while fetching the original and does not count it as completed', async () => {

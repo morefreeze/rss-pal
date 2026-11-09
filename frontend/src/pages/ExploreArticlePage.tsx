@@ -16,6 +16,7 @@ import MarkdownArticle from '../components/MarkdownArticle'
 import ReaderSettingsPanel from '../components/ReaderSettingsPanel'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useReaderSettings } from '../hooks/useReaderSettings'
+import { useRecordReadingHistory } from '../hooks/useRecordReadingHistory'
 import { resolveDetailPreviewTitle } from '../utils/pageTitle'
 import { computeViewportProgress } from '../utils/readingProgress'
 
@@ -30,7 +31,9 @@ function safeExploreReturnPath(value: unknown): string {
   }
   try {
     const parsed = new URL(value, window.location.origin)
-    if (parsed.origin !== window.location.origin || parsed.pathname !== '/explore') return '/explore'
+    if (parsed.origin !== window.location.origin) return '/explore'
+    if (parsed.pathname === '/history') return '/history'
+    if (parsed.pathname !== '/explore') return '/explore'
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
   } catch {
     return '/explore'
@@ -53,6 +56,8 @@ export default function ExploreArticlePage() {
     : undefined
   const returnPath = useMemo(() => safeExploreReturnPath(locationState?.from), [locationState?.from])
   const [article, setArticle] = useState<ExploreArticleDetail | null>(null)
+  useRecordReadingHistory('explore', article?.id === articleID ? articleID : undefined)
+  const backLabel = returnPath === '/history' ? '返回历史记录' : '返回探索'
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [contentLoading, setContentLoading] = useState(false)
@@ -289,7 +294,7 @@ export default function ExploreArticlePage() {
     return (
       <div className="reading-layout" aria-busy="true">
         <div className="reading-toolbar">
-          <button type="button" className="reading-exit" aria-label="返回探索" onClick={goBack}>← 返回探索</button>
+          <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}>← {backLabel}</button>
         </div>
         <div className="card" role="status">正在加载探索文章…</div>
       </div>
@@ -300,7 +305,7 @@ export default function ExploreArticlePage() {
     return (
       <div className="reading-layout">
         <div className="reading-toolbar">
-          <button type="button" className="reading-exit" aria-label="返回探索" onClick={goBack}>← 返回探索</button>
+          <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}>← {backLabel}</button>
         </div>
         <div className="card" role="alert">
           <p>{loadError || '探索文章不存在或已失效'}</p>
@@ -328,7 +333,7 @@ export default function ExploreArticlePage() {
   return (
     <div className="reading-layout explore-article-reader">
       <div className="reading-toolbar flex-between">
-        <button type="button" className="reading-exit" aria-label="返回探索" onClick={goBack}>← 返回探索</button>
+        <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}>← {backLabel}</button>
         <div className="explore-article-actions"><ExploreArticleActions actions={actions} />{subscribeButton('top')}</div>
       </div>
 
@@ -368,7 +373,7 @@ export default function ExploreArticlePage() {
         )}
 
         <div className="reading-nav">
-          <button type="button" className="reading-nav-btn" aria-label="返回探索列表" onClick={goBack}>返回探索</button>
+          <button type="button" className="reading-nav-btn" aria-label={returnPath === '/history' ? backLabel : '返回探索列表'} onClick={goBack}>{backLabel}</button>
           <ExploreArticleActions actions={actions} />{subscribeButton('bottom')}
         </div>
       </article>

@@ -83,6 +83,7 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
       <button
         type="button"
         className="nav-link"
+        aria-label="我的"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(o => !o)}
@@ -98,7 +99,7 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
           cursor: 'pointer',
         }}
       >
-        <AccountDisplay user={user} />
+        <AccountDisplay user={user} label="我的" />
         <span
           aria-hidden="true"
           style={{
@@ -128,22 +129,14 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
             zIndex: 100,
           }}
         >
+          <Link role="menuitem" className="user-menu-item" to="/history" onClick={() => setOpen(false)}>
+            历史记录
+          </Link>
           <button
             role="menuitem"
+            className="user-menu-item"
             type="button"
             onClick={() => { setOpen(false); onLogout() }}
-            style={{
-              width: '100%',
-              textAlign: 'left',
-              padding: '8px 12px',
-              height: 'auto',
-              background: 'transparent',
-              color: 'var(--fg)',
-              border: 'none',
-              borderRadius: 4,
-              fontWeight: 400,
-              cursor: 'pointer',
-            }}
           >
             🚪 登出
           </button>

@@ -1239,6 +1239,27 @@ export const getBriefingIndex = (type: 'daily' | 'weekly', from: string, to: str
 
 // === Feed governance Phase 1 ===
 
+export type ReadingHistoryReader = 'article' | 'explore'
+
+export interface ReadingHistoryPageData {
+  items: Array<{
+    id: number
+    article_id: number | null
+    kind: ReadingHistoryReader | 'clip'
+    title: string
+    source_title: string
+    opened_at: string
+    available: boolean
+  }>
+  next_cursor: string
+}
+
+export const getReadingHistory = (before?: string, signal?: AbortSignal) =>
+  api.get<ReadingHistoryPageData>('/reading-history', { params: { before }, signal }).then(res => res.data)
+
+export const recordReadingHistory = (kind: ReadingHistoryReader, id: number) =>
+  api.post(`/reading-history/${kind}/${id}`).then(() => undefined)
+
 export type EventType = 'exposure' | 'click'
 
 export const postEvent = (articleId: number, eventType: EventType) =>

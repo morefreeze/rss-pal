@@ -382,6 +382,11 @@ func main() {
 		apiGroup.PATCH("/tags/:id", userTagHandler.RenameTag)
 		apiGroup.DELETE("/tags/:id", userTagHandler.DeleteTag)
 
+		// Reading history
+		historyHandler := api.NewReadingHistoryHandler(repository.NewReadingHistoryRepository(db))
+		apiGroup.GET("/reading-history", historyHandler.List)
+		apiGroup.POST("/reading-history/:kind/:id", historyHandler.Record)
+
 		// Articles
 		apiGroup.GET("/articles", articleHandler.GetAll)
 		apiGroup.GET("/articles/grouped", articleHandler.GetGrouped)

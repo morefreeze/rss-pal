@@ -98,11 +98,12 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
         <button
           type="button"
           onClick={() => setMoreOpen(true)}
-          aria-label="更多"
-          style={tabStyle(moreOpen)}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          style={tabStyle(moreOpen || location.pathname === '/history')}
         >
-          <span style={{ fontSize: 22, lineHeight: 1 }}>⋯</span>
-          <span>更多</span>
+          <span aria-hidden="true" style={{ fontSize: 22, lineHeight: 1 }}>👤</span>
+          <span>我的</span>
         </button>
       </nav>
       <MoreSheet user={user} isAdmin={isAdmin} open={moreOpen} onClose={() => setMoreOpen(false)} onLogout={onLogout} />

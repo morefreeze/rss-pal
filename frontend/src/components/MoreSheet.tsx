@@ -5,6 +5,7 @@ import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
 type SheetItem = { icon: string; label: string; to?: string; action?: 'logout' }
 
 const ITEMS: SheetItem[] = [
+  { icon: '🕘', label: '历史记录', to: '/history' },
   { icon: '📅', label: '简报',     to: '/briefing' },
   { icon: '💡', label: '兴趣',     to: '/interests' },
   { icon: '📊', label: '统计',     to: '/stats' },
@@ -52,10 +53,12 @@ export default function MoreSheet({ open, onClose, onLogout, isAdmin = false, us
       />
       <div
         role="dialog"
-        aria-label="更多"
+        aria-label="我的"
         style={{
           position: 'fixed',
           left: 0, right: 0, bottom: 0,
+          maxHeight: '100dvh',
+          overflowY: 'auto',
           background: 'var(--surface)',
           borderTop: '1px solid var(--border)',
           borderTopLeftRadius: 16,

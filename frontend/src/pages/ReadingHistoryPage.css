@@ -1,0 +1,66 @@
+.reading-history {
+  max-width: 800px;
+  margin-inline: auto;
+}
+
+.reading-history h2 {
+  margin: 0 0 16px;
+  font-size: 24px;
+}
+
+.reading-history-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.reading-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.reading-history-list li + li,
+.reading-history-list + .reading-history-status {
+  border-top: 1px solid var(--border);
+}
+
+.reading-history-row {
+  display: block;
+  padding: 13px 16px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+a.reading-history-row:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+
+.reading-history-row:focus-visible {
+  outline-offset: -2px;
+}
+
+.reading-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 16px;
+  margin-top: 3px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.reading-history-meta time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.reading-history-status {
+  padding: 14px 16px;
+  margin: 0;
+}
+
+.reading-history-status p {
+  margin: 0 0 8px;
+}

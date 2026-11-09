@@ -14,13 +14,13 @@ function safeAvatar(raw?: string): string | null {
     return u.href
   } catch { return null }
 }
-export default function AccountDisplay({user}: {user: DisplayAccount}) {
+export default function AccountDisplay({user, label}: {user: DisplayAccount; label?: string}) {
   const avatar = safeAvatar(user.qq_avatar_url)
   const [failed, setFailed] = useState(false)
   useEffect(() => setFailed(false), [avatar])
   const name = user.nickname || user.qq_nickname || user.username
   return <span className="account-display">
     {avatar && !failed ? <img src={avatar} width={24} height={24} alt="QQ 头像" referrerPolicy="no-referrer" loading="lazy" decoding="async" onError={() => setFailed(true)} /> : <span aria-hidden="true">👤</span>}
-    <span className="account-display-name">{name}{user.nickname && user.qq_nickname && user.nickname !== user.qq_nickname && <span className="text-muted">（QQ：{user.qq_nickname}）</span>}</span>
+    <span className="account-display-name">{label ?? name}{!label && user.nickname && user.qq_nickname && user.nickname !== user.qq_nickname && <span className="text-muted">（QQ：{user.qq_nickname}）</span>}</span>
   </span>
 }

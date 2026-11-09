@@ -174,6 +174,11 @@ func TestRLS_PrivateTablesAreScoped(t *testing.T) {
 			countSQL: `SELECT COUNT(*) FROM reading_progress`,
 		},
 		{
+			name:     "reading_history",
+			seedSQL:  `INSERT INTO reading_history (article_id, user_id) VALUES ($1, $2)`,
+			countSQL: `SELECT COUNT(*) FROM reading_history`,
+		},
+		{
 			name:     "playback_progress",
 			seedSQL:  `INSERT INTO playback_progress (article_id, position_seconds, user_id) VALUES ($1, 30, $2)`,
 			countSQL: `SELECT COUNT(*) FROM playback_progress`,

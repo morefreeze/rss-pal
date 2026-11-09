@@ -9,6 +9,7 @@ import RegisterPage from './pages/RegisterPage'
 import FeedListPage from './pages/FeedListPage'
 import ArticleListPage from './pages/ArticleListPage'
 import ArticlePage from './pages/ArticlePage'
+import ReadingHistoryPage from './pages/ReadingHistoryPage'
 import InterestsPage from './pages/InterestsPage'
 import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
@@ -119,6 +120,7 @@ export function AppRoutes({
         <Route path="interests" element={<InterestsPage />} />
         <Route path="insights" element={<Navigate to="/interests" replace />} />
         <Route path="stats" element={<StatsPage />} />
+        <Route path="history" element={<ReadingHistoryPage />} />
         <Route path="settings" element={<SettingsPage user={user} onUserUpdate={onLogin} />} />
         <Route path="admin" element={<AdminLayout user={user} />}>
           <Route index element={<Navigate to="feed-catalog" replace />} />

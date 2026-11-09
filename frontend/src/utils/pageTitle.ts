@@ -21,6 +21,7 @@ const STATIC_ROUTE_TITLES: Record<string, string> = {
   '/explore': '探索',
   '/interests': '兴趣',
   '/stats': '统计',
+  '/history': '历史记录',
   '/settings': '设置',
   '/admin': '后台管理',
   '/admin/feed-catalog': '公共推荐目录',

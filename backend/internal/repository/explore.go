@@ -590,6 +590,17 @@ func (r *ExploreRepository) GetSources(userID int) ([]ExploreSourceItem, error) 
 	return result, rows.Err()
 }
 
+// exploreArticleVisibility is shared by the detail and history queries.
+const exploreArticleVisibility = `
+			EXISTS (
+				SELECT 1 FROM explore_batch_sources batch_source
+				JOIN explore_batches batch
+				  ON batch.id=batch_source.batch_id AND batch.user_id=batch_source.user_id
+				WHERE batch_source.user_id=$1 AND batch_source.source_id=article.source_id
+				  AND batch.status='done' AND batch.completed_at >= NOW() - INTERVAL '30 days'
+			) OR source.normalized_url=ANY($2) OR source.id IN (SELECT id FROM cold_sources) OR state.saved OR state.skipped
+`
+
 func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreArticleDetail, error) {
 	formalURLs, err := visibleFormalNormalizedURLs(r.db, userID)
 	if err != nil {
@@ -604,15 +615,7 @@ func (r *ExploreRepository) GetVisibleArticle(userID, articleID int) (*ExploreAr
 		FROM explore_articles article
 		JOIN recommended_feeds source ON source.id=article.source_id
         LEFT JOIN explore_article_states state ON state.user_id=$1 AND state.normalized_url=article.normalized_url
-		WHERE article.id=$3 AND (
-			EXISTS (
-				SELECT 1 FROM explore_batch_sources batch_source
-				JOIN explore_batches batch
-				  ON batch.id=batch_source.batch_id AND batch.user_id=batch_source.user_id
-				WHERE batch_source.user_id=$1 AND batch_source.source_id=article.source_id
-				  AND batch.status='done' AND batch.completed_at >= NOW() - INTERVAL '30 days'
-			) OR source.normalized_url=ANY($2) OR source.id IN (SELECT id FROM cold_sources) OR state.saved OR state.skipped
-		)
+		WHERE article.id=$3 AND (`+exploreArticleVisibility+`)
 	`, userID, pq.Array(formalURLs), articleID).Scan(
 		&detail.ID, &detail.SourceID, &detail.SourceTitle, &detail.SourceURL,
 		&detail.SiteURL, &detail.Title, &detail.URL, &detail.Content, &detail.Excerpt, &detail.ThumbnailURL,
