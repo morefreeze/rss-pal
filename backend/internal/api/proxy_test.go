@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -132,6 +133,63 @@ func TestProxyMedia_RejectsNonMediaContentType(t *testing.T) {
 
 	if rec.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("status = %d, want 415; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+type mediaTestTransport func(*http.Request) (*http.Response, error)
+
+func (f mediaTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestProxyMediaXiaoyuzhouDirectAndFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, host            string
+		directStatus          int
+		wantDirect, wantProxy int
+	}{
+		{"direct range", "media.xyzcdn.net", http.StatusPartialContent, 1, 0},
+		{"direct network error", "media.xyzcdn.net", 0, 1, 1},
+		{"direct HTTP error", "media.xyzcdn.net", http.StatusForbidden, 1, 1},
+		{"redirect outside CDN", "media.xyzcdn.net", http.StatusFound, 1, 1},
+		{"other host", "media.xyzcdn.net.example.org", http.StatusPartialContent, 0, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := func(count *int, status int) http.RoundTripper {
+				return mediaTestTransport(func(r *http.Request) (*http.Response, error) {
+					(*count)++
+					if r.Header.Get("Range") != "bytes=0-3" || r.Header.Get("Referer") != "https://"+tc.host+"/" {
+						t.Fatalf("incorrect upstream request headers: %v", r.Header)
+					}
+					if status == 0 {
+						return nil, errors.New("direct connection failed")
+					}
+					headers := http.Header{
+						"Content-Type": {"audio/mp4"}, "Content-Range": {"bytes 0-3/8"},
+					}
+					if status == http.StatusFound {
+						headers.Set("Location", "https://93.184.216.34/episode.m4a")
+					}
+					return &http.Response{StatusCode: status, Header: headers, Body: io.NopCloser(strings.NewReader("m4a!"))}, nil
+				})
+			}
+			var direct, proxied int
+			proxy := NewMediaProxy()
+			proxy.Validate = allowLoopbackValidator
+			proxy.Client.Transport = transport(&proxied, http.StatusPartialContent)
+			proxy.directClient.Transport = transport(&direct, tc.directStatus)
+			router := gin.New()
+			router.GET("/api/proxy/media", proxy.Handle)
+			req := httptest.NewRequest(http.MethodGet, "/api/proxy/media?url="+url.QueryEscape("https://"+tc.host+"/episode.m4a"), nil)
+			req.Header.Set("Range", "bytes=0-3")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusPartialContent || rec.Header().Get("Content-Range") != "bytes 0-3/8" || rec.Body.String() != "m4a!" {
+				t.Fatalf("response status=%d headers=%v body=%q", rec.Code, rec.Header(), rec.Body.String())
+			}
+			if direct != tc.wantDirect || proxied != tc.wantProxy {
+				t.Fatalf("calls direct=%d proxy=%d, want %d/%d", direct, proxied, tc.wantDirect, tc.wantProxy)
+			}
+		})
 	}
 }
 

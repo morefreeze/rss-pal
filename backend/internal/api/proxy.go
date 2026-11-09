@@ -35,8 +35,9 @@ type ImageProxy struct {
 // keeping browser playback behind the SSRF guard, it supplies a source-origin
 // Referer for media CDNs that reject cross-site hotlinks.
 type MediaProxy struct {
-	Validate func(rawURL string) (*url.URL, error)
-	Client   *http.Client
+	Validate     func(rawURL string) (*url.URL, error)
+	Client       *http.Client
+	directClient *http.Client
 }
 
 // NewImageProxy returns a production-ready proxy: strict SSRF validation,
@@ -49,9 +50,19 @@ func NewImageProxy() *ImageProxy {
 }
 
 func NewMediaProxy() *MediaProxy {
+	directClient := httpx.NewDirectClient(mediaProxyTimeout)
+	validateRedirect := directClient.CheckRedirect
+	directClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !isXiaoyuzhouMediaURL(req.URL) {
+			// Let the normal proxy handle redirects outside the direct route.
+			return http.ErrUseLastResponse
+		}
+		return validateRedirect(req, via)
+	}
 	return &MediaProxy{
-		Validate: httpx.ValidateURL,
-		Client:   httpx.NewClient(mediaProxyTimeout),
+		Validate:     httpx.ValidateURL,
+		Client:       httpx.NewClient(mediaProxyTimeout),
+		directClient: directClient,
 	}
 }
 
@@ -151,7 +162,7 @@ func (p *MediaProxy) Handle(c *gin.Context) {
 		}
 	}
 
-	resp, err := p.Client.Do(req)
+	resp, err := p.fetchMedia(req)
 	if err != nil {
 		c.String(http.StatusBadGateway, "upstream: %s", err)
 		return
@@ -187,4 +198,26 @@ func (p *MediaProxy) Handle(c *gin.Context) {
 		return
 	}
 	_, _ = io.Copy(c.Writer, io.LimitReader(resp.Body, mediaProxyMaxBytes))
+}
+
+func (p *MediaProxy) fetchMedia(req *http.Request) (*http.Response, error) {
+	// Xiaoyuzhou's audio CDN is reachable directly from the deployment,
+	// including when the configured outbound proxy stalls before headers.
+	if p.directClient != nil && isXiaoyuzhouMediaURL(req.URL) {
+		resp, err := p.directClient.Do(req)
+		if err == nil {
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent {
+				return resp, nil
+			}
+			resp.Body.Close()
+		}
+		if err := req.Context().Err(); err != nil {
+			return nil, err
+		}
+	}
+	return p.Client.Do(req)
+}
+
+func isXiaoyuzhouMediaURL(target *url.URL) bool {
+	return target.Scheme == "https" && strings.EqualFold(target.Host, "media.xyzcdn.net")
 }

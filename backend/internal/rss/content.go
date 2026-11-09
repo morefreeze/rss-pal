@@ -1257,6 +1257,31 @@ func mediaInfoFromURL(raw, explicitType, baseURL string) *MediaInfo {
 	return &MediaInfo{URL: parsed.String(), Type: mimeType}
 }
 
+// ExtractXiaoyuzhouEpisodeAudio reads the episode's public Open Graph audio
+// metadata. The player lives outside the selected show notes.
+func ExtractXiaoyuzhouEpisodeAudio(doc *goquery.Document, pageURL string) *MediaInfo {
+	page, err := url.Parse(pageURL)
+	if err != nil || page.Scheme != "https" || page.User != nil ||
+		(!strings.EqualFold(page.Host, "www.xiaoyuzhoufm.com") && !strings.EqualFold(page.Host, "xiaoyuzhoufm.com")) {
+		return nil
+	}
+	episode, ok := strings.CutPrefix(strings.TrimSuffix(page.Path, "/"), "/episode/")
+	if !ok || episode == "" || strings.Contains(episode, "/") {
+		return nil
+	}
+
+	raw := strings.TrimSpace(doc.Find(`head meta[property="og:audio"]`).First().AttrOr("content", ""))
+	audio, err := url.Parse(raw)
+	if err != nil || audio.Scheme != "https" || audio.Hostname() == "" || audio.User != nil {
+		return nil
+	}
+	media := mediaInfoFromURL(audio.String(), "", pageURL)
+	if media == nil || !strings.HasPrefix(media.Type, "audio/") {
+		return nil
+	}
+	return media
+}
+
 // FindMediaInHTMLBytes returns the first plausible audio/video URL embedded in
 // an already-captured HTML document. Bookmarklet captures use this before the
 // HTML-to-Markdown conversion drops native <audio>/<video> elements.

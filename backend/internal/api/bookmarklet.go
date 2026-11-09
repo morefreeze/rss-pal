@@ -529,6 +529,7 @@ func extractArticleWithPublication(html, baseURL string) (string, *rss.MediaInfo
 		return "", nil, nil, err
 	}
 	publishedAt := rss.ExtractPublishedAt(doc, baseURL)
+	media := rss.ExtractXiaoyuzhouEpisodeAudio(doc, baseURL)
 	// If the HTML is a clean extraction from our extension (body contains
 	// #js_content and optionally #wx_images), skip the aggressive generic
 	// cleanup — the extension already did targeted cleanup and the generic
@@ -547,7 +548,9 @@ func extractArticleWithPublication(html, baseURL string) (string, *rss.MediaInfo
 	rss.ResolveURLs(doc, baseURL)
 
 	selection, content := rss.SelectArticleContent(doc, 200)
-	media := rss.ExtractVideoMedia(baseURL)
+	if media == nil {
+		media = rss.ExtractVideoMedia(baseURL)
+	}
 	if media == nil && selection != nil {
 		selectionHTML, _ := selection.Html()
 		media = rss.FindMediaInHTMLBytes([]byte(selectionHTML), baseURL)
