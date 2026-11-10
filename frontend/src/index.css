@@ -1769,8 +1769,8 @@ button.article-feedback[aria-pressed="true"] svg { fill: currentColor; fill-opac
     -webkit-user-select: none;
     user-select: none;
   }
-  .article-read-surface :is(a, button, input, select, textarea, video, audio, [role="menu"], [role="button"], [role="link"], [contenteditable]:not([contenteditable="false"])),
-  .article-read-surface :is(a, button, input, select, textarea, video, audio, [role="menu"], [role="button"], [role="link"], [contenteditable]:not([contenteditable="false"])) * {
+  .article-read-surface :is(a:not([data-article-reader-link]), button, input, select, textarea, video, audio, [role="menu"], [role="button"], [role="link"], [contenteditable]:not([contenteditable="false"])),
+  .article-read-surface :is(a:not([data-article-reader-link]), button, input, select, textarea, video, audio, [role="menu"], [role="button"], [role="link"], [contenteditable]:not([contenteditable="false"])) * {
     -webkit-touch-callout: default;
     -webkit-user-select: text;
     user-select: text;
