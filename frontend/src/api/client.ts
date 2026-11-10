@@ -111,6 +111,11 @@ api.interceptors.response.use(
       if (url.startsWith('/bookmarklet/')) {
         return Promise.reject(err)
       }
+      // A failed password login is handled by the form. It does not
+      // invalidate a session or warrant replaying the submitted credentials.
+      if (url === '/auth/login' && config?.method === 'post') {
+        return Promise.reject(err)
+      }
       // Don't try to refresh on refresh itself, or on requests we've already
       // replayed once after a refresh.
       if (config && !config.__refreshed && !url.startsWith('/auth/refresh')) {

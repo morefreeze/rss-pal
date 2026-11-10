@@ -1053,7 +1053,7 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
                   disabled={pwChanging}
                 />
               </div>
-              {pwError && <div className="text-sm mb-1" style={{ color: '#dc2626' }}>{pwError}</div>}
+              {pwError && <div role="alert" className="text-sm mb-1" style={{ color: '#dc2626' }}>{pwError}</div>}
               {pwSuccess && <div className="text-sm mb-1" style={{ color: '#16a34a' }}>{pwSuccess}</div>}
               <button type="submit" disabled={pwChanging || (!needsPassword && !oldPassword) || !newPassword}>
                 {pwChanging ? '保存中...' : needsPassword ? '设置密码' : '修改密码'}

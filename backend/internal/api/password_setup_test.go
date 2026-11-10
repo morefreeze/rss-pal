@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -99,8 +100,8 @@ func TestFirstPasswordSetup(t *testing.T) {
 	t.Run("requires old password for all later changes", func(t *testing.T) {
 		for _, body := range []string{`{"new_password":"replacement"}`, `{"old_password":"wrong","new_password":"replacement"}`} {
 			w := request("PUT", "/password", body, token)
-			if w.Code != 401 {
-				t.Fatalf("existing password changed without proof: %d %s", w.Code, w.Body.String())
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "旧密码不正确") {
+				t.Fatalf("expected a password validation error for an authenticated user: %d %s", w.Code, w.Body.String())
 			}
 		}
 		if w := request("PUT", "/password", `{"old_password":"new-password","new_password":"replacement"}`, token); w.Code != 200 {

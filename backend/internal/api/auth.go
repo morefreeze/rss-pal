@@ -370,7 +370,9 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 	if !user.NeedsPassword && !userRepo.VerifyPassword(user, req.OldPassword) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "旧密码不正确"})
+		// The session is already authenticated. An incorrect current password
+		// is a form validation error, and only middleware returns a session 401.
+		c.JSON(http.StatusBadRequest, gin.H{"error": "旧密码不正确"})
 		return
 	}
 	if err := userRepo.ChangePassword(userID, user.PasswordHash, req.NewPassword); errors.Is(err, repository.ErrPasswordChanged) {

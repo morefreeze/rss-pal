@@ -39,3 +39,19 @@ it('keeps the current password required for accounts that already have one', asy
   fireEvent.click(screen.getByRole('button', { name: '修改密码' }))
   await waitFor(() => expect(mocks.change).toHaveBeenCalledWith('old-password', 'next-password'))
 })
+
+it('announces an incorrect current password and leaves the form ready for correction', async () => {
+  mocks.change.mockRejectedValueOnce({ response: { status: 400, data: { error: '旧密码不正确' } } })
+  render(<MemoryRouter><SettingsPage user={{ ...user, needs_password: false }} /></MemoryRouter>)
+  const oldPassword = await screen.findByPlaceholderText<HTMLInputElement>('当前密码')
+  const newPassword = screen.getByPlaceholderText<HTMLInputElement>('新密码（至少 6 位）')
+  fireEvent.change(oldPassword, { target: { value: 'incorrect-password' } })
+  fireEvent.change(newPassword, { target: { value: 'next-password' } })
+  const submit = screen.getByRole('button', { name: '修改密码' })
+  fireEvent.click(submit)
+
+  expect((await screen.findByRole('alert')).textContent).toBe('旧密码不正确')
+  expect(oldPassword.value).toBe('incorrect-password')
+  expect(newPassword.value).toBe('next-password')
+  expect(submit.hasAttribute('disabled')).toBe(false)
+})
