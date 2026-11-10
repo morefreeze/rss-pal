@@ -7,7 +7,8 @@ import {
 } from 'react'
 import type { ReadDirection } from '../api/client'
 
-const nativeInteractionSelector = 'button,a,input,select,textarea,video,audio,[role="menu"],[role="button"],[role="link"],[contenteditable]:not([contenteditable="false"])'
+// Titles still belong to the card's swipe and long-press surface.
+const nativeInteractionSelector = 'button,a:not([data-article-reader-link]),input,select,textarea,video,audio,[role="menu"],[role="button"],[role="link"],[contenteditable]:not([contenteditable="false"])'
 function isNativeInteraction(target: EventTarget | null) {
   const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null
   return Boolean(element?.closest(nativeInteractionSelector))

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ArticleReadSurface from '../src/components/ArticleReadSurface'
+import ArticleReaderLink from '../src/components/ArticleReaderLink'
 
 afterEach(() => vi.useRealTimers())
 function setup() {
@@ -35,6 +36,20 @@ describe('article read gestures', () => {
     end(card, 40)
     fireEvent.click(card)
     expect(mark).toHaveBeenCalledWith('single')
+    expect(open).not.toHaveBeenCalled()
+  })
+  it('keeps the read gesture when it begins on the article title link', () => {
+    const mark = vi.fn()
+    const open = vi.fn()
+    render(<ArticleReadSurface onMarkRead={mark}>
+      <ArticleReaderLink href="/articles/9" onOpen={open}>文章标题</ArticleReaderLink>
+    </ArticleReadSurface>)
+    const title = screen.getByRole('link', { name: '文章标题' })
+    start(title)
+    move(title, 40)
+    end(title, 40)
+    expect(fireEvent.click(title)).toBe(false)
+    expect(mark).toHaveBeenCalledExactlyOnceWith('single')
     expect(open).not.toHaveBeenCalled()
   })
   it('right swipe opens inclusive range choices without reading yet', () => {

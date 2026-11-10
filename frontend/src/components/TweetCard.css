@@ -62,6 +62,9 @@
   margin: 0;
 }
 .tweet-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   margin-top: 8px;
   font-size: 0.85em;
 }

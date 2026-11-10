@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { saveListReturn } from '../src/utils/articleListReturn'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticleListPage from '../src/pages/ArticleListPage'
@@ -198,6 +199,7 @@ describe('ArticleListPage automatic pagination', () => {
   })
 
   it('restores the search URL, highlights context and carries q into detail', async () => {
+    const user = userEvent.setup()
     apiMocks.getArticles.mockResolvedValue([])
     const result = {...makeArticles(42)[0], title: 'Needle title', search_snippet: 'context needle after'}
     apiMocks.searchArticles.mockResolvedValue([result])
@@ -209,8 +211,25 @@ describe('ArticleListPage automatic pagination', () => {
     await waitFor(() => expect(apiMocks.searchArticles).toHaveBeenCalledWith('needle', 30))
     await screen.findByText('context', { exact: false })
     expect(container.querySelectorAll('mark').length).toBe(2)
-    fireEvent.click(container.querySelector('[data-article-card]')!)
+    const link = screen.getByRole('link', { name: 'Needle title' })
+    expect(link.getAttribute('href')).toBe('/articles/42?q=needle')
+    link.focus()
+    await user.keyboard('{Enter}')
     expect(screen.getByTestId('destination').textContent).toBe('/articles/42?q=needle')
+  })
+  it('opens the focused search result when a different result is highlighted by a shortcut', async () => {
+    const user = userEvent.setup()
+    apiMocks.getArticles.mockResolvedValue([])
+    apiMocks.searchArticles.mockResolvedValue(makeArticles(42).slice(0, 2))
+    render(<MemoryRouter initialEntries={['/articles?q=article']}><Routes>
+      <Route path="/articles" element={<ArticleListPage />} />
+      <Route path="/articles/:id" element={<ArticleLocationProbe />} />
+    </Routes></MemoryRouter>)
+    const secondResult = await screen.findByRole('link', { name: 'Article 43' })
+    fireEvent.keyDown(document.body, { key: 'j' })
+    secondResult.focus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByTestId('route-preview').textContent).toBe('43')
   })
   it('discards results from a previous search after a newer query finishes', async () => {
     apiMocks.getArticles.mockResolvedValue([])

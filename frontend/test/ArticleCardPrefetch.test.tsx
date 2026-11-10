@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import ArticleCard from '../src/components/ArticleCard'
 import type { ArticleListItem } from '../src/api/client'
@@ -9,6 +10,20 @@ vi.mock('../src/hooks/useExposureTracking', () => ({
 }))
 
 describe('ArticleCard detail prefetch', () => {
+  it.each([undefined, 'tweet'] as const)('opens a %s card with Tab and Enter', async (kind) => {
+    const user = userEvent.setup()
+    const article = { id: 9, feed_id: 1, title: 'Article 9', url: 'https://example.com/9', published_at: '', fetched_at: '', kind }
+    const onOpen = vi.fn()
+    render(<ArticleCard article={article} isRead={false} isFocused={false} idx={0} onPlay={vi.fn()} formatDate={() => ''} stripMarkdown={x => x} onOpen={onOpen} onFocus={vi.fn()} />)
+
+    const link = screen.getByRole('link', { name: /Article 9/ })
+    expect(link.getAttribute('href')).toBe('/articles/9')
+    await user.tab()
+    expect(document.activeElement).toBe(link)
+    await user.keyboard('{Enter}')
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(9, article)
+  })
+
   it('shows queued captures as waiting for fetch', () => {
     const article = { id: 91, feed_id: 1, title: 'Shared link', url: 'https://example.com', published_at: '', fetched_at: '', processing_state: 'queued' as const }
     render(<ArticleCard article={article} isRead={false} isFocused={false} idx={0} onPlay={vi.fn()} formatDate={() => ''} stripMarkdown={x => x} onOpen={vi.fn()} onFocus={vi.fn()} />)

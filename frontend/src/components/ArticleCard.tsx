@@ -2,6 +2,7 @@ import React, { useCallback } from 'react'
 import { Article, ArticleListItem, UserTag } from '../api/client'
 import TweetCard from './TweetCard'
 import ArticleReadSurface from './ArticleReadSurface'
+import ArticleReaderLink from './ArticleReaderLink'
 import type { ReadDirection } from '../api/client'
 
 // ArticleCardItem is what the card renders: anything with the lean
@@ -172,12 +173,19 @@ export default function ArticleCard({
           outline: isFocused ? '2px solid var(--accent)' : 'none',
           outlineOffset: -2,
         }}
-        onClick={handleCardClick}
+        onClick={event => {
+          if (event.defaultPrevented || (event.target as Element).closest('a')) return
+          handleCardClick()
+        }}
         onPointerEnter={handlePrefetch}
         onFocus={handlePrefetch}
         onTouchStart={handlePrefetch}
       >
-        <TweetCard article={article} compact />
+        <TweetCard article={article} compact readerLink={
+          <ArticleReaderLink href={`/articles/${articleId}`} onOpen={handleCardClick} label={`在 RSS Pal 阅读：${article.title}`}>
+            在 RSS Pal 阅读
+          </ArticleReaderLink>
+        } />
         <NotePreview note={article.capture_note} />
       </div>
     )
@@ -208,7 +216,9 @@ export default function ArticleCard({
         <div className="article-card-content" style={{ flex: 1, minWidth: 0 }}>
           <div className={`article-card-title-row ${isRead ? 'text-muted' : 'text-bold'}`} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
-            <span className="article-card-title">{article.title}</span>
+            <ArticleReaderLink href={`/articles/${articleId}`} onOpen={handleCardClick} className="article-card-title">
+              {article.title}
+            </ArticleReaderLink>
             {article.processing_state === 'queued' && (
               <span style={{ marginLeft: 8, fontSize: '0.85em', color: 'var(--fg-muted)' }}>
                 ⏳ 等待抓取

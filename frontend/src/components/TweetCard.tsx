@@ -1,5 +1,5 @@
 import { SearchText, useSearchHighlightPlugin } from './ArticleSearch'
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Article, ArticleListItem } from '../api/client'
@@ -9,6 +9,7 @@ import './TweetCard.css'
 interface Props {
   article: Article | ArticleListItem
   compact?: boolean
+  readerLink?: ReactNode
 }
 
 interface ParsedByline {
@@ -73,7 +74,7 @@ function initialAvatar(handle: string, displayName: string): { char: string; bg:
   return { char, bg: `hsl(${hue}, 55%, 45%)` }
 }
 
-export default function TweetCard({ article, compact = false }: Props) {
+export default function TweetCard({ article, compact = false, readerLink }: Props) {
   const searchPlugin = useSearchHighlightPlugin()
   const rehypePlugins = useMemo(() => [searchPlugin], [searchPlugin])
   const storedContent = articleContent(article)
@@ -127,6 +128,7 @@ export default function TweetCard({ article, compact = false }: Props) {
         >{body}</ReactMarkdown>
       </div>
       <footer className="tweet-card-footer">
+        {readerLink}
         <a href={article.url} target="_blank" rel="noopener noreferrer">在 X 打开 ↗</a>
       </footer>
     </div>

@@ -7,6 +7,7 @@ import { writeNav, type NavContext } from '../utils/articleNav'
 import ReadingMeta from '../components/ReadingMeta'
 import ArticleCard from '../components/ArticleCard'
 import ArticleReadSurface from '../components/ArticleReadSurface'
+import ArticleReaderLink from '../components/ArticleReaderLink'
 import { ArticleListSkeleton } from '../components/ArticleListSkeleton'
 import BackToTopButton from '../components/BackToTopButton'
 import GroupedArticleView from '../components/GroupedArticleView'
@@ -117,9 +118,8 @@ function SearchArticleRow({
   formatDate,
   stripMarkdown,
   searchQuery,
-  onNavigate,
+  onOpen,
   onFocus,
-  navList,
   sourceSearch,
   onSourceFilter,
 }: {
@@ -131,13 +131,16 @@ function SearchArticleRow({
   formatDate: (d: string | null) => string
   stripMarkdown: (t: string) => string
   searchQuery: string
-  onNavigate: (id: number) => void
+  onOpen: (id: number, preview: ArticleListItem) => void
   onFocus: (idx: number) => void
-  navList: number[]
   sourceSearch: string
   onSourceFilter: (feedId: number, href: string) => void
 }) {
   const exposureRef = useExposureTracking(article.id)
+  const openResult = () => {
+    onFocus(idx)
+    onOpen(article.id, article)
+  }
 
   return (
     <div
@@ -150,15 +153,7 @@ function SearchArticleRow({
         outline: isFocused ? '2px solid var(--accent)' : 'none',
         outlineOffset: -2,
       }}
-      onClick={() => {
-        onFocus(idx)
-        reportClick(article.id)
-        // Search results are one-shot — clear any paginated load-more context
-        // so the article page doesn't try to fetch the next page of /articles
-        // for a list that the user reached via search.
-        writeNav(navList, null)
-        onNavigate(article.id)
-      }}
+      onClick={openResult}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         {!isRead && (
@@ -167,7 +162,9 @@ function SearchArticleRow({
         <div className="article-card-content" style={{ flex: 1 }}>
           <div className={`article-card-title-row ${isRead ? 'text-muted' : 'text-bold'}`} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
-            <span className="article-card-title"><SearchText text={article.title} query={searchQuery} /></span>
+            <ArticleReaderLink href={`/articles/${article.id}?q=${encodeURIComponent(searchQuery.trim())}`} onOpen={openResult} className="article-card-title">
+              <SearchText text={article.title} query={searchQuery} />
+            </ArticleReaderLink>
           </div>
           {(article.search_snippet || article.summary_brief) && (
             <div className="article-card-summary text-muted text-sm mt-1">
@@ -846,7 +843,9 @@ export default function ArticleListPage() {
       : articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id))
 
     const handler = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
+      const target = e.target instanceof Element ? e.target : null
+      if (e.defaultPrevented || target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return
+      if (e.key === 'Enter' && target?.closest('a[href],button,summary,[role="button"],[role="link"],[role="menuitem"]')) return
       if (e.key === '/') {
         e.preventDefault()
         searchRef.current?.focus()
@@ -1209,11 +1208,8 @@ export default function ArticleListPage() {
                   formatDate={formatDate}
                   stripMarkdown={stripMarkdown}
                   searchQuery={searchQuery}
-                  onNavigate={(id) => navigate(`/articles/${id}?q=${encodeURIComponent(searchQuery.trim())}`, {
-                    state: { from: articleEntryPath, articlePreview: article },
-                  })}
+                  onOpen={openArticle}
                   onFocus={setFocusedIdx}
-                  navList={searchResults.map(a => a.id)}
                   sourceSearch={sourceSearch}
                   onSourceFilter={handleSourceFilter}
                 />
