@@ -170,3 +170,16 @@ describe('ExploreSourceDrawer', () => {
     expect((screen.getByRole('button', { name: '订阅已选 1 个' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })
+
+it('releases its body lock and closes permanently when its cached list becomes inactive', async () => {
+  api.getExploreSources.mockResolvedValue(sources)
+  document.body.style.overflow = 'auto'
+  const { rerender } = render(<ExploreSourceDrawer active />)
+  fireEvent.click(await screen.findByRole('button', { name: '查看 2 个候选源' }))
+  expect(document.body.style.overflow).toBe('hidden')
+  rerender(<ExploreSourceDrawer active={false} />)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.body.style.overflow).toBe('auto')
+  rerender(<ExploreSourceDrawer active />)
+  expect(screen.queryByRole('dialog')).toBeNull()
+})

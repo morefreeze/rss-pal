@@ -1,3 +1,4 @@
+import { useReadingWorkspace, WorkspaceSidebar } from '../workspace/ReadingWorkspaceContext'
 import { useCallback, useEffect, useMemo, useState, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { parsePublicationDate } from '../utils/publicationDate'
@@ -99,6 +100,8 @@ export default function ClipPage({
   savedOnly,
   onSelectionChange,
 }: ClipPageProps = {}) {
+  const workspace = useReadingWorkspace()
+  const listRootRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
   const bp = useBreakpoint()
   const player = usePlayer()
@@ -113,6 +116,7 @@ export default function ClipPage({
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [offset, setOffset] = useState(0)
   const [focusedIdx, setFocusedIdx] = useState(-1)
   const [markingRead, setMarkingRead] = useState(false)
@@ -123,7 +127,11 @@ export default function ClipPage({
 
   // Initial sidebar tag list
   useEffect(() => {
-    listTags().then(setTags).catch(() => setTags([]))
+    let active = true
+    const refresh = () => { void listTags().then(data => { if (active) setTags(data) }).catch(() => {}) }
+    refresh()
+    window.addEventListener('article-content-changed', refresh)
+    return () => { active = false; window.removeEventListener('article-content-changed', refresh) }
   }, [])
 
   const params = useMemo(() => {
@@ -151,6 +159,7 @@ export default function ClipPage({
   const loadPage = useCallback(
     async (off: number, reset: boolean, restoreThrough = off, continuation?: ReadContinuation) => {
       const generation = reset ? ++generationRef.current : generationRef.current
+      setLoadError('')
       if (reset) {
         pendingReadScrollRef.current = null
         setLoading(true)
@@ -183,6 +192,8 @@ export default function ClipPage({
         }
         setTotal(total)
         setOffset(lastOffset)
+      } catch {
+        if (generation === generationRef.current) setLoadError('网摘加载失败，请重试。')
       } finally {
         if (generation === generationRef.current) {
           setLoading(false)
@@ -241,7 +252,7 @@ export default function ClipPage({
     const pending = pendingReadScrollRef.current
     if (!pending || loading) return
     pendingReadScrollRef.current = null
-    if (pending.generation === generationRef.current) scrollToReadContinuation(pending.id)
+    if (pending.generation === generationRef.current) scrollToReadContinuation(pending.id, listRootRef.current ?? document)
   }, [items, loading])
 
   const loadMore = () => {
@@ -267,7 +278,7 @@ export default function ClipPage({
           }
         : null
       writeNav(ids.slice(start, end), context)
-      sessionStorage.setItem('articleListScroll', String(window.scrollY))
+      sessionStorage.setItem('articleListScroll', String(workspace?.getListScrollElement()?.scrollTop ?? window.scrollY))
       sessionStorage.setItem('articleEntryPath', entryPath)
     } catch {
       // ignore storage failures
@@ -276,6 +287,8 @@ export default function ClipPage({
   }
 
   const handleSelect = (sel: ClipSelection) => {
+    workspace?.closeReader()
+    workspace?.getListScrollElement()?.scrollTo(0, 0)
     setSelection(sel)
   }
 
@@ -327,13 +340,24 @@ export default function ClipPage({
   }
 
   useEffect(() => {
-    const onUndo = () => {void loadPage(0, true).catch(() => toast.error('列表刷新失败，请刷新重试'))}
+    const onUndo = () => {void loadPage(0, true, offset).catch(() => toast.error('列表刷新失败，请刷新重试'))}
     window.addEventListener('read-state-refresh', onUndo)
-    return () => window.removeEventListener('read-state-refresh', onUndo)
-  }, [loadPage])
+    window.addEventListener('article-content-changed', onUndo)
+    return () => { window.removeEventListener('read-state-refresh', onUndo); window.removeEventListener('article-content-changed', onUndo) }
+  }, [loadPage, offset])
+
+  useEffect(() => {
+    const onRead = (event: Event) => {
+      const { id, isRead } = (event as CustomEvent<{ id: number; isRead: boolean }>).detail
+      setItems(rows => rows.map(row => row.id === id ? { ...row, is_read: isRead } : row))
+    }
+    window.addEventListener('article-read-changed', onRead)
+    return () => window.removeEventListener('article-read-changed', onRead)
+  }, [])
 
   const renderList = () => {
     if (loading) return <div className="card">Loading...</div>
+    if (loadError) return <div role="alert" className="card"><p>{loadError}</p><button onClick={() => void loadPage(0, true, offset)}>重试</button></div>
     if (items.length === 0) return <div className="card text-muted">暂无收藏文章</div>
     return (
       <>
@@ -375,6 +399,14 @@ export default function ClipPage({
         )}
       </>
     )
+  }
+
+  if (workspace) {
+    return <div ref={listRootRef} className="workspace-clip-list">
+      <WorkspaceSidebar><ClipTagSidebar tags={tags} sources={sources} selection={selection} onSelect={handleSelect} /></WorkspaceSidebar>
+      <div className="flex-between mb-2"><span>{headerLabel}</span><span className="text-muted text-sm">共 {total} 篇</span></div>
+      {renderList()}
+    </div>
   }
 
   if (bp === 'phone') {

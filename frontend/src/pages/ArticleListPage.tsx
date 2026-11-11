@@ -1,3 +1,5 @@
+import '../components/ReadingPages.css'
+import { useReadingWorkspace, WorkspaceSidebar } from '../workspace/ReadingWorkspaceContext'
 import { SearchText } from '../components/ArticleSearch'
 import { parsePublicationDate } from '../utils/publicationDate'
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
@@ -136,6 +138,7 @@ function SearchArticleRow({
   sourceSearch: string
   onSourceFilter: (feedId: number, href: string) => void
 }) {
+  const workspace = useReadingWorkspace()
   const exposureRef = useExposureTracking(article.id)
   const openResult = () => {
     onFocus(idx)
@@ -147,6 +150,8 @@ function SearchArticleRow({
       ref={exposureRef}
       className="card"
       data-article-card
+      data-article-id={article.id}
+      data-selected={workspace?.isActive && workspace.selectedArticleId === article.id || undefined}
       style={{
         display: 'block',
         cursor: 'pointer',
@@ -311,6 +316,9 @@ function FeedPicker({
 }
 
 export default function ArticleListPage() {
+  const workspace = useReadingWorkspace()
+  const listRootRef = useRef<HTMLDivElement>(null)
+  const listScrollPosition = () => workspace?.getListScrollElement()?.scrollTop ?? window.scrollY
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const wantsClip = searchParams.get('view') === 'clip'
@@ -320,10 +328,11 @@ export default function ArticleListPage() {
   const breakpoint = useBreakpoint()
   // On phone the toolbar tucks non-priority controls (search, feed select,
   // sort, 分组) under a ⋯ menu so the row only carries 仅未读 / 已保存 / 全部已读.
-  const compactToolbar = breakpoint === 'phone'
+  const compactToolbar = !!workspace || breakpoint === 'phone'
   const [articles, setArticles] = useState<ArticleListItem[]>([])
   const [briefingArticles, setBriefingArticles] = useState<Article[]>([])
   const [feeds, setFeeds] = useState<Feed[]>([])
+  const [feedsLoaded, setFeedsLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [listError, setListError] = useState('')
@@ -333,7 +342,7 @@ export default function ArticleListPage() {
   const [selectedFeed, setSelectedFeed] = useState<number | null>(() => {
     // URL ?feed_id=<n> wins on initial mount (deep link from extension popup, etc.)
     try {
-      const urlFeedId = new URLSearchParams(window.location.search).get('feed_id')
+      const urlFeedId = searchParams.get('feed_id')
       if (urlFeedId) {
         const n = parseInt(urlFeedId, 10)
         if (Number.isFinite(n) && n > 0) {
@@ -350,7 +359,7 @@ export default function ArticleListPage() {
   // filter — avoids a transient unfiltered render that would race the
   // refetch.
   const savedRedirect = (() => {
-    try { return new URLSearchParams(window.location.search).get('saved') === '1' }
+    try { return searchParams.get('saved') === '1' }
     catch { return false }
   })()
   const [unreadOnly, setUnreadOnly] = useState(() => {
@@ -409,7 +418,9 @@ export default function ArticleListPage() {
     if (restoreScrollRef.current === null || loading) return
     const scrollY = restoreScrollRef.current
     restoreScrollRef.current = null
-    window.scrollTo(0, scrollY)
+    const scrollElement = workspace?.getListScrollElement()
+    if (scrollElement) scrollElement.scrollTo(0, scrollY)
+    else window.scrollTo(0, scrollY)
   }, [articles, loading])
   // Save state together so automatically unticked filters cannot return later.
   useEffect(() => {
@@ -433,12 +444,19 @@ export default function ArticleListPage() {
   // to other feeds, but unread/saved checkboxes, search, and
   // mark-all-read are hidden because /api/clip doesn't support them.
   const selectedFeedObj = feeds.find(f => f.id === selectedFeed)
-  const isClippingMode = selectedFeedObj?.feed_type === 'clip'
+  const isClippingMode = wantsClip || selectedFeedObj?.feed_type === 'clip'
   const readViewKey = JSON.stringify([listReturnKey, searchQuery, grouped, isClippingMode])
   const readViewRef = useRef({key: readViewKey, generation: 0})
   if (readViewRef.current.key !== readViewKey) {
     readViewRef.current = {key: readViewKey, generation: readViewRef.current.generation + 1}
     pendingReadScrollRef.current = null
+  }
+  const resetWorkspaceSelection = () => {
+    if (!workspace?.isActive) return
+    workspace.closeReader()
+    const element = workspace.getListScrollElement()
+    if (element) element.scrollTo(0, 0)
+    else window.scrollTo(0, 0)
   }
   const handleFeedSelect = useCallback((val: number | null) => {
     setSelectedFeed(val)
@@ -456,14 +474,23 @@ export default function ArticleListPage() {
     setSearchParams(nextParams)
   }, [feeds, wantsClip, searchParams, setSearchParams])
 
+  const previousFeedParam = useRef(searchParams.get('feed_id'))
   useEffect(() => {
     const raw = searchParams.get('feed_id')
-    if (!raw) return
+    const previous = previousFeedParam.current
+    previousFeedParam.current = raw
+    if (!raw) {
+      if (previous && !wantsClip) {
+        setSelectedFeed(null)
+        try { sessionStorage.setItem('selectedFeed', 'null') } catch {}
+      }
+      return
+    }
     const nextFeed = parseInt(raw, 10)
     if (!Number.isFinite(nextFeed) || nextFeed <= 0 || nextFeed === selectedFeed) return
     setSelectedFeed(nextFeed)
     try { sessionStorage.setItem('selectedFeed', JSON.stringify(nextFeed)) } catch {}
-  }, [searchParams, selectedFeed])
+  }, [searchParams, wantsClip])
 
   const handleSourceFilter = useCallback((feedId: number) => {
     if (searchTimeout.current) {
@@ -489,20 +516,26 @@ export default function ArticleListPage() {
   }, [])
 
   const selectTag = (sel: TagFilter) => {
+    resetWorkspaceSelection()
     if (sel.kind !== 'all' && grouped) setGrouped(false)
     setTagFilter(sel)
   }
 
   useEffect(() => {
-    loadFeeds()
-    loadBriefing()
+    void loadFeeds().catch(() => {})
+    if (!workspace) loadBriefing()
     const onRefreshUnread = () => {
       try {
         setSessionReadIds(new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]')))
       } catch {}
+      void loadFeeds().catch(() => {})
     }
     window.addEventListener('refresh-unread', onRefreshUnread)
-    return () => window.removeEventListener('refresh-unread', onRefreshUnread)
+    window.addEventListener('subscriptions-changed', onRefreshUnread)
+    return () => {
+      window.removeEventListener('refresh-unread', onRefreshUnread)
+      window.removeEventListener('subscriptions-changed', onRefreshUnread)
+    }
   }, [])
 
   // /saved (legacy bookmark) redirects here as /articles?saved=1. The
@@ -511,6 +544,8 @@ export default function ArticleListPage() {
   // doesn't re-tick if the user clears the box.
   useEffect(() => {
     if (searchParams.get('saved') !== '1') return
+    setSavedOnly(true)
+    setUnreadOnly(false)
     try {
       sessionStorage.setItem('savedOnly', 'true')
       sessionStorage.setItem('unreadOnly', 'false')
@@ -585,7 +620,7 @@ export default function ArticleListPage() {
   }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, sortField, sortDir, tagFilter])
 
   useEffect(() => {
-    if (!sidebarOpen || isClippingMode) return
+    if ((!sidebarOpen && !workspace) || isClippingMode) return
     getTagSidebar({
       feed_id: selectedFeed || undefined,
       unread: unreadOnly || undefined,
@@ -593,9 +628,26 @@ export default function ArticleListPage() {
     }).then(setTagSidebarData).catch(() => setTagSidebarData(null))
   }, [sidebarOpen, isClippingMode, selectedFeed, unreadOnly, savedOnly])
 
+  useEffect(() => {
+    const updateReadState = (event: Event) => {
+      const { id, isRead } = (event as CustomEvent<{ id: number; isRead: boolean }>).detail
+      const update = (rows: ArticleListItem[]) => rows.map(row => row.id === id ? { ...row, is_read: isRead } : row)
+      setArticles(update)
+      setSearchResults(rows => rows && update(rows))
+    }
+    window.addEventListener('article-read-changed', updateReadState)
+    return () => window.removeEventListener('article-read-changed', updateReadState)
+  }, [])
+
   const loadFeeds = async () => {
     const data = await getFeeds()
     setFeeds(data || [])
+    setFeedsLoaded(true)
+    setSelectedFeed(current => {
+      if (current == null || data?.some(feed => feed.id === current)) return current
+      try { sessionStorage.setItem('selectedFeed', 'null') } catch {}
+      return null
+    })
   }
 
   const loadArticles = useCallback(async (off: number, reset: boolean, restoreThrough?: number, continuation?: ReadContinuation) => {
@@ -674,7 +726,7 @@ export default function ArticleListPage() {
 
   useInfiniteScrollTrigger({
     targetRef: loadMoreRef,
-    enabled: hasMore
+    enabled: (workspace?.isListVisible ?? true) && hasMore
       && !loading
       && searchQuery.length === 0
       && !grouped
@@ -690,7 +742,7 @@ export default function ArticleListPage() {
     if (!pending || loading) return
     pendingReadScrollRef.current = null
     if (pending.generation !== requestGenerationRef.current || pending.viewGeneration !== readViewRef.current.generation || searchQuery || grouped || isClippingMode) return
-    scrollToReadContinuation(pending.id)
+    scrollToReadContinuation(pending.id, listRootRef.current ?? document)
   }, [articles, loading, searchQuery, grouped, isClippingMode])
 
   useEffect(() => {
@@ -707,14 +759,21 @@ export default function ArticleListPage() {
       } else {
         await loadArticles(0, true, offset)
       }
-      if (active && sidebarOpen) {
+      if (active && (sidebarOpen || workspace)) {
         const data = await getTagSidebar({feed_id:selectedFeed ?? undefined,unread:unreadOnly,saved:savedOnly})
         if (active) setTagSidebarData(data)
       }
     }
     const onUndo = () => { void refresh().catch(() => toast.error('列表刷新失败，请刷新重试')) }
     window.addEventListener('read-state-refresh', onUndo)
-    return () => {active = false; window.removeEventListener('read-state-refresh', onUndo)}
+    window.addEventListener('article-content-changed', onUndo)
+    window.addEventListener('subscriptions-changed', onUndo)
+    return () => {
+      active = false
+      window.removeEventListener('read-state-refresh', onUndo)
+      window.removeEventListener('article-content-changed', onUndo)
+      window.removeEventListener('subscriptions-changed', onUndo)
+    }
   }, [isClippingMode, searchQuery, grouped, selectedFeed, unreadOnly, savedOnly, sidebarOpen, loadArticles, offset])
 
   const handleMarkRead = async (anchorId: number, direction: ReadDirection) => {
@@ -840,9 +899,10 @@ export default function ArticleListPage() {
   useEffect(() => {
     const displayedArticles = searchQuery
       ? (searchResults || [])
-      : articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id))
+      : articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id) || a.id === workspace?.selectedArticleId)
 
     const handler = (e: KeyboardEvent) => {
+      if (workspace && (!workspace.isListVisible || workspace.isReaderOpen || isClippingMode)) return
       const target = e.target instanceof Element ? e.target : null
       if (e.defaultPrevented || target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return
       if (e.key === 'Enter' && target?.closest('a[href],button,summary,[role="button"],[role="link"],[role="menuitem"]')) return
@@ -862,7 +922,7 @@ export default function ArticleListPage() {
           const next = Math.min(i + 1, displayedArticles.length - 1)
           // scroll into view after state update
           setTimeout(() => {
-            const cards = document.querySelectorAll('[data-article-card]')
+            const cards = listRootRef.current?.querySelectorAll('[data-article-card]') ?? []
             cards[next]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
           }, 0)
           return next
@@ -872,7 +932,7 @@ export default function ArticleListPage() {
         setFocusedIdx(i => {
           const prev = Math.max(i - 1, 0)
           setTimeout(() => {
-            const cards = document.querySelectorAll('[data-article-card]')
+            const cards = listRootRef.current?.querySelectorAll('[data-article-card]') ?? []
             cards[prev]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
           }, 0)
           return prev
@@ -884,7 +944,7 @@ export default function ArticleListPage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [articles, searchResults, searchQuery, unreadOnly, sessionReadIds, focusedIdx, toggleSidebar])
+  }, [articles, searchResults, searchQuery, unreadOnly, sessionReadIds, focusedIdx, toggleSidebar, workspace?.isListVisible, workspace?.isReaderOpen, isClippingMode])
 
   const isRead = (article: ArticleListItem | Article) => article.is_read || sessionReadIds.has(article.id)
 
@@ -927,8 +987,8 @@ export default function ArticleListPage() {
         : null
       writeNav(ids.slice(start, end), context)
       sessionStorage.removeItem('articleListReturn')
-      if (!grouped && !searchQuery) saveListReturn({ key: listReturnKey, articles, offset, hasMore, scrollY: window.scrollY })
-      sessionStorage.setItem('articleListScroll', String(window.scrollY))
+      if (!grouped && !searchQuery) saveListReturn({ key: listReturnKey, articles, offset, hasMore, scrollY: listScrollPosition() })
+      sessionStorage.setItem('articleListScroll', String(listScrollPosition()))
       sessionStorage.setItem('articleEntryPath', articleEntryPath)
     } catch {}
     navigate(`/articles/${id}`, {
@@ -950,8 +1010,20 @@ export default function ArticleListPage() {
       .trim()
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
-      {sidebarOpen && !isClippingMode && tagSidebarData && (
+    <div ref={listRootRef} className={workspace ? 'workspace-article-list' : undefined} style={{ display: 'flex', minHeight: workspace ? undefined : '100vh' }}>
+      {workspace && !isClippingMode && <WorkspaceSidebar>
+        <div className="workspace-source-list">
+          <button type="button" className="saved-row" aria-pressed={selectedFeed === null && !savedOnly} onClick={() => { setSavedOnly(false); handleFeedSelect(null) }}>全部文章</button>
+          <button type="button" className="saved-row" aria-pressed={savedOnly} onClick={() => { setSavedOnly(true); setUnreadOnly(false); handleFeedSelect(null) }}>已保存</button>
+          <h3 className="saved-section-title">订阅来源</h3>
+          {feeds.filter(feed => feed.feed_type !== 'clip').map(feed => <button key={feed.id} type="button" className="saved-row" aria-pressed={selectedFeed === feed.id} onClick={() => handleFeedSelect(feed.id)}>
+            <span className="saved-row-label">{feed.title || feed.url}</span><span className="saved-row-count">{feed.unread_count || ''}</span>
+          </button>)}
+          <Link className="workspace-manage-link" to="/feeds">添加和管理订阅</Link>
+          {tagSidebarData && <details><summary>文章标签</summary><TagSidebar data={tagSidebarData} selection={tagFilter} onSelect={selectTag} /></details>}
+        </div>
+      </WorkspaceSidebar>}
+      {!workspace && sidebarOpen && !isClippingMode && tagSidebarData && (
         <TagSidebar data={tagSidebarData} selection={tagFilter} onSelect={selectTag} />
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -960,8 +1032,8 @@ export default function ArticleListPage() {
         className={`article-list-header mb-2${compactToolbar ? ' article-list-header--compact' : ''}`}
       >
         <div className="article-list-heading">
-          {!isClippingMode && <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />}
-          <h2 style={{ margin: 0 }}>{isClippingMode ? '网摘' : '文章列表'}</h2>
+          {workspace ? <button type="button" className="btn-ghost workspace-scope-button" onClick={workspace.openScopes}>{isClippingMode ? '标签与来源' : '来源与标签'}</button> : !isClippingMode && <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />}
+          <h2 style={{ margin: 0 }}>{isClippingMode ? '网摘' : workspace ? '文章' : '文章列表'}</h2>
         </div>
         {(() => {
           const searchEl = !isClippingMode && (
@@ -986,6 +1058,7 @@ export default function ArticleListPage() {
           )
           const sortEl = !searchQuery && !grouped && (() => {
             const pick = (field: ArticleSort) => {
+              resetWorkspaceSelection()
               if (field === sortField) {
                 const next: ArticleOrder = sortDir === 'desc' ? 'asc' : 'desc'
                 setSortDir(next)
@@ -1024,6 +1097,7 @@ export default function ArticleListPage() {
               type="button"
               className={grouped ? '' : 'btn-ghost'}
               onClick={() => {
+                resetWorkspaceSelection()
                 const next = !grouped
                 setGrouped(next)
               }}
@@ -1038,6 +1112,7 @@ export default function ArticleListPage() {
                 type="checkbox"
                 checked={unreadOnly}
                 onChange={e => {
+                  resetWorkspaceSelection()
                   setUnreadOnly(e.target.checked)
                   if (e.target.checked) setSavedOnly(false)
                 }}
@@ -1052,6 +1127,7 @@ export default function ArticleListPage() {
                 type="checkbox"
                 checked={savedOnly}
                 onChange={e => {
+                  resetWorkspaceSelection()
                   setSavedOnly(e.target.checked)
                   if (e.target.checked) setUnreadOnly(false)
                 }}
@@ -1078,7 +1154,7 @@ export default function ArticleListPage() {
               data-testid="article-list-toolbar"
               className={`article-list-toolbar${compactToolbar ? ' article-list-toolbar--compact' : ''}`}
             >
-              {!compactToolbar && searchEl}
+              {(!compactToolbar || workspace) && searchEl}
               {!compactToolbar && feedSelectEl}
               {unreadEl}
               {savedEl}
@@ -1087,8 +1163,8 @@ export default function ArticleListPage() {
               {markAllReadEl}
               {compactToolbar && hasOverflow && (
                 <OverflowMenu>
-                  {searchEl}
-                  {feedSelectEl}
+                  {!workspace && searchEl}
+                  {!workspace && feedSelectEl}
                   {sortEl}
                   {groupEl}
                 </OverflowMenu>
@@ -1098,7 +1174,7 @@ export default function ArticleListPage() {
         })()}
       </div>
 
-      {wantsClip && !isClippingMode && !feeds.find(f => f.feed_type === 'clip') && (
+      {wantsClip && feedsLoaded && !feeds.find(f => f.feed_type === 'clip') && (
         <div className="text-muted" style={{ padding: 24, textAlign: 'center' }}>
           还没有网摘 — 安装浏览器扩展或书签后再来收藏文章。
         </div>
@@ -1107,7 +1183,7 @@ export default function ArticleListPage() {
       {isClippingMode && selectedFeed != null && (
         <ClipPage
           restrictToFeedId={selectedFeed}
-          entryPath="/articles"
+          entryPath={articleEntryPath}
           sidebarOpen={true}
           sortField={sortField}
           sortDir={sortDir}
@@ -1117,7 +1193,7 @@ export default function ArticleListPage() {
         />
       )}
 
-      {!isClippingMode && briefingArticles.length > 0 && !searchQuery && !grouped && (
+      {!workspace && !isClippingMode && briefingArticles.length > 0 && !searchQuery && !grouped && (
         <div className="rec-panel">
           <button
             type="button"
@@ -1255,7 +1331,7 @@ export default function ArticleListPage() {
           {unreadOnly ? '没有未读文章 🎉' : '暂无文章，订阅源正在抓取中...'}
         </div>
       ) : !isClippingMode && !searchQuery ? (() => {
-        const filtered = articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id))
+        const filtered = articles.filter(a => !unreadOnly || !sessionReadIds.has(a.id) || a.id === workspace?.selectedArticleId)
         // Prefetch trigger sits PREFETCH_OFFSET items before the end so
         // the next page starts loading while the user still has reading
         // left. Falls back to position 0 when the list is shorter than
@@ -1314,7 +1390,7 @@ export default function ArticleListPage() {
         )
       })() : null}
       </div>
-      <BackToTopButton />
+      {!workspace && <BackToTopButton />}
     </div>
   )
 }

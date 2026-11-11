@@ -37,7 +37,7 @@ export function findReadContinuation(
   return rows.slice(start).find(row => !row.is_read && !target.readIds.has(row.id))?.id
 }
 
-export function scrollToReadContinuation(id: number) {
-  document.querySelector<HTMLElement>(`[data-article-id="${id}"]`)
+export function scrollToReadContinuation(id: number, root: ParentNode = document) {
+  root.querySelector<HTMLElement>(`[data-article-id="${id}"]`)
     ?.scrollIntoView({ block: 'start', behavior: 'instant' })
 }

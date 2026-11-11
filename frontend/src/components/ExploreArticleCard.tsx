@@ -1,3 +1,4 @@
+import { useReadingWorkspace } from '../workspace/ReadingWorkspaceContext'
 import ExploreArticleActions from './ExploreArticleActions'
 import { parsePublicationDate } from '../utils/publicationDate'
 import { useExploreArticleActions } from '../hooks/useExploreArticleActions'
@@ -31,7 +32,9 @@ export default function ExploreArticleCard({
   onHideSource,
   onDampenTopic,
 }: Props) {
-	const cardRef = useRef<HTMLElement | null>(null)
+  const workspace = useReadingWorkspace()
+  const visible = workspace?.isListVisible ?? true
+  const cardRef = useRef<HTMLElement | null>(null)
   const actions = useExploreArticleActions(article.id, article.saved, undefined, article.skipped)
   const topicLabel = feedbackTopicLabel(article.topic)
   const sourceLabel = article.source_title || '未命名来源'
@@ -41,7 +44,7 @@ export default function ExploreArticleCard({
 
   useEffect(() => {
     const element = cardRef.current
-    if (!element || typeof IntersectionObserver === 'undefined') return
+    if (!visible || !element || typeof IntersectionObserver === 'undefined') return
     let timer: ReturnType<typeof setTimeout> | null = null
     let requestInFlight = false
     let stopped = false
@@ -73,15 +76,17 @@ export default function ExploreArticleCard({
       if (timer != null) clearTimeout(timer)
       observer.disconnect()
     }
-  }, [article.id, onExposure])
+  }, [article.id, onExposure, visible])
+
+  useEffect(() => { if (!visible) setMenuOpen(false) }, [visible])
 
   useEffect(() => {
-    if (!menuOpen) return
+    if (!menuOpen || !visible) return
     const onPointerDown = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false)
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false)
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMenuOpen(false) }
     }
     document.addEventListener('pointerdown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
@@ -89,7 +94,7 @@ export default function ExploreArticleCard({
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [menuOpen])
+  }, [menuOpen, visible])
 
   const assignRef = (element: HTMLElement | null) => {
     cardRef.current = element
@@ -108,6 +113,8 @@ export default function ExploreArticleCard({
     <article
       ref={assignRef}
       aria-label={article.title}
+      data-article-id={article.id}
+      data-selected={workspace?.isActive && workspace.selectedArticleId === article.id || undefined}
       className={`card explore-article-card${thumbnailSrc ? ' explore-article-card--with-thumbnail' : ''}`}
     >
       <div className="explore-article-card__body">

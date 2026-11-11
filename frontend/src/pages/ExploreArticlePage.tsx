@@ -276,6 +276,7 @@ export default function ExploreArticlePage() {
       await subscribeExploreSource(article.source_id)
       if (generation !== subscribeGenerationRef.current) return
       setSubscribed(true)
+      window.dispatchEvent(new Event('refresh-unread'))
     } catch {
       if (generation !== subscribeGenerationRef.current) return
       setSubscribeError('订阅失败，请稍后重试')

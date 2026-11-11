@@ -1,0 +1,13 @@
+.workspace-article-reader { max-width: 840px; margin-inline: auto; }
+.workspace-article-reader > .card { padding: 0; margin: 0 0 28px; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.workspace-article-reader > .card > h2 { font-size: clamp(24px, 2.4vw, 34px); line-height: 1.45; margin-block: 20px 12px; overflow-wrap: anywhere; }
+.workspace-article-reader > .article-summary-section { padding-block: 16px; border-block: 1px solid var(--border); }
+.workspace-article-reader .summary-controls { gap: 12px; flex-wrap: wrap; margin-bottom: 0; }
+.workspace-article-reader .summary-controls + div { margin-top: 16px; }
+.workspace-summary-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 4px 0; background: transparent; color: var(--fg); border: 0; font-size: 15px; font-weight: 600; text-align: left; }
+.workspace-summary-toggle:disabled { opacity: 1; cursor: default; }
+.workspace-article-reader > .card > .flex-between { gap: 12px; flex-wrap: wrap; }
+@media (max-width: 767px) {
+  .workspace-article-reader > .card { margin-bottom: 24px; }
+  .workspace-article-reader > .card > h2 { font-size: 25px; }
+}

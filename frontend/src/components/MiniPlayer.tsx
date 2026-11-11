@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePlayer } from '../player/PlayerContext'
 import Spinner from './Spinner'
-import { useBreakpoint } from '../hooks/useBreakpoint'
 
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2] as const
 
@@ -15,7 +14,6 @@ function fmt(sec: number): string {
 
 export default function MiniPlayer() {
   const p = usePlayer()
-  const bp = useBreakpoint()
   const [dragValue, setDragValue] = useState<number | null>(null)
   const [extraOpen, setExtraOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -36,9 +34,7 @@ export default function MiniPlayer() {
   if (p.articleId === null) return null
 
   const sliderValue = dragValue ?? p.position
-  const bottomOffset = bp === 'desktop'
-    ? '0'
-    : 'calc(56px + env(safe-area-inset-bottom))'
+  const bottomOffset = 'var(--mobile-tabs-offset, 0px)'
 
   return (
     <div

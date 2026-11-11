@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import Layout from '../src/components/Layout'
 import MoreSheet from '../src/components/MoreSheet'
 
-vi.mock('../src/api/client', () => ({
+vi.mock('../src/api/client', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/api/client')>(),
   getServerHealth: vi.fn().mockResolvedValue({ status: 'ok', version: 'test-backend' }),
   getUnreadCount: vi.fn().mockResolvedValue(0),
 }))
@@ -12,10 +13,10 @@ vi.mock('../src/api/client', () => ({
 describe('interest navigation', () => {
   it('shows the interest link and removes the recommended link from desktop navigation', async () => {
     render(
-      <MemoryRouter initialEntries={['/articles']}>
+      <MemoryRouter initialEntries={['/feeds']}>
         <Routes>
           <Route element={<Layout user={{ id: 1, username: 'reader', is_admin: false }} onLogout={() => {}} />}>
-            <Route path="/articles" element={<div>Articles</div>} />
+            <Route path="/feeds" element={<div>Articles</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,

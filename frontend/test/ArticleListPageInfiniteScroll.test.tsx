@@ -365,7 +365,9 @@ describe('ArticleListPage automatic pagination', () => {
     localStorage.setItem('articlesSortDir', 'asc')
     localStorage.setItem('articleTagFilter', JSON.stringify({kind:'tag',id:8}))
     sessionStorage.setItem('selectedFeed', '4')
-    apiMocks.getArticles.mockResolvedValueOnce(makeArticles(1)).mockResolvedValue(makeArticles(50))
+    apiMocks.getFeeds.mockResolvedValue([makeFeed(4, 'Filtered feed', 'https://filtered.example/feed')])
+    apiMocks.getArticles.mockResolvedValueOnce(makeArticles(1).map(article => ({ ...article, feed_id: 4 })))
+      .mockResolvedValue(makeArticles(50).map(article => ({ ...article, feed_id: 4 })))
     apiMocks.markReadRange.mockResolvedValue({count:3,article_ids:[10,11,200]})
     render(<MemoryRouter><ArticleListPage /></MemoryRouter>)
     fireEvent.click(await screen.findByRole('button',{name:'read-below-10'}))
@@ -738,11 +740,11 @@ describe('ArticleListPage automatic pagination', () => {
     apiMocks.getArticles.mockResolvedValue([])
 
     render(
-      <MemoryRouter initialEntries={['/articles?saved=1']}>
+      <MemoryRouter initialEntries={['/articles']}>
         <Routes>
           <Route path="/articles" element={(
             <>
-              <Link to="/articles?saved=1&feed_id=3">Gamma source</Link>
+              <Link to="/articles?feed_id=3">Gamma source</Link>
               <ArticleListPage />
             </>
           )} />

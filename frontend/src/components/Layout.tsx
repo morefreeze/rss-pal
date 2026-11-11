@@ -7,18 +7,15 @@ import { PlayerProvider, usePlayer } from '../player/PlayerContext'
 import MiniPlayer from './MiniPlayer'
 import MobileTabBar from './MobileTabBar'
 import { useBreakpoint } from '../hooks/useBreakpoint'
+import ReadingWorkspace from '../workspace/ReadingWorkspace'
+import { resolveWorkspaceRoute } from '../workspace/workspaceRoutes'
+import { readWorkspaceDestinations, rememberWorkspaceDestination, moduleDestination } from '../workspace/workspaceDestinations'
 import { VERSION as FRONTEND_VERSION } from '../version'
 
 const ICP_FILING_NUMBER = '京ICP备2026025766号-2'
 const ICP_FILING_URL = 'https://beian.miit.gov.cn/'
 
-function VersionFooter() {
-  const [backend, setBackend] = useState<string>('-')
-  useEffect(() => {
-    getServerHealth()
-      .then(h => setBackend(h.version || '-'))
-      .catch(() => setBackend('?'))
-  }, [])
+function VersionFooter({ backend }: { backend: string }) {
   return (
     <footer className="version-footer text-muted">
       <div className="version-footer-meta">
@@ -52,9 +49,9 @@ type NavItem = { to: string; icon: string; label: string; matchClip?: boolean }
 const NAV_ITEMS: NavItem[] = [
   { to: '/articles',           icon: '📰', label: '文章' },
   { to: '/articles?view=clip', icon: '⭐', label: '网摘', matchClip: true },
-  { to: '/feeds',              icon: '📡', label: '订阅' },
   { to: '/explore',            icon: '🔭', label: '探索' },
   { to: '/briefing',           icon: '📅', label: '简报' },
+  { to: '/feeds',              icon: '📡', label: '订阅' },
   { to: '/interests',          icon: '💡', label: '兴趣' },
   { to: '/stats',              icon: '📊', label: '统计' },
 ]
@@ -149,7 +146,6 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
 }
 
 export default function Layout({ user, onLogout }: LayoutProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
 
   const refreshUnread = useCallback(() => {
@@ -191,8 +187,6 @@ export default function Layout({ user, onLogout }: LayoutProps) {
         unreadCount={unreadCount}
         onLogout={handleLogout}
         renderNavLabel={renderNavLabel}
-        menuOpen={menuOpen}
-        setMenuOpen={setMenuOpen}
       />
     </PlayerProvider>
   )
@@ -203,109 +197,42 @@ interface LayoutInnerProps {
   unreadCount: number
   onLogout: () => void
   renderNavLabel: (item: NavItem) => React.ReactNode
-  menuOpen: boolean
-  setMenuOpen: (v: boolean) => void
 }
 
-function LayoutInner({
-  user, unreadCount, onLogout, renderNavLabel, menuOpen, setMenuOpen,
-}: LayoutInnerProps) {
+function LayoutInner({ user, unreadCount, onLogout, renderNavLabel }: LayoutInnerProps) {
   const bp = useBreakpoint()
   const player = usePlayer()
   const location = useLocation()
-
-  // /articles?view=clip is the 网摘 view embedded inside the article page.
-  // Two desktop tabs share pathname /articles, so React Router's default
-  // active predicate can't distinguish them — we derive activeness from
-  // (pathname + search) instead.
-  const isClipView =
-    location.pathname === '/articles' &&
-    new URLSearchParams(location.search).get('view') === 'clip'
-
-  const itemIsActive = (item: NavItem): boolean => {
-    if (item.to === '/articles') return location.pathname === '/articles' && !isClipView
-    if (item.matchClip) return isClipView
+  const [backendVersion, setBackendVersion] = useState('-')
+  useEffect(() => { getServerHealth().then(health => setBackendVersion(health.version || '-')).catch(() => setBackendVersion('?')) }, [])
+  const workspaceRoute = resolveWorkspaceRoute(location.pathname, location.search, location.state)
+  const destinations = readWorkspaceDestinations(user?.id)
+  if (workspaceRoute && workspaceRoute.articleId == null) destinations[workspaceRoute.module] = workspaceRoute.listPath
+  useEffect(() => {
+    if (workspaceRoute && workspaceRoute.articleId == null) rememberWorkspaceDestination(user?.id, workspaceRoute.module, workspaceRoute.listPath)
+  }, [user?.id, workspaceRoute?.module, workspaceRoute?.listPath, workspaceRoute?.articleId])
+  const showTabs = bp === 'phone' && workspaceRoute?.articleId == null
+  const navItems = user?.is_admin ? [...NAV_ITEMS, { to: '/admin', icon: '🛡️', label: '后台管理' }] : NAV_ITEMS
+  const itemIsActive = (item: NavItem) => {
+    if (item.to === '/articles') return workspaceRoute?.module === 'articles'
+    if (item.matchClip) return workspaceRoute?.module === 'clips'
+    if (item.to === '/explore') return workspaceRoute?.module === 'explore'
+    if (item.to === '/briefing') return workspaceRoute?.module === 'briefing' || location.pathname === '/briefing'
     return location.pathname === item.to || location.pathname.startsWith(item.to + '/')
   }
-
-  const navItems = user?.is_admin ? [...NAV_ITEMS, { to: '/admin', icon: '🛡️', label: '后台管理' }] : NAV_ITEMS
-
-  const navLinkClass = (item: NavItem) => (itemIsActive(item) ? 'nav-link active' : 'nav-link')
-
-  // --bottom-chrome = tab-bar height (if shown) + mini-player height (if active)
-  // + safe-area-inset-bottom + 16px gutter. Reads on <body> so any deep main
-  // can pad correctly.
   useEffect(() => {
-    const tabH = bp === 'desktop' ? 0 : 56
+    const tabH = showTabs ? 56 : 0
     const playerH = player.articleId !== null ? 64 : 0
-    const chrome = `calc(${tabH + playerH + 16}px + env(safe-area-inset-bottom))`
-    document.body.style.setProperty('--bottom-chrome', chrome)
-    return () => {
-      document.body.style.removeProperty('--bottom-chrome')
-    }
-  }, [bp, player.articleId])
-
-  return (
-    <div>
-      <header style={{ marginBottom: 20 }}>
-        <div className="flex-between">
-          <h1 className="nav-brand">RSS Pal</h1>
-
-          <nav className="flex gap-2 desktop-nav" style={{ alignItems: 'center' }}>
-            {navItems.map(item => (
-              <Link key={item.to} to={item.to} className={navLinkClass(item)}>
-                {renderNavLabel(item)}
-              </Link>
-            ))}
-            {user && <UserMenu user={user} onLogout={onLogout} />}
-          </nav>
-
-          <button
-            className="btn-ghost btn-sm mobile-menu-btn"
-            onClick={() => setMenuOpen(!menuOpen)}
-            aria-label="菜单"
-          >
-            {menuOpen ? '✕' : '☰'}
-          </button>
-        </div>
-
-        {menuOpen && (
-          <nav className="mobile-nav" style={{
-            marginTop: 8,
-            padding: '8px 0',
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 8,
-          }}>
-            {navItems.map(item => (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={navLinkClass(item)}
-                onClick={() => setMenuOpen(false)}
-                style={{ display: 'block', padding: '10px 16px', borderBottom: '1px solid var(--border)', borderRadius: 0 }}
-              >
-                {renderNavLabel(item)}
-              </Link>
-            ))}
-            <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="text-muted text-sm">{user && <AccountDisplay user={user} />}</span>
-              <button className="btn-ghost btn-sm" onClick={onLogout}>
-                🚪 登出
-              </button>
-            </div>
-          </nav>
-        )}
-      </header>
-      <main>
-        <Outlet />
-      </main>
-      <VersionFooter />
-      <Toaster />
-      <MiniPlayer />
-      {bp !== 'desktop' && (
-        <MobileTabBar user={user} unreadCount={unreadCount} onLogout={onLogout} isAdmin={!!user?.is_admin} />
-      )}
-    </div>
-  )
+    document.body.style.setProperty('--bottom-chrome', `calc(${tabH + playerH + 16}px + env(safe-area-inset-bottom))`)
+    document.body.style.setProperty('--mobile-tabs-offset', showTabs ? 'calc(56px + env(safe-area-inset-bottom))' : '0px')
+    return () => { document.body.style.removeProperty('--bottom-chrome'); document.body.style.removeProperty('--mobile-tabs-offset') }
+  }, [showTabs, player.articleId])
+  const navigation = <nav className="workspace-nav" aria-label="主导航">{navItems.slice(0, 4).map(item => <Link key={item.to} to={moduleDestination(item.to, destinations)} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav>
+  const account = <><details className="workspace-more"><summary>更多</summary><nav className="workspace-nav" aria-label="更多导航">{navItems.slice(4).map(item => <Link key={item.to} to={item.to} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav></details>{user && <UserMenu user={user} onLogout={onLogout} />}</>
+  return <>
+    <ReadingWorkspace navigation={navigation} account={account} footer={<VersionFooter backend={backendVersion} />}><Outlet /></ReadingWorkspace>
+    <Toaster />
+    <MiniPlayer />
+    {showTabs && <MobileTabBar destinations={destinations} user={user} unreadCount={unreadCount} onLogout={onLogout} isAdmin={!!user?.is_admin} />}
+  </>
 }

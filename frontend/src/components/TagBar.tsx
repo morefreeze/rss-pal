@@ -42,6 +42,7 @@ export default function TagBar({ articleId }: Props) {
     const name = (raw ?? draft).trim()
     if (!name) return
     await addArticleTag(articleId, name)
+    window.dispatchEvent(new Event('article-content-changed'))
     setDraft('')
     setEditing(false)
     const fresh = await getArticleTags(articleId)
@@ -51,6 +52,7 @@ export default function TagBar({ articleId }: Props) {
 
   const removeManual = async (tagId: number) => {
     await removeArticleTag(articleId, tagId)
+    window.dispatchEvent(new Event('article-content-changed'))
     setData(d => (d ? { ...d, manual: d.manual.filter(t => t.id !== tagId) } : d))
   }
 
@@ -115,6 +117,7 @@ export default function TagBar({ articleId }: Props) {
                 variant="suggestion"
                 onAdopt={async () => {
                   await addArticleTag(articleId, name)
+                  window.dispatchEvent(new Event('article-content-changed'))
                   const fresh = await getArticleTags(articleId)
                   setData(fresh)
                   listTags().then(setAllTags)

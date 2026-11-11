@@ -21,10 +21,10 @@ it('opens settings and history from the desktop account menu and loads older art
       { ...item, id: 3, title: '已过期的探索文章', kind: 'explore', available: false, article_id: null },
     ], next_cursor: '' })
 
-  render(<MemoryRouter initialEntries={['/articles']}>
+  render(<MemoryRouter initialEntries={['/feeds']}>
     <Routes>
       <Route element={<Layout user={{ id: 1, username: 'reader', is_admin: false }} onLogout={() => {}} />}>
-        <Route path="/articles" element={<div />} />
+        <Route path="/feeds" element={<div />} />
         <Route path="/settings" element={<h2>设置页面</h2>} />
         <Route path="/history" element={<ReadingHistoryPage />} />
       </Route>

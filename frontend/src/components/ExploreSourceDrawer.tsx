@@ -8,6 +8,7 @@ import {
 import { useBreakpoint } from '../hooks/useBreakpoint'
 
 interface Props {
+  active?: boolean
   onSubscribed?: (sourceIDs: number[]) => void
 }
 
@@ -24,7 +25,7 @@ function canSubscribe(source: ExploreSource) {
   return source.validation_status === 'valid' && !source.is_broken && source.merged_into_source_id == null
 }
 
-export default function ExploreSourceDrawer({ onSubscribed }: Props) {
+export default function ExploreSourceDrawer({ onSubscribed, active = true }: Props) {
   const breakpoint = useBreakpoint()
   const [sources, setSources] = useState<ExploreSource[]>([])
   const [open, setOpen] = useState(false)
@@ -62,12 +63,14 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
     return () => { loadGenerationRef.current += 1 }
   }, [loadSources])
 
+  useEffect(() => { if (!active) setOpen(false) }, [active])
+
   useEffect(() => {
-    if (!open) return
+    if (!open || !active) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false) }
       if (event.key !== 'Tab') return
       const focusable = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>(
         'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -89,12 +92,12 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
     }
-  }, [open])
+  }, [open, active])
 
   useEffect(() => {
-    if (!open && wasOpenRef.current) handleRef.current?.focus()
+    if (active && !open && wasOpenRef.current) handleRef.current?.focus()
     wasOpenRef.current = open
-  }, [open])
+  }, [open, active])
 
   const selectedIDs = useMemo(
     () => sources.filter(source => selected.has(source.id) && !source.is_subscribed && canSubscribe(source)).map(source => source.id),
@@ -151,7 +154,7 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
         type="button"
         className={`explore-source-handle explore-source-handle--${breakpoint === 'phone' ? 'mobile' : 'desktop'}`}
         aria-label={loadingSources ? '候选源加载中' : loadError ? '查看候选源（加载失败）' : `查看 ${sources.length} 个候选源`}
-        aria-expanded={open}
+        aria-expanded={open && active}
         aria-controls="explore-source-drawer"
         onClick={() => { setError(null); setOpen(true) }}
       >
@@ -159,7 +162,7 @@ export default function ExploreSourceDrawer({ onSubscribed }: Props) {
         <span>{loadingSources ? '加载中' : loadError ? '加载失败' : `${sources.length} 个候选源`}</span>
       </button>
 
-      {open && (
+      {open && active && (
         <>
           <div
             className="explore-drawer-backdrop"

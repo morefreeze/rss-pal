@@ -172,7 +172,7 @@ describe('ReaderInteractionSurface desktop selection', () => {
 })
 
 describe('ReaderInteractionSurface phone selection', () => {
-  it('uses the unfocused toolbar on a landscape touch device wider than 640px', () => {
+  it('uses the unfocused toolbar on a landscape touch device wider than the phone breakpoint', () => {
     const original = window.matchMedia
     vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
       ...original(query), matches: query === '(pointer: coarse)',
@@ -189,7 +189,7 @@ describe('ReaderInteractionSurface phone selection', () => {
   function phone() {
     const original = window.matchMedia
     vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
-      ...original(query), matches: query === '(max-width: 640px)',
+      ...original(query), matches: query === '(max-width: 767px)',
     }))
   }
 

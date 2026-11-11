@@ -1,3 +1,4 @@
+import { useReadingWorkspace, WorkspaceSidebar } from '../workspace/ReadingWorkspaceContext'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -46,6 +47,7 @@ export default function ExplorePage() {
 }
 
 function ExplorePageContent() {
+  const workspace = useReadingWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -81,7 +83,7 @@ function ExplorePageContent() {
 
   useInfiniteScrollTrigger({
     targetRef: loadMoreRef,
-    enabled: feed.hasMore && !feed.loading && !feed.loadingMore,
+    enabled: (workspace?.isListVisible ?? true) && feed.hasMore && !feed.loading && !feed.loadingMore,
     refreshKey: feed.articles.length,
     activationKey: feed.requestGeneration,
     rootMarginPx: 200,
@@ -235,9 +237,15 @@ function ExplorePageContent() {
 
   return (
     <div className="explore-page">
+      {workspace && <WorkspaceSidebar><nav className="workspace-source-list" aria-label="探索范围">
+        <Link className="saved-row" aria-current={!view ? 'page' : undefined} to="/explore">推荐</Link>
+        <Link className="saved-row" aria-current={view ? 'page' : undefined} to="/explore?view=later">稍后读</Link>
+        <Link className="workspace-manage-link" to="/interests">管理兴趣</Link>
+      </nav></WorkspaceSidebar>}
       <header className="explore-header">
         <div>
           <h1>{view ? '稍后读' : '探索'}</h1>
+          {workspace && <button className="btn-ghost workspace-scope-button" onClick={workspace.openScopes}>推荐与稍后读</button>}
           <p>{view ? '保存感兴趣的文章，随时回来继续阅读' : '从你的订阅出发，发现持续更新的新来源'}</p>
         </div>
         <div className="explore-toolbar" aria-label="探索排序与筛选">
@@ -374,7 +382,7 @@ function ExplorePageContent() {
         )}
       </main>
 
-      {!view && <ExploreSourceDrawer key={feed.requestGeneration} />}
+      {!view && <ExploreSourceDrawer key={feed.requestGeneration} active={workspace?.isListVisible ?? true} />}
     </div>
   )
 }

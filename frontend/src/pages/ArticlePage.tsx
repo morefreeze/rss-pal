@@ -1,3 +1,5 @@
+import { useReadingWorkspace } from '../workspace/ReadingWorkspaceContext'
+import '../components/WorkspaceReader.css'
 import { ArticleSearch, ExcludeArticleSearch, SearchText, useArticleSearchQuery } from '../components/ArticleSearch'
 import { parsePublicationDate } from '../utils/publicationDate'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
@@ -93,6 +95,7 @@ export default function ArticlePage() {
 }
 
 function ArticlePageContent() {
+  const workspace = useReadingWorkspace()
   const searchQuery = useArticleSearchQuery()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -110,7 +113,9 @@ function ArticlePageContent() {
   const reader = useReaderSettings()
   const { toggle: toggleReadingChrome } = useReadingChrome(reader.mode === 'reading')
   const entryPath =
-    locationState?.from
+    workspace?.returnPath
+    ?? locationState?.from
+    ?? workspace?.listPath
     ?? (() => { try { return sessionStorage.getItem('articleEntryPath') } catch { return null } })()
     ?? '/articles'
   const entrySearch = extractSearchFromPath(entryPath)
@@ -153,6 +158,10 @@ function ArticlePageContent() {
   // paginated list that still has more articles server-side.
   const [navList, setNavList] = useState<number[]>(readNavList)
   const [navContext, setNavContext] = useState(readNavContext)
+  useEffect(() => {
+    setNavList(readNavList())
+    setNavContext(readNavContext())
+  }, [location.key])
   const [loadingNext, setLoadingNext] = useState(false)
   // Single in-flight extend fetch — shared by both the silent prefetch effect
   // and a click on Next, so a click during prefetch awaits the same request
@@ -258,6 +267,12 @@ function ArticlePageContent() {
   currentArticleIDRef.current = articleID
   const [summaryJob, setSummaryJob] = useState<ArticleDetailResponse['summary_job']>(initialDetail?.summary_job)
   const [summaryError, setSummaryError] = useState('')
+  const [summaryDisclosure, setSummaryDisclosure] = useState({ articleId: articleID, open: false })
+  const summaryMustOpen = !!searchQuery || (article?.id === articleID && (streamPhase !== 'idle' || summaryJob?.state === 'running' || !!summaryError || summaryJob?.state === 'failed'))
+  const summaryOpen = !workspace || summaryMustOpen || (summaryDisclosure.articleId === articleID && summaryDisclosure.open)
+  useEffect(() => {
+    if (summaryMustOpen) setSummaryDisclosure({ articleId: articleID, open: true })
+  }, [articleID, summaryMustOpen])
   const [localAIHintMuted, setLocalAIHintMuted] = useState(() => {
     try { return localStorage.getItem(LOCAL_AI_HINT_MUTE_KEY) === '1' } catch { return false }
   })
@@ -616,6 +631,7 @@ function ArticlePageContent() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return
       // Skip if focused in an input/textarea
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
       if (e.key === 'n' || e.key === 'j') {
@@ -649,7 +665,13 @@ function ArticlePageContent() {
   if (!progressQueueRef.current) {
     const owner = progressAccountId()
     progressQueueRef.current = new ProgressSaveQueue(
-      entry => updateProgress(entry.articleId, entry.scrollPosition, entry.isCompleted),
+      async entry => {
+        const result = await updateProgress(entry.articleId, entry.scrollPosition, entry.isCompleted)
+        if (result.is_completed && owner !== null && progressAccountId() === owner) {
+          window.dispatchEvent(new CustomEvent('article-read-changed', { detail: { id: entry.articleId, isRead: true } }))
+        }
+        return result
+      },
       () => owner !== null && progressAccountId() === owner,
       (savedArticleID, newProgress) => {
         invalidateArticleDetail(savedArticleID)
@@ -823,7 +845,7 @@ function ArticlePageContent() {
       clearTimeout(t2)
       window.removeEventListener('resize', recompute)
     }
-  }, [article?.id, article?.summary_brief, article?.summary_detailed, article?.content, streamPhase])
+  }, [article?.id, article?.summary_brief, article?.summary_detailed, article?.content, streamPhase, summaryOpen])
 
   useEffect(() => {
     const onVisibility = () => { if (document.hidden) flushProgress() }
@@ -839,6 +861,7 @@ function ArticlePageContent() {
 
   const handleRegenerateWithTemplate = async () => {
     if (!article || article.id !== articleID || streamAbortRef.current || summaryJob?.state === 'running') return
+    setSummaryDisclosure({ articleId: articleID, open: true })
     const requestedID = article.id
     const generation = ++summaryGenerationRef.current
     const ctrl = new AbortController()
@@ -973,10 +996,12 @@ function ArticlePageContent() {
       await unsaveArticle(article.id)
       invalidateArticleDetail(article.id)
       setSaved(false)
+      window.dispatchEvent(new Event('article-content-changed'))
     } else {
       await saveArticle(article.id)
       invalidateArticleDetail(article.id)
       setSaved(true)
+      window.dispatchEvent(new Event('article-content-changed'))
     }
   }
 
@@ -992,6 +1017,7 @@ function ArticlePageContent() {
       toast.error('删除失败，请稍后重试')
       return
     }
+    window.dispatchEvent(new Event('article-content-changed'))
     // Local hint so list pages can hide the row immediately on remount.
     try {
       const arr: number[] = JSON.parse(sessionStorage.getItem('hiddenArticles') || '[]')
@@ -1012,6 +1038,7 @@ function ArticlePageContent() {
               const arr: number[] = JSON.parse(sessionStorage.getItem('hiddenArticles') || '[]')
               sessionStorage.setItem('hiddenArticles', JSON.stringify(arr.filter(i => i !== targetId)))
             } catch {}
+            window.dispatchEvent(new Event('article-content-changed'))
             window.dispatchEvent(new Event('refresh-unread'))
             navigate(`/articles/${targetId}`, { replace: true, state: { from: entryPath } })
           } catch {
@@ -1029,6 +1056,7 @@ function ArticlePageContent() {
       await unhideArticle(article.id)
       invalidateArticleDetail(article.id)
       setHidden(false)
+      window.dispatchEvent(new Event('article-content-changed'))
       try {
         const arr: number[] = JSON.parse(sessionStorage.getItem('hiddenArticles') || '[]')
         sessionStorage.setItem('hiddenArticles', JSON.stringify(arr.filter(i => i !== article.id)))
@@ -1055,6 +1083,7 @@ function ArticlePageContent() {
         sessionStorage.setItem('readArticles', JSON.stringify(read))
       }
     } catch {}
+    window.dispatchEvent(new CustomEvent('article-read-changed', { detail: { id: article.id, isRead: true } }))
     window.dispatchEvent(new Event('refresh-unread'))
   }
 
@@ -1070,6 +1099,7 @@ function ArticlePageContent() {
       const read: number[] = JSON.parse(sessionStorage.getItem('readArticles') || '[]')
       sessionStorage.setItem('readArticles', JSON.stringify(read.filter(id => id !== article.id)))
     } catch {}
+    window.dispatchEvent(new CustomEvent('article-read-changed', { detail: { id: article.id, isRead: false } }))
     window.dispatchEvent(new Event('refresh-unread'))
   }
 
@@ -1215,7 +1245,7 @@ function ArticlePageContent() {
   }
 
   return (
-    <div ref={contentRef} aria-busy={loading}>
+    <div ref={contentRef} aria-busy={loading} className={workspace ? 'workspace-article-reader' : undefined}>
       <ArticleProgressBar
         historicalPercent={progressDisplay.historicalPercent}
         currentPercent={progressDisplay.currentPercent}
@@ -1259,13 +1289,13 @@ function ArticlePageContent() {
       <div className="card">
         <div className="flex-between mb-2">
           <div className="flex gap-1">
-            <button
+            {!workspace && <button
               className="secondary"
               onClick={handleBack}
               style={{ fontSize: 13, padding: '4px 10px' }}
             >
               ← 返回
-            </button>
+            </button>}
             <button
               className="secondary"
               disabled={!prevId}
@@ -1310,6 +1340,7 @@ function ArticlePageContent() {
             savedNotesRef.current.set(article.id, { note })
             invalidateArticleDetail(article.id)
             setArticle(current => current?.id === article.id ? { ...current, capture_note: note } : current)
+            window.dispatchEvent(new Event('article-content-changed'))
           }} />
 
         <ArticleProvenance article={article} />
@@ -1462,9 +1493,11 @@ function ArticlePageContent() {
       )}
 
       {/* Summary section — shown before content */}
-      <div ref={summaryRef} className="card">
+      <div ref={summaryRef} className="card article-summary-section">
         <div className="flex-between mb-2 summary-controls">
-          <h3>AI 总结</h3>
+          {workspace ? <button type="button" className="workspace-summary-toggle" aria-label={summaryOpen ? '收起 AI 总结' : '展开 AI 总结'} aria-expanded={summaryOpen} aria-controls={`article-summary-${articleID}`} disabled={summaryMustOpen} onClick={() => setSummaryDisclosure({ articleId: articleID, open: !summaryOpen })}>
+            <span aria-hidden="true">{summaryOpen ? '▾' : '▸'}</span> AI 总结
+          </button> : <h3>AI 总结</h3>}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select
               value={selectedTemplateId ?? ''}
@@ -1487,6 +1520,7 @@ function ArticlePageContent() {
           </div>
         </div>
 
+        {summaryOpen && <div id={`article-summary-${articleID}`}>
         {streamPhase === 'idle' && summaryJob?.state === 'running' && <p role="status" className="text-muted text-sm">总结正在生成，完成后会自动更新。</p>}
         {streamPhase === 'idle' && (summaryError || summaryJob?.state === 'failed') && <p role="alert" className="text-sm">{summaryError || summaryJob?.last_error || '上次生成失败，可以重试。'}</p>}
         {!localAIHintMuted && (
@@ -1528,6 +1562,7 @@ function ArticlePageContent() {
             暂无总结，点击右上角"生成总结"按钮
           </div>
         )}
+        </div>}
       </div>
 
       {/* Content section: hidden entirely for video articles without
@@ -1627,7 +1662,7 @@ function ArticlePageContent() {
           {loadingNext ? '加载中…' : '下一篇 ›'}
         </button>
       </div>
-      <BackFab onClick={handleBack} />
+      {!workspace && <BackFab onClick={handleBack} />}
       <BackToTopButton />
     </div>
   )

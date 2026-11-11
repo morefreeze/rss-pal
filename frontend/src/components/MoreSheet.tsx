@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
 
@@ -6,7 +6,7 @@ type SheetItem = { icon: string; label: string; to?: string; action?: 'logout' }
 
 const ITEMS: SheetItem[] = [
   { icon: '🕘', label: '历史记录', to: '/history' },
-  { icon: '📅', label: '简报',     to: '/briefing' },
+  { icon: '📡', label: '订阅管理', to: '/feeds' },
   { icon: '💡', label: '兴趣',     to: '/interests' },
   { icon: '📊', label: '统计',     to: '/stats' },
   { icon: '⚙️', label: '设置',     to: '/settings' },
@@ -23,13 +23,27 @@ interface Props {
 
 export default function MoreSheet({ open, onClose, onLogout, isAdmin = false, user }: Props) {
   const navigate = useNavigate()
+  const dialog = useRef<HTMLDivElement>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const previous = document.activeElement as HTMLElement | null
+    const focusables = () => Array.from(dialog.current?.querySelectorAll<HTMLElement>('button, a[href], [tabindex="0"]') || [])
+    focusables()[0]?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeRef.current() }
+      if (e.key !== 'Tab') return
+      const elements = focusables(), first = elements[0], last = elements[elements.length - 1]
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
+      if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
+    }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = previousOverflow; previous?.focus() }
+  }, [open])
 
   if (!open) return null
 
@@ -52,8 +66,10 @@ export default function MoreSheet({ open, onClose, onLogout, isAdmin = false, us
         }}
       />
       <div
+        ref={dialog}
         role="dialog"
-        aria-label="我的"
+        aria-modal="true"
+        aria-label="更多"
         style={{
           position: 'fixed',
           left: 0, right: 0, bottom: 0,
@@ -76,6 +92,7 @@ export default function MoreSheet({ open, onClose, onLogout, isAdmin = false, us
             margin: '8px auto 12px',
           }}
         />
+        <button className="btn-ghost btn-sm" onClick={onClose} aria-label="关闭更多菜单" style={{ float: 'right' }}>✕</button>
         {user && <div style={{padding:'8px 16px 16px', borderBottom:'1px solid var(--border)'}}><AccountDisplay user={user} /></div>}
         {items.map(item => (
           <button

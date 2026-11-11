@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ArticlePage from '../src/pages/ArticlePage'
+import { ReadingWorkspaceContext, type ReadingWorkspaceValue } from '../src/workspace/ReadingWorkspaceContext'
 import {
   peekArticleDetail,
   putArticleDetail,
@@ -208,6 +209,80 @@ describe('ArticlePage immediate loading', () => {
     persist(.9)
     fireEvent.online(window)
     expect(apiMocks.updateProgress).not.toHaveBeenCalledWith(43, .9, false)
+  })
+
+  const workspace: ReadingWorkspaceValue = {
+    activeModule: 'articles', isActive: true, isListVisible: true, isReaderOpen: true, selectedArticleId: 42,
+    isPhone: false, isCompact: true, listPath: '/articles', returnPath: '/articles', getListScrollElement: () => null,
+    closeReader: () => {}, openScopes: () => {}, sidebarTarget: null, overviewTarget: null,
+  }
+  it('collapses workspace summaries while preserving generation controls and article metadata', () => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42']}><ReadingWorkspaceContext.Provider value={workspace}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </ReadingWorkspaceContext.Provider></MemoryRouter>)
+    const toggle = screen.getByRole('button', { name: '展开 AI 总结' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText('Cached brief')).toBeNull()
+    expect(screen.getByRole('link', { name: '原文链接' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '重新生成' })).toBeTruthy()
+    fireEvent.click(toggle)
+    expect(screen.getByText('Cached brief')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '收起 AI 总结' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('notifies retained lists when an automatic completion is persisted', async () => {
+    localStorage.setItem('user', JSON.stringify({ id: 7 }))
+    localStorage.setItem('token', 'token')
+    localStorage.setItem('rsspal:progress:v1:7:43:pending:complete', JSON.stringify({
+      revision: 'complete', generation: '', entry: { articleId: 43, scrollPosition: 1, isCompleted: true },
+    }))
+    apiMocks.updateProgress.mockResolvedValueOnce({ article_id: 43, scroll_position: 1, is_completed: true })
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    const listener = vi.fn()
+    window.addEventListener('article-read-changed', listener)
+    try {
+      render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+      await waitFor(() => expect(listener).toHaveBeenCalled())
+      expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({ id: 43, isRead: true })
+    } finally { window.removeEventListener('article-read-changed', listener) }
+  })
+
+  it('opens workspace summary matches for search and keeps generation output visible', async () => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42?q=brief']}><ReadingWorkspaceContext.Provider value={workspace}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </ReadingWorkspaceContext.Provider></MemoryRouter>)
+    expect(screen.getByRole('button', { name: '收起 AI 总结' }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('brief', { selector: 'mark' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '退出搜索' }))
+    fireEvent.click(screen.getByRole('button', { name: '收起 AI 总结' }))
+    expect(screen.queryByText('Cached brief')).toBeNull()
+    apiMocks.generateSummaryStream.mockImplementationOnce(async (_id, _template, handlers) => {
+      handlers.onBriefDone('Generated summary')
+      handlers.onDone()
+    })
+    fireEvent.click(screen.getByRole('button', { name: '重新生成' }))
+    expect(await screen.findByText('Generated summary')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '收起 AI 总结' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('uses the validated workspace history return path for keyboard navigation', () => {
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={[{ pathname: '/articles/42', state: { from: '/articles' } }]}><ReadingWorkspaceContext.Provider value={{ ...workspace, returnPath: '/history' }}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /><Route path="/history" element={<p>History page</p>} /></Routes>
+    </ReadingWorkspaceContext.Provider></MemoryRouter>)
+    expect(screen.queryByRole('button', { name: '← 返回' })).toBeNull()
+    const dialogEscape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    dialogEscape.preventDefault()
+    fireEvent(window, dialogEscape)
+    expect(screen.queryByText('History page')).toBeNull()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByText('History page')).toBeTruthy()
   })
 
   it('clears a disconnected stream warning when persisted completion is confirmed', async () => {

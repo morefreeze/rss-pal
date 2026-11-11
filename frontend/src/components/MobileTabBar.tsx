@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import MoreSheet from './MoreSheet'
+import { moduleDestination, type WorkspaceDestinations } from '../workspace/workspaceDestinations'
 import type { DisplayAccount } from './AccountDisplay'
 
 type Tab = { to: string; icon: string; label: string; showUnread?: boolean; matchClip?: boolean }
@@ -8,18 +9,19 @@ type Tab = { to: string; icon: string; label: string; showUnread?: boolean; matc
 const TABS: Tab[] = [
   { to: '/articles',            icon: '📰', label: '文章', showUnread: true, matchClip: false },
   { to: '/articles?view=clip',  icon: '⭐', label: '网摘',                   matchClip: true  },
-  { to: '/feeds',               icon: '📡', label: '订阅' },
   { to: '/explore',             icon: '🔭', label: '探索' },
+  { to: '/briefing',            icon: '📅', label: '简报' },
 ]
 
 interface Props {
+  destinations?: WorkspaceDestinations
   user?: DisplayAccount | null
   isAdmin?: boolean
   unreadCount: number
   onLogout: () => void
 }
 
-export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, user }: Props) {
+export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, user, destinations = {} }: Props) {
   const [moreOpen, setMoreOpen] = useState(false)
   const location = useLocation()
   const isClipView = location.pathname === '/articles'
@@ -30,9 +32,9 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
       return location.pathname === '/articles' && !isClipView
     }
     if (t.matchClip) {
-      return isClipView
+      return isClipView || location.pathname === '/clip'
     }
-    // Other tabs (/feeds, /explore): plain pathname prefix match.
+    if (t.to === '/briefing') return ['/briefing', '/daily', '/weekly'].includes(location.pathname)
     return location.pathname === t.to || location.pathname.startsWith(t.to + '/')
   }
 
@@ -73,10 +75,10 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
         {TABS.map(tab => {
           const active = tabIsActive(tab)
           return (
-            <NavLink
+            <Link
               key={tab.to}
-              to={tab.to}
-              end={false}
+              to={moduleDestination(tab.to, destinations)}
+              aria-current={active ? 'page' : undefined}
               className="mobile-tab-link"
               style={tabStyle(active)}
             >
@@ -92,7 +94,7 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
                 )}
               </span>
               <span>{tab.label}</span>
-            </NavLink>
+            </Link>
           )
         })}
         <button
@@ -100,10 +102,10 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
           onClick={() => setMoreOpen(true)}
           aria-haspopup="dialog"
           aria-expanded={moreOpen}
-          style={tabStyle(moreOpen || location.pathname === '/history')}
+          style={tabStyle(moreOpen || ['/history', '/settings', '/stats', '/interests', '/feeds', '/admin'].some(path => location.pathname === path || location.pathname.startsWith(path + '/')))}
         >
           <span aria-hidden="true" style={{ fontSize: 22, lineHeight: 1 }}>👤</span>
-          <span>我的</span>
+          <span>更多</span>
         </button>
       </nav>
       <MoreSheet user={user} isAdmin={isAdmin} open={moreOpen} onClose={() => setMoreOpen(false)} onLogout={onLogout} />

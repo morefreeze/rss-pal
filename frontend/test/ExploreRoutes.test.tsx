@@ -35,7 +35,7 @@ describe('explore routes and desktop navigation', () => {
     renderRoute('/explore')
 
     expect(await screen.findByTestId('explore-list-page')).toBeTruthy()
-    const desktopNav = document.querySelector('.desktop-nav') as HTMLElement
+    const desktopNav = document.querySelector('.workspace-nav') as HTMLElement
     const link = within(desktopNav).getByRole('link', { name: '🔭 探索' })
     expect(link.getAttribute('href')).toBe('/explore')
     expect(link.className).toContain('active')
@@ -45,8 +45,9 @@ describe('explore routes and desktop navigation', () => {
     renderRoute('/explore/articles/19')
 
     expect(await screen.findByTestId('explore-detail-page')).toBeTruthy()
-    expect(screen.queryByTestId('explore-list-page')).toBeNull()
-    const desktopNav = document.querySelector('.desktop-nav') as HTMLElement
+    expect(screen.getByTestId('explore-list-page')).toBeTruthy()
+    expect((screen.getByTestId('explore-list-page').closest('.workspace-list') as HTMLElement).hidden).toBe(false)
+    const desktopNav = document.querySelector('.workspace-nav') as HTMLElement
     expect(within(desktopNav).getByRole('link', { name: '🔭 探索' }).className).toContain('active')
   })
 })

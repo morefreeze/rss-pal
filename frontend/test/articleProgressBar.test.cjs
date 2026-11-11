@@ -44,7 +44,7 @@ assertIncludes(
 )
 assertIncludes(
   articlePage,
-  '<div ref={summaryRef} className="card">',
+  '<div ref={summaryRef} className="card article-summary-section">',
   'ArticlePage should attach summaryRef to the AI summary card',
 )
 assertIncludes(

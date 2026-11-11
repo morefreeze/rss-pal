@@ -98,6 +98,7 @@ export default function FeedListPage() {
     try {
       const data = await getFeeds()
       setFeeds(data || [])
+      window.dispatchEvent(new Event('subscriptions-changed'))
     } finally {
       setLoading(false)
     }

@@ -1,3 +1,4 @@
+import { useReadingWorkspace } from '../workspace/ReadingWorkspaceContext'
 import React, { useCallback } from 'react'
 import { Article, ArticleListItem, UserTag } from '../api/client'
 import TweetCard from './TweetCard'
@@ -126,6 +127,8 @@ export default function ArticleCard({
   onSourceFilter,
   dateField = 'published',
 }: Props) {
+  const workspace = useReadingWorkspace()
+  const selected = workspace?.isActive && workspace.selectedArticleId === article.id
   const exposureRef = useExposureTracking(article.id)
   const effectiveSourceLabel = article.source?.title ?? sourceLabel ?? article.feed_title
   const articleId = article.id
@@ -166,6 +169,8 @@ export default function ArticleCard({
         className="card"
         data-article-card
         data-article-id={article.id}
+        aria-current={selected ? 'true' : undefined}
+        data-selected={selected || undefined}
         style={{
           display: 'block',
           opacity: isRead ? 0.6 : 1,
@@ -197,6 +202,8 @@ export default function ArticleCard({
       className="card"
       data-article-card
       data-article-id={article.id}
+        aria-current={selected ? 'true' : undefined}
+        data-selected={selected || undefined}
       style={{
         display: 'block',
         opacity: isRead ? 0.6 : 1,

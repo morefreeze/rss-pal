@@ -406,3 +406,27 @@ it('persists channel and topic filters and resets pagination when the channel ch
   fireEvent.change(screen.getByLabelText('发现渠道筛选'),{target:{value:''}})
   await waitFor(()=>expect(api.getExplore).toHaveBeenLastCalledWith(expect.not.objectContaining({channel:expect.anything()})))
 })
+
+it('pauses pagination and releases an open source drawer when its mounted workspace list is hidden', async () => {
+  const { ReadingWorkspaceContext } = await import('../src/workspace/ReadingWorkspaceContext')
+  api.getExplore.mockResolvedValue(response({ has_more: true }))
+  api.getExploreSources.mockResolvedValue([])
+  const value = {
+    activeModule: 'explore' as const, isActive: true, isListVisible: true, isReaderOpen: false,
+    selectedArticleId: null, isPhone: false, isCompact: true, listPath: '/explore', returnPath: '/explore',
+    getListScrollElement: () => null, closeReader: () => {}, openScopes: () => {}, sidebarTarget: null, overviewTarget: null,
+  }
+  const tree = (visible: boolean) => <MemoryRouter initialEntries={['/explore']}><ReadingWorkspaceContext.Provider value={{ ...value, isListVisible: visible }}><ExplorePage /></ReadingWorkspaceContext.Provider></MemoryRouter>
+  const { rerender } = render(tree(true))
+  await screen.findByText('Article 1')
+  expect(infinite.options.enabled).toBe(true)
+  fireEvent.click(await screen.findByRole('button', { name: '查看 0 个候选源' }))
+  expect(document.body.style.overflow).toBe('hidden')
+  rerender(tree(false))
+  expect(infinite.options.enabled).toBe(false)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.body.style.overflow).not.toBe('hidden')
+  rerender(tree(true))
+  expect(infinite.options.enabled).toBe(true)
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
