@@ -64,3 +64,6 @@
 @media (hover: hover) and (pointer: fine) {
   .workspace-list .article-read-controls > button { min-width: 28px; min-height: 28px; padding: 2px 6px; }
 }
+.workspace-clip-sources summary { padding: 8px 6px; cursor: pointer; font-size: 12px; color: var(--fg-muted); overflow-wrap: anywhere; }
+.workspace-clip-source-selected { color: var(--fg); }
+.workspace-clip-sources[open] { margin-bottom: 12px; }

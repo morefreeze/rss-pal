@@ -1,3 +1,4 @@
+import { useReadingWorkspace } from '../workspace/ReadingWorkspaceContext'
 import { UserTag } from '../api/client'
 
 // Source row aggregated from /api/clip items by EffectiveSource.key.
@@ -36,6 +37,25 @@ export default function ClipTagSidebar({
   selection,
   onSelect,
 }: Props) {
+  const workspace = useReadingWorkspace()
+  const sourceRows = sources.length === 0 ? (
+    <div className="text-muted text-sm" style={{ padding: '4px 8px' }}>
+      暂无来源
+    </div>
+  ) : (
+    sources.map(s => (
+      <button
+        key={s.key}
+        type="button"
+        className={'saved-row' + (isSourceActive(selection, s.key) ? ' active' : '')}
+        onClick={() => onSelect({ kind: 'source', key: s.key, title: s.title })}
+        title={s.title}
+      >
+        <span className="saved-row-label">{s.title}</span>
+        <span className="saved-row-count">{s.count}</span>
+      </button>
+    ))
+  )
   return (
     <aside
       style={{
@@ -46,27 +66,20 @@ export default function ClipTagSidebar({
         overflowY: 'auto',
       }}
     >
-      <div>
-        <div className="saved-section-title">Sources</div>
-        {sources.length === 0 ? (
-          <div className="text-muted text-sm" style={{ padding: '4px 8px' }}>
-            暂无来源
-          </div>
-        ) : (
-          sources.map(s => (
-            <button
-              key={s.key}
-              type="button"
-              className={'saved-row' + (isSourceActive(selection, s.key) ? ' active' : '')}
-              onClick={() => onSelect({ kind: 'source', key: s.key, title: s.title })}
-              title={s.title}
-            >
-              <span className="saved-row-label">{s.title}</span>
-              <span className="saved-row-count">{s.count}</span>
-            </button>
-          ))
-        )}
-      </div>
+      {workspace ? (
+        <details className="workspace-clip-sources">
+          <summary>
+            <span>来源</span>
+            {selection.kind === 'source' && <span className="workspace-clip-source-selected" title={selection.title}> · {selection.title}</span>}
+          </summary>
+          {sourceRows}
+        </details>
+      ) : (
+        <div>
+          <div className="saved-section-title">Sources</div>
+          {sourceRows}
+        </div>
+      )}
 
       <div style={{ marginTop: 12 }}>
         <button
