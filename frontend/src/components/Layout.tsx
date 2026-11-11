@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
@@ -137,7 +138,7 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
             type="button"
             onClick={() => { setOpen(false); onLogout() }}
           >
-            🚪 登出
+            <UiIcon name="logout" /> 登出
           </button>
         </div>
       )}
@@ -168,11 +169,11 @@ export default function Layout({ user, onLogout }: LayoutProps) {
 
   const renderNavLabel = (item: NavItem) => {
     if (item.to !== '/articles' || unreadCount === 0) {
-      return <>{item.icon} {item.label}</>
+      return <><UiIcon name={item.icon} /> {item.label}</>
     }
     return (
       <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        {item.icon} {item.label}
+        <UiIcon name={item.icon} /> {item.label}
         <span className="unread-badge">
           {unreadCount > 99 ? '99+' : unreadCount}
         </span>

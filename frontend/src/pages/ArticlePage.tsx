@@ -1,3 +1,4 @@
+import UiIcon from '../components/UiIcon'
 import { useReadingWorkspace } from '../workspace/ReadingWorkspaceContext'
 import '../components/WorkspaceReader.css'
 import { ArticleSearch, ExcludeArticleSearch, SearchText, useArticleSearchQuery } from '../components/ArticleSearch'
@@ -1349,7 +1350,7 @@ function ArticlePageContent() {
 
         <ArticlePlayerCard article={article} articleAnchorID={primaryVideoAnchorID} />
 
-        <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
+        <div className="article-reader-actions flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
           <button
             type="button"
             className="article-feedback article-feedback--like"
@@ -1379,7 +1380,7 @@ function ArticlePageContent() {
             onClick={handleSave}
             style={saved ? { backgroundColor: '#f59e0b', color: 'white', borderColor: '#f59e0b' } : {}}
           >
-            {saved ? '✓ 已保存' : '⭐ 保存'}
+            {saved ? '✓ 已保存' : <><UiIcon name="bookmark" size={15} /> 保存</>}
           </button>
           {progress?.is_completed ? (
             <button
@@ -1404,7 +1405,7 @@ function ArticlePageContent() {
             title="进入阅读模式 (r)"
             style={{ fontSize: 13 }}
           >
-            📖 阅读模式
+            <UiIcon name="book" size={15} /> 阅读模式
           </button>
           <div className="article-share-shortcuts">
           <button

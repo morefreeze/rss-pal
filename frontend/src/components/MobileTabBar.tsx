@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import MoreSheet from './MoreSheet'
@@ -83,7 +84,7 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
               style={tabStyle(active)}
             >
               <span style={{ fontSize: 22, lineHeight: 1, position: 'relative' }}>
-                {tab.icon}
+                <UiIcon name={tab.icon} size={21} />
                 {tab.showUnread && unreadCount > 0 && (
                   <span
                     className="unread-badge"
@@ -104,7 +105,7 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
           aria-expanded={moreOpen}
           style={tabStyle(moreOpen || ['/history', '/settings', '/stats', '/interests', '/feeds', '/admin'].some(path => location.pathname === path || location.pathname.startsWith(path + '/')))}
         >
-          <span aria-hidden="true" style={{ fontSize: 22, lineHeight: 1 }}>👤</span>
+          <span aria-hidden="true" style={{ fontSize: 22, lineHeight: 1 }}><UiIcon name="user" size={21} /></span>
           <span>更多</span>
         </button>
       </nav>

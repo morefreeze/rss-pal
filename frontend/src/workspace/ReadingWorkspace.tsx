@@ -1,3 +1,4 @@
+import UiIcon from '../components/UiIcon'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import ArticleListPage from '../pages/ArticleListPage'
@@ -117,12 +118,12 @@ export default function ReadingWorkspace({ children, navigation, account, footer
   return <div className={`reading-workspace ${route ? 'workspace-reading' : 'workspace-utility'}${isReader ? ' workspace-has-reader' : ''}${focusMode ? ' workspace-focus' : ''}`} style={{ '--workspace-list-width': `${effectiveListWidth}px` } as CSSProperties}>
     {drawerOpen && <div className="workspace-drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
     <aside ref={drawer} className={`workspace-sidebar${drawerOpen ? ' workspace-sidebar-open' : ''}`} role={bp !== 'desktop' && drawerOpen ? 'dialog' : undefined} aria-modal={bp !== 'desktop' && drawerOpen ? true : undefined} aria-label="导航与阅读范围">
-      <div className="workspace-brand"><Link to="/articles">RSS Pal</Link><button className="btn-ghost btn-sm workspace-drawer-close" aria-label="关闭导航" onClick={() => setDrawerOpen(false)}>✕</button></div>
+      <div className="workspace-brand"><Link to="/articles"><span className="workspace-brand-symbol" aria-hidden="true"><UiIcon name="rss" size={18} /></span>RSS Pal</Link><button className="btn-ghost btn-sm workspace-drawer-close" aria-label="关闭导航" onClick={() => setDrawerOpen(false)}><UiIcon name="close" /></button></div>
       {navigation}
       <div className="workspace-scopes" ref={setSidebarTarget} />
       <div className="workspace-account">{account}</div>
     </aside>
-    <div className="workspace-mobile-header" ref={el => { if (el) el.inert = drawerOpen }}><span className="workspace-wordmark">RSS Pal</span><button className="btn-ghost btn-sm" onClick={openScopes} aria-haspopup="dialog" aria-expanded={drawerOpen}>☰ 导航与筛选</button></div>
+    <div className="workspace-mobile-header" ref={el => { if (el) el.inert = drawerOpen }}><span className="workspace-wordmark">RSS Pal</span><button className="btn-ghost btn-sm" onClick={openScopes} aria-haspopup="dialog" aria-expanded={drawerOpen}><UiIcon name="menu" /> 导航与筛选</button></div>
     {Object.entries(cached).map(([key, saved]) => {
       const active = key === activeKey
       const hidden = !active || (isPhone && isReader) || focusMode
@@ -145,7 +146,7 @@ export default function ReadingWorkspace({ children, navigation, account, footer
       {isReader && <div className="workspace-reader-toolbar"><button className="btn-ghost btn-sm" onClick={closeReader}>← {route?.returnPath === '/history' ? '返回历史' : route?.module === 'briefing' ? '返回本期简报' : '返回列表'}</button><button className="btn-ghost btn-sm workspace-focus-toggle" aria-pressed={focusMode} onClick={() => setFocusMode(value => !value)}>{focusMode ? '退出专注' : '专注阅读'}</button></div>}
       <ReadingWorkspaceContext.Provider value={shared}>
         {(!route || isReader) && <div className="workspace-page">{children}{footer}</div>}
-        {route && !isReader && <><div className="workspace-overview" ref={setOverviewTarget}><div className="workspace-empty-reader"><span className="workspace-empty-mark" aria-hidden="true">▤</span><h2>选择一篇文章</h2><p>在列表中选择文章后，这里显示正文。</p></div></div>{!isPhone && footer}</>}
+        {route && !isReader && <><div className="workspace-overview" ref={setOverviewTarget}><div className="workspace-empty-reader"><span className="workspace-empty-mark" aria-hidden="true"><UiIcon name="book" size={40} /></span><h2>选择一篇文章</h2><p>在列表中选择文章后，这里显示正文。</p></div></div>{!isPhone && footer}</>}
       </ReadingWorkspaceContext.Provider>
     </main>
   </div>

@@ -221,6 +221,12 @@ export default function ArticleCard({
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />
         )}
         <div className="article-card-content" style={{ flex: 1, minWidth: 0 }}>
+          {workspace && <div className="workspace-article-meta">
+            <span>{showSourceTag && effectiveSourceLabel ? (
+              article.source || onSourceFilter ? <ArticleSourceLink article={article} label={effectiveSourceLabel} search={sourceSearch} onNavigate={onSourceFilter} /> : effectiveSourceLabel
+            ) : '文章'}</span>
+            <time>{dateField === 'captured' ? `抓 ${formatDate(article.fetched_at)}` : formatDate(article.published_at)}</time>
+          </div>}
           <div className={`article-card-title-row ${isRead ? 'text-muted' : 'text-bold'}`} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
             <MediaIndicator article={article} onPlay={onPlay} />
             <ArticleReaderLink href={`/articles/${articleId}`} onOpen={handleCardClick} className="article-card-title">
@@ -251,12 +257,12 @@ export default function ArticleCard({
           <NotePreview note={article.capture_note} />
           {article.summary_brief && (
             <div className="article-card-summary text-muted text-sm mt-1">
-              {stripMarkdown(article.summary_brief).slice(0, 120)}...
+              {stripMarkdown(article.summary_brief).slice(0, 160)}{article.summary_brief.length > 160 ? '…' : ''}
             </div>
           )}
-          {(showSourceTag && effectiveSourceLabel) || manualTags.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4 }}>
-              {showSourceTag && effectiveSourceLabel && (
+          {(!workspace && showSourceTag && effectiveSourceLabel) || manualTags.length > 0 ? (
+            <div className="article-card-tags" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4 }}>
+              {!workspace && showSourceTag && effectiveSourceLabel && (
                 article.source || onSourceFilter ? (
                   <ArticleSourceLink
                     article={article}
@@ -273,7 +279,7 @@ export default function ArticleCard({
               ))}
             </div>
           ) : null}
-          <div className="flex-between mt-1">
+          <div className="article-card-reading-meta flex-between mt-1">
             <div className="flex gap-2" style={{ alignItems: 'center' }}>
               <span className="text-muted text-sm">
                 {dateField === 'captured' ? `抓 ${formatDate(article.fetched_at)}` : formatDate(article.published_at)}

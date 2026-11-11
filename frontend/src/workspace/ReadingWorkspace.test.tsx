@@ -76,7 +76,7 @@ describe('ReadingWorkspace', () => {
   it('provides keyboard-close and focus restoration for tablet scopes', () => {
     viewport(900)
     harness()
-    const trigger = screen.getByRole('button', { name: '☰ 导航与筛选' })
+    const trigger = screen.getByRole('button', { name: '导航与筛选' })
     trigger.focus()
     fireEvent.click(trigger)
     expect(screen.getByRole('dialog', { name: '导航与阅读范围' })).toBeTruthy()

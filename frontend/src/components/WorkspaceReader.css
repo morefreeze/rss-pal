@@ -11,3 +11,24 @@
   .workspace-article-reader > .card { margin-bottom: 24px; }
   .workspace-article-reader > .card > h2 { font-size: 25px; }
 }
+
+.workspace-article-reader { max-width: 720px; }
+.workspace-article-reader > .card > h2 { font-family: var(--font-sans); font-size: clamp(24px,2.2vw,30px); line-height: 1.45; font-weight: 650; margin-block: 26px 14px; letter-spacing: -.025em; }
+.workspace-article-reader :is(button.secondary,.btn-ghost,select) { font-size: 12px; background: transparent; border-color: var(--border); color: var(--fg-muted); }
+.workspace-article-reader button.secondary:hover { color: var(--fg); background: var(--surface-hover); }
+.workspace-article-reader > .card > .text-muted { font-size: 12px; line-height: 1.7; }
+.workspace-article-reader > .article-summary-section { margin-top: 24px; padding-block: 18px; }
+.workspace-article-reader .article-feedback { background: transparent; border-color: var(--border); }
+.workspace-article-reader .article-note-add { margin-block: 12px; }
+.workspace-article-reader .summary-controls > button:not(.workspace-summary-toggle) { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
+.workspace-article-reader .markdown-body { line-height: 1.9; }
+@media (max-width: 767px) {
+  .workspace-article-reader > .card > h2 { font-size: 25px; margin-top: 22px; }
+  .workspace-article-reader button { min-height: 44px; }
+}
+.reading-workspace .workspace-article-reader .markdown-body :is(h1,h2,h3,h4,h5) { font-family: var(--font-sans); margin-top: 24px; }
+.reading-workspace .workspace-article-reader .markdown-body p { margin-block: 12px; }
+.workspace-article-reader .article-reader-actions { gap: 6px; padding-top: 6px; }
+.workspace-article-reader .article-reader-actions button { font-weight: 400; }
+.workspace-article-reader .article-reader-actions .ui-icon { margin-right: 3px; }
+.workspace-reader-toolbar .btn-ghost { border-color: transparent; font-weight: 400; }

@@ -21,7 +21,7 @@ export default function ReadingMeta({ wordCount, readingMinutes, mediaType, medi
   if (!hasText && !video) return null
   return (
     <span className={className} style={{ color: 'var(--fg-muted)', fontSize: 12 }}>
-      {hasText && <span>📖 {wordCount!.toLocaleString('zh-CN')} 字 · {readingMinutes && readingMinutes > 0 ? readingMinutes : 1} 分钟</span>}
+      {hasText && <span><span className="reading-meta-symbol" aria-hidden="true">📖 </span>{wordCount!.toLocaleString('zh-CN')} 字 · {readingMinutes && readingMinutes > 0 ? readingMinutes : 1} 分钟</span>}
       {hasText && video && ' · '}
       {video && <span>{formatVideoDuration(mediaDurationSeconds)}</span>}
     </span>

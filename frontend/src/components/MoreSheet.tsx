@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
@@ -92,7 +93,7 @@ export default function MoreSheet({ open, onClose, onLogout, isAdmin = false, us
             margin: '8px auto 12px',
           }}
         />
-        <button className="btn-ghost btn-sm" onClick={onClose} aria-label="关闭更多菜单" style={{ float: 'right' }}>✕</button>
+        <button className="btn-ghost btn-sm" onClick={onClose} aria-label="关闭更多菜单" style={{ float: 'right' }}><UiIcon name="close" /></button>
         {user && <div style={{padding:'8px 16px 16px', borderBottom:'1px solid var(--border)'}}><AccountDisplay user={user} /></div>}
         {items.map(item => (
           <button
@@ -114,7 +115,7 @@ export default function MoreSheet({ open, onClose, onLogout, isAdmin = false, us
               textAlign: 'left',
             }}
           >
-            <span style={{ fontSize: 20, width: 24, textAlign: 'center' }}>{item.icon}</span>
+            <span style={{ fontSize: 20, width: 24, textAlign: 'center' }}><UiIcon name={item.icon} /></span>
             <span>{item.label}</span>
           </button>
         ))}

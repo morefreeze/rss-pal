@@ -13,23 +13,23 @@ describe('MobileTabBar', () => {
 
     const nav = screen.getByRole('navigation', { name: '主导航' })
     expect(Array.from(nav.querySelectorAll('a, button')).map(item => item.textContent?.trim())).toEqual([
-      '📰文章',
-      '⭐网摘',
-      '🔭探索',
-      '📅简报',
-      '👤更多',
+      '文章',
+      '网摘',
+      '探索',
+      '简报',
+      '更多',
     ])
 
     fireEvent.click(within(nav).getByRole('button', { name: '更多' }))
     const sheet = screen.getByRole('dialog', { name: '更多' })
-    expect(within(sheet).getAllByRole('button').map(item => item.textContent?.trim())).toEqual([
-      '✕',
-      '🕘历史记录',
-      '📡订阅管理',
-      '💡兴趣',
-      '📊统计',
-      '⚙️设置',
-      '🚪登出',
+    expect(within(sheet).getAllByRole('button').map(item => item.getAttribute('aria-label') || item.textContent?.trim())).toEqual([
+      '关闭更多菜单',
+      '历史记录',
+      '订阅管理',
+      '兴趣',
+      '统计',
+      '设置',
+      '登出',
     ])
   })
 })

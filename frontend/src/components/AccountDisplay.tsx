@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useEffect, useState } from 'react'
 export type DisplayAccount = {
   username: string
@@ -20,7 +21,7 @@ export default function AccountDisplay({user, label}: {user: DisplayAccount; lab
   useEffect(() => setFailed(false), [avatar])
   const name = user.nickname || user.qq_nickname || user.username
   return <span className="account-display">
-    {avatar && !failed ? <img src={avatar} width={24} height={24} alt="QQ 头像" referrerPolicy="no-referrer" loading="lazy" decoding="async" onError={() => setFailed(true)} /> : <span aria-hidden="true">👤</span>}
+    {avatar && !failed ? <img src={avatar} width={24} height={24} alt="QQ 头像" referrerPolicy="no-referrer" loading="lazy" decoding="async" onError={() => setFailed(true)} /> : <span aria-hidden="true"><UiIcon name="user" size={21} /></span>}
     <span className="account-display-name">{label ?? name}{!label && user.nickname && user.qq_nickname && user.nickname !== user.qq_nickname && <span className="text-muted">（QQ：{user.qq_nickname}）</span>}</span>
   </span>
 }
