@@ -1437,12 +1437,12 @@ function ArticlePageContent() {
         }
         return null
       })()}
-      {article.processing_state === 'queued' && (
+      {(article.processing_state === 'queued' || (article.processing_state === 'processing' && article.parent_article_id != null && !article.content)) && (
         <div role="status" className="p-3 rounded-md mb-4 text-sm" style={{ border: '1px solid var(--border)', color: 'var(--fg-muted)' }}>
           已加入抓取队列，后台完成后正文会自动显示。
         </div>
       )}
-      {article.processing_state === 'processing' && (
+      {article.processing_state === 'processing' && article.parent_article_id == null && (
         <div
           style={{
             padding: '12px',
@@ -1476,10 +1476,12 @@ function ArticlePageContent() {
             className="px-2 py-1 text-xs rounded"
             style={{ border: '1px solid var(--border)', color: 'var(--fg)' }}
             onClick={async () => {
+              const generation = loadGenerationRef.current
               try {
-                invalidateArticleDetail(article.id)
                 await expandLinkSetChild(article.id)
+                invalidateArticleDetail(article.id)
                 const data = await fetchDetailForPage(article.id)
+                if (generation !== loadGenerationRef.current) return
                 setArticle(data.article)
                 setLinkSetChildren(data.children ?? null)
                 setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])

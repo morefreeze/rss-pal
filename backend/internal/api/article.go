@@ -654,8 +654,7 @@ func (h *ArticleHandler) RecordClick(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
-// ExpandChild transitions a stub link_set child to 'processing' so the worker
-// picks it up on its next cycle. 4xx if the article is not a stub.
+// ExpandChild queues a stub or failed link_set child for the worker's next cycle.
 func (h *ArticleHandler) ExpandChild(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -668,16 +667,16 @@ func (h *ArticleHandler) ExpandChild(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found"})
 		return
 	}
-	n, err := articleRepo.UpdateProcessingState(id, "stub", "processing")
+	n, err := articleRepo.QueueLinkSetChild(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if n == 0 {
-		c.JSON(http.StatusConflict, gin.H{"error": "文章不是 stub 状态"})
+		c.JSON(http.StatusConflict, gin.H{"error": "文章当前无法加入抓取队列"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"article_id": id, "state": "processing"})
+	jsonAfterCommit(c, http.StatusOK, gin.H{"article_id": id, "state": "processing"})
 }
 
 func (h *ArticleHandler) GetLinkSetRecommended(c *gin.Context) {

@@ -1596,10 +1596,13 @@ func (r *ArticleRepository) GetChildURLs(parentID int) ([]string, error) {
 	return urls, rows.Err()
 }
 
-// UpdateProcessingState transitions an article's processing_state.
-// Returns rowsAffected so callers can detect "already in target state".
-func (r *ArticleRepository) UpdateProcessingState(id int, from, to string) (int64, error) {
-	res, err := r.db.Exec(`UPDATE articles SET processing_state = $1 WHERE id = $2 AND processing_state = $3`, to, id, from)
+// QueueLinkSetChild gives a stub or failed child a fresh set of fetch attempts.
+func (r *ArticleRepository) QueueLinkSetChild(id int) (int64, error) {
+	res, err := r.db.Exec(`
+		UPDATE articles
+		SET processing_state = 'processing', refetch_attempts = 0, processing_error = ''
+		WHERE id = $1 AND parent_article_id IS NOT NULL AND processing_state IN ('stub', 'failed')
+	`, id)
 	if err != nil {
 		return 0, err
 	}
