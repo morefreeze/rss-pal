@@ -105,3 +105,6 @@
 .reading-workspace .workspace-list .explore-article-card__excerpt { font-size: 12px; line-height: 1.65; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .reading-workspace .workspace-list .explore-source-chip { font-size: 11px; padding: 0; background: transparent; color: var(--fg-muted); font-weight: 400; }
 .reading-workspace .workspace-list .explore-article-card__source-row .text-sm { font-size: 10px; }
+/* Long feed names must not widen the grid track beyond the sidebar. */
+.reading-workspace .workspace-source-list { grid-template-columns: minmax(0,1fr); }
+.reading-workspace .workspace-scopes .saved-row { min-width: 0; max-width: 100%; }
