@@ -155,7 +155,7 @@ function SearchArticleRow({
       style={{
         display: 'block',
         cursor: 'pointer',
-        outline: isFocused ? '2px solid var(--accent)' : 'none',
+        outline: isFocused && !workspace?.isReaderOpen ? '2px solid var(--accent)' : 'none',
         outlineOffset: -2,
       }}
       onClick={openResult}
@@ -432,7 +432,7 @@ export default function ArticleListPage() {
     } catch {}
   }, [unreadOnly, savedOnly, grouped, tagFilter])
   const [tagSidebarData, setTagSidebarData] = useState<TagSidebarData | null>(null)
-  const [focusedIdx, setFocusedIdx] = useState<number>(-1)
+  const [focusedArticleId, setFocusedArticleId] = useState<number | null>(null)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Mirrors the embedded ClipPage's tag/source selection so the toolbar
   // (mark-all-read in particular) acts on the same subset the user sees.
@@ -615,7 +615,7 @@ export default function ArticleListPage() {
       return
     }
     setOffset(0)
-    setFocusedIdx(-1)
+    setFocusedArticleId(null)
     loadArticles(0, true)
   }, [selectedFeed, unreadOnly, savedOnly, isClippingMode, grouped, sortField, sortDir, tagFilter])
 
@@ -916,35 +916,27 @@ export default function ArticleListPage() {
         toggleSidebar()
         return
       }
-      if (e.key === 'j' || e.key === 'ArrowDown') {
+      if (['j', 'ArrowDown', 'k', 'ArrowUp'].includes(e.key)) {
         e.preventDefault()
-        setFocusedIdx(i => {
-          const next = Math.min(i + 1, displayedArticles.length - 1)
-          // scroll into view after state update
-          setTimeout(() => {
-            const cards = listRootRef.current?.querySelectorAll('[data-article-card]') ?? []
-            cards[next]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-          }, 0)
-          return next
-        })
-      } else if (e.key === 'k' || e.key === 'ArrowUp') {
-        e.preventDefault()
-        setFocusedIdx(i => {
-          const prev = Math.max(i - 1, 0)
-          setTimeout(() => {
-            const cards = listRootRef.current?.querySelectorAll('[data-article-card]') ?? []
-            cards[prev]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-          }, 0)
-          return prev
-        })
-      } else if ((e.key === 'o' || e.key === 'Enter') && focusedIdx >= 0) {
-        const article = displayedArticles[focusedIdx]
+        // Rows can disappear from the unread list while the workspace stays
+        // mounted. Resolve the cursor by identity against the current order.
+        const current = displayedArticles.findIndex(article => article.id === focusedArticleId)
+        const forward = e.key === 'j' || e.key === 'ArrowDown'
+        const index = forward ? Math.min(current + 1, displayedArticles.length - 1) : Math.max(current - 1, 0)
+        const article = displayedArticles[index]
+        setFocusedArticleId(article?.id ?? null)
+        if (article) setTimeout(() => {
+          listRootRef.current?.querySelector(`[data-article-card][data-article-id="${article.id}"]`)
+            ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        }, 0)
+      } else if ((e.key === 'o' || e.key === 'Enter') && focusedArticleId !== null) {
+        const article = displayedArticles.find(article => article.id === focusedArticleId)
         if (article) openArticle(article.id, article)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [articles, searchResults, searchQuery, unreadOnly, sessionReadIds, focusedIdx, toggleSidebar, workspace?.isListVisible, workspace?.isReaderOpen, isClippingMode])
+  }, [articles, searchResults, searchQuery, unreadOnly, sessionReadIds, focusedArticleId, toggleSidebar, workspace?.isListVisible, workspace?.isReaderOpen, workspace?.selectedArticleId, isClippingMode])
 
   const isRead = (article: ArticleListItem | Article) => article.is_read || sessionReadIds.has(article.id)
 
@@ -1278,14 +1270,14 @@ export default function ArticleListPage() {
                   key={article.id}
                   article={article}
                   isRead={isRead(article)}
-                  isFocused={focusedIdx === idx}
+                  isFocused={focusedArticleId === article.id}
                   idx={idx}
                   onPlay={player.playArticle}
                   formatDate={formatDate}
                   stripMarkdown={stripMarkdown}
                   searchQuery={searchQuery}
                   onOpen={openArticle}
-                  onFocus={setFocusedIdx}
+                  onFocus={() => setFocusedArticleId(article.id)}
                   sourceSearch={sourceSearch}
                   onSourceFilter={handleSourceFilter}
                 />
@@ -1348,14 +1340,14 @@ export default function ArticleListPage() {
               article={article}
               manualTags={article.manual_tags || []}
               isRead={isRead(article)}
-              isFocused={focusedIdx === idx}
+              isFocused={focusedArticleId === article.id}
               idx={idx}
               prefetchRef={idx === prefetchIdx ? loadMoreRef : undefined}
               onPlay={player.playArticle}
               formatDate={formatDate}
               stripMarkdown={stripMarkdown}
               onOpen={openArticle}
-              onFocus={setFocusedIdx}
+              onFocus={() => setFocusedArticleId(article.id)}
               onPrefetch={promoteArticlePrefetch}
               observeRef={registerArticlePrefetchCard}
               onMarkRead={direction => { void handleMarkRead(article.id, direction) }}

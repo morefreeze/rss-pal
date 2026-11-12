@@ -175,7 +175,7 @@ export default function ArticleCard({
           display: 'block',
           opacity: isRead ? 0.6 : 1,
           cursor: 'pointer',
-          outline: isFocused ? '2px solid var(--accent)' : 'none',
+          outline: isFocused && !workspace?.isReaderOpen ? '2px solid var(--accent)' : 'none',
           outlineOffset: -2,
         }}
         onClick={event => {
@@ -208,7 +208,7 @@ export default function ArticleCard({
         display: 'block',
         opacity: isRead ? 0.6 : 1,
         cursor: 'pointer',
-        outline: isFocused ? '2px solid var(--accent)' : 'none',
+        outline: isFocused && !workspace?.isReaderOpen ? '2px solid var(--accent)' : 'none',
         outlineOffset: -2,
       }}
       onClick={handleCardClick}

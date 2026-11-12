@@ -11,6 +11,8 @@ vi.mock('../src/pages/ClipPage', () => ({ default: ({ restrictToFeedId }: { rest
 vi.mock('../src/hooks/useInfiniteScrollTrigger', () => ({ useInfiniteScrollTrigger: () => {} }))
 vi.mock('../src/hooks/useArticleDetailPrefetch', () => ({ useArticleDetailPrefetch: () => ({ promote: () => {}, registerCard: () => {} }) }))
 
+vi.mock('../src/hooks/useExposureTracking', () => ({ useExposureTracking: () => ({ current: null }), reportClick: vi.fn() }))
+
 const closeReader = vi.fn()
 function context(overrides: Partial<ReadingWorkspaceValue> = {}): ReadingWorkspaceValue {
   return {
@@ -62,4 +64,70 @@ it('applies the legacy saved URL to a retained list and consumes the redirect pa
   expect(screen.getByTestId('location').textContent).toBe('/articles')
   expect(localStorage.getItem('savedOnly')).toBe('true')
   expect(closeReader).not.toHaveBeenCalled()
+})
+
+const focusRows = [1, 2, 3].map(id => ({ id, feed_id: 1, title: `Focus article ${id}`, url: `https://example.com/${id}`, published_at: null, fetched_at: '2026-11-12T00:00:00Z', summary_brief: '', manual_tags: [] }))
+function focusCard(id: number) { return screen.getByRole('link', { name: `Focus article ${id}`, exact: true }).closest<HTMLElement>('[data-article-card]')! }
+function focusHarness(value: ReadingWorkspaceValue) {
+  return <MemoryRouter initialEntries={['/articles']}><ReadingWorkspaceContext.Provider value={value}><LocationProbe /><ArticleListPage /></ReadingWorkspaceContext.Provider></MemoryRouter>
+}
+it('does not transfer the clicked row outline when the previous read article leaves the retained list', async () => {
+  localStorage.setItem('unreadOnly', 'true')
+  sessionStorage.setItem('readArticles', '[1]')
+  api.getArticles.mockResolvedValue(focusRows)
+  const view = render(focusHarness(context({ isReaderOpen: true, selectedArticleId: 1 })))
+  await screen.findByRole('link', { name: 'Focus article 2', exact: true })
+  fireEvent.click(screen.getByRole('link', { name: 'Focus article 2', exact: true }))
+  view.rerender(focusHarness(context({ isReaderOpen: true, selectedArticleId: 2 })))
+  await waitFor(() => expect(screen.queryByRole('link', { name: 'Focus article 1', exact: true })).toBeNull())
+  expect(focusCard(2).dataset.selected).toBe('true')
+  expect(focusCard(3).style.outline).toBe('none')
+})
+it('keeps keyboard focus on the article identity when an earlier unread row disappears', async () => {
+  localStorage.setItem('unreadOnly', 'true')
+  api.getArticles.mockResolvedValue(focusRows)
+  HTMLElement.prototype.scrollIntoView = vi.fn()
+  render(focusHarness(context()))
+  await screen.findByRole('link', { name: 'Focus article 2', exact: true })
+  fireEvent.keyDown(window, { key: 'j' })
+  fireEvent.keyDown(window, { key: 'j' })
+  expect(focusCard(2).style.outline).toContain('2px')
+  await act(async () => {
+    sessionStorage.setItem('readArticles', '[1]')
+    window.dispatchEvent(new Event('refresh-unread'))
+  })
+  expect(focusCard(2).style.outline).toContain('2px')
+  expect(focusCard(3).style.outline).toBe('none')
+  fireEvent.keyDown(window, { key: 'o' })
+  expect(screen.getByTestId('location').textContent).toBe('/articles/2')
+})
+it('does not open the replacement row after the focused article is filtered out', async () => {
+  localStorage.setItem('unreadOnly', 'true')
+  api.getArticles.mockResolvedValue(focusRows)
+  HTMLElement.prototype.scrollIntoView = vi.fn()
+  render(focusHarness(context()))
+  await screen.findByRole('link', { name: 'Focus article 1', exact: true })
+  fireEvent.keyDown(window, { key: 'j' })
+  await act(async () => {
+    sessionStorage.setItem('readArticles', '[1]')
+    window.dispatchEvent(new Event('refresh-unread'))
+  })
+  expect(focusCard(2).style.outline).toBe('none')
+  fireEvent.keyDown(window, { key: 'o' })
+  expect(screen.getByTestId('location').textContent).toBe('/articles')
+  fireEvent.keyDown(window, { key: 'j' })
+  expect(focusCard(2).style.outline).toContain('2px')
+  fireEvent.keyDown(window, { key: 'j' })
+  expect(focusCard(3).style.outline).toContain('2px')
+  fireEvent.keyDown(window, { key: 'k' })
+  expect(focusCard(2).style.outline).toContain('2px')
+})
+it('uses only the reading selection while the reader advances to another article', async () => {
+  api.getArticles.mockResolvedValue(focusRows)
+  const view = render(focusHarness(context()))
+  await screen.findByRole('link', { name: 'Focus article 1', exact: true })
+  fireEvent.click(screen.getByRole('link', { name: 'Focus article 1', exact: true }))
+  view.rerender(focusHarness(context({ isReaderOpen: true, selectedArticleId: 2 })))
+  expect(focusCard(1).style.outline).toBe('none')
+  expect(focusCard(2).dataset.selected).toBe('true')
 })
