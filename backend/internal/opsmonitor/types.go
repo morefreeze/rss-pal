@@ -109,6 +109,8 @@ type Response struct {
 	Hours                    int               `json:"hours"`
 	Status                   string            `json:"status"`
 	RetentionDays            int               `json:"retention_days"`
+	NewUsers                 int64             `json:"new_users"`
+	Traffic                  *Traffic          `json:"traffic,omitempty"`
 	Registration             Registration      `json:"registration"`
 	Captcha                  Captcha           `json:"captcha"`
 	LimitTotal               int               `json:"limit_total"`

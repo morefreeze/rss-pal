@@ -217,6 +217,8 @@ func main() {
 	router.GET("/api/internal/health/worker", systemHealthHandler.Worker)
 
 	// Public routes
+	router.POST("/api/traffic/page-view", api.NewShareRateLimiter(120, time.Minute, 4096, time.Now),
+		api.NewSiteTrafficHandler(adminDB, cfg.Auth.PublicOrigin).Post)
 	authBudgetRepo := repository.NewAuthRateLimitRepository(db)
 	authGuard := api.NewAuthAbuseGuard(authBudgetRepo, cfg.JWT.Secret)
 	authHandler.SetRegistrationBudget(authGuard)

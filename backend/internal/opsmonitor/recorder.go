@@ -160,4 +160,8 @@ func (r *Recorder) cleanup() {
 	if err != nil {
 		log.Print("operations monitoring retention unavailable")
 	}
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM site_page_views WHERE event_id IN
+		(SELECT event_id FROM site_page_views WHERE at < now()-interval '30 days' ORDER BY at LIMIT 10000)`); err != nil {
+		log.Print("site traffic retention unavailable")
+	}
 }

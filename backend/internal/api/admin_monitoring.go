@@ -33,8 +33,8 @@ func (h *AdminMonitoringHandler) Get(c *gin.Context) {
 		return
 	}
 	hours, err := strconv.Atoi(c.DefaultQuery("hours", "24"))
-	if err != nil || (hours != 1 && hours != 24 && hours != 168) {
-		c.JSON(400, gin.H{"error": "hours must be 1, 24 or 168"})
+	if err != nil || !opsmonitor.ValidWindow(hours) {
+		c.JSON(400, gin.H{"error": "hours must be 1, 3, 6, 24 or 168"})
 		return
 	}
 	before, err := strconv.ParseInt(c.DefaultQuery("before_id", "0"), 10, 64)

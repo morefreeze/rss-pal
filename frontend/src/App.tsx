@@ -31,6 +31,7 @@ import Layout from './components/Layout'
 import AdminLayout from './components/AdminLayout'
 import AdminStatusPage from './pages/AdminStatusPage'
 import RoutePageTitle from './components/RoutePageTitle'
+import SiteTraffic from './components/SiteTraffic'
 import AccountOnboarding from './components/AccountOnboarding'
 
 export interface User {
@@ -176,6 +177,7 @@ export function MainSiteApp() {
   return (
     <BrowserRouter>
       <RoutePageTitle />
+      <SiteTraffic />
       <AppRoutes user={user} onLogin={handleLogin} onLogout={handleLogout} onboardingReady={onboardingReady} />
     </BrowserRouter>
   )

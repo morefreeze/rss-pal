@@ -11,6 +11,12 @@ export interface MonitoringResponse {
  explore_source_states?: Record<string, number>
   generated_at: string; collection_available_since: string; window_start: string; window_end: string
   hours: number; status: 'available' | 'partial' | 'no_data'; retention_days: number
+  new_users?: number
+  traffic?: {
+    collection_since: string; partial: boolean; page_views: number; visitors: number
+    time_series: { at: string; page_views: number; visitors: number }[]
+    by_source: { source: string; page_views: number }[]
+  }
   registration: { attempts: number; success: number; failed: number }
   captcha: { success: number; rejected: number; unavailable: number }
   limit_total: number

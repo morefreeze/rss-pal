@@ -31,3 +31,6 @@
 .monitor-legend { display:flex; flex-wrap:wrap; gap:12px; font-size:12px; }
 .monitor-legend span { display:inline-flex; align-items:center; gap:5px; }
 .monitor-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; }
+
+.monitor-traffic-values { display: flex; flex-wrap: wrap; gap: 12px 36px; margin: 0 0 12px; }
+.monitor-traffic-values dd { margin: 2px 0 0; font-weight: 700; }

@@ -143,3 +143,22 @@ it('额度耗尽显示恢复时间而非重复拦截次数', async () => {
  expect(screen.getByText(/订阅抓取.*用户 #1.*10,000.*10,000/)).toBeTruthy()
  expect(screen.getByText(/恢复时间/)).toBeTruthy()
 })
+
+it('展示按浏览器去重的流量和实际新增用户，并支持 3／6 小时窗口', async () => {
+  api.getAdminMonitoring.mockResolvedValue({
+    ...snapshot,
+    new_users: 4,
+    traffic: {
+      collection_since: '2026-09-16T08:00:00Z', partial: true, page_views: 27, visitors: 8,
+      time_series: [{ at: '2026-09-16T09:00:00Z', page_views: 27, visitors: 8 }],
+      by_source: [{ source: 'campaign', page_views: 9 }],
+    },
+  })
+  render(<AdminMonitoringPage user={{ is_admin: true }} />)
+  await screen.findByText('页面访问量')
+  expect(screen.getByText('独立访客')).toBeTruthy()
+  expect(screen.getByText('新增用户')).toBeTruthy()
+  expect(screen.getByText('仅覆盖采集开始后的流量')).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('统计范围'), { target: { value: '6' } })
+  await waitFor(() => expect(api.getAdminMonitoring).toHaveBeenLastCalledWith(6, undefined, expect.any(AbortSignal)))
+})

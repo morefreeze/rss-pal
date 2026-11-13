@@ -3,6 +3,7 @@ import { getAdminMonitoring, type MonitoringResponse } from '../api/monitoring'
 import './AdminMonitoringPage.css'
 
 const labels: Record<string, string> = {
+  direct: '直接访问', internal: '站内跳转', external: '外部引荐', campaign: '带推广参数',
   register: '注册', registration: '注册', login: '登录', refresh: '登录续期', captcha: '验证码',
   success: '成功', rejected: '未通过', unavailable: '服务不可用', invalid: '无效请求',
   limit: '限流', failed: '失败', network: '来源网络频率限制', account: '账号频率限制', global: '全局频率限制',
@@ -20,6 +21,15 @@ const when = (value?: string | null) => value ? new Date(value).toLocaleString('
 const number = (value?: number | null) => value == null ? '不可用' : value.toLocaleString('zh-CN')
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`
 const amount = (value: number | null) => value == null ? '未配置单价' : `¥${value.toFixed(2)}`
+const tokensPerHour = (data: MonitoringResponse) => {
+  const costs = data.token_cost
+  if (!costs?.by_model.length) return null
+  const start = Math.max(Date.parse(costs.collection_since), Date.parse(data.window_start))
+  const end = Date.parse(data.window_end)
+  if (!(end > start)) return null
+  const tokens = costs.by_model.reduce((sum, model) => sum + model.input_tokens + model.output_tokens, 0)
+  return { rate: Math.round(tokens * 3_600_000 / (end - start)), partial: start > Date.parse(data.window_start) || costs.by_model.some(model => model.missing_usage > 0) }
+}
 const usd = (value?: number | null) => value == null ? '暂无可计费用量' : `$${value.toFixed(6)}`
 const account = (id: number) => id > 0 ? `用户 #${id}` : '系统／未登录'
 function alertValue(code: string, value: number): string {
@@ -80,16 +90,17 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
 
   if (!isAdmin) return <div className="card">仅管理员可访问运行监控</div>
   const hasEvents = data && data.status !== 'no_data'
+  const tokenRate = data && tokensPerHour(data)
   const attempts = data?.registration.attempts || 0
   const captchaTotal = data ? data.captcha.success + data.captcha.rejected + data.captcha.unavailable : 0
   const trendMax = Math.max(1, ...(data?.time_series || []).map(p => p.registration_success + p.registration_failed + p.captcha_rejected + p.captcha_unavailable + p.limit_denied))
 
   return <div className="admin-monitoring">
     <header className="monitor-heading">
-      <div><h2>运行监控</h2><p className="text-muted">注册、验证码、限流、积压与成本风险</p></div>
+      <div><h2>运行监控</h2><p className="text-muted">流量、注册、限流、积压与模型用量</p></div>
       <div className="monitor-controls">
         <label>统计范围 <select aria-label="统计范围" value={hours} onChange={e => { setHours(Number(e.target.value)); setBeforeID(undefined) }}>
-          <option value={1}>最近 1 小时</option><option value={24}>最近 24 小时</option><option value={168}>最近 7 天</option>
+          <option value={1}>最近 1 小时</option><option value={3}>最近 3 小时</option><option value={6}>最近 6 小时</option><option value={24}>最近 24 小时</option><option value={168}>最近 7 天</option>
         </select></label>
         <button disabled={loading} onClick={() => setRefresh(v => v + 1)}>刷新</button>
       </div>
@@ -108,19 +119,37 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
       </section>
       {!!data.quota_exhaustions?.length && <section className="card monitor-section"><h3>额度等待恢复</h3><p className="text-muted text-sm">日额度耗尽，恢复后可继续执行；重复被拦截的次数不代表新的故障。</p>{data.quota_exhaustions.map(q => <div className="monitor-queue" key={`${q.task_type}:${q.user_id}:${q.reason}`}><p>{label(q.task_type)} · {q.reason === 'global_daily' ? '全站' : account(q.user_id)} · {number(q.used)} / {number(q.limit)}</p><small>恢复时间：{when(q.retry_at)}</small></div>)}</section>}
       <div className="monitor-cards">
-        <section className="card"><h3>注册</h3><strong className="monitor-value">{hasEvents ? number(data.registration.success) : '—'}</strong><p>成功／尝试 {hasEvents ? number(attempts) : '—'}</p><small>失败率 {attempts ? percent(data.registration.failed / attempts) : '尚无数据'}</small></section>
+        <section className="card"><h3>新增用户</h3><strong className="monitor-value">{number(data.new_users)}</strong><p>所选时间段内创建的账号</p><small>注册相关请求失败率 {attempts ? percent(data.registration.failed / attempts) : '尚无数据'}</small></section>
         <section className="card"><h3>验证码服务故障</h3><strong className="monitor-value">{hasEvents ? number(data.captcha.unavailable) : '—'}</strong><p>未通过验证 {hasEvents ? number(data.captcha.rejected) : '—'}</p><small>服务故障率 {captchaTotal ? percent(data.captcha.unavailable / captchaTotal) : '尚无数据'}</small></section>
         <section className="card"><h3>限流拦截</h3><strong className="monitor-value">{hasEvents ? number(data.limit_total) : '—'}</strong><p>所选时间段内</p><small>包括认证和任务额度限制</small></section>
         <section className="card"><h3>今日 token 估算成本</h3><strong className="monitor-value monitor-money">{usd(data.token_cost?.estimated_today)}</strong><p>USD · 按实际 token 与公开单价估算</p><small>UTC 日界线 · 非 Coding 套餐账单</small>{!!data.token_cost?.today_missing && <p>今日 {number(data.token_cost.today_missing)} 次请求缺少用量或单价，合计不完整。</p>}</section>
       </div>
-      <section className="card monitor-section"><h3>事件趋势</h3><p className="text-muted text-sm">注册结果、验证码拒绝／故障、限流事件；同一请求可能产生多类事件。</p>
+      <section className="card monitor-section" aria-labelledby="monitor-traffic">
+        <h3 id="monitor-traffic">网站流量</h3>
+        {data.traffic ? <>
+          <dl className="monitor-traffic-values">
+            <div><dt>页面访问量</dt><dd className="monitor-value">{number(data.traffic.page_views)}</dd></div>
+            <div><dt>独立访客</dt><dd className="monitor-value">{number(data.traffic.visitors)}</dd></div>
+          </dl>
+          <p className="text-muted text-sm">主站页面 · 按匿名浏览器标识去重 · 采集开始于 {when(data.traffic.collection_since)}</p>
+          {data.traffic.partial && <p className="text-muted text-sm">仅覆盖采集开始后的流量</p>}
+          {!!data.traffic.by_source.length && <p className="text-sm">{data.traffic.by_source.map(row => `${label(row.source)} ${number(row.page_views)}`).join(' · ')}</p>}
+          {!!data.traffic.time_series.length && <details>
+            <summary>查看流量趋势</summary>
+            <Table headers={['时间', '访问量', '去重访客']}>{data.traffic.time_series.map(point => <tr key={point.at}>
+              <td>{when(point.at)}</td><td>{number(point.page_views)}</td><td>{number(point.visitors)}</td>
+            </tr>)}</Table>
+          </details>}
+        </> : <p className="text-muted">流量统计暂不可用</p>}
+      </section>
+      <section className="card monitor-section"><h3>事件趋势</h3><p className="text-muted text-sm">注册相关请求结果、验证码拒绝／故障、限流事件；同一请求可能产生多类事件。</p>
         {!data.time_series.length ? <p>尚无数据</p> : <>
           <div className="monitor-trend" role="img" aria-label="事件数量趋势，详细数据见下方表格">{data.time_series.map(p => {
             const parts = [p.registration_success, p.registration_failed, p.captcha_rejected, p.captcha_unavailable, p.limit_denied]
             return <div className="monitor-bar" key={p.at} title={`${when(p.at)}：${parts.reduce((a,b) => a+b,0)} 个事件`}>{parts.map((n,i) => <span key={i} className={`series-${i}`} style={{ height: `${100*n/trendMax}%` }} />)}</div>
           })}</div>
-          <p className="monitor-legend">{['注册成功', '注册失败', '验证码未通过', '验证码故障', '限流'].map((name, i) => <span key={name}><i className={`series-${i}`} />{name}</span>)}</p>
-          <details><summary>查看趋势明细</summary><Table headers={['时间', '注册成功', '注册失败', '验证码未通过', '验证码故障', '限流']}>{data.time_series.map(p => <tr key={p.at}><td>{when(p.at)}</td><td>{p.registration_success}</td><td>{p.registration_failed}</td><td>{p.captcha_rejected}</td><td>{p.captcha_unavailable}</td><td>{p.limit_denied}</td></tr>)}</Table></details>
+          <p className="monitor-legend">{['注册请求成功', '注册请求失败', '验证码未通过', '验证码故障', '限流'].map((name, i) => <span key={name}><i className={`series-${i}`} />{name}</span>)}</p>
+          <details><summary>查看趋势明细</summary><Table headers={['时间', '注册请求成功', '注册请求失败', '验证码未通过', '验证码故障', '限流']}>{data.time_series.map(p => <tr key={p.at}><td>{when(p.at)}</td><td>{p.registration_success}</td><td>{p.registration_failed}</td><td>{p.captcha_rejected}</td><td>{p.captcha_unavailable}</td><td>{p.limit_denied}</td></tr>)}</Table></details>
         </>}
       </section>
       <section className="card monitor-section"><h3>故障与限流分类</h3>{!data.groups.length ? <p className="text-muted">所选时段尚无记录</p> : <Table headers={['类型', '原因', '任务', '账号', '次数']}>{data.groups.map((g,i) => <tr key={i}><td>{label(g.kind)}</td><td>{label(g.reason)}</td><td>{label(g.task_type)}</td><td>{account(g.user_id)}</td><td>{number(g.count)}</td></tr>)}</Table>}</section>
@@ -136,6 +165,7 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
         })}
       </section>
       <section className="card monitor-section"><h3>AI token 用量与成本</h3>
+        {tokenRate && <p>平均 {number(tokenRate.rate)} token／小时{tokenRate.partial && '（按已采集用量估算）'}</p>}
         <p className="text-muted text-sm">按所选时间段统计。输入 token 包含缓存命中；费用 =（输入 − 缓存）× 输入单价 + 缓存 × 缓存单价 + 输出 × 输出单价，再除以一百万。历史未采集的用量无法补算。</p>
         <p>Token 统计起点：{when(data.token_cost?.collection_since)} · 币种 USD · API 按量价值估算，不代表 Coding 套餐实际扣费。</p>
         <h4>单价（USD / 百万 token）</h4>

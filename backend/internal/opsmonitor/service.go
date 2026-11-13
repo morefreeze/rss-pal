@@ -17,9 +17,18 @@ type Service struct {
 }
 
 func NewService(db *sql.DB, c Config, p taskbudget.Policies) *Service { return &Service{db, c, p} }
+func ValidWindow(hours int) bool {
+	switch hours {
+	case 1, 3, 6, 24, 168:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Service) Snapshot(parent context.Context, hours int, before int64, limit int) (Response, error) {
 	r := Response{Hours: hours, RetentionDays: 30, TimeSeries: []Point{}, Groups: []Group{}, Queues: []Queue{}, Alerts: []Alert{}, RecentEvents: []Event{}, CaptchaExpiresAt: s.cfg.CaptchaExpiresAt}
-	if hours != 1 && hours != 24 && hours != 168 {
+	if !ValidWindow(hours) {
 		return r, fmt.Errorf("invalid hours")
 	}
 	if limit < 1 || limit > 50 {
@@ -32,6 +41,9 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 	}
 	r.WindowEnd = r.GeneratedAt
 	r.WindowStart = r.WindowEnd.Add(-time.Duration(hours) * time.Hour)
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE created_at >= $1 AND created_at < $2`, r.WindowStart, r.WindowEnd).Scan(&r.NewUsers); err != nil {
+		return r, err
+	}
 	var tokenErr error
 	r.TokenCost, tokenErr = aiusage.Snapshot(ctx, s.db, r.WindowStart, r.WindowEnd)
 	if tokenErr != nil {
@@ -70,6 +82,10 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 	if hours == 1 {
 		interval = 300
 	}
+	// Traffic is supplemental. An unavailable collector must not hide operational alerts.
+	trafficCtx, cancelTraffic := context.WithTimeout(ctx, time.Second)
+	r.Traffic, _ = trafficSnapshot(trafficCtx, s.db, r.WindowStart, r.WindowEnd, interval)
+	cancelTraffic()
 	rows, err = s.db.QueryContext(ctx, `SELECT to_timestamp(floor(extract(epoch from at)/$3)*$3),COALESCE(sum(count) FILTER(WHERE kind='registration' AND reason='success'),0),COALESCE(sum(count) FILTER(WHERE kind='registration' AND reason='failed'),0),COALESCE(sum(count) FILTER(WHERE kind='captcha' AND reason='rejected'),0),COALESCE(sum(count) FILTER(WHERE kind='captcha' AND reason='unavailable'),0),COALESCE(sum(count) FILTER(WHERE kind='limit'),0) FROM operations_events WHERE at >= $1 AND at <= $2 GROUP BY 1 ORDER BY 1`, r.WindowStart, r.WindowEnd, interval)
 	if err != nil {
 		return r, err
