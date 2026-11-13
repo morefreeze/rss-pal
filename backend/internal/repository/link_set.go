@@ -259,6 +259,18 @@ func (r *ArticleRepository) CancelLinkFetch(parentID, childID, userID int) error
 	return commit()
 }
 
+// LinkCheckPending rechecks a queued link detector before its external fetch.
+func (r *ArticleRepository) LinkCheckPending(ctx context.Context, id int, suggestion bool) (bool, error) {
+	var pending bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM articles a JOIN feeds f ON f.id=a.feed_id
+		WHERE a.id=$1 AND a.links_extendable IS NULL AND a.parent_article_id IS NULL
+		  AND CASE WHEN $2 THEN a.link_set_suggested IS NULL AND f.feed_type='rss'
+		           ELSE f.feed_type IN ('link_set','clip') END
+	)`, id, suggestion).Scan(&pending)
+	return pending, err
+}
+
 func (r *ArticleRepository) LinkFetchPending(ctx context.Context, id int) (bool, error) {
 	var pending bool
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (

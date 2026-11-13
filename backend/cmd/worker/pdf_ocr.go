@@ -97,7 +97,9 @@ func runOnePDFOCR(parentCtx context.Context, articleRepo *repository.ArticleRepo
 	if ownerErr != nil {
 		return
 	}
-	release, budgetErr := admitBackground(ownerCtx, "background_ocr")
+	release, budgetErr := admitBackground(ownerCtx, "background_ocr", func(ctx context.Context) (bool, error) {
+		return articleRepo.PDFOCRPending(ctx, a.ID)
+	})
 	if budgetErr != nil {
 		return
 	}

@@ -139,3 +139,77 @@ func TestSubscriptionCycleDrainsSameOwnerWithinBudgetConcurrency(t *testing.T) {
 		t.Fatalf("requests=%d concurrency denials=%d", calls.Load(), denied.Load())
 	}
 }
+
+func TestSubscriptionWaitsForSharedSlotThenRetriesFetchFailure(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	oldStore, oldPolicies := workerBudgets, workerPolicies
+	defer func() { workerBudgets, workerPolicies = oldStore, oldPolicies }()
+	workerBudgets = taskbudget.New(db)
+	policy := taskbudget.Policy{Daily: 10, GlobalDaily: 10, Concurrent: 1, GlobalConcurrent: 1, Lease: time.Minute}
+	const bucket = "subscription_fetch"
+	workerPolicies = taskbudget.Policies{bucket: policy}
+	workerBudgets.SetObserver(func(_ int, _, reason string, _ *time.Time) {
+		t.Errorf("unexpected admission rejection: %s", reason)
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	release, err := taskbudget.New(db).Acquire(ctx, 0, bucket, 1, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer server.Close()
+	feeds := repository.NewFeedRepository(db)
+	var feedID int
+	if err := db.QueryRow(`INSERT INTO feeds(url,title) VALUES($1,'test') RETURNING id`, server.URL).Scan(&feedID); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fetchAllFeeds(ctx, feeds, nil, rss.NewFetcher(""), nil, nil)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	select {
+	case <-done:
+		t.Fatal("cycle exited while the shared slot was occupied")
+	case <-time.After(250 * time.Millisecond):
+	}
+	if calls.Load() != 0 {
+		t.Fatal("subscription fetched before the shared slot opened")
+	}
+	release()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("subscription did not continue after lease release")
+	}
+
+	failed, err := feeds.GetByID(feedID)
+	if err != nil || calls.Load() != 1 || failed.NextAttemptAt == nil || shouldFetch(failed) {
+		t.Fatalf("failed fetch did not schedule a retry: calls=%d feed=%+v err=%v", calls.Load(), failed, err)
+	}
+	if _, err := db.Exec(`UPDATE feeds SET next_attempt_at=NOW()-interval '1 second' WHERE id=$1`, feedID); err != nil {
+		t.Fatal(err)
+	}
+	fetchAllFeeds(ctx, feeds, nil, rss.NewFetcher(""), nil, nil)
+	recovered, err := feeds.GetByID(feedID)
+	if err != nil || calls.Load() != 2 || recovered.NextAttemptAt != nil || recovered.FetchFailures != 0 {
+		t.Fatalf("scheduled retry did not recover: calls=%d feed=%+v err=%v", calls.Load(), recovered, err)
+	}
+}

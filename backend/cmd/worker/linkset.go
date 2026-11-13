@@ -53,20 +53,20 @@ func detectLinkSetCandidates(
 	log.Printf("link_set: checking %d articles for extractable links", len(arts))
 
 	for _, a := range arts {
-		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		ownerCtx, err := articleRepo.TaskContext(fetchCtx, a.ID)
+		ownerCtx, err := articleRepo.TaskContext(ctx, a.ID)
 		if err != nil {
-			cancel()
 			log.Printf("link_set: resolve owner %d: %v", a.ID, err)
 			continue
 		}
-		release, err := admitBackground(ownerCtx, "background_fetch")
+		release, err := admitBackground(ownerCtx, "background_fetch", func(ctx context.Context) (bool, error) {
+			return articleRepo.LinkCheckPending(ctx, a.ID, false)
+		})
 		if err != nil {
-			cancel()
 			// Admission is retryable; preserve unchecked flags.
 			continue
 		}
-		doc, err := contentFetcher.FetchHTMLDocument(ownerCtx, a.URL)
+		fetchCtx, cancel := context.WithTimeout(ownerCtx, 30*time.Second)
+		doc, err := contentFetcher.FetchHTMLDocument(fetchCtx, a.URL)
 		cancel()
 		release()
 		if err != nil || doc == nil {
@@ -130,20 +130,20 @@ func detectLinkSetSuggestions(
 	log.Printf("link_set suggest: checking %d rss articles", len(arts))
 
 	for _, a := range arts {
-		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		ownerCtx, err := articleRepo.TaskContext(fetchCtx, a.ID)
+		ownerCtx, err := articleRepo.TaskContext(ctx, a.ID)
 		if err != nil {
-			cancel()
 			log.Printf("link_set: resolve owner %d: %v", a.ID, err)
 			continue
 		}
-		release, err := admitBackground(ownerCtx, "background_fetch")
+		release, err := admitBackground(ownerCtx, "background_fetch", func(ctx context.Context) (bool, error) {
+			return articleRepo.LinkCheckPending(ctx, a.ID, true)
+		})
 		if err != nil {
-			cancel()
 			// Admission is retryable; preserve unchecked flags.
 			continue
 		}
-		doc, err := contentFetcher.FetchHTMLDocument(ownerCtx, a.URL)
+		fetchCtx, cancel := context.WithTimeout(ownerCtx, 30*time.Second)
+		doc, err := contentFetcher.FetchHTMLDocument(fetchCtx, a.URL)
 		cancel()
 		release()
 		if err != nil || doc == nil {
@@ -231,24 +231,26 @@ func processQueuedChildren(
 			}
 			defer func() { <-sem }()
 
-			cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			defer cancel()
-			cctx, ownerErr := articleRepo.TaskContext(cctx, c.ID)
+			ownerCtx, ownerErr := articleRepo.TaskContext(ctx, c.ID)
 			if ownerErr != nil {
 				log.Printf("link_set: resolve child owner %d: %v", c.ID, ownerErr)
 				return
 			}
-			due, err := articleRepo.FetchRetryDue(cctx, c.ID, false)
-			if err != nil || !due {
-				return
-			}
-			release, budgetErr := admitBackground(cctx, "background_fetch")
+			release, budgetErr := admitBackground(ownerCtx, "background_fetch", func(ctx context.Context) (bool, error) {
+				pending, err := articleRepo.LinkFetchPending(ctx, c.ID)
+				if err != nil || !pending {
+					return false, err
+				}
+				return articleRepo.FetchRetryDue(ctx, c.ID, false)
+			})
 			if budgetErr != nil {
 				// Keep processing state and retry attempts untouched until admission.
 				return
 			}
 			defer release()
 
+			cctx, cancel := context.WithTimeout(ownerCtx, 60*time.Second)
+			defer cancel()
 			pending, err := articleRepo.LinkFetchPending(cctx, c.ID)
 			if err != nil || !pending {
 				return

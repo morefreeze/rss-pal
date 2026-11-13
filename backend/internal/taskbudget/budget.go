@@ -49,6 +49,10 @@ func New(db *sql.DB) *Store { return &Store{db: db} }
 // Acquire commits accounting BEFORE work begins. Its release only clears the
 // concurrency lease; attempts never refund daily budget on rollback/failure.
 func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost int, p Policy) (func(), error) {
+	return s.acquire(parent, owner, bucket, cost, p, false)
+}
+
+func (s *Store) acquire(parent context.Context, owner int, bucket string, cost int, p Policy, waitForConcurrency bool) (func(), error) {
 	if s == nil || s.db == nil || owner < 0 || bucket == "" || cost < 1 || p.Daily < 1 || p.GlobalDaily < 1 || p.Concurrent < 1 || p.GlobalConcurrent < 1 || p.Lease <= 0 {
 		return nil, ErrUnavailable
 	}
@@ -72,12 +76,16 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 		return nil, ErrUnavailable
 	}
 	if total >= p.GlobalConcurrent {
-		s.denied(owner, bucket, "global_concurrency", nil)
+		if !waitForConcurrency {
+			s.denied(owner, bucket, "global_concurrency", nil)
+		}
 		return nil, &LimitError{Reason: "global_concurrency", Bucket: bucket, Used: total, Limit: p.GlobalConcurrent, RetryAt: nil}
 	}
 	concurrencyExceeded := owner > 0 && own >= p.Concurrent
 	if concurrencyExceeded && !p.PublicOverflow {
-		s.denied(owner, bucket, "user_concurrency", nil)
+		if !waitForConcurrency {
+			s.denied(owner, bucket, "user_concurrency", nil)
+		}
 		return nil, &LimitError{Reason: "user_concurrency", Bucket: bucket, Used: own, Limit: p.Concurrent, RetryAt: nil}
 	}
 	var day string

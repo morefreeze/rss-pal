@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -434,4 +435,16 @@ func (r *FeedRepository) CompleteFetch(id int, etag, modified string, pending bo
   last_attempt_at=NOW(),fetch_error='',fetch_failures=0,
   next_attempt_at=CASE WHEN $4 THEN NOW()+interval '1 minute' ELSE NULL END WHERE id=$1`, id, etag, modified, pending)
 	return err
+}
+
+// SubscriptionFetchDue rechecks persisted eligibility before a waiting fetch starts.
+func (r *FeedRepository) SubscriptionFetchDue(ctx context.Context, id int) (bool, error) {
+	var due bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM feeds WHERE id=$1 AND status='active'
+		  AND feed_type IN ('rss','html','youtube','podcast')
+		  AND CASE WHEN next_attempt_at IS NOT NULL THEN next_attempt_at <= statement_timestamp()
+		      ELSE last_fetched_at IS NULL OR last_fetched_at + make_interval(mins => fetch_interval_minutes) <= (statement_timestamp() AT TIME ZONE 'UTC')
+		  END)`, id).Scan(&due)
+	return due, err
 }

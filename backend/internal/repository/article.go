@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -2083,6 +2084,16 @@ func (r *ArticleRepository) GetPDFOCRPending(limit int) ([]model.Article, error)
 	}
 	defer rows.Close()
 	return r.scanArticleNoFeedTitle(rows)
+}
+
+// PDFOCRPending rechecks whether a selected PDF still needs worker processing.
+func (r *ArticleRepository) PDFOCRPending(ctx context.Context, id int) (bool, error) {
+	var pending bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM articles WHERE id=$1 AND processing_state='processing'
+		  AND is_clip AND parent_article_id IS NULL
+	)`, id).Scan(&pending)
+	return pending, err
 }
 
 // querier returns the underlying Querier. Exposed (unexported) so the

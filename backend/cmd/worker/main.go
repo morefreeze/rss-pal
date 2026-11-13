@@ -449,11 +449,9 @@ func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRep
 			if ownerErr != nil {
 				return
 			}
-			due, err := articleRepo.FetchRetryDue(ownerCtx, article.ID, true)
-			if err != nil || !due {
-				return
-			}
-			release, budgetErr := admitBackground(ownerCtx, "background_fetch")
+			release, budgetErr := admitBackground(ownerCtx, "background_fetch", func(ctx context.Context) (bool, error) {
+				return articleRepo.FetchRetryDue(ctx, article.ID, true)
+			})
 			if budgetErr != nil {
 				return
 			}
@@ -462,6 +460,9 @@ func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRep
 			defer cancel()
 
 			result, err := fetcher.Fetch(tCtx, article)
+			if ctx.Err() != nil {
+				return
+			}
 			if err != nil {
 				log.Printf("Transcript fetch error for article %d: %v", article.ID, err)
 				if deferErr := articleRepo.DeferTranscriptRetry(article.ID, errors.Is(err, englife.ErrPending)); deferErr != nil {
@@ -528,9 +529,7 @@ func fetchAllFeeds(ctx context.Context, feedRepo *repository.FeedRepository, art
 		ownerLimit = 2
 	}
 	dispatchSubscriptionFeeds(ctx, due, globalLimit, ownerLimit, policy.PublicOverflow, func(ctx context.Context, feed model.Feed) {
-		feedCtx, cancel := context.WithTimeout(ctx, feedTimeout)
-		defer cancel()
-		processFeed(feedCtx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer, feed)
+		processFeed(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer, feed)
 	})
 }
 
@@ -540,13 +539,15 @@ func processFeed(ctx context.Context, feedRepo *repository.FeedRepository, artic
 		owner = *feed.OwnerID
 	}
 	ctx = taskbudget.WithOwner(ctx, owner)
-	ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
-	defer cancel()
-	release, err := admitBackground(ctx, "subscription_fetch")
+	release, err := admitBackground(ctx, "subscription_fetch", func(ctx context.Context) (bool, error) {
+		return feedRepo.SubscriptionFetchDue(ctx, feed.ID)
+	})
 	if err != nil {
 		return
 	}
 	defer release()
+	ctx, cancel := context.WithTimeout(ctx, feedTimeout)
+	defer cancel()
 	if !rss.IsNetworkFeedURL(feed.URL) {
 		_ = feedRepo.RecordFetchFailure(feed.ID, "订阅地址无效，请删除后重新添加有效的 http/https RSS 地址")
 		return
@@ -824,11 +825,9 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 			if ownerErr != nil {
 				return
 			}
-			due, err := articleRepo.FetchRetryDue(ownerCtx, article.ID, false)
-			if err != nil || !due {
-				return
-			}
-			release, budgetErr := admitBackground(ownerCtx, "background_fetch")
+			release, budgetErr := admitBackground(ownerCtx, "background_fetch", func(ctx context.Context) (bool, error) {
+				return articleRepo.ContentRefetchDue(ctx, article.ID, article.Content)
+			})
 			if budgetErr != nil {
 				return
 			}
@@ -838,6 +837,9 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 
 			log.Printf("Re-fetching content for article %d: %s", article.ID, article.URL)
 			content, err := contentFetcher.FetchContent(articleCtx, article.URL)
+			if ctx.Err() != nil {
+				return
+			}
 			if err != nil {
 				log.Printf("Failed to re-fetch content for article %d: %v", article.ID, err)
 				if err := articleRepo.DeferContentRetry(article.ID); err != nil {
@@ -848,9 +850,10 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 
 			if len(content) > len(article.Content) {
 				wc, rm := rss.ComputeMetrics(content)
-				if err := articleRepo.UpdateContent(article.ID, content, wc, rm); err != nil {
+				replaced, err := articleRepo.ReplaceFetchedContent(article.ID, article.Content, content, wc, rm)
+				if err != nil {
 					log.Printf("Failed to update content for article %d: %v", article.ID, err)
-				} else {
+				} else if replaced {
 					log.Printf("Updated content for article %d: %d chars", article.ID, len(content))
 					if summarizer != nil {
 						asyncSummarize(summarizer, articleRepo, article.ID, article.Title, content)

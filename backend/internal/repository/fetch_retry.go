@@ -79,3 +79,19 @@ func (r *ArticleRepository) FetchRetryDue(ctx context.Context, id int, transcrip
 		)`, id, transcript).Scan(&due)
 	return due, err
 }
+
+// ContentRefetchDue rejects a queued snapshot if its body changed or its feed was paused.
+func (r *ArticleRepository) ContentRefetchDue(ctx context.Context, id int, content string) (bool, error) {
+	var due bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM articles a JOIN feeds f ON f.id=a.feed_id
+			WHERE a.id=$1 AND COALESCE(a.content,'')=$2
+			  AND f.status='active' AND f.is_active
+			  AND COALESCE(a.processing_state,'ready') NOT IN ('stub','queued','processing','failed')
+			  AND (a.refetch_next_attempt_at IS NULL OR a.refetch_next_attempt_at <= statement_timestamp())
+			  AND (a.refetch_retry_started_at + interval '72 hours' > statement_timestamp()
+			       OR a.refetch_retry_started_at IS NULL AND a.refetch_attempts < 5)
+		)`, id, content).Scan(&due)
+	return due, err
+}

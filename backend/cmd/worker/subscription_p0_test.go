@@ -64,6 +64,9 @@ func TestSubscriptionDrainsBatchBeforeCachingValidators(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
+		if _, err := db.Exec(`UPDATE feeds SET next_attempt_at=NOW()-interval '1 second' WHERE id=$1`, feed.ID); err != nil {
+			t.Fatal(err)
+		}
 		current, err := repo.GetByID(feed.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -147,6 +150,9 @@ func TestSubscriptionBaselineRSSDatabaseAndArticleAPI(t *testing.T) {
 		}
 	}
 	// A repeated conditional check must retain all rows and their full content.
+	if _, err := db.Exec(`UPDATE feeds SET next_attempt_at=NOW()-interval '1 second' WHERE id=$1`, feed.ID); err != nil {
+		t.Fatal(err)
+	}
 	current, err := feeds.GetByID(feed.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +200,10 @@ func TestSubscriptionDoesNotAcknowledgeFailedIngestion(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE articles DROP CONSTRAINT simulate_storage_failure`); err != nil {
 		t.Fatal(err)
 	}
-	processFeed(context.Background(), feeds, articles, rss.NewFetcher(""), nil, nil, *failed)
+	if _, err := db.Exec(`UPDATE feeds SET next_attempt_at=NOW()-interval '1 second' WHERE id=$1`, feed.ID); err != nil {
+		t.Fatal(err)
+	}
+	fetchAllFeeds(context.Background(), feeds, articles, rss.NewFetcher(""), nil, nil)
 	recovered, err := feeds.GetByID(feed.ID)
 	if err != nil {
 		t.Fatal(err)
