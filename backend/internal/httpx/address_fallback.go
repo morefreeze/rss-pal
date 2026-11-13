@@ -49,7 +49,15 @@ func NewDirectBufferedGETClient(timeout time.Duration) *http.Client {
 // copying every body. EOF/reset recovery and scheduler-yield resumes share at
 // most two attempts per checked IP within the original request's deadline.
 func NewBufferedImageGETClient(timeout time.Duration) *http.Client {
-	client := NewClient(timeout)
+	return withBufferedImageGETAddressFallback(NewClient(timeout))
+}
+
+// NewDirectBufferedImageGETClient uses the image scheduler without an environment proxy.
+func NewDirectBufferedImageGETClient(timeout time.Duration) *http.Client {
+	return withBufferedImageGETAddressFallback(NewDirectClient(timeout))
+}
+
+func withBufferedImageGETAddressFallback(client *http.Client) *http.Client {
 	client.Transport = &bufferedGETTransport{base: client.Transport.(*safeRoundTripper), slots: bufferedImageSlots, bodyLimit: bufferedImageBodyLimit, retryPreBodyFailures: true, imageLanes: bufferedImageLanes}
 	return client
 }

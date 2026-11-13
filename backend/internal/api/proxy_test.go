@@ -241,6 +241,44 @@ func TestProxyMediaXiaoyuzhouDirectAndFallback(t *testing.T) {
 	}
 }
 
+func TestProxyImageBeekkaDirectWithProxyFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name, target          string
+		directStatus          int
+		wantDirect, wantProxy int
+	}{
+		{"direct", "https://cdn.beekka.com/blogimg/asset/test.webp", 200, 1, 0},
+		{"fallback", "https://cdn.beekka.com/blogimg/asset/test.webp", 502, 1, 1},
+		{"unrelated host", "https://cdn.beekka.com.example.org/blogimg/asset/test.webp", 200, 0, 1},
+		{"unrelated path", "https://cdn.beekka.com/other.webp", 200, 0, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serveImage := func(calls *int, status int) http.RoundTripper {
+				return mediaTestTransport(func(req *http.Request) (*http.Response, error) {
+					(*calls)++
+					return &http.Response{
+						StatusCode: status,
+						Header:     http.Header{"Content-Type": {"image/webp"}},
+						Body:       io.NopCloser(strings.NewReader("image")),
+					}, nil
+				})
+			}
+			p := NewImageProxy()
+			p.Validate = allowLoopbackValidator
+			var direct, proxied int
+			p.Client.Transport = serveImage(&proxied, 200)
+			p.directClient.Transport = serveImage(&direct, tc.directStatus)
+			router := gin.New()
+			router.GET("/api/proxy/image", p.Handle)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/proxy/image?url="+url.QueryEscape(tc.target), nil))
+			if rec.Code != 200 || rec.Body.String() != "image" || direct != tc.wantDirect || proxied != tc.wantProxy {
+				t.Fatalf("status=%d body=%q direct=%d proxy=%d", rec.Code, rec.Body.String(), direct, proxied)
+			}
+		})
+	}
+}
+
 func TestProxyImage_StreamsAndInjectsReferer(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

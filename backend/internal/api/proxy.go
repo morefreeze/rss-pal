@@ -20,17 +20,19 @@ const (
 	// A complete multi-MB image can take over 30s through the configured
 	// egress proxy. Keep a bounded full-body budget below nginx's image-only
 	// read timeout; partial bodies must still never receive success headers.
-	imageProxyTimeout  = 90 * time.Second
-	mediaProxyMaxBytes = 512 * 1024 * 1024 // 512MB
-	mediaProxyTimeout  = 10 * time.Minute
+	imageProxyTimeout   = 90 * time.Second
+	beekkaDirectTimeout = 8 * time.Second
+	mediaProxyMaxBytes  = 512 * 1024 * 1024 // 512MB
+	mediaProxyTimeout   = 10 * time.Minute
 )
 
 // ImageProxy serves remote images through this server. Constructed via
 // NewImageProxy for production use; tests instantiate the struct directly
 // with custom dependencies.
 type ImageProxy struct {
-	Validate func(rawURL string) (*url.URL, error)
-	Client   *http.Client
+	Validate     func(rawURL string) (*url.URL, error)
+	Client       *http.Client
+	directClient *http.Client
 }
 
 // MediaProxy streams remote audio/video through this server. In addition to
@@ -45,9 +47,18 @@ type MediaProxy struct {
 // NewImageProxy returns a production-ready proxy: strict SSRF validation,
 // 90s timeout, 10MB cap, and redirect re-validation against the SSRF guard.
 func NewImageProxy() *ImageProxy {
+	directClient := httpx.NewDirectBufferedImageGETClient(beekkaDirectTimeout)
+	checkRedirect := directClient.CheckRedirect
+	directClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !isBeekkaImageURL(req.URL) {
+			return http.ErrUseLastResponse
+		}
+		return checkRedirect(req, via)
+	}
 	return &ImageProxy{
-		Validate: httpx.ValidateURL,
-		Client:   httpx.NewBufferedImageGETClient(imageProxyTimeout),
+		Validate:     httpx.ValidateURL,
+		Client:       httpx.NewBufferedImageGETClient(imageProxyTimeout),
+		directClient: directClient,
 	}
 }
 
@@ -90,7 +101,7 @@ func (p *ImageProxy) Handle(c *gin.Context) {
 	req.Header.Set("Referer", target.Scheme+"://"+target.Host+"/")
 	req.Header.Set("User-Agent", httpx.UserAgent)
 
-	resp, err := p.Client.Do(req)
+	resp, err := p.fetchImage(req)
 	if err != nil {
 		c.String(http.StatusBadGateway, "upstream: %s", err)
 		return
@@ -132,6 +143,27 @@ func (p *ImageProxy) Handle(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "public, max-age=604800, immutable")
 	c.Data(http.StatusOK, ct, body)
+}
+
+func (p *ImageProxy) fetchImage(req *http.Request) (*http.Response, error) {
+	if p.directClient != nil && isBeekkaImageURL(req.URL) {
+		resp, err := p.directClient.Do(req)
+		if err == nil {
+			if resp.StatusCode == http.StatusOK && strings.HasPrefix(resp.Header.Get("Content-Type"), "image/") {
+				return resp, nil
+			}
+			resp.Body.Close()
+		}
+		if err := req.Context().Err(); err != nil {
+			return nil, err
+		}
+	}
+	return p.Client.Do(req)
+}
+
+func isBeekkaImageURL(target *url.URL) bool {
+	return target.Scheme == "https" && strings.EqualFold(target.Host, "cdn.beekka.com") &&
+		strings.HasPrefix(target.EscapedPath(), "/blogimg/asset/")
 }
 
 // Handle serves media GET/HEAD requests and preserves byte-range semantics so
