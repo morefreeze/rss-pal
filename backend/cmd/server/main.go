@@ -76,6 +76,7 @@ func main() {
 	taskBudgets.SetObserver(func(owner int, bucket, reason string, retry *time.Time) {
 		monitorRecorder.Record(opsmonitor.Event{Kind: "limit", Reason: reason, TaskType: bucket, UserID: owner, RetryAt: retry})
 	})
+	taskBudgets.SetAdmissionObserver(monitorRecorder.RecordTaskAdmission)
 	ai.ConfigureUsageRecorder(aiusage.Recorder(adminDB))
 	articleAI := airouting.NewStore(adminDB, cfg.Share.Secret, cfg.Claude.APIKey, cfg.Claude.BaseURL, cfg.Claude.Model)
 	ai.ConfigureAdmission(func(ctx context.Context) (func(), error) {

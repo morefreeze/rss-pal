@@ -54,11 +54,17 @@ func (r *Recorder) Record(e Event) {
 		r.dropped.Add(int64(e.Count))
 	}
 }
+func (r *Recorder) RecordTaskAdmission(bucket, outcome string) {
+	r.Record(Event{Kind: "task_admission", Reason: outcome, TaskType: bucket})
+}
+
 func validEvent(e Event) bool {
 	if e.UserID < 0 || !validTask(e.TaskType) {
 		return false
 	}
 	switch e.Kind {
+	case "task_admission":
+		return validPriceTask(e.TaskType) && (e.Reason == "personal" || e.Reason == "public" || e.Reason == "system" || e.Reason == "denied")
 	case "registration":
 		return e.Reason == "success" || e.Reason == "failed"
 	case "captcha":

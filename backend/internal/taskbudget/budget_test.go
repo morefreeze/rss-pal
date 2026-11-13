@@ -154,6 +154,7 @@ func TestMonitoringDenialReasonsAndKnownReset(t *testing.T) {
 }
 
 func TestAdministratorBackgroundDailyQuota(t *testing.T) {
+	t.Setenv("TASK_PUBLIC_OVERFLOW", "false")
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	if _, err := db.Exec(`INSERT INTO users(id,username,password_hash,is_admin) VALUES(201,'quota-admin','unused',true),(202,'quota-user','unused',false)`); err != nil {

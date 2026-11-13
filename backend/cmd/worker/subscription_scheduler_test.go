@@ -88,7 +88,7 @@ func TestSubscriptionDispatcherFairBoundsAndDrain(t *testing.T) {
 	completed := 0
 	go func() {
 		defer close(done)
-		dispatchSubscriptionFeeds(context.Background(), feeds, 2, 1, func(ctx context.Context, f model.Feed) {
+		dispatchSubscriptionFeeds(context.Background(), feeds, 2, 1, false, func(ctx context.Context, f model.Feed) {
 			mu.Lock()
 			active[*f.OwnerID]++
 			total := active[1] + active[2]
@@ -147,7 +147,7 @@ func TestSubscriptionDispatcherCancelDrainsRunningTasks(t *testing.T) {
 	var calls, exited atomic.Int32
 	go func() {
 		defer close(done)
-		dispatchSubscriptionFeeds(ctx, feeds, 1, 1, func(ctx context.Context, _ model.Feed) { calls.Add(1); close(started); <-ctx.Done(); exited.Add(1) })
+		dispatchSubscriptionFeeds(ctx, feeds, 1, 1, false, func(ctx context.Context, _ model.Feed) { calls.Add(1); close(started); <-ctx.Done(); exited.Add(1) })
 	}()
 	select {
 	case <-started:
@@ -163,5 +163,28 @@ func TestSubscriptionDispatcherCancelDrainsRunningTasks(t *testing.T) {
 	if calls.Load() != 1 || exited.Load() != 1 {
 		t.Fatal("queued work started after cancel or running task leaked")
 	}
-	dispatchSubscriptionFeeds(ctx, feeds, 1, 1, func(context.Context, model.Feed) { t.Error("started on canceled context") })
+	dispatchSubscriptionFeeds(ctx, feeds, 1, 1, false, func(context.Context, model.Feed) { t.Error("started on canceled context") })
+}
+
+func TestSubscriptionDispatcherBorrowsIdleSlotAfterPersonalRound(t *testing.T) {
+	one, two := 1, 2
+	feeds := []model.Feed{{ID: 1, OwnerID: &one}, {ID: 2, OwnerID: &one}, {ID: 3, OwnerID: &two}}
+	started := make(chan model.Feed, len(feeds))
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		dispatchSubscriptionFeeds(t.Context(), feeds, 3, 1, true, func(_ context.Context, f model.Feed) {
+			started <- f
+			<-release
+		})
+	}()
+	defer func() { close(release); <-done }()
+	for range feeds {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("idle global slot was not borrowed")
+		}
+	}
 }

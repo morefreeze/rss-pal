@@ -111,6 +111,7 @@ type Response struct {
 	RetentionDays            int               `json:"retention_days"`
 	NewUsers                 int64             `json:"new_users"`
 	Traffic                  *Traffic          `json:"traffic,omitempty"`
+	TaskAdmission            *TaskAdmission    `json:"task_admission,omitempty"`
 	Registration             Registration      `json:"registration"`
 	Captcha                  Captcha           `json:"captcha"`
 	LimitTotal               int               `json:"limit_total"`

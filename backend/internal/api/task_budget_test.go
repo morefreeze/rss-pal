@@ -11,6 +11,7 @@ import (
 )
 
 func TestTaskBudgetBatchCostAndFailureRollback(t *testing.T) {
+	t.Setenv("TASK_PUBLIC_OVERFLOW", "false")
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	policies, _ := taskbudget.LoadPolicies()
@@ -59,6 +60,7 @@ func TestExpensiveTaskRouteCoverage(t *testing.T) {
 }
 
 func TestCatalogUnpublishDoesNotNeedFetchBudget(t *testing.T) {
+	t.Setenv("TASK_PUBLIC_OVERFLOW", "false")
 	db, cleanup := testdb.New(t)
 	defer cleanup()
 	policies, _ := taskbudget.LoadPolicies()
@@ -77,6 +79,36 @@ func TestCatalogUnpublishDoesNotNeedFetchBudget(t *testing.T) {
 		r.ServeHTTP(w, req)
 		if w.Code != tc.want {
 			t.Fatalf("%s: %d %s", tc.body, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestTaskBudgetPublicOverflowPreservesRequestOwner(t *testing.T) {
+	t.Setenv("TASK_PUBLIC_OVERFLOW", "true")
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	policies, err := taskbudget.LoadPolicies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := policies["capture"]
+	p.Daily, p.GlobalDaily = 1, 2
+	policies["capture"] = p
+
+	const owner = 7
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("userID", owner) }, TaskBudgetMiddleware(taskbudget.New(db), policies))
+	r.POST("/api/extension/ingest", func(c *gin.Context) {
+		if getUserID(c) != owner || taskbudget.Owner(c.Request.Context()) != owner {
+			t.Error("quota borrowing changed the request owner")
+		}
+		c.Status(204)
+	})
+	for i, want := range []int{204, 204, 429} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("POST", "/api/extension/ingest", strings.NewReader(`{"items":[{}]}`)))
+		if w.Code != want {
+			t.Fatalf("attempt %d got %d, want %d: %s", i+1, w.Code, want, w.Body.String())
 		}
 	}
 }

@@ -17,6 +17,10 @@ export interface MonitoringResponse {
     time_series: { at: string; page_views: number; visitors: number }[]
     by_source: { source: string; page_views: number }[]
   }
+  task_admission?: {
+    first_recorded_at: string
+    by_task: { task_type: string; personal: number; public: number; system: number; denied: number }[]
+  }
   registration: { attempts: number; success: number; failed: number }
   captcha: { success: number; rejected: number; unavailable: number }
   limit_total: number

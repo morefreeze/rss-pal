@@ -35,7 +35,7 @@ func runWorkerLoops(ctx context.Context, interval time.Duration, subscriptions, 
 // Dispatch round-robin between owners, oldest-check-first within each owner.
 // Only running tasks get goroutines; waiting feeds consume no budget or slots.
 // The database ledger remains authoritative across worker processes.
-func dispatchSubscriptionFeeds(ctx context.Context, feeds []model.Feed, globalLimit, ownerLimit int, process func(context.Context, model.Feed)) {
+func dispatchSubscriptionFeeds(ctx context.Context, feeds []model.Feed, globalLimit, ownerLimit int, publicOverflow bool, process func(context.Context, model.Feed)) {
 	if globalLimit <= 0 || ownerLimit <= 0 || ctx.Err() != nil {
 		return
 	}
@@ -75,14 +75,13 @@ func dispatchSubscriptionFeeds(ctx context.Context, feeds []model.Feed, globalLi
 		if ctx.Err() != nil {
 			break
 		}
-		launched := false
 		if running < globalLimit {
-			for offset := 0; offset < len(owners); offset++ {
-				index := (next + offset) % len(owners)
+			index := nextSubscriptionOwner(owners, queues, active, next, ownerLimit, false)
+			if index < 0 && publicOverflow {
+				index = nextSubscriptionOwner(owners, queues, active, next, ownerLimit, true)
+			}
+			if index >= 0 {
 				owner := owners[index]
-				if len(queues[owner]) == 0 || active[owner] >= ownerLimit {
-					continue
-				}
 				feed := queues[owner][0]
 				queues[owner] = queues[owner][1:]
 				active[owner]++
@@ -95,12 +94,8 @@ func dispatchSubscriptionFeeds(ctx context.Context, feeds []model.Feed, globalLi
 						process(ctx, feed)
 					}
 				}(owner, feed)
-				launched = true
-				break
+				continue
 			}
-		}
-		if launched {
-			continue
 		}
 		select {
 		case owner := <-finished:
@@ -114,4 +109,15 @@ func dispatchSubscriptionFeeds(ctx context.Context, feeds []model.Feed, globalLi
 		<-finished
 		running--
 	}
+}
+
+func nextSubscriptionOwner(owners []int, queues map[int][]model.Feed, active map[int]int, next, ownerLimit int, overflow bool) int {
+	for offset := range owners {
+		index := (next + offset) % len(owners)
+		owner := owners[index]
+		if len(queues[owner]) > 0 && (overflow || active[owner] < ownerLimit) {
+			return index
+		}
+	}
+	return -1
 }

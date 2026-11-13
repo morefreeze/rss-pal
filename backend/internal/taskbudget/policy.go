@@ -1,6 +1,7 @@
 package taskbudget
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -10,6 +11,14 @@ import (
 type Policies map[string]Policy
 
 func LoadPolicies() (Policies, error) {
+	overflow := true
+	if raw := os.Getenv("TASK_PUBLIC_OVERFLOW"); raw != "" {
+		var err error
+		overflow, err = strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("TASK_PUBLIC_OVERFLOW must be a boolean")
+		}
+	}
 	out := Policies{}
 	for key, limits := range map[string][4]int{
 		"ai_auto": {100, 1000, 2, 4}, "ai_manual": {20, 1000, 2, 4}, "interactive": {300, 10000, 2, 20},
@@ -27,7 +36,7 @@ func LoadPolicies() (Policies, error) {
 				limits[i] = v
 			}
 		}
-		out[key] = Policy{Daily: limits[0], GlobalDaily: limits[1], Concurrent: limits[2], GlobalConcurrent: limits[3], Lease: 15 * time.Minute}
+		out[key] = Policy{Daily: limits[0], GlobalDaily: limits[1], Concurrent: limits[2], GlobalConcurrent: limits[3], Lease: 15 * time.Minute, PublicOverflow: overflow}
 	}
 	for _, bucket := range []string{"background_fetch", "subscription_fetch"} {
 		name := "TASK_" + strings.ToUpper(bucket) + "_ADMIN_DAILY"

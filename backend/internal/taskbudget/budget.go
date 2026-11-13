@@ -17,15 +17,28 @@ var ErrUnavailable = errors.New("任务额度检查暂时不可用，请稍后�
 type Policy struct {
 	Daily, GlobalDaily, Concurrent, GlobalConcurrent int
 	Lease                                            time.Duration
-	AdminDaily                                       int // Zero uses Daily; never derived from caller-supplied admin claims.
+	PublicOverflow                                   bool // Personal limits can borrow unused platform capacity.
+	AdminDaily                                       int  // Zero uses Daily; never derived from caller-supplied admin claims.
 }
 type Store struct {
-	db       *sql.DB
-	observer func(int, string, string, *time.Time)
+	db                *sql.DB
+	observer          func(int, string, string, *time.Time)
+	admissionObserver func(bucket, outcome string)
 }
 
 func (s *Store) SetObserver(f func(int, string, string, *time.Time)) { s.observer = f }
+
+// SetAdmissionObserver observes one decision per admitted or limited attempt.
+func (s *Store) SetAdmissionObserver(f func(bucket, outcome string)) { s.admissionObserver = f }
+
+func (s *Store) observeAdmission(bucket, outcome string) {
+	if s.admissionObserver != nil {
+		s.admissionObserver(bucket, outcome)
+	}
+}
+
 func (s *Store) denied(owner int, bucket, reason string, retry *time.Time) {
+	s.observeAdmission(bucket, "denied")
 	if s.observer != nil {
 		s.observer(owner, bucket, reason, retry)
 	}
@@ -62,7 +75,8 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 		s.denied(owner, bucket, "global_concurrency", nil)
 		return nil, &LimitError{Reason: "global_concurrency", Bucket: bucket, Used: total, Limit: p.GlobalConcurrent, RetryAt: nil}
 	}
-	if owner > 0 && own >= p.Concurrent {
+	concurrencyExceeded := owner > 0 && own >= p.Concurrent
+	if concurrencyExceeded && !p.PublicOverflow {
 		s.denied(owner, bucket, "user_concurrency", nil)
 		return nil, &LimitError{Reason: "user_concurrency", Bucket: bucket, Used: own, Limit: p.Concurrent, RetryAt: nil}
 	}
@@ -90,13 +104,25 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 			daily = p.AdminDaily
 		}
 	}
-	if owner > 0 && cost > daily-userUsed {
+	dailyExceeded := owner > 0 && cost > daily-userUsed
+	if dailyExceeded && !p.PublicOverflow {
 		s.denied(owner, bucket, "user_daily", &reset)
 		return nil, &LimitError{Reason: "user_daily", Bucket: bucket, Used: userUsed, Limit: daily, RetryAt: &reset}
 	}
+	// Owner zero represents platform accounting and the shared lease namespace.
+	// The caller's execution context and the task's owner stay intact.
+	chargeOwner := owner
+	outcome := "personal"
+	switch {
+	case owner == 0:
+		outcome = "system"
+	case concurrencyExceeded || dailyExceeded:
+		chargeOwner = 0
+		outcome = "public"
+	}
 	owners := []int{0}
-	if owner > 0 {
-		owners = append(owners, owner)
+	if chargeOwner > 0 {
+		owners = append(owners, chargeOwner)
 	}
 	for _, id := range owners {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO task_budget_daily(owner_id,bucket,day,used) VALUES($1,$2,$4::date,$3) ON CONFLICT(owner_id,bucket,day) DO UPDATE SET used=task_budget_daily.used+EXCLUDED.used`, id, bucket, cost, day); err != nil {
@@ -108,12 +134,13 @@ func (s *Store) Acquire(parent context.Context, owner int, bucket string, cost i
 		return nil, ErrUnavailable
 	}
 	id := hex.EncodeToString(raw[:])
-	if _, err = tx.ExecContext(ctx, `INSERT INTO task_budget_leases(id,owner_id,bucket,expires_at) VALUES($1,$2,$3,clock_timestamp()+make_interval(secs=>$4))`, id, owner, bucket, p.Lease.Seconds()); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO task_budget_leases(id,owner_id,bucket,expires_at) VALUES($1,$2,$3,clock_timestamp()+make_interval(secs=>$4))`, id, chargeOwner, bucket, p.Lease.Seconds()); err != nil {
 		return nil, ErrUnavailable
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, ErrUnavailable
 	}
+	s.observeAdmission(bucket, outcome)
 	var once sync.Once
 	return func() {
 		once.Do(func() {

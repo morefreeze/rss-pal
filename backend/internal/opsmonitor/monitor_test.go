@@ -196,3 +196,25 @@ func TestSnapshotSeparatesExploreSourceStates(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskAdmissionAggregatesAndPreservesLimitCount(t *testing.T) {
+	db, cleanup := testdb.New(t)
+	defer cleanup()
+	recorder := &Recorder{db: db, input: make(chan Event, 16)}
+	for _, outcome := range []string{"personal", "personal", "public", "system", "denied"} {
+		recorder.RecordTaskAdmission("background_fetch", outcome)
+	}
+	recorder.Record(Event{Kind: "limit", Reason: "global_concurrency", TaskType: "background_fetch"})
+	recorder.flush()
+	snapshot, err := NewService(db, DefaultConfig(), nil).Snapshot(t.Context(), 1, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := TaskAdmissionOutcome{TaskType: "background_fetch", Personal: 2, Public: 1, System: 1, Denied: 1}
+	if snapshot.TaskAdmission == nil || len(snapshot.TaskAdmission.ByTask) != 1 || snapshot.TaskAdmission.ByTask[0] != want {
+		t.Fatalf("unexpected outcomes: %+v", snapshot.TaskAdmission)
+	}
+	if snapshot.LimitTotal != 1 || len(snapshot.RecentEvents) != 1 {
+		t.Fatalf("admission duplicates existing limit event: %d / %+v", snapshot.LimitTotal, snapshot.RecentEvents)
+	}
+}

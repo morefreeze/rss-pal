@@ -105,6 +105,7 @@ func main() {
 	workerBudgets.SetObserver(func(owner int, bucket, reason string, retry *time.Time) {
 		monitorRecorder.Record(opsmonitor.Event{Kind: "limit", Reason: reason, TaskType: bucket, UserID: owner, RetryAt: retry})
 	})
+	workerBudgets.SetAdmissionObserver(monitorRecorder.RecordTaskAdmission)
 	ai.ConfigureUsageRecorder(aiusage.Recorder(db))
 	if len(cfg.Share.Secret) < 32 {
 		log.Fatal("SHARE_SECRET must be at least 32 bytes for AI credential encryption")
@@ -517,7 +518,7 @@ func fetchAllFeeds(ctx context.Context, feedRepo *repository.FeedRepository, art
 	if ownerLimit <= 0 {
 		ownerLimit = 2
 	}
-	dispatchSubscriptionFeeds(ctx, due, globalLimit, ownerLimit, func(ctx context.Context, feed model.Feed) {
+	dispatchSubscriptionFeeds(ctx, due, globalLimit, ownerLimit, policy.PublicOverflow, func(ctx context.Context, feed model.Feed) {
 		feedCtx, cancel := context.WithTimeout(ctx, feedTimeout)
 		defer cancel()
 		processFeed(feedCtx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer, feed)

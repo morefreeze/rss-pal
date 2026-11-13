@@ -10,6 +10,7 @@ import (
 )
 
 func TestAutomaticAndManualAIPoolsAreIndependent(t *testing.T) {
+	t.Setenv("TASK_PUBLIC_OVERFLOW", "false")
 	policies, err := taskbudget.LoadPolicies()
 	if err != nil {
 		t.Fatal(err)

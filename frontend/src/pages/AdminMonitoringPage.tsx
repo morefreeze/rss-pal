@@ -173,9 +173,28 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
         <p className="text-muted text-sm">单价核对日期：2026-09-24 · <a href="https://docs.z.ai/guides/overview/pricing" target="_blank" rel="noreferrer">Z.AI 官方价格</a> · 未配置的模型不计入金额。</p>
         {!data.token_cost?.by_model.length ? <p>所选时段尚无 token 用量记录</p> : <Table headers={['模型 / 服务商', '请求次数', '输入 token', '缓存 token', '输出 token', '缺少用量 / 单价', '估算费用（USD）']}>{data.token_cost.by_model.map(m => <tr key={`${m.provider}:${m.model}`}><td>{m.model}<small> · {m.provider}</small></td><td>{number(m.calls)}</td><td>{number(m.input_tokens)}</td><td>{number(m.cached_tokens)}</td><td>{number(m.output_tokens)}</td><td>{number(m.missing_usage)} / {number(m.unpriced_calls)}</td><td>{usd(m.cost_usd)}{(m.missing_usage > 0 || m.unpriced_calls > 0) && <small> · 不完整</small>}</td></tr>)}</Table>}
       </section>
+      <section className="card monitor-section"><h3>任务准入</h3>
+        {data.task_admission ? <>
+          <p className="text-muted text-sm">按已判定的准入尝试计数，重试会再次计入。通过表示任务获准执行。</p>
+          {Date.parse(data.task_admission.first_recorded_at) > Date.parse(data.window_start) &&
+            <p className="text-muted text-sm">最早记录于 {when(data.task_admission.first_recorded_at)}，此前的尝试不计入。</p>}
+          {data.task_admission.by_task.length ? <Table headers={['任务', '流入', '通过', '个人通过', '借用通过', '系统通过', '限流']}>
+            {data.task_admission.by_task.map(row => {
+              const passed = row.personal + row.public + row.system
+              const total = passed + row.denied
+              return <tr key={row.task_type}>
+                <td>{label(row.task_type)}</td><td>{number(total)}</td>
+                <td>{number(passed)}（{percent(passed / total)}）</td>
+                <td>{number(row.personal)}</td><td>{number(row.public)}</td><td>{number(row.system)}</td>
+                <td>{number(row.denied)}（{percent(row.denied / total)}）</td>
+              </tr>
+            })}
+          </Table> : <p className="text-muted">所选时段尚无记录</p>}
+        </> : <p className="text-muted">尚无任务准入记录</p>}
+      </section>
       <section className="card monitor-section"><h3>任务额度</h3><p>额度日期：{data.cost.utc_day}（UTC）</p><p className="text-muted text-sm">{data.cost.ledger_retention_note} 调用量按任务尝试统计，可能包含失败尝试。</p>
         <Table headers={['任务', '涉及 UTC 日期调用量', '今日额度', '已用比例']}>{data.cost.by_task.map(t => <tr key={t.task_type}><td>{label(t.task_type)}</td><td>{number(t.attempts)}</td><td>{t.global_daily_limit > 0 ? `${number(t.today_attempts)} / ${number(t.global_daily_limit)}` : '历史记录，不再计额'}</td><td>{t.global_daily_limit > 0 ? percent(t.usage_ratio) : '—'}</td></tr>)}</Table>
-        <h4>用户消耗排行（窗口涉及的完整 UTC 日期）</h4>{!data.cost.by_user.length ? <p className="text-muted">尚无数据</p> : <Table headers={['账号', '任务', '调用量']}>{data.cost.by_user.map(t => <tr key={`${t.user_id}:${t.task_type}`}><td>{account(t.user_id)}</td><td>{label(t.task_type)}</td><td>{number(t.attempts)}</td></tr>)}</Table>}
+        <h4>个人额度使用（窗口涉及的完整 UTC 日期）</h4>{!data.cost.by_user.length ? <p className="text-muted">尚无数据</p> : <Table headers={['账号', '任务', '调用量']}>{data.cost.by_user.map(t => <tr key={`${t.user_id}:${t.task_type}`}><td>{account(t.user_id)}</td><td>{label(t.task_type)}</td><td>{number(t.attempts)}</td></tr>)}</Table>}
       </section>
       <section className="card monitor-section"><h3>最近事件</h3>{!data.recent_events.length ? <p className="text-muted">尚无数据</p> : <Table headers={['时间', '类型', '原因', '任务', '账号', '次数', '可恢复时间']}>{data.recent_events.map(e => <tr key={e.id}><td>{when(e.at)}</td><td>{label(e.kind)}</td><td>{label(e.reason)}</td><td>{label(e.task_type)}</td><td>{account(e.user_id)}</td><td>{number(e.count)}</td><td>{e.retry_at ? when(e.retry_at) : '未确定'}</td></tr>)}</Table>}
         <div className="monitor-controls">{beforeID != null && <button disabled={loading} onClick={() => setBeforeID(undefined)}>返回最新事件</button>}{data.next_before_id != null && <button disabled={loading} onClick={() => setBeforeID(data.next_before_id!)}>更早事件</button>}</div>

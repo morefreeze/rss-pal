@@ -53,7 +53,7 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 	if r.CollectionAvailableSince.After(r.WindowStart) || r.CollectionDropped > 0 {
 		r.Status = "partial"
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT kind,reason,task_type,user_id,sum(count) FROM operations_events WHERE at >= $1 AND at <= $2 GROUP BY kind,reason,task_type,user_id ORDER BY sum(count) DESC LIMIT 200`, r.WindowStart, r.WindowEnd)
+	rows, err := s.db.QueryContext(ctx, `SELECT kind,reason,task_type,user_id,sum(count) FROM operations_events WHERE at >= $1 AND at <= $2 AND kind <> 'task_admission' GROUP BY kind,reason,task_type,user_id ORDER BY sum(count) DESC LIMIT 200`, r.WindowStart, r.WindowEnd)
 	if err != nil {
 		return r, err
 	}
@@ -86,7 +86,7 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 	trafficCtx, cancelTraffic := context.WithTimeout(ctx, time.Second)
 	r.Traffic, _ = trafficSnapshot(trafficCtx, s.db, r.WindowStart, r.WindowEnd, interval)
 	cancelTraffic()
-	rows, err = s.db.QueryContext(ctx, `SELECT to_timestamp(floor(extract(epoch from at)/$3)*$3),COALESCE(sum(count) FILTER(WHERE kind='registration' AND reason='success'),0),COALESCE(sum(count) FILTER(WHERE kind='registration' AND reason='failed'),0),COALESCE(sum(count) FILTER(WHERE kind='captcha' AND reason='rejected'),0),COALESCE(sum(count) FILTER(WHERE kind='captcha' AND reason='unavailable'),0),COALESCE(sum(count) FILTER(WHERE kind='limit'),0) FROM operations_events WHERE at >= $1 AND at <= $2 GROUP BY 1 ORDER BY 1`, r.WindowStart, r.WindowEnd, interval)
+	rows, err = s.db.QueryContext(ctx, `SELECT to_timestamp(floor(extract(epoch from at)/$3)*$3),COALESCE(sum(count) FILTER(WHERE kind='registration' AND reason='success'),0),COALESCE(sum(count) FILTER(WHERE kind='registration' AND reason='failed'),0),COALESCE(sum(count) FILTER(WHERE kind='captcha' AND reason='rejected'),0),COALESCE(sum(count) FILTER(WHERE kind='captcha' AND reason='unavailable'),0),COALESCE(sum(count) FILTER(WHERE kind='limit'),0) FROM operations_events WHERE at >= $1 AND at <= $2 AND kind <> 'task_admission' GROUP BY 1 ORDER BY 1`, r.WindowStart, r.WindowEnd, interval)
 	if err != nil {
 		return r, err
 	}
@@ -103,7 +103,7 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 	if err != nil {
 		return r, err
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT id,at,kind,reason,task_type,user_id,count,retry_at FROM operations_events WHERE at >= $1 AND at <= $2 AND ($3::bigint=0 OR id<$3) ORDER BY id DESC LIMIT $4`, r.WindowStart, r.WindowEnd, before, limit+1)
+	rows, err = s.db.QueryContext(ctx, `SELECT id,at,kind,reason,task_type,user_id,count,retry_at FROM operations_events WHERE at >= $1 AND at <= $2 AND kind <> 'task_admission' AND ($3::bigint=0 OR id<$3) ORDER BY id DESC LIMIT $4`, r.WindowStart, r.WindowEnd, before, limit+1)
 	if err != nil {
 		return r, err
 	}
@@ -129,6 +129,9 @@ func (s *Service) Snapshot(parent context.Context, hours int, before int64, limi
 		return r, err
 	}
 	if err = s.exploreEstimate(ctx, &r); err != nil {
+		return r, err
+	}
+	if err = s.taskAdmission(ctx, &r); err != nil {
 		return r, err
 	}
 	if err = s.cost(ctx, &r); err != nil {

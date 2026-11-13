@@ -21,6 +21,9 @@ func (s *Service) quotaExhaustions(ctx context.Context, r *Response) error {
 			return err
 		}
 		p := s.policies[q.TaskType]
+		if p.PublicOverflow && q.UserID > 0 {
+			continue
+		}
 		q.Limit = p.Daily
 		if admin && p.AdminDaily > 0 {
 			q.Limit = p.AdminDaily
