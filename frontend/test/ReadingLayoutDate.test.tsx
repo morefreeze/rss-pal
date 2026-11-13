@@ -10,6 +10,7 @@ function renderPublicationDate(published_at: string | null) {
       summary_brief: '', summary_detailed: '',
     }}
     fontSize={18} fontFamily="sans" codeWrap={false}
+    summaryOpen={true} onToggleSummary={vi.fn()}
     onExit={vi.fn()} onFontSize={vi.fn()} onFontFamily={vi.fn()} onCodeWrap={vi.fn()}
   />)
 }

@@ -839,6 +839,17 @@ function AppearanceTab({ readerSettings }: { readerSettings: ReturnType<typeof u
             <input
               type="checkbox"
               style={{ width: 'auto' }}
+              checked={readerSettings.summaryOpenByDefault}
+              onChange={e => readerSettings.setSummaryOpenByDefault(e.target.checked)}
+            />
+            默认展开 AI 总结
+          </label>
+        </div>
+        <div className="flex gap-2 mt-2" style={{ alignItems: 'center' }}>
+          <label className="text-sm flex gap-1" style={{ alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              style={{ width: 'auto' }}
               checked={readerSettings.confettiEnabled}
               onChange={e => readerSettings.setConfettiEnabled(e.target.checked)}
             />

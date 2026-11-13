@@ -77,20 +77,6 @@ vi.mock('../src/components/LinkSetChildren', () => ({
 }))
 vi.mock('../src/components/BackFab', () => ({ default: () => null }))
 vi.mock('../src/components/BackToTopButton', () => ({ default: () => null }))
-vi.mock('../src/components/ReadingLayout', () => ({ default: () => null }))
-vi.mock('../src/hooks/useReaderSettings', () => ({
-  useReaderSettings: () => ({
-    mode: 'normal',
-    fontSize: 17,
-    fontFamily: 'serif',
-    codeWrap: false,
-    setMode: vi.fn(),
-    setFontSize: vi.fn(),
-    setFontFamily: vi.fn(),
-    setCodeWrap: vi.fn(),
-    toggleMode: vi.fn(),
-  }),
-}))
 vi.mock('../src/hooks/useReadingChrome', () => ({
   useReadingChrome: () => ({ toggle: vi.fn() }),
 }))
@@ -216,10 +202,28 @@ describe('ArticlePage immediate loading', () => {
     isPhone: false, isCompact: true, listPath: '/articles', returnPath: '/articles', getListScrollElement: () => null,
     closeReader: () => {}, openScopes: () => {}, sidebarTarget: null, overviewTarget: null,
   }
-  it('collapses workspace summaries while preserving generation controls and article metadata', () => {
+  it.each([{}, { fontSize: 17 }])('opens workspace summaries by default with reader settings %j', (settings) => {
+    localStorage.setItem('rsspal:reader-settings', JSON.stringify(settings))
     apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
     putArticleDetail(detail(42))
+    putArticleDetail(detail(43))
     render(<MemoryRouter initialEntries={['/articles/42']}><ReadingWorkspaceContext.Provider value={workspace}>
+      <Link to="/articles/43">Next test article</Link>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </ReadingWorkspaceContext.Provider></MemoryRouter>)
+
+    expect(screen.getByText('Cached brief')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '收起 AI 总结' }))
+    expect(screen.queryByText('Cached brief')).toBeNull()
+    fireEvent.click(screen.getByText('Next test article'))
+    expect(screen.getByText('Cached brief')).toBeTruthy()
+  })
+
+  it.each([workspace, null])('honors the saved collapsed preference while preserving generation controls and article metadata (%s)', (context) => {
+    localStorage.setItem('rsspal:reader-settings', JSON.stringify({ summaryOpenByDefault: false }))
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42']}><ReadingWorkspaceContext.Provider value={context}>
       <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
     </ReadingWorkspaceContext.Provider></MemoryRouter>)
     const toggle = screen.getByRole('button', { name: '展开 AI 总结' })
@@ -230,6 +234,21 @@ describe('ArticlePage immediate loading', () => {
     fireEvent.click(toggle)
     expect(screen.getByText('Cached brief')).toBeTruthy()
     expect(screen.getByRole('button', { name: '收起 AI 总结' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it.each([true, false])('uses the saved expansion preference in reading mode (%s)', (summaryOpenByDefault) => {
+    localStorage.setItem('rsspal:reader-settings', JSON.stringify({ summaryOpenByDefault }))
+    apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
+    putArticleDetail(detail(42))
+    render(<MemoryRouter initialEntries={['/articles/42']}>
+      <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
+    </MemoryRouter>)
+
+    fireEvent.click(screen.getByRole('button', { name: '阅读模式' }))
+    expect(screen.getByRole('button', { name: /退出阅读模式/ })).toBeTruthy()
+    expect(Boolean(screen.queryByText('Cached brief'))).toBe(summaryOpenByDefault)
+    fireEvent.click(screen.getByRole('button', { name: /AI 摘要/ }))
+    expect(Boolean(screen.queryByText('Cached brief'))).toBe(!summaryOpenByDefault)
   })
 
   it('notifies retained lists when an automatic completion is persisted', async () => {
@@ -251,6 +270,7 @@ describe('ArticlePage immediate loading', () => {
   })
 
   it('opens workspace summary matches for search and keeps generation output visible', async () => {
+    localStorage.setItem('rsspal:reader-settings', JSON.stringify({ summaryOpenByDefault: false }))
     apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
     putArticleDetail(detail(42))
     render(<MemoryRouter initialEntries={['/articles/42?q=brief']}><ReadingWorkspaceContext.Provider value={workspace}>

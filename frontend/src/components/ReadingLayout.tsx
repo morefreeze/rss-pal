@@ -1,5 +1,4 @@
-import { SearchText, useArticleSearchQuery } from './ArticleSearch'
-import { useState } from 'react'
+import { SearchText } from './ArticleSearch'
 import MarkdownArticle from './MarkdownArticle'
 import SummaryMarkdown from './SummaryMarkdown'
 import ReaderSettingsPanel from './ReaderSettingsPanel'
@@ -25,6 +24,9 @@ type Props = {
   fontSize: number
   fontFamily: ReaderFontFamily
   codeWrap: boolean
+  summaryOpen: boolean
+  summaryToggleDisabled?: boolean
+  onToggleSummary: () => void
   onExit: () => void
   onFontSize: (n: number) => void
   onFontFamily: (f: ReaderFontFamily) => void
@@ -40,9 +42,7 @@ type Props = {
 export default function ReadingLayout(props: Props) {
   const { article, fontSize, fontFamily, codeWrap, onExit, onTapBody, onPrev, onNext, onBack } = props
 
-  const [summaryOpen, setSummaryOpen] = useState(false)
-  const searchQuery = useArticleSearchQuery()
-  const showSummary = summaryOpen || !!searchQuery
+  const { summaryOpen, summaryToggleDisabled, onToggleSummary } = props
 
   const published = parsePublicationDate(article.published_at)
   const ff = fontFamily === 'serif'
@@ -80,10 +80,10 @@ export default function ReadingLayout(props: Props) {
 
         {(article.summary_brief || article.summary_detailed) && (
           <div className="reading-summary">
-            <button className="reading-summary-toggle" onClick={() => setSummaryOpen(o => !o)}>
-              {showSummary ? '▼' : '▶'} AI 摘要
+            <button type="button" className="reading-summary-toggle" aria-expanded={summaryOpen} disabled={summaryToggleDisabled} onClick={onToggleSummary}>
+              <span aria-hidden="true">{summaryOpen ? '▼' : '▶'}</span> AI 摘要
             </button>
-            {showSummary && (
+            {summaryOpen && (
               <div className="reading-summary-body">
                 {article.summary_brief && <SummaryMarkdown source={article.summary_brief} />}
                 {article.summary_detailed && (

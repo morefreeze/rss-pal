@@ -268,9 +268,10 @@ function ArticlePageContent() {
   currentArticleIDRef.current = articleID
   const [summaryJob, setSummaryJob] = useState<ArticleDetailResponse['summary_job']>(initialDetail?.summary_job)
   const [summaryError, setSummaryError] = useState('')
-  const [summaryDisclosure, setSummaryDisclosure] = useState({ articleId: articleID, open: false })
+  const [summaryDisclosure, setSummaryDisclosure] = useState<{ articleId: number; open: boolean } | null>(null)
   const summaryMustOpen = !!searchQuery || (article?.id === articleID && (streamPhase !== 'idle' || summaryJob?.state === 'running' || !!summaryError || summaryJob?.state === 'failed'))
-  const summaryOpen = !workspace || summaryMustOpen || (summaryDisclosure.articleId === articleID && summaryDisclosure.open)
+  const summaryOpen = summaryMustOpen || (summaryDisclosure?.articleId === articleID ? summaryDisclosure.open : reader.summaryOpenByDefault)
+  const toggleSummary = () => setSummaryDisclosure({ articleId: articleID, open: !summaryOpen })
   useEffect(() => {
     if (summaryMustOpen) setSummaryDisclosure({ articleId: articleID, open: true })
   }, [articleID, summaryMustOpen])
@@ -467,6 +468,7 @@ function ArticlePageContent() {
   // Reset before paint, including cached content and next/previous navigation.
   // Otherwise the list's window offset can become a new article's progress.
   useLayoutEffect(() => {
+    setSummaryDisclosure(null)
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
   }, [id])
 
@@ -1230,6 +1232,9 @@ function ArticlePageContent() {
           fontSize={reader.fontSize}
           fontFamily={reader.fontFamily}
           codeWrap={reader.codeWrap}
+          summaryOpen={summaryOpen}
+          summaryToggleDisabled={summaryMustOpen}
+          onToggleSummary={toggleSummary}
           onExit={() => reader.setMode('normal')}
           onFontSize={reader.setFontSize}
           onFontFamily={reader.setFontFamily}
@@ -1498,9 +1503,9 @@ function ArticlePageContent() {
       {/* Summary section — shown before content */}
       <div ref={summaryRef} className="card article-summary-section">
         <div className="flex-between mb-2 summary-controls">
-          {workspace ? <button type="button" className="workspace-summary-toggle" aria-label={summaryOpen ? '收起 AI 总结' : '展开 AI 总结'} aria-expanded={summaryOpen} aria-controls={`article-summary-${articleID}`} disabled={summaryMustOpen} onClick={() => setSummaryDisclosure({ articleId: articleID, open: !summaryOpen })}>
+          <button type="button" className="article-summary-toggle" aria-label={summaryOpen ? '收起 AI 总结' : '展开 AI 总结'} aria-expanded={summaryOpen} aria-controls={`article-summary-${articleID}`} disabled={summaryMustOpen} onClick={toggleSummary}>
             <span aria-hidden="true">{summaryOpen ? '▾' : '▸'}</span> AI 总结
-          </button> : <h3>AI 总结</h3>}
+          </button>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select
               value={selectedTemplateId ?? ''}
@@ -1523,7 +1528,8 @@ function ArticlePageContent() {
           </div>
         </div>
 
-        {summaryOpen && <div id={`article-summary-${articleID}`}>
+        <div id={`article-summary-${articleID}`} hidden={!summaryOpen}>
+        {summaryOpen && <>
         {streamPhase === 'idle' && summaryJob?.state === 'running' && <p role="status" className="text-muted text-sm">总结正在生成，完成后会自动更新。</p>}
         {streamPhase === 'idle' && (summaryError || summaryJob?.state === 'failed') && <p role="alert" className="text-sm">{summaryError || summaryJob?.last_error || '上次生成失败，可以重试。'}</p>}
         {!localAIHintMuted && (
@@ -1565,7 +1571,8 @@ function ArticlePageContent() {
             暂无总结，点击右上角"生成总结"按钮
           </div>
         )}
-        </div>}
+        </>}
+        </div>
       </div>
 
       {/* Content section: hidden entirely for video articles without

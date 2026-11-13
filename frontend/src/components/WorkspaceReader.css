@@ -4,8 +4,8 @@
 .workspace-article-reader > .article-summary-section { padding-block: 16px; border-block: 1px solid var(--border); }
 .workspace-article-reader .summary-controls { gap: 12px; flex-wrap: wrap; margin-bottom: 0; }
 .workspace-article-reader .summary-controls + div { margin-top: 16px; }
-.workspace-summary-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 4px 0; background: transparent; color: var(--fg); border: 0; font-size: 15px; font-weight: 600; text-align: left; }
-.workspace-summary-toggle:disabled { opacity: 1; cursor: default; }
+.article-summary-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 4px 0; background: transparent; color: var(--fg); border: 0; font-size: 15px; font-weight: 600; text-align: left; }
+.article-summary-toggle:disabled { opacity: 1; cursor: default; }
 .workspace-article-reader > .card > .flex-between { gap: 12px; flex-wrap: wrap; }
 @media (max-width: 767px) {
   .workspace-article-reader > .card { margin-bottom: 24px; }
@@ -20,7 +20,7 @@
 .workspace-article-reader > .article-summary-section { margin-top: 24px; padding-block: 18px; }
 .workspace-article-reader .article-feedback { background: transparent; border-color: var(--border); }
 .workspace-article-reader .article-note-add { margin-block: 12px; }
-.workspace-article-reader .summary-controls > button:not(.workspace-summary-toggle) { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
+.workspace-article-reader .summary-controls > button:not(.article-summary-toggle) { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
 .workspace-article-reader .markdown-body { line-height: 1.9; }
 @media (max-width: 767px) {
   .workspace-article-reader > .card > h2 { font-size: 25px; margin-top: 22px; }

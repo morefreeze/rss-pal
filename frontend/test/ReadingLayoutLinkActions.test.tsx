@@ -25,6 +25,7 @@ describe('ReadingLayout reader link actions', () => {
         fontSize={18}
         fontFamily="sans"
         codeWrap={false}
+        summaryOpen={true} onToggleSummary={vi.fn()}
         onExit={vi.fn()}
         onFontSize={vi.fn()}
         onFontFamily={vi.fn()}
