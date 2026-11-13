@@ -140,6 +140,54 @@ type mediaTestTransport func(*http.Request) (*http.Response, error)
 
 func (f mediaTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestProxyMediaLennyPodcast(t *testing.T) {
+	const episode = "/feed/podcast/224221477/e714fff25978e0a4d943e3d0fd317f24.mp3"
+	const cdnPath = "/video_upload/post/224221477/f9d3e02f-445d-4358-a8f4-223d3b606e55/transcoded.mp3"
+	for _, tc := range []struct {
+		name, raw, upstreamHost, finalHost, finalPath, contentType string
+		want                                                       int
+	}{
+		{"Substack RSS enclosure", "https://api.substack.com" + episode, "www.lennysnewsletter.com", "substackcdn.com", cdnPath, "binary/octet-stream", 206},
+		{"publisher enclosure", "https://www.lennysnewsletter.com" + episode, "www.lennysnewsletter.com", "substackcdn.com", cdnPath, "application/octet-stream", 206},
+		{"mismatched episode", "https://www.lennysnewsletter.com" + episode, "www.lennysnewsletter.com", "substackcdn.com", strings.Replace(cdnPath, "224221477", "42", 1), "binary/octet-stream", 415},
+		{"unrelated origin", "https://media.example.com" + episode, "media.example.com", "substackcdn.com", cdnPath, "binary/octet-stream", 415},
+		{"unexpected CDN", "https://www.lennysnewsletter.com" + episode, "www.lennysnewsletter.com", "substackcdn.com.example.org", cdnPath, "binary/octet-stream", 415},
+		{"unexpected CDN path", "https://www.lennysnewsletter.com" + episode, "www.lennysnewsletter.com", "substackcdn.com", "/" + episode, "binary/octet-stream", 415},
+		{"HTML from CDN", "https://www.lennysnewsletter.com" + episode, "www.lennysnewsletter.com", "substackcdn.com", cdnPath, "text/html", 415},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The article source is required to select the Lenny publisher route.
+			proxy := newTestMediaProxy(allowLoopbackValidator)
+			proxy.Client.Transport = mediaTestTransport(func(r *http.Request) (*http.Response, error) {
+				if r.Header.Get("Range") != "bytes=0-3" {
+					t.Fatalf("upstream Range = %q", r.Header.Get("Range"))
+				}
+				if r.URL.Host != tc.upstreamHost || r.URL.Path != episode {
+					t.Fatalf("upstream URL = %v, want %s%s", r.URL, tc.upstreamHost, episode)
+				}
+				return &http.Response{
+					StatusCode: http.StatusPartialContent,
+					Header:     http.Header{"Content-Type": {tc.contentType}, "Content-Range": {"bytes 0-3/8"}},
+					Body:       io.NopCloser(strings.NewReader("ID3x")),
+					Request:    &http.Request{URL: &url.URL{Scheme: "https", Host: tc.finalHost, Path: tc.finalPath}},
+				}, nil
+			})
+			req := httptest.NewRequest(http.MethodGet, "/api/proxy/media?url="+url.QueryEscape(tc.raw)+"&source="+url.QueryEscape("https://www.lennysnewsletter.com/p/episode"), nil)
+			req.Header.Set("Range", "bytes=0-3")
+			rec := httptest.NewRecorder()
+			r := gin.New()
+			r.GET("/api/proxy/media", proxy.Handle)
+			r.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status=%d want=%d body=%q", rec.Code, tc.want, rec.Body.String())
+			}
+			if tc.want == 206 && (rec.Header().Get("Content-Type") != "audio/mpeg" || rec.Header().Get("Content-Range") != "bytes 0-3/8" || rec.Body.String() != "ID3x") {
+				t.Fatalf("headers=%v body=%q", rec.Header(), rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestProxyMediaXiaoyuzhouDirectAndFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {

@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -136,6 +138,7 @@ func (p *ImageProxy) Handle(c *gin.Context) {
 // browsers can seek without downloading the whole file again.
 func (p *MediaProxy) Handle(c *gin.Context) {
 	raw := c.Query("url")
+	raw, lennyEpisode := lennyPodcastUpstream(raw, c.Query("source"))
 	target, err := p.Validate(raw)
 	if err != nil {
 		c.String(http.StatusBadRequest, "invalid url: %s", err)
@@ -179,19 +182,24 @@ func (p *MediaProxy) Handle(c *gin.Context) {
 	}
 
 	ct := resp.Header.Get("Content-Type")
+	if lennyEpisode != "" && isSubstackPodcastMP3(resp, lennyEpisode) {
+		ct = "audio/mpeg"
+	}
 	if !strings.HasPrefix(ct, "audio/") && !strings.HasPrefix(ct, "video/") {
 		c.String(http.StatusUnsupportedMediaType, "non-media content-type: %s", ct)
 		return
 	}
 
 	for _, name := range []string{
-		"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges",
+		"Content-Length", "Content-Range", "Accept-Ranges",
 		"ETag", "Last-Modified",
 	} {
 		if value := resp.Header.Get(name); value != "" {
 			c.Header(name, value)
 		}
 	}
+	c.Header("Content-Type", ct)
+	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Cache-Control", "public, max-age=86400")
 	c.Status(resp.StatusCode)
 	if method == http.MethodHead {
@@ -220,4 +228,45 @@ func (p *MediaProxy) fetchMedia(req *http.Request) (*http.Response, error) {
 
 func isXiaoyuzhouMediaURL(target *url.URL) bool {
 	return target.Scheme == "https" && strings.EqualFold(target.Host, "media.xyzcdn.net")
+}
+
+const lennyPodcastHost = "www.lennysnewsletter.com"
+
+var lennyEnclosurePath = regexp.MustCompile(`^/feed/podcast/([0-9]+)/[a-f0-9]{32}\.mp3$`)
+var substackMP3Path = regexp.MustCompile(`^/video_upload/post/([0-9]+)/[a-f0-9-]+/transcoded\.mp3$`)
+
+// Lenny's publisher origin serves the same signed podcast redirect as the
+// Substack enclosure, and is reachable from the production media relay.
+func lennyPodcastUpstream(raw, source string) (string, string) {
+	origin, err := url.Parse(source)
+	if err != nil || origin.Scheme != "https" || origin.User != nil || !strings.EqualFold(origin.Host, lennyPodcastHost) || !strings.HasPrefix(origin.Path, "/p/") {
+		return raw, ""
+	}
+	target, err := url.Parse(raw)
+	if err != nil || target.Scheme != "https" || target.User != nil ||
+		(!strings.EqualFold(target.Host, "api.substack.com") && !strings.EqualFold(target.Host, lennyPodcastHost)) {
+		return raw, ""
+	}
+	match := lennyEnclosurePath.FindStringSubmatch(target.EscapedPath())
+	if match == nil {
+		return raw, ""
+	}
+	target.Host = lennyPodcastHost
+	return target.String(), match[1]
+}
+
+func isSubstackPodcastMP3(resp *http.Response, episode string) bool {
+	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if contentType != "binary/octet-stream" && contentType != "application/octet-stream" {
+		return false
+	}
+	if resp.Request == nil || resp.Request.URL == nil {
+		return false
+	}
+	final := resp.Request.URL
+	if final.Scheme != "https" || !strings.EqualFold(final.Host, "substackcdn.com") {
+		return false
+	}
+	match := substackMP3Path.FindStringSubmatch(final.EscapedPath())
+	return match != nil && match[1] == episode
 }

@@ -311,6 +311,19 @@ describe('SharePage public reader', () => {
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
   })
 
+  it('uses the RSS Pal relay for Lenny Substack podcast enclosures on a public share', async () => {
+    const mediaURL = 'https://api.substack.com/feed/podcast/224221477/e714fff25978e0a4d943e3d0fd317f24.mp3'
+    const sourceURL = 'https://www.lennysnewsletter.com/p/claude-code-obsidian-my-familys-ai'
+    axiosMock.get.mockResolvedValue({ data: sharedSnapshot({ url: sourceURL, media_url: mediaURL, media_type: 'audio/mpeg' }) })
+    const { container } = renderSharePage()
+    await screen.findByText('音频节目')
+    const relay = new URL(container.querySelector('audio')!.src)
+    expect(relay.origin).toBe('https://rss.morefreeze.top')
+    expect(relay.pathname).toBe('/api/proxy/media')
+    expect(relay.searchParams.get('url')).toBe(mediaURL)
+    expect(relay.searchParams.get('source')).toBe(sourceURL)
+  })
+
   it('uses a native audio element for public http(s) audio', async () => {
     axiosMock.get.mockResolvedValue({
       data: sharedSnapshot({

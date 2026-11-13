@@ -6,6 +6,7 @@ import VideoEmbed from './VideoEmbed'
 import { parseStoredEmbedURL } from './parseVideoPlaceholder'
 import { authSearch, parseAuthIntent, safePublicSourceURL } from '../utils/authIntent'
 import ShareActions from './ShareActions'
+import { isLennyPodcastEnclosure, playableMediaURL } from '../player/mediaURL'
 
 export { safePublicSourceURL } from '../utils/authIntent'
 
@@ -164,10 +165,13 @@ function PublicMedia({ article, sourceURL }: ArticleProps & { sourceURL: string 
   }
 
   if (mediaURL && mediaType.startsWith('audio/')) {
+    const audioURL = isLennyPodcastEnclosure(mediaURL, sourceURL)
+      ? MAIN_SITE_ORIGIN + playableMediaURL(mediaURL, sourceURL)
+      : mediaURL
     return (
       <div className="public-reader-media card">
         <div className="public-reader-media-title">音频节目</div>
-        <audio controls preload="none" src={mediaURL} />
+        <audio controls preload="none" src={audioURL} />
         <div className="text-muted text-sm">{formatDuration(article.media_duration_seconds)}</div>
       </div>
     )

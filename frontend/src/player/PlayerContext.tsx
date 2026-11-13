@@ -144,7 +144,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // ok, start from 0
     }
 
-	const src = playableMediaURL(article.media_url)
+    const src = playableMediaURL(article.media_url, article.url)
 
     setState({
       articleId: article.id,
