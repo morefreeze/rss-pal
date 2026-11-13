@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminMonitoringPage from '../src/pages/AdminMonitoringPage'
 
@@ -161,4 +161,29 @@ it('展示按浏览器去重的流量和实际新增用户，并支持 3／6 小
   expect(screen.getByText('仅覆盖采集开始后的流量')).toBeTruthy()
   fireEvent.change(screen.getByLabelText('统计范围'), { target: { value: '6' } })
   await waitFor(() => expect(api.getAdminMonitoring).toHaveBeenLastCalledWith(6, undefined, expect.any(AbortSignal)))
+})
+
+it('悬停事件柱显示分类数值，键盘可查看相邻时间', async () => {
+  api.getAdminMonitoring.mockResolvedValue({
+    ...snapshot,
+    status: 'available',
+    time_series: [
+      { at: '2026-09-16T08:00:00Z', registration_success: 2, registration_failed: 0, captcha_rejected: 0, captcha_unavailable: 0, limit_denied: 42 },
+      { at: '2026-09-16T09:00:00Z', registration_success: 0, registration_failed: 0, captcha_rejected: 0, captcha_unavailable: 0, limit_denied: 7 },
+    ],
+  })
+  render(<AdminMonitoringPage user={{ is_admin: true }} />)
+  const chart = await screen.findByRole('group', { name: '事件数量趋势' })
+  const [first, second] = within(chart).getAllByRole('button')
+  fireEvent.pointerEnter(first)
+  expect(within(screen.getByRole('tooltip')).getByText('42')).toBeTruthy()
+  expect(within(screen.getByRole('tooltip')).getByText('注册请求成功')).toBeTruthy()
+  fireEvent.pointerLeave(chart)
+  expect(screen.queryByRole('tooltip')).toBeNull()
+  act(() => first.focus())
+  fireEvent.keyDown(first, { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(second)
+  expect(within(screen.getByRole('tooltip')).getByText('7')).toBeTruthy()
+  fireEvent.keyDown(second, { key: 'Escape' })
+  expect(screen.queryByRole('tooltip')).toBeNull()
 })

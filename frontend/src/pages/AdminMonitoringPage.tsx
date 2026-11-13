@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { getAdminMonitoring, type MonitoringResponse } from '../api/monitoring'
 import './AdminMonitoringPage.css'
 
@@ -49,6 +49,78 @@ function Table({ headers, children }: { headers: string[]; children: ReactNode }
   return <div className="monitor-table-wrap"><table><thead><tr>{headers.map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>
 }
 
+const eventSeries = [
+  ['registration_success', '注册请求成功'],
+  ['registration_failed', '注册请求失败'],
+  ['captcha_rejected', '验证码未通过'],
+  ['captcha_unavailable', '验证码故障'],
+  ['limit_denied', '限流'],
+] as const
+
+function EventTrend({ points }: { points: MonitoringResponse['time_series'] }) {
+  const tooltipId = useId()
+  const bars = useRef(new Map<string, HTMLButtonElement>())
+  const [activeTime, setActiveTime] = useState<string>()
+  const [tabTime, setTabTime] = useState<string>()
+  const selected = points.findIndex(point => point.at === activeTime)
+  const tabIndex = points.findIndex(point => point.at === tabTime)
+  const max = Math.max(1, ...points.map(point => eventSeries.reduce((sum, [key]) => sum + point[key], 0)))
+  const active = points[selected]
+
+  return <>
+    <div className="monitor-trend" role="group" aria-label="事件数量趋势"
+      onPointerLeave={() => setActiveTime(undefined)}>
+      {points.map((point, index) => <button
+        key={point.at}
+        ref={element => {
+          if (element) bars.current.set(point.at, element)
+          else bars.current.delete(point.at)
+        }}
+        type="button"
+        className="monitor-bar"
+        tabIndex={index === Math.max(0, tabIndex) ? 0 : -1}
+        aria-label={when(point.at)}
+        aria-describedby={index === selected ? tooltipId : undefined}
+        onPointerEnter={() => setActiveTime(point.at)}
+        onClick={() => setActiveTime(point.at)}
+        onFocus={() => { setTabTime(point.at); setActiveTime(point.at) }}
+        onBlur={() => setActiveTime(undefined)}
+        onKeyDown={event => {
+          if (event.key === 'Escape' && active) {
+            event.stopPropagation()
+            setActiveTime(undefined)
+          }
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            event.preventDefault()
+            const direction = event.key === 'ArrowLeft' ? -1 : 1
+            const next = points[index + direction]
+            if (next) bars.current.get(next.at)?.focus()
+          }
+        }}
+      >
+        {eventSeries.map(([key], series) => <span key={key} aria-hidden="true"
+          className={`series-${series}`} style={{ height: `${100 * point[key] / max}%` }} />)}
+      </button>)}
+      {active && <div id={tooltipId} role="tooltip" className="monitor-trend-tooltip"
+        style={{ left: `clamp(var(--tooltip-half-width), ${100 * (selected + 0.5) / points.length}%, calc(100% - var(--tooltip-half-width)))` }}>
+        <strong>{when(active.at)}</strong>
+        <dl>{eventSeries.map(([key, name]) => <div key={key}>
+          <dt>{name}</dt><dd>{number(active[key])}</dd>
+        </div>)}</dl>
+      </div>}
+    </div>
+    <p className="monitor-legend">{eventSeries.map(([key, name], series) =>
+      <span key={key}><i className={`series-${series}`} />{name}</span>)}</p>
+    <details><summary>查看趋势明细</summary>
+      <Table headers={['时间', ...eventSeries.map(([, name]) => name)]}>
+        {points.map(point => <tr key={point.at}>
+          <td>{when(point.at)}</td>{eventSeries.map(([key]) => <td key={key}>{number(point[key])}</td>)}
+        </tr>)}
+      </Table>
+    </details>
+  </>
+}
+
 export default function AdminMonitoringPage({ user }: { user?: { is_admin: boolean } | null }) {
   const [hours, setHours] = useState(24)
   const [data, setData] = useState<MonitoringResponse | null>(null)
@@ -93,7 +165,6 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
   const tokenRate = data && tokensPerHour(data)
   const attempts = data?.registration.attempts || 0
   const captchaTotal = data ? data.captcha.success + data.captcha.rejected + data.captcha.unavailable : 0
-  const trendMax = Math.max(1, ...(data?.time_series || []).map(p => p.registration_success + p.registration_failed + p.captcha_rejected + p.captcha_unavailable + p.limit_denied))
 
   return <div className="admin-monitoring">
     <header className="monitor-heading">
@@ -143,14 +214,7 @@ export default function AdminMonitoringPage({ user }: { user?: { is_admin: boole
         </> : <p className="text-muted">流量统计暂不可用</p>}
       </section>
       <section className="card monitor-section"><h3>事件趋势</h3><p className="text-muted text-sm">注册相关请求结果、验证码拒绝／故障、限流事件；同一请求可能产生多类事件。</p>
-        {!data.time_series.length ? <p>尚无数据</p> : <>
-          <div className="monitor-trend" role="img" aria-label="事件数量趋势，详细数据见下方表格">{data.time_series.map(p => {
-            const parts = [p.registration_success, p.registration_failed, p.captcha_rejected, p.captcha_unavailable, p.limit_denied]
-            return <div className="monitor-bar" key={p.at} title={`${when(p.at)}：${parts.reduce((a,b) => a+b,0)} 个事件`}>{parts.map((n,i) => <span key={i} className={`series-${i}`} style={{ height: `${100*n/trendMax}%` }} />)}</div>
-          })}</div>
-          <p className="monitor-legend">{['注册请求成功', '注册请求失败', '验证码未通过', '验证码故障', '限流'].map((name, i) => <span key={name}><i className={`series-${i}`} />{name}</span>)}</p>
-          <details><summary>查看趋势明细</summary><Table headers={['时间', '注册请求成功', '注册请求失败', '验证码未通过', '验证码故障', '限流']}>{data.time_series.map(p => <tr key={p.at}><td>{when(p.at)}</td><td>{p.registration_success}</td><td>{p.registration_failed}</td><td>{p.captcha_rejected}</td><td>{p.captcha_unavailable}</td><td>{p.limit_denied}</td></tr>)}</Table></details>
-        </>}
+        {data.time_series.length ? <EventTrend points={data.time_series} /> : <p>尚无数据</p>}
       </section>
       <section className="card monitor-section"><h3>故障与限流分类</h3>{!data.groups.length ? <p className="text-muted">所选时段尚无记录</p> : <Table headers={['类型', '原因', '任务', '账号', '次数']}>{data.groups.map((g,i) => <tr key={i}><td>{label(g.kind)}</td><td>{label(g.reason)}</td><td>{label(g.task_type)}</td><td>{account(g.user_id)}</td><td>{number(g.count)}</td></tr>)}</Table>}</section>
       <section className="card monitor-section"><h3>当前任务积压</h3><p className="text-muted text-sm">实时快照，不随统计范围切换。</p>
