@@ -194,6 +194,10 @@ func fetchPDFBytes(ctx context.Context, rawURL string) ([]byte, error) {
 			return nil
 		},
 	}
+	return downloadPDF(ctx, client, rawURL)
+}
+
+func downloadPDF(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err

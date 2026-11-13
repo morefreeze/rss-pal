@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -205,6 +206,81 @@ func (r *ArticleRepository) EnableAndInsertLinkSetChildren(parentID int, childre
 		return 0, err
 	}
 	return inserted, nil
+}
+
+var ErrLinkFetchNotCancelable = errors.New("link fetch cannot be canceled")
+
+// CancelLinkFetch locks the row before checking its state. Completion and
+// cancellation therefore cannot both succeed for the same fetch task.
+func (r *ArticleRepository) CancelLinkFetch(parentID, childID, userID int) error {
+	tx, commit, rollback, err := txOrBegin(r.db)
+	if err != nil {
+		return err
+	}
+	defer rollback()
+	// Match the lock order used by batch submission and shortcut imports.
+	var lockedParent int
+	err = tx.QueryRow(`
+		SELECT a.id FROM articles a JOIN feeds f ON f.id = a.feed_id
+		WHERE a.id = $1 AND f.owner_id = $2 FOR UPDATE OF a
+	`, parentID, userID).Scan(&lockedParent)
+	if err != nil {
+		return err
+	}
+	var state string
+	err = tx.QueryRow(`
+		SELECT a.processing_state
+		FROM articles a JOIN feeds f ON f.id = a.feed_id
+		WHERE a.id = $1 AND a.parent_article_id = $2 AND f.owner_id = $3
+		FOR UPDATE OF a
+	`, childID, parentID, userID).Scan(&state)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case "stub", "queued", "processing", "failed":
+	default:
+		return ErrLinkFetchNotCancelable
+	}
+	// A child may itself be a link collection. Protect its descendants from
+	// the article foreign key's cascading delete.
+	result, err := tx.Exec(`
+		DELETE FROM articles a WHERE a.id = $1
+		AND NOT EXISTS (SELECT 1 FROM articles child WHERE child.parent_article_id = a.id)
+	`, childID)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrLinkFetchNotCancelable
+	}
+	return commit()
+}
+
+func (r *ArticleRepository) LinkFetchPending(ctx context.Context, id int) (bool, error) {
+	var pending bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM articles WHERE id = $1 AND parent_article_id IS NOT NULL AND processing_state = 'processing'
+	)`, id).Scan(&pending)
+	return pending, err
+}
+
+// CompleteLinkFetch stores the title and content only while the original
+// task still exists. Summary generation is independent of the fetch status.
+func (r *ArticleRepository) CompleteLinkFetch(id int, title, content string, words, minutes int) (bool, error) {
+	result, err := r.db.Exec(`
+		UPDATE articles SET title = COALESCE(NULLIF($2, ''), title), content = $3,
+		    word_count = $4, reading_minutes = $5, refetch_attempts = 0,
+		    summary_brief = NULL, summary_detailed = NULL, processing_error = '', processing_state = 'ready'
+		WHERE id = $1 AND parent_article_id IS NOT NULL AND processing_state = 'processing'
+	`, id, title, content, words, minutes)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected > 0, err
 }
 
 func insertLinkSetChildren(q Querier, children []LinkSetChildInput) (int, error) {

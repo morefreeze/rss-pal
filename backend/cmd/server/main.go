@@ -422,6 +422,7 @@ func main() {
 		apiGroup.POST("/articles/:id/expand", articleHandler.ExpandChild)
 		apiGroup.GET("/articles/:id/candidates", articleHandler.GetCandidates)
 		apiGroup.POST("/articles/:id/batch_fetch", articleHandler.BatchFetch)
+		apiGroup.DELETE("/articles/:id/fetch-tasks/:childId", articleHandler.CancelLinkFetch)
 		apiGroup.POST("/articles/:id/confirm_link_set", articleHandler.ConfirmLinkSetSuggestion)
 		apiGroup.POST("/articles/:id/hide", articleHandler.Hide)
 		apiGroup.DELETE("/articles/:id/hide", articleHandler.Unhide)

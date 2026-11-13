@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -825,6 +826,27 @@ func (h *ArticleHandler) BatchFetch(c *gin.Context) {
 		return
 	}
 	jsonAfterCommit(c, http.StatusOK, gin.H{"inserted": n})
+}
+
+// CancelLinkFetch removes an unfinished child task from its parent's list.
+func (h *ArticleHandler) CancelLinkFetch(c *gin.Context) {
+	parentID, parentErr := strconv.Atoi(c.Param("id"))
+	childID, childErr := strconv.Atoi(c.Param("childId"))
+	if parentErr != nil || childErr != nil || parentID <= 0 || childID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid article id"})
+		return
+	}
+	err := h.articleRepo.WithCtx(c).CancelLinkFetch(parentID, childID, getUserID(c))
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		c.JSON(http.StatusNotFound, gin.H{"error": "抓取任务不存在"})
+	case errors.Is(err, repository.ErrLinkFetchNotCancelable):
+		c.JSON(http.StatusConflict, gin.H{"error": "该任务当前无法删除"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除抓取任务失败"})
+	default:
+		jsonAfterCommit(c, http.StatusNoContent, nil)
+	}
 }
 
 // ConfirmLinkSetSuggestion is called when the user accepts the

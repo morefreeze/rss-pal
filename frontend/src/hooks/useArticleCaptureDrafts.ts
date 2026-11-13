@@ -170,5 +170,23 @@ export function useArticleCaptureDrafts(articleId: number, fetchedURLs: Readonly
     return true
   }, [articleId, scope])
 
-  return { draftLinks, fetchedURLSet, addDrafts, enrichDrafts, removeDrafts, markFetched, error }
+  const forgetFetched = useCallback((url: string) => {
+    scope.epoch++
+    scope.submitted.delete(url)
+    setState(previous => previous.articleId === articleId
+      ? { ...previous, fetched: previous.fetched.filter(value => normalizeHTTPURL(value) !== url) }
+      : previous)
+  }, [articleId, scope])
+
+  const reconcileFetched = useCallback((urls: ReadonlySet<string>) => {
+    // A detail response is authoritative for submitted tasks. Invalidate
+    // any older draft refresh before adopting its fetched-link projection.
+    scope.epoch++
+    scope.submitted.clear()
+    setState(previous => previous.articleId === articleId
+      ? { ...previous, fetched: [...urls] }
+      : previous)
+  }, [articleId, scope])
+
+  return { draftLinks, fetchedURLSet, addDrafts, enrichDrafts, removeDrafts, markFetched, forgetFetched, reconcileFetched, error }
 }

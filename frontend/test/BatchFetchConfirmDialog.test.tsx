@@ -78,7 +78,7 @@ describe('BatchFetchConfirmDialog drafts', () => {
       { title: 'A title', url: 'https://a.example/' },
     ]))
     expect(onFetched).toHaveBeenCalledWith(['https://a.example/'], 1)
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('retains the dialog, error, and checkbox state when submission fails', async () => {

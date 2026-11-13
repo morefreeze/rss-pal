@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/bytedance/rss-pal/internal/httpx"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/pdfextract"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -179,9 +180,20 @@ func detectLinkSetSuggestions(
 	}
 }
 
-// processQueuedChildren handles processing_state='processing' children:
-// fetches content. The existing backfillSummaries pass then picks them up
-// and transitions to 'ready' via UpdateSummary.
+func runLinkFetchLoop(ctx context.Context, interval time.Duration, process func(context.Context)) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		process(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// processQueuedChildren fetches content for the queued link-set children.
 //
 // imageBaseDir is the same cfg.Backup.Dir used by the PDF capture flow —
 // when a child URL is a PDF we route it through pdfextract instead of
@@ -233,31 +245,17 @@ func processQueuedChildren(
 			}
 			defer release()
 
-			// PDF children: route through pdfextract instead of goquery.
-			// Same code path the bookmarklet PDF capture uses, minus the
-			// async OCR queue — for scanned PDFs we mark failed with a
-			// nudge to use the PDF entry directly (where the worker can
-			// pick it up via GetPDFOCRPending).
-			if looksLikePDFURL(c.URL) {
-				if err := processPDFChild(cctx, articleRepo, c, imageBaseDir); err != nil {
-					log.Printf("link_set: child %d (%s) PDF process failed: %v", c.ID, c.URL, err)
-					if e := articleRepo.IncrementRefetchAttempts(c.ID); e != nil {
-						log.Printf("link_set: increment refetch_attempts %d: %v", c.ID, e)
-					}
-					if e := articleRepo.MarkFailedAfterRetries(c.ID, 3); e != nil {
-						log.Printf("link_set: mark failed %d: %v", c.ID, e)
-					}
-					atomic.AddInt64(&failed, 1)
-					return
-				}
-				atomic.AddInt64(&success, 1)
+			pending, err := articleRepo.LinkFetchPending(cctx, c.ID)
+			if err != nil || !pending {
 				return
 			}
+			go watchLinkFetch(cctx, articleRepo, c.ID, cancel)
 
-			result, ferr := contentFetcher.FetchContentWithMetadata(cctx, c.URL)
-			content := result.Content
-			if ferr != nil || content == "" {
-				log.Printf("link_set: child %d (%s) fetch failed: %v", c.ID, c.URL, ferr)
+			if err := fetchLinkChild(cctx, articleRepo, contentFetcher, c, imageBaseDir); err != nil {
+				if cctx.Err() != nil && ctx.Err() != nil {
+					return
+				}
+				log.Printf("link_set: child %d fetch failed: %v", c.ID, err)
 				if e := articleRepo.IncrementRefetchAttempts(c.ID); e != nil {
 					log.Printf("link_set: increment refetch_attempts %d: %v", c.ID, e)
 				}
@@ -267,41 +265,49 @@ func processQueuedChildren(
 				atomic.AddInt64(&failed, 1)
 				return
 			}
-			// PDFs and other binaries can ship as the "content" of a URL
-			// (link_set's ContentFetcher doesn't enforce text/html). NUL
-			// bytes inside violate Postgres TEXT encoding and make
-			// UpdateContent fail forever. Strip NULs so the write
-			// succeeds; if the result is still mostly binary that's a
-			// pre-existing scrape-quality issue, not a hard failure.
-			if strings.ContainsRune(content, '\x00') {
-				content = strings.ReplaceAll(content, "\x00", "")
-			}
-			wc, rm := rss.ComputeMetrics(content)
-			if e := articleRepo.UpdateContent(c.ID, content, wc, rm); e != nil {
-				log.Printf("link_set: save content %d: %v", c.ID, e)
-				// Treat persist failure the same as fetch failure so the
-				// worker doesn't loop forever on a stuck row. Previously
-				// this branch only logged and returned, keeping the row
-				// in processing_state='processing' indefinitely.
-				if ie := articleRepo.IncrementRefetchAttempts(c.ID); ie != nil {
-					log.Printf("link_set: increment refetch_attempts %d: %v", c.ID, ie)
-				}
-				if me := articleRepo.MarkFailedAfterRetries(c.ID, 3); me != nil {
-					log.Printf("link_set: mark failed %d: %v", c.ID, me)
-				}
-				atomic.AddInt64(&failed, 1)
-				return
-			}
-			if result.Title != "" && result.Title != c.Title {
-				if e := articleRepo.UpdateTitle(c.ID, result.Title); e != nil {
-					log.Printf("link_set: update title %d: %v", c.ID, e)
-				}
-			}
 			atomic.AddInt64(&success, 1)
 		}()
 	}
 	wg.Wait()
 	log.Printf("link_set: queued children pass done — %d ok, %d failed", success, failed)
+}
+
+// A deleted task may already be in an HTTP request. Stop that request when
+// the deletion becomes visible. The conditional write also protects the
+// interval between checks.
+func watchLinkFetch(ctx context.Context, repo *repository.ArticleRepository, id int, cancel context.CancelFunc) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pending, err := repo.LinkFetchPending(ctx, id)
+			if err == nil && !pending {
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+func fetchLinkChild(ctx context.Context, repo *repository.ArticleRepository, fetcher linkSetContentFetcher, child *model.Article, imageBaseDir string) error {
+	if looksLikePDFURL(child.URL) {
+		return processPDFChild(ctx, repo, child, imageBaseDir)
+	}
+	result, err := fetcher.FetchContentWithMetadata(ctx, child.URL)
+	if err != nil {
+		return err
+	}
+	// Postgres TEXT cannot store NUL bytes.
+	content := strings.ReplaceAll(result.Content, "\x00", "")
+	if content == "" {
+		return errors.New("empty content")
+	}
+	words, minutes := rss.ComputeMetrics(content)
+	_, err = repo.CompleteLinkFetch(child.ID, result.Title, content, words, minutes)
+	return err
 }
 
 // looksLikePDFURL returns true when the URL path ends in .pdf (case-
@@ -331,7 +337,7 @@ func processPDFChild(
 	c *model.Article,
 	imageBaseDir string,
 ) error {
-	pdfBytes, err := fetchPDFBytes(ctx, c.URL)
+	pdfBytes, err := downloadPDF(ctx, httpx.NewClient(pdfOCRFetchTimeout), c.URL)
 	if err != nil {
 		return fmt.Errorf("download pdf: %w", err)
 	}
@@ -351,17 +357,9 @@ func processPDFChild(
 		content = content[:50000] + "..."
 	}
 	wc, rm := rss.ComputeMetrics(content)
-	// UpdateContentAndMarkReady transitions processing_state to 'ready'
-	// atomically with the content write so the user doesn't see the
-	// 处理中 banner while waiting for backfillSummaries to flip the state
-	// (which is what plain UpdateContent would force).
-	if err := articleRepo.UpdateContentAndMarkReady(c.ID, content, wc, rm); err != nil {
-		return fmt.Errorf("update content: %w", err)
+	saved, err := articleRepo.CompleteLinkFetch(c.ID, r.Title, content, wc, rm)
+	if !saved {
+		_ = pdfextract.RemoveImageDir(imageBaseDir, c.ID)
 	}
-	if r.Title != "" && r.Title != c.Title {
-		if err := articleRepo.UpdateTitle(c.ID, r.Title); err != nil {
-			log.Printf("link_set: pdf child %d update title: %v", c.ID, err)
-		}
-	}
-	return nil
+	return err
 }

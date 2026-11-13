@@ -9,7 +9,7 @@ import {
   fetchContent, likeArticle, dislikeArticle, saveArticle, unsaveArticle,
   recordReadDuration, updateProgress, resetProgress,
   getTemplates, generateSummaryStream, exportMarkdown, expandLinkSetChild,
-  hideArticle, unhideArticle,
+  hideArticle, unhideArticle, batchFetchCandidates, cancelLinkFetch,
   Article, ReadingProgress, SummaryTemplate,
   type ArticleDetailResponse, type ArticleListItem,
 } from '../api/client'
@@ -22,14 +22,13 @@ import {
 import { ProgressSaveQueue, progressAccountId } from '../utils/progressSaveQueue'
 import { toast } from '../utils/toast'
 import { LinkSetChildren } from '../components/LinkSetChildren'
-import { BatchFetchConfirmDialog } from '../components/BatchFetchConfirmDialog'
+import { BatchFetchConfirmDialog, canDeleteLinkFetch } from '../components/BatchFetchConfirmDialog'
 import { ReaderActionContext } from '../reader/ReaderActionContext'
 import { createLinkSetActions } from '../reader/linkSetActions'
 import type { ReaderActionContextValue } from '../reader/types'
 import { normalizeHTTPURL } from '../utils/url'
 import {
   buildFetchedURLSet,
-  mergeFetchedLinkURLs,
 } from '../utils/linkSetSelection'
 import ReadingMeta from '../components/ReadingMeta'
 import MarkdownArticle, { findStandaloneVideoAnchorID } from '../components/MarkdownArticle'
@@ -302,9 +301,18 @@ function ArticlePageContent() {
       ?? [],
   )
 
-  // Ordered per-article scratchpad used by both reader modes. It is available
-  // for every article; the first successful batch implicitly enables link_set.
-  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [fetchListOpen, setFetchListOpen] = useState(false)
+  const linkFetchScope = useMemo(() => ({
+    revision: 0,
+    active: false,
+    submitting: new Map<string, { url: string; title: string }>(),
+    busyTasks: new Set<number>(),
+  }), [articleID])
+  const [submittingLinks, setSubmittingLinks] = useState<Array<{ url: string; title: string }>>([])
+  const [busyTaskIDs, setBusyTaskIDs] = useState<ReadonlySet<number>>(new Set())
+  const [fetchRefreshPending, setFetchRefreshPending] = useState(false)
+  const closeFetchList = useCallback(() => setFetchListOpen(false), [])
+  const openFetchList = useCallback(() => setFetchListOpen(true), [])
 
   const articleURL = article?.url
   const primaryVideo = useMemo(
@@ -331,27 +339,140 @@ function ArticlePageContent() {
     [article?.id, articleURL, fetchedLinkURLs, id],
   )
   const {
-    draftLinks, fetchedURLSet, addDrafts: addCaptureDrafts,
-    removeDrafts, enrichDrafts, markFetched, error: draftError,
+    draftLinks, fetchedURLSet, removeDrafts, enrichDrafts, markFetched,
+    forgetFetched, reconcileFetched, error: draftError,
   } = useArticleCaptureDrafts(Number(id), detailFetchedURLSet)
   const draftURLSet = useMemo(
     () => new Set(draftLinks.map((draft) => draft.url)),
     [draftLinks],
   )
 
-  useEffect(() => {
-    setConfirmOpen(false)
+  useLayoutEffect(() => {
+    linkFetchScope.active = true
+    closeFetchList()
+    setSubmittingLinks([])
+    setBusyTaskIDs(new Set())
+    setFetchRefreshPending(false)
     setFetchedLinkURLs([])
-  }, [id])
+    return () => { linkFetchScope.active = false }
+  }, [linkFetchScope, closeFetchList])
 
   useEffect(() => {
     if (draftError) toast.error(draftError)
   }, [draftError])
 
-  const addDrafts = useCallback((links: Array<{ url: string; title: string }>) => {
-    const count = addCaptureDrafts(links)
-    if (count > 0) toast.success(`已加入待抓取（${count}）`)
-  }, [addCaptureDrafts])
+  const syncLinkFetches = useCallback((data: ArticleDetailResponse, reconcile = false) => {
+    const urls = data.fetched_link_urls ?? data.children?.map(child => child.url) ?? []
+    setLinkSetChildren(data.children ?? null)
+    setFetchedLinkURLs(urls)
+    if (reconcile) reconcileFetched(buildFetchedURLSet(urls, data.article.url))
+  }, [reconcileFetched])
+
+  const refreshLinkFetches = useCallback(async () => {
+    const revision = linkFetchScope.revision
+    const generation = loadGenerationRef.current
+    const data = await fetchDetailForPage(articleID)
+    if (!linkFetchScope.active || loadGenerationRef.current !== generation ||
+      linkFetchScope.revision !== revision) return
+    syncLinkFetches(data, true)
+    setFetchRefreshPending(false)
+  }, [articleID, fetchDetailForPage, linkFetchScope, syncLinkFetches])
+
+  const handleDraftsFetched = useCallback((submittedURLs: string[], insertedCount: number) => {
+    invalidateArticleDetail(articleID)
+    if (!markFetched(submittedURLs) || !linkFetchScope.active) return
+    linkFetchScope.revision++
+    setFetchRefreshPending(true)
+    toast.success(insertedCount > 0 ? `已提交 ${insertedCount} 个抓取任务` : '链接已在抓取列表中')
+    void refreshLinkFetches().catch(() => {})
+  }, [articleID, linkFetchScope, markFetched, refreshLinkFetches])
+
+  const startLinkFetch = useCallback(async (links: Array<{ url: string; title: string }>) => {
+    const candidates = links.filter(link => !linkFetchScope.submitting.has(link.url) && !fetchedURLSet.has(link.url))
+    if (candidates.length === 0) return
+    for (const link of candidates) linkFetchScope.submitting.set(link.url, link)
+    setSubmittingLinks([...linkFetchScope.submitting.values()])
+    try {
+      for (let offset = 0; offset < candidates.length; offset += 100) {
+        const batch = candidates.slice(offset, offset + 100)
+        const result = await batchFetchCandidates(articleID, batch)
+        handleDraftsFetched(batch.map(link => link.url), result.inserted)
+      }
+    } catch (error) {
+      if (linkFetchScope.active) {
+        const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+        toast.error(message || '提交抓取失败，请重试')
+      }
+    } finally {
+      for (const link of candidates) linkFetchScope.submitting.delete(link.url)
+      if (linkFetchScope.active) setSubmittingLinks([...linkFetchScope.submitting.values()])
+    }
+  }, [articleID, fetchedURLSet, handleDraftsFetched, linkFetchScope])
+
+  const updateLinkFetch = useCallback(async (task: Article, action: 'delete' | 'retry') => {
+    if (linkFetchScope.busyTasks.has(task.id)) return
+    linkFetchScope.busyTasks.add(task.id)
+    setBusyTaskIDs(new Set(linkFetchScope.busyTasks))
+    const remove = () => {
+      const url = normalizeHTTPURL(task.url, articleURL)
+      if (url) forgetFetched(url)
+      setLinkSetChildren(current => current?.filter(child => child.id !== task.id) ?? null)
+      setFetchedLinkURLs(current => current.filter(value => normalizeHTTPURL(value, articleURL) !== url))
+    }
+    try {
+      if (action === 'delete') await cancelLinkFetch(articleID, task.id)
+      else await expandLinkSetChild(task.id)
+      invalidateArticleDetail(articleID)
+      invalidateArticleDetail(task.id)
+      if (!linkFetchScope.active) return
+      if (action === 'delete') {
+        remove()
+        toast.success('抓取任务已删除')
+      } else {
+        setLinkSetChildren(current => current?.map(child => child.id === task.id
+          ? { ...child, processing_state: 'processing' } : child) ?? null)
+      }
+    } catch (error) {
+      if (!linkFetchScope.active) return
+      const status = (error as { response?: { status?: number } })?.response?.status
+      if (action === 'delete' && status === 404) {
+        invalidateArticleDetail(task.id)
+        remove()
+      } else {
+        toast.error(status === 409 ? '任务状态已变化，请查看列表' : action === 'delete' ? '删除抓取任务失败，请重试' : '重试抓取失败')
+      }
+    } finally {
+      linkFetchScope.busyTasks.delete(task.id)
+      if (linkFetchScope.active) {
+        setBusyTaskIDs(new Set(linkFetchScope.busyTasks))
+        linkFetchScope.revision++
+        invalidateArticleDetail(articleID)
+        setFetchRefreshPending(true)
+        void refreshLinkFetches().catch(() => {})
+      }
+    }
+  }, [articleID, articleURL, forgetFetched, linkFetchScope, refreshLinkFetches])
+
+  const hasPendingLinkFetch = linkSetChildren?.some(task =>
+    task.processing_state === 'processing' || task.processing_state === 'queued',
+  ) ?? false
+  useEffect(() => {
+    if (!fetchRefreshPending && !hasPendingLinkFetch && !fetchListOpen) return
+    const refresh = () => {
+      if (!document.hidden) void refreshLinkFetches().catch(() => {})
+    }
+    const timer = window.setInterval(refresh, 4000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [fetchRefreshPending, fetchListOpen, hasPendingLinkFetch, refreshLinkFetches])
+
+  const activeLinkURLs = useMemo(() => buildFetchedURLSet([
+    ...(linkSetChildren ?? []).filter(canDeleteLinkFetch).map(task => task.url),
+    ...submittingLinks.map(link => link.url),
+  ], articleURL), [articleURL, linkSetChildren, submittingLinks])
 
   const openReaderLink = useCallback((url: string) => {
     window.open(url, '_blank', 'noopener,noreferrer')
@@ -378,14 +499,18 @@ function ArticlePageContent() {
       target,
       draftURLs: draftURLSet,
       fetchedURLs: fetchedURLSet,
-      onAdd: addDrafts,
+      activeURLs: activeLinkURLs,
+      onAdd: startLinkFetch,
+      onViewTasks: openFetchList,
       onRemove: removeDrafts,
       onOpen: openReaderLink,
       onCopy: copyReaderLink,
     }),
     onLinkDiscovered: discoverReaderLink,
   }), [
-    addDrafts,
+    activeLinkURLs,
+    startLinkFetch,
+    openFetchList,
     copyReaderLink,
     discoverReaderLink,
     draftURLSet,
@@ -395,7 +520,7 @@ function ArticlePageContent() {
     removeDrafts,
   ])
 
-  const applyDetailResponse = useCallback((data: ArticleDetailResponse) => {
+  const applyDetailResponse = useCallback((data: ArticleDetailResponse, applyLinks = true) => {
     setArticle(data.article)
     setSummaryJob(data.summary_job)
     setProgress(data.progress ?? null)
@@ -405,21 +530,17 @@ function ArticlePageContent() {
     setCurrentScrollPosition(savedScrollPosition)
     setFromBookmarklet(Boolean(data.from_bookmarklet))
     setHidden(Boolean(data.hidden))
-    setLinkSetChildren(data.children ?? null)
-    setFetchedLinkURLs(
-      data.fetched_link_urls
-      ?? data.children?.map((child) => child.url)
-      ?? [],
-    )
+    if (applyLinks) syncLinkFetches(data)
     setLiked((data.signals?.like ?? 0) > 0)
     setDisliked((data.signals?.dislike ?? 0) > 0)
     setSaved((data.signals?.save ?? 0) > 0)
-  }, [])
+  }, [syncLinkFetches])
 
   const loadArticle = async () => {
     if (!Number.isFinite(articleID)) return
 
     const generation = ++loadGenerationRef.current
+    const linkRevision = linkFetchScope.revision
     const isCurrent = () =>
       loadGenerationRef.current === generation && Number(id) === articleID
     const cached = peekArticleDetail(articleID)
@@ -441,7 +562,7 @@ function ArticlePageContent() {
     try {
       const data = await fetchDetailForPage(articleID)
       if (!isCurrent()) return
-      applyDetailResponse(data)
+      applyDetailResponse(data, linkFetchScope.revision === linkRevision)
     } catch (err: any) {
       if (!isCurrent()) return
       if (isArticleAccessDenied(err)) {
@@ -591,12 +712,12 @@ function ArticlePageContent() {
       intervalId = setInterval(async () => {
         if (cancelled) return
         try {
+          const linkRevision = linkFetchScope.revision
           const data = await fetchDetailForPage(article.id)
           if (cancelled) return
           if (data.article.processing_state === 'ready' || data.article.processing_state === 'failed') {
             setArticle(data.article)
-            setLinkSetChildren(data.children ?? null)
-            setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
+            if (linkFetchScope.revision === linkRevision) syncLinkFetches(data)
             if (intervalId) clearInterval(intervalId)
           } else {
             setArticle(data.article)
@@ -1146,27 +1267,6 @@ function ArticlePageContent() {
     historicalHighWater: deriveHistoricalHighWater(progress?.scroll_position, maxScrollRef.current),
   })
 
-  const handleDraftsFetched = useCallback((submittedURLs: string[], insertedCount: number) => {
-    if (!markFetched(submittedURLs)) return
-    const generation = loadGenerationRef.current
-    toast.success(`已提交 ${submittedURLs.length} 条链接${insertedCount < submittedURLs.length ? `，新增 ${insertedCount} 条` : ''}`)
-    const articleID = article?.id
-    if (!articleID) return
-    invalidateArticleDetail(articleID)
-    void fetchDetailForPage(articleID)
-      .then((data) => {
-        if (loadGenerationRef.current !== generation) return
-        setArticle(data.article)
-        setLinkSetChildren(data.children ?? null)
-        setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
-      })
-      .catch((error) => {
-        if (loadGenerationRef.current !== generation) return
-        console.warn('refresh after batch_fetch failed', error)
-        toast.error('链接已提交，但详情刷新失败，请手动刷新')
-      })
-  }, [article?.id, id, markFetched])
-
   if (loadError && (!article || article.id !== articleID)) return (
     <div className="card" style={{ textAlign: 'center' }}>
       <div className="text-muted">{loadError}</div>
@@ -1191,25 +1291,33 @@ function ArticlePageContent() {
     )
   }
 
-  const draftControls = (
+  const tasks = linkSetChildren ?? []
+  const taskCount = draftLinks.length + tasks.length + submittingLinks.filter(link => !fetchedURLSet.has(link.url)).length
+  const fetchListControls = (
     <>
-      {draftLinks.length > 0 && (
+      {(taskCount > 0 || fetchRefreshPending) && (
         <CollapsibleFab
           articleId={article.id}
           icon="📥"
-          label={`待抓取 ${draftLinks.length}`}
+          label={taskCount > 0 ? `抓取列表 ${taskCount}` : '抓取列表'}
           variant="primary"
-          title={`${draftLinks.length} 条链接待确认抓取`}
-          onActivate={() => setConfirmOpen(true)}
+          title={taskCount > 0 ? `抓取列表（${taskCount}）` : '抓取列表'}
+          onActivate={openFetchList}
         />
       )}
       <BatchFetchConfirmDialog
-        open={confirmOpen}
+        key={article.id}
+        open={fetchListOpen}
         articleId={article.id}
         drafts={draftLinks}
         fetchedURLs={fetchedURLSet}
+        tasks={tasks}
+        submittingLinks={submittingLinks.filter(link => !fetchedURLSet.has(link.url))}
+        busyTaskIDs={busyTaskIDs}
+        onDeleteTask={(task) => void updateLinkFetch(task, 'delete')}
+        onRetryTask={(task) => void updateLinkFetch(task, 'retry')}
         onRemove={(url) => void removeDrafts([url])}
-        onClose={() => setConfirmOpen(false)}
+        onClose={closeFetchList}
         onFetched={handleDraftsFetched}
       />
     </>
@@ -1245,7 +1353,7 @@ function ArticlePageContent() {
           onBack={handleBack}
           readerActionContext={readerActionContext}
         />
-        {draftControls}
+        {fetchListControls}
       </>
     )
   }
@@ -1485,11 +1593,11 @@ function ArticlePageContent() {
               try {
                 await expandLinkSetChild(article.id)
                 invalidateArticleDetail(article.id)
+                const linkRevision = linkFetchScope.revision
                 const data = await fetchDetailForPage(article.id)
                 if (generation !== loadGenerationRef.current) return
                 setArticle(data.article)
-                setLinkSetChildren(data.children ?? null)
-                setFetchedLinkURLs(data.fetched_link_urls ?? data.children?.map((child) => child.url) ?? [])
+                if (linkFetchScope.revision === linkRevision) syncLinkFetches(data)
               } catch (e) {
                 console.warn('retry failed', e)
               }
@@ -1641,15 +1749,11 @@ function ArticlePageContent() {
         onCopyXiaohongshu={handleShareXiaohongshu}
         onExportMarkdown={() => void handleExportMarkdown()}
       />
-      {draftControls}
+      {fetchListControls}
       {(article.links_extendable === true || (linkSetChildren?.length ?? 0) > 0) && (
         <ExcludeArticleSearch><LinkSetChildren
-          parentId={article.id}
-          children={linkSetChildren ?? []}
-          onChildrenUpdated={(updated, fetchedURLs) => {
-            setLinkSetChildren(updated)
-            setFetchedLinkURLs((current) => mergeFetchedLinkURLs(current, fetchedURLs, updated))
-          }}
+          children={tasks}
+          onRetry={(task) => void updateLinkFetch(task, 'retry')}
         /></ExcludeArticleSearch>
       )}
       {/* Bottom nav so readers don't have to scroll back up to switch articles.

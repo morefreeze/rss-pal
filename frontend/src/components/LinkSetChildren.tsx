@@ -1,13 +1,10 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Article, expandLinkSetChild, getArticle } from '../api/client'
+import type { Article } from '../api/client'
 import SummaryMarkdown from './SummaryMarkdown'
 
 interface Props {
-  parentId: number
-  // eslint-disable-next-line react/no-unused-prop-types
   children: Article[]
-  onChildrenUpdated?: (children: Article[], fetchedLinkURLs?: string[]) => void
+  onRetry: (task: Article) => void
 }
 
 function hostOf(url: string): string {
@@ -18,61 +15,8 @@ function hostOf(url: string): string {
   }
 }
 
-export function LinkSetChildren({ parentId, children, onChildrenUpdated }: Props) {
-  const [items, setItems] = useState<Article[]>(children)
-
-  useEffect(() => {
-    // Sort by id ASC (creation order = user's selection order)
-    const sorted = [...children].sort((a, b) => a.id - b.id)
-    setItems(sorted)
-  }, [children])
-
-  // Poll for any processing children until they finish
-  useEffect(() => {
-    const processingIds = items.filter((c) => c.processing_state === 'processing').map((c) => c.id)
-    if (processingIds.length === 0) return
-
-    let cancelled = false
-    const interval = setInterval(async () => {
-      if (cancelled) return
-      try {
-        const data = await getArticle(parentId)
-        if (cancelled) return
-        if (data.children) {
-          const sorted = [...data.children].sort((a, b) => a.id - b.id)
-          setItems(sorted)
-          onChildrenUpdated?.(data.children, data.fetched_link_urls)
-          // Stop polling once none are processing
-          const stillProcessing = sorted.some((c) => c.processing_state === 'processing')
-          if (!stillProcessing) {
-            clearInterval(interval)
-          }
-        }
-      } catch (e) {
-        console.warn('poll failed', e)
-      }
-    }, 4000)
-
-    // Safety cap at 5 minutes
-    const safety = setTimeout(() => {
-      cancelled = true
-      clearInterval(interval)
-    }, 5 * 60 * 1000)
-
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-      clearTimeout(safety)
-    }
-  }, [items.map((c) => c.id + ':' + c.processing_state).join(',')])
-
-  async function handleRetry(childId: number) {
-    try {
-      await expandLinkSetChild(childId)
-    } catch (e) {
-      console.warn('retry failed', e)
-    }
-  }
+export function LinkSetChildren({ children, onRetry }: Props) {
+  const items = [...children].sort((a, b) => a.id - b.id)
 
   if (items.length === 0) {
     return (
@@ -113,14 +57,14 @@ export function LinkSetChildren({ parentId, children, onChildrenUpdated }: Props
             )}
             {c.processing_state === 'processing' && (
               <p className="text-xs mt-2" style={{ color: 'var(--fg-muted)' }}>
-                正在抓取并生成摘要…
+                正在抓取…
               </p>
             )}
             {c.processing_state === 'failed' && (
               <button
                 className="mt-2 text-xs px-2 py-1 rounded"
                 style={{ border: '1px solid var(--border)', color: 'var(--fg)' }}
-                onClick={() => handleRetry(c.id)}
+                onClick={() => onRetry(c)}
               >
                 重试
               </button>

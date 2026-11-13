@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	ErrCaptureSourceNotFound  = errors.New("没有找到包含该链接的来源文章，请回到 RSS Pal 原文章加入待抓取")
-	ErrCaptureSourceAmbiguous = errors.New("多篇文章包含该链接，请在来源文章内使用“加入待抓取”")
+	ErrCaptureSourceNotFound  = errors.New("没有找到包含该链接的来源文章，请回到 RSS Pal 原文章开始抓取")
+	ErrCaptureSourceAmbiguous = errors.New("多篇文章包含该链接，请在来源文章内使用“立即开始抓取”")
 )
 
 type ArticleCaptureDraft struct {

@@ -371,6 +371,10 @@ export async function batchFetchCandidates(
   return data
 }
 
+export async function cancelLinkFetch(articleId: number, childId: number): Promise<void> {
+  await api.delete(`/articles/${articleId}/fetch-tasks/${childId}`)
+}
+
 export async function confirmLinkSetSuggestion(articleId: number): Promise<void> {
   await api.post(`/articles/${articleId}/confirm_link_set`)
 }

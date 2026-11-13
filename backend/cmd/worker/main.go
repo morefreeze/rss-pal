@@ -224,17 +224,23 @@ func main() {
 		}
 	}()
 
+	linkFetchCtx, cancelLinkFetch := context.WithCancel(context.Background())
+	defer cancelLinkFetch()
+	go runLinkFetchLoop(linkFetchCtx, 3*time.Second, func(ctx context.Context) {
+		processQueuedChildren(ctx, articleRepo, contentFetcher, cfg.Backup.Dir)
+	})
+
 	runWorkerLoops(context.Background(), time.Minute,
 		func(ctx context.Context) {
 			fetchAllFeeds(ctx, feedRepo, articleRepo, fetcher, contentFetcher, summarizer)
 		},
 		func(ctx context.Context) {
-			runFetchCycle(ctx, cfg, articleRepo, prefRepo, contentFetcher, summarizer, transcriptFetcher, cfg.Backup.Dir, autoTagger)
+			runFetchCycle(ctx, cfg, articleRepo, prefRepo, contentFetcher, summarizer, transcriptFetcher, autoTagger)
 		},
 	)
 }
 
-func runFetchCycle(ctx context.Context, cfg *config.Config, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, imageBaseDir string, autoTagger *service.AutoTagService) {
+func runFetchCycle(ctx context.Context, cfg *config.Config, articleRepo *repository.ArticleRepository, prefRepo *repository.PreferenceRepository, contentFetcher *rss.ContentFetcher, summarizer *ai.Summarizer, transcriptFetcher transcript.Fetcher, autoTagger *service.AutoTagService) {
 	if !cycleMu.TryLock() {
 		log.Println("Previous fetch cycle still running, skipping")
 		return
@@ -243,7 +249,6 @@ func runFetchCycle(ctx context.Context, cfg *config.Config, articleRepo *reposit
 
 	detectLinkSetCandidates(ctx, articleRepo, contentFetcher)
 	detectLinkSetSuggestions(ctx, articleRepo, contentFetcher)
-	processQueuedChildren(ctx, articleRepo, contentFetcher, imageBaseDir)
 	refetchShortContent(ctx, articleRepo, contentFetcher, summarizer)
 	if transcriptFetcher != nil {
 		backfillTranscripts(ctx, articleRepo, transcriptFetcher)

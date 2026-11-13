@@ -25,6 +25,7 @@ function callbacks() {
     onRemove: vi.fn(),
     onOpen: vi.fn(),
     onCopy: vi.fn(),
+    onViewTasks: vi.fn(),
   }
 }
 
@@ -39,7 +40,7 @@ describe('createLinkSetActions', () => {
       ...events,
     })
 
-    expect(actions.map((action) => action.label)).toEqual(['加入待抓取（2）'])
+    expect(actions.map((action) => action.label)).toEqual(['立即开始抓取（2）'])
     await actions[0].run()
     expect(events.onAdd).toHaveBeenCalledWith([
       { url: 'https://a.example/', title: 'A' },
@@ -56,8 +57,8 @@ describe('createLinkSetActions', () => {
       fetchedURLs: new Set(),
       ...events,
     })
-    expect(actions.map((action) => action.label)).toEqual(['移出待抓取（2）'])
-    await actions[0].run()
+    expect(actions.map((action) => action.label)).toEqual(['立即开始抓取（2）', '移出待抓取（2）'])
+    await actions[1].run()
     expect(events.onRemove).toHaveBeenCalledWith(['https://a.example/', 'https://b.example/'])
   })
 
@@ -75,14 +76,14 @@ describe('createLinkSetActions', () => {
       ...events,
     })
     expect(actions.map((action) => action.label)).toEqual([
-      '加入待抓取（1）',
+      '立即开始抓取（2）',
       '移出待抓取（1）',
       '已抓取（1）',
     ])
     expect(actions[2].disabled).toBe(true)
     await actions[0].run()
     await actions[1].run()
-    expect(events.onAdd).toHaveBeenCalledWith([{ url: links[0].url, title: 'A' }])
+    expect(events.onAdd).toHaveBeenCalledWith([{ url: links[0].url, title: 'A' }, { url: links[1].url, title: 'B' }])
     expect(events.onRemove).toHaveBeenCalledWith([links[1].url])
   })
 
@@ -110,7 +111,7 @@ describe('createLinkSetActions', () => {
       ...events,
     })
     expect(actions.map((action) => action.label)).toEqual([
-      '加入待抓取',
+      '立即开始抓取',
       '在新标签页打开',
       '复制链接',
     ])
@@ -124,7 +125,7 @@ describe('createLinkSetActions', () => {
     const events = callbacks()
     const item = link('https://a.example/', 'A')
     const base = { target: target([item], 'long-press-link'), fetchedURLs: new Set<string>(), ...events }
-    expect(createLinkSetActions({ ...base, draftURLs: new Set([item.url]) })[0].label).toBe('移出待抓取')
+    expect(createLinkSetActions({ ...base, draftURLs: new Set([item.url]) })[1].label).toBe('移出待抓取')
     const fetched = createLinkSetActions({
       ...base,
       draftURLs: new Set(),

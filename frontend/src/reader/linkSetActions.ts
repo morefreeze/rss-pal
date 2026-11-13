@@ -11,38 +11,46 @@ type LinkSetActionOptions = {
   target: ReaderContextTarget
   draftURLs: ReadonlySet<string>
   fetchedURLs: ReadonlySet<string>
+  activeURLs?: ReadonlySet<string>
   onAdd: (links: LinkInput[]) => ActionResult
   onRemove: (urls: string[]) => ActionResult
   onOpen: (url: string) => ActionResult
   onCopy: (url: string) => ActionResult
+  onViewTasks: () => ActionResult
 }
 
 export function createLinkSetActions({
   target,
   draftURLs,
   fetchedURLs,
+  activeURLs,
   onAdd,
   onRemove,
   onOpen,
   onCopy,
+  onViewTasks,
 }: LinkSetActionOptions): ReaderContextAction[] {
-  const unmarked: ReaderLinkTarget[] = []
+  const startable: ReaderLinkTarget[] = []
   const drafts: ReaderLinkTarget[] = []
   const fetched: ReaderLinkTarget[] = []
+  const active: ReaderLinkTarget[] = []
 
   for (const link of target.links) {
-    if (fetchedURLs.has(link.url)) fetched.push(link)
-    else if (draftURLs.has(link.url)) drafts.push(link)
-    else unmarked.push(link)
+    if (activeURLs?.has(link.url)) active.push(link)
+    else if (fetchedURLs.has(link.url)) fetched.push(link)
+    else {
+      startable.push(link)
+      if (draftURLs.has(link.url)) drafts.push(link)
+    }
   }
 
   const mobile = target.kind === 'long-press-link'
   const actions: ReaderContextAction[] = []
-  if (unmarked.length > 0) {
+  if (startable.length > 0) {
     actions.push({
       id: 'link-set-add',
-      label: mobile ? '加入待抓取' : `加入待抓取（${unmarked.length}）`,
-      run: () => onAdd(unmarked.map(({ url, title }) => ({ url, title }))),
+      label: mobile ? '立即开始抓取' : `立即开始抓取（${startable.length}）`,
+      run: () => onAdd(startable.map(({ url, title }) => ({ url, title }))),
     })
   }
   if (drafts.length > 0) {
@@ -50,6 +58,13 @@ export function createLinkSetActions({
       id: 'link-set-remove',
       label: mobile ? '移出待抓取' : `移出待抓取（${drafts.length}）`,
       run: () => onRemove(drafts.map((link) => link.url)),
+    })
+  }
+  if (active.length > 0) {
+    actions.push({
+      id: 'link-set-active',
+      label: mobile ? '查看抓取任务' : `查看抓取任务（${active.length}）`,
+      run: onViewTasks,
     })
   }
   if (fetched.length > 0) {

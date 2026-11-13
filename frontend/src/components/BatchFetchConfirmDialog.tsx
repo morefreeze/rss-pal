@@ -1,9 +1,15 @@
 // Confirmation for the ordered per-article link draft list. Checkbox state
 // is only for the current submission; the remove button edits the draft list.
 
-import { useEffect, useState } from 'react'
-import { batchFetchCandidates } from '../api/client'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { batchFetchCandidates, type Article } from '../api/client'
 import type { DraftLink } from '../utils/linkSetSelection'
+
+export function canDeleteLinkFetch(task: Article) {
+  return task.processing_state === 'processing' || task.processing_state === 'queued'
+    || task.processing_state === 'failed' || task.processing_state === 'stub'
+}
 
 interface Props {
   open: boolean
@@ -12,6 +18,11 @@ interface Props {
   fetchedURLs: ReadonlySet<string>
   onRemove: (url: string) => void
   onClose: () => void
+  tasks?: Article[]
+  submittingLinks?: Array<{ url: string; title: string }>
+  busyTaskIDs?: ReadonlySet<number>
+  onDeleteTask?: (task: Article) => void
+  onRetryTask?: (task: Article) => void
   onFetched?: (submittedURLs: string[], insertedCount: number) => void
 }
 
@@ -22,9 +33,16 @@ export function BatchFetchConfirmDialog({
   fetchedURLs,
   onRemove,
   onClose,
+  tasks = [],
+  submittingLinks = [],
+  busyTaskIDs,
+  onDeleteTask,
+  onRetryTask,
   onFetched,
 }: Props) {
   const rows = drafts
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   // Per-row "include in this fetch" state. Identified by normalized URL so
   // it survives rows shifting in/out as the user ✕s things.
@@ -68,13 +86,28 @@ export function BatchFetchConfirmDialog({
   // Lock body scroll while open + ESC to close
   useEffect(() => {
     if (!open) return
+    const previousFocus = document.activeElement
+    closeRef.current?.focus()
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Tab' || !dialogRef.current) return
+      const controls = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled)'))
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (!controls.includes(document.activeElement as HTMLElement) ||
+        (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+        e.preventDefault()
+        const next = e.shiftKey ? last : first
+        next?.focus()
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = prev
       window.removeEventListener('keydown', onKey)
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
     }
   }, [open, onClose])
 
@@ -125,7 +158,6 @@ export function BatchFetchConfirmDialog({
         }))
       const result = await batchFetchCandidates(articleId, chosen)
       onFetched?.(chosen.map((draft) => draft.url), result.inserted)
-      onClose()
     } catch (e: any) {
       setError(e?.response?.data?.error || '抓取失败')
     } finally {
@@ -155,6 +187,7 @@ export function BatchFetchConfirmDialog({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="batch-fetch-dialog-title"
@@ -179,10 +212,11 @@ export function BatchFetchConfirmDialog({
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <h3 id="batch-fetch-dialog-title" style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>确认要抓取的链接</h3>
+          <h3 id="batch-fetch-dialog-title" style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>抓取列表</h3>
           <button
             type="button"
             onClick={onClose}
+            ref={closeRef}
             aria-label="关闭"
             style={{
               border: 'none',
@@ -191,13 +225,14 @@ export function BatchFetchConfirmDialog({
               fontSize: 22,
               lineHeight: 1,
               cursor: 'pointer',
+              minWidth: 44,
+              minHeight: 44,
               padding: 0,
             }}
           >×</button>
         </div>
 
-        {/* Toolbar */}
-        <div style={{
+        {rows.length > 0 && <div style={{
           padding: '10px 20px',
           borderBottom: '1px solid var(--border)',
           display: 'flex',
@@ -212,16 +247,47 @@ export function BatchFetchConfirmDialog({
           <span style={{ marginLeft: 'auto', color: 'var(--fg-muted)' }}>
             已勾选 {checkedURLs.size} / 共 {totalSelectable} 可抓取
           </span>
-        </div>
+        </div>}
 
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 12px', minWidth: 0 }}>
           {error && (
-            <div style={{ padding: 16, fontSize: 13, color: 'crimson' }}>{error}</div>
+            <div role="alert" style={{ padding: 16, fontSize: 13, color: 'crimson' }}>{error}</div>
           )}
-          {rows.length === 0 && !error && (
+          {(tasks.length > 0 || submittingLinks.length > 0) && (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {submittingLinks.map(link => (
+                <li key={link.url} className="link-fetch-task">
+                  <div className="link-fetch-task-copy"><strong>{link.title || link.url}</strong><small>正在提交…</small></div>
+                </li>
+              ))}
+              {[...tasks].sort((a, b) => a.id - b.id).map(task => {
+                const busy = busyTaskIDs?.has(task.id)
+                const removable = canDeleteLinkFetch(task)
+                const status = task.processing_state === 'failed' ? '抓取失败'
+                  : task.processing_state === 'stub' || task.processing_state === 'queued' ? '等待抓取'
+                  : task.processing_state === 'processing' ? '抓取中' : '已完成'
+                return (
+                  <li key={task.id} className="link-fetch-task">
+                    <div className="link-fetch-task-copy">
+                      {removable ? <strong>{task.title}</strong> : <Link to={`/articles/${task.id}`} onClick={onClose}>{task.title}</Link>}
+                      <small>{status} · {hostOf(task.url)}</small>
+                    </div>
+                    {task.processing_state === 'failed' && onRetryTask && (
+                      <button type="button" className="btn-ghost" disabled={busy} onClick={() => onRetryTask(task)}>重试</button>
+                    )}
+                    {removable && onDeleteTask && (
+                      <button type="button" className="btn-ghost" disabled={busy} onClick={() => onDeleteTask(task)}
+                        aria-label={`删除抓取任务 ${task.title}`}>删除</button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {rows.length === 0 && tasks.length === 0 && submittingLinks.length === 0 && !error && (
             <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--fg-muted)' }}>
-              还没有待抓取链接。回到正文，选中链接文字或长按链接后加入。
+              还没有抓取任务。
             </div>
           )}
           {rows.length > 0 && (
@@ -319,8 +385,7 @@ export function BatchFetchConfirmDialog({
           )}
         </div>
 
-        {/* Footer */}
-        <div style={{
+        {rows.length > 0 && <div style={{
           padding: '12px 20px',
           borderTop: '1px solid var(--border)',
           display: 'flex',
@@ -328,19 +393,6 @@ export function BatchFetchConfirmDialog({
           justifyContent: 'flex-end',
           gap: 8,
         }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: '6px 14px',
-              fontSize: 13,
-              borderRadius: 4,
-              border: '1px solid var(--border)',
-              background: 'transparent',
-              color: 'var(--fg)',
-              cursor: 'pointer',
-            }}
-          >取消</button>
           <button
             type="button"
             onClick={handleConfirm}
@@ -357,7 +409,7 @@ export function BatchFetchConfirmDialog({
           >
             {submitting ? '抓取中…' : `开始抓取（${checkedURLs.size}）`}
           </button>
-        </div>
+        </div>}
       </div>
     </div>
   )

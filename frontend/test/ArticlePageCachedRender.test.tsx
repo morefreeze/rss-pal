@@ -8,12 +8,14 @@ import {
   putArticleDetail,
   resetArticleDetailCache,
 } from '../src/api/articleDetailCache'
+import { ReaderActionContext } from '../src/reader/ReaderActionContext'
 import { saveDraftLinks } from '../src/utils/linkSetSelection'
 import type { Article, ArticleDetailResponse, ArticleListItem } from '../src/api/client'
 
 const apiMocks = vi.hoisted(() => ({
   getArticleCaptureDrafts: vi.fn(async (): Promise<{drafts: Array<{url:string;title:string;addedAt:number}>; fetched_link_urls: string[]}> => ({drafts:[], fetched_link_urls:[]})),
   removeArticleCaptureDrafts: vi.fn(async () => undefined),
+  cancelLinkFetch: vi.fn(async () => undefined),
   batchFetchCandidates: vi.fn(async () => ({inserted:2})),
   updateArticleNote: vi.fn(async () => ({ capture_note: '新想法' })),
   dislikeArticle: vi.fn(async () => undefined),
@@ -60,7 +62,14 @@ vi.mock('../src/components/MarkdownArticle', () => ({
     suppressVideo?: { platform: 'youtube' | 'bilibili'; id: string }
   }) => {
     markdownMocks.render(props)
-    return <div data-testid="article-body">{props.source}</div>
+    return <><div data-testid="article-body">{props.source}</div>
+      <ReaderActionContext.Consumer>{context => context && (
+        <button onClick={() => {
+          const link = { url: 'https://example.com/direct', title: 'Direct link', element: document.createElement('a') }
+          void context.getActions({ kind: 'long-press-link', links: [link], anchorRect: new DOMRect() })[0].run()
+        }}>抓取正文链接</button>
+      )}</ReaderActionContext.Consumer>
+    </>
   },
 }))
 vi.mock('../src/components/TagBar', () => ({ default: () => null }))
@@ -169,6 +178,8 @@ describe('ArticlePage immediate loading', () => {
     resetArticleDetailCache()
     localStorage.clear()
     vi.clearAllMocks()
+    apiMocks.batchFetchCandidates.mockReset().mockResolvedValue({ inserted: 2 })
+    apiMocks.cancelLinkFetch.mockReset().mockResolvedValue(undefined)
     apiMocks.getArticleCaptureDrafts.mockResolvedValue({drafts:[], fetched_link_urls:[]})
     apiMocks.fetchContent.mockReset().mockResolvedValue({ content: '' })
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
@@ -348,17 +359,44 @@ describe('ArticlePage immediate loading', () => {
     expect((screen.getByRole('button', { name: '重新生成' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('imports shortcut rows into the existing pending badge and waits for explicit Start Fetch', async () => {
+  it('submits a reader link on the first action and lets the task be deleted and submitted again', async () => {
+    const parent = detail(42)
+    const child = { ...detail(44).article, url: 'https://example.com/direct', title: 'Direct link', processing_state: 'processing' as const }
+    const queued = { ...parent, children: [child], fetched_link_urls: [child.url] }
+    apiMocks.getArticle.mockResolvedValue(parent)
+    apiMocks.batchFetchCandidates.mockImplementation(async () => {
+      apiMocks.getArticle.mockResolvedValue(queued)
+      return { inserted: 1 }
+    })
+    apiMocks.cancelLinkFetch.mockImplementationOnce(async () => {
+      apiMocks.getArticle.mockResolvedValue(parent)
+    })
+    putArticleDetail(parent)
+    render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: '抓取正文链接' }))
+    expect(apiMocks.batchFetchCandidates).toHaveBeenCalledWith(42, [{ title: 'Direct link', url: child.url }])
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(await screen.findByTitle('抓取列表（1）'))
+    expect(await screen.findByText(/^抓取中/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '删除抓取任务 Direct link' }))
+    await waitFor(() => expect(screen.queryByText('Direct link')).toBeNull())
+    expect(apiMocks.cancelLinkFetch).toHaveBeenCalledWith(42, 44)
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    fireEvent.click(screen.getByRole('button', { name: '抓取正文链接' }))
+    expect(apiMocks.batchFetchCandidates).toHaveBeenCalledTimes(2)
+  })
+
+  it('imports shortcut rows into the fetch list and waits for explicit Start Fetch', async () => {
     const imported = {url:'https://example.com/shortcut',title:'Shortcut link',addedAt:123}
     const manual = {url:'https://example.com/manual',title:'Manual link',addedAt:100}
     saveDraftLinks(42, [manual])
     apiMocks.getArticle.mockReturnValue(new Promise(() => {}))
     putArticleDetail(detail(42))
     render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
-    await screen.findByTitle('1 条链接待确认抓取')
+    await screen.findByTitle('抓取列表（1）')
     apiMocks.getArticleCaptureDrafts.mockResolvedValue({drafts:[imported],fetched_link_urls:[]})
     await act(async () => { window.dispatchEvent(new Event('focus')) })
-    fireEvent.click(await screen.findByTitle('2 条链接待确认抓取'))
+    fireEvent.click(await screen.findByTitle('抓取列表（2）'))
     expect(screen.getByRole('dialog').textContent).toContain('Shortcut link')
     expect(screen.getByRole('dialog').textContent).toContain('Manual link')
     expect(apiMocks.batchFetchCandidates).not.toHaveBeenCalled()
@@ -366,9 +404,9 @@ describe('ArticlePage immediate loading', () => {
     await waitFor(() => expect(apiMocks.batchFetchCandidates).toHaveBeenCalledWith(42, [
       {url:manual.url,title:manual.title},{url:imported.url,title:imported.title},
     ]))
-    await waitFor(() => expect(screen.queryByTitle('2 条链接待确认抓取')).toBeNull())
+    await waitFor(() => expect(screen.queryByTitle('抓取列表（2）')).toBeNull())
     await act(async () => { window.dispatchEvent(new Event('focus')) })
-    expect(screen.queryByTitle('2 条链接待确认抓取')).toBeNull()
+    expect(screen.queryByTitle('抓取列表（2）')).toBeNull()
     expect(apiMocks.batchFetchCandidates).toHaveBeenCalledTimes(1)
   })
 
@@ -383,7 +421,7 @@ describe('ArticlePage immediate loading', () => {
       <Link to="/articles/43">Next test article</Link>
       <Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes>
     </MemoryRouter>)
-    fireEvent.click(await screen.findByTitle('1 条链接待确认抓取'))
+    fireEvent.click(await screen.findByTitle('抓取列表（1）'))
     fireEvent.click(screen.getByRole('button', {name:'开始抓取（1）'}))
     fireEvent.click(screen.getByText('Next test article'))
     await screen.findByText('Next article')
@@ -403,7 +441,7 @@ describe('ArticlePage immediate loading', () => {
     window.addEventListener('show-toast', listener)
     try {
       render(<MemoryRouter initialEntries={['/articles/42']}><Routes><Route path="/articles/:id" element={<ArticlePage />} /></Routes></MemoryRouter>)
-      fireEvent.click(await screen.findByTitle('1 条链接待确认抓取'))
+      fireEvent.click(await screen.findByTitle('抓取列表（1）'))
       fireEvent.click(screen.getByRole('button', {name:'从草稿移除 Shortcut link'}))
       await waitFor(() => expect(messages).toContain('移除失败，请联网后重试'))
       expect(screen.getByRole('dialog').textContent).toContain('Shortcut link')

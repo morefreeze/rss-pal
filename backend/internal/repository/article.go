@@ -1621,7 +1621,7 @@ func (r *ArticleRepository) GetProcessingChildren(limit int) ([]model.Article, e
 		WHERE processing_state = 'processing'
 		  AND parent_article_id IS NOT NULL
 		  AND COALESCE(refetch_attempts, 0) < 3
-		ORDER BY prerank_score DESC NULLS LAST, id ASC
+		ORDER BY row_number() OVER (PARTITION BY (SELECT owner_id FROM feeds WHERE id = articles.feed_id) ORDER BY prerank_score DESC NULLS LAST, id), prerank_score DESC NULLS LAST, id ASC
 		LIMIT $1
 	`
 	rows, err := r.db.Query(query, limit)
@@ -1930,9 +1930,9 @@ func (r *ArticleRepository) FindArticlesNeedingLinkCheck(limit int) ([]model.Art
 	return r.scanArticleNoFeedTitle(rows)
 }
 
-// SetLinksExtendable atomically writes the boolean flag.
+// SetLinksExtendable records detection only if the user has not promoted the article.
 func (r *ArticleRepository) SetLinksExtendable(id int, val bool) error {
-	_, err := r.db.Exec(`UPDATE articles SET links_extendable = $1 WHERE id = $2`, val, id)
+	_, err := r.db.Exec(`UPDATE articles SET links_extendable = $1 WHERE id = $2 AND links_extendable IS NULL`, val, id)
 	return err
 }
 
