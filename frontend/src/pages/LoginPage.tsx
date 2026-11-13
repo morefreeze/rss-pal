@@ -48,7 +48,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       onLogin(data.user)
       navigate(postAuthURL(intent), { replace: true })
     } catch (err) {
-      setError(authErrorMessage(err, '用户名或密码错误'))
+      setError(authErrorMessage(err, '账号或密码错误'))
     } finally {
       setSubmitting(false)
     }
@@ -56,8 +56,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
   const passwordForm = (
       <form id="password-login" className="login-password-form" onSubmit={handleSubmit}>
-        <label htmlFor="login-username">用户名</label>
-        <input id="login-username" placeholder="用户名" type="text" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" disabled={submitting} />
+        <label htmlFor="login-username">用户名或邮箱</label>
+        <input id="login-username" placeholder="用户名或邮箱" type="text" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" disabled={submitting} />
         <label htmlFor="login-password">密码</label>
         <input id="login-password" placeholder="密码" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" disabled={submitting} />
         <label className="account-remember">

@@ -1040,7 +1040,7 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
           {/* 修改密码 */}
           <div className="card mb-2">
             <h3 className="mb-2">{needsPassword ? '设置密码' : '修改密码'}</h3>
-            {needsPassword && <p className="text-sm mb-2">登录用户名：{user?.username}。设置密码后，可使用此用户名和密码登录。</p>}
+            {needsPassword && <p className="text-sm mb-2">登录用户名：{user?.username}。设置密码后，可使用此用户名和密码登录。通过验证码绑定邮箱后，也可使用邮箱和密码登录。</p>}
             <form onSubmit={handleChangePassword}>
               {!needsPassword && <div className="mb-1">
                 <input

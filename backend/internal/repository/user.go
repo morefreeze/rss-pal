@@ -90,6 +90,21 @@ func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 	return user, err
 }
 
+// FindByVerifiedEmail resolves only email identities created by code verification.
+func (r *UserRepository) FindByVerifiedEmail(email string) (*model.User, error) {
+	var id int
+	err := r.db.QueryRow(
+		`SELECT user_id FROM account_identities WHERE provider = 'email' AND subject = $1`, email,
+	).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r.FindByID(id)
+}
+
 func (r *UserRepository) FindByID(id int) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRow(

@@ -221,7 +221,7 @@ func main() {
 		api.NewSiteTrafficHandler(adminDB, cfg.Auth.PublicOrigin).Post)
 	authBudgetRepo := repository.NewAuthRateLimitRepository(db)
 	authGuard := api.NewAuthAbuseGuard(authBudgetRepo, cfg.JWT.Secret)
-	authHandler.SetRegistrationBudget(authGuard)
+	authHandler.SetAuthAbuseGuard(authGuard)
 	authHandler.SetMonitor(monitorRecorder)
 	authGuard.SetMonitor(monitorRecorder)
 	go func() {

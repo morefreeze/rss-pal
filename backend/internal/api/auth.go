@@ -22,7 +22,7 @@ import (
 type AuthHandler struct {
 	monitor              *opsmonitor.Recorder
 	registrationVerifier RegistrationVerifier
-	registrationBudget   *AuthAbuseGuard
+	abuseGuard           *AuthAbuseGuard
 	cfg                  *config.Config
 	userRepo             *repository.UserRepository
 	refreshRepo          *repository.RefreshTokenRepository
@@ -112,8 +112,26 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if user == nil || !userRepo.VerifyPassword(user, req.Password) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+	validPassword := user != nil && userRepo.VerifyPassword(user, req.Password)
+	email := normalizeLoginIdentifier(req.Username)
+	if !validPassword && strings.Contains(email, "@") {
+		emailUser, err := userRepo.FindByVerifiedEmail(email)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if emailUser != nil && (user == nil || user.ID != emailUser.ID) {
+			// Both login identifiers share the existing username budget.
+			if h.abuseGuard != nil && normalizeLoginIdentifier(emailUser.Username) != email &&
+				!h.abuseGuard.takeLoginAccount(c, emailUser.Username) {
+				return
+			}
+			user = emailUser
+			validPassword = userRepo.VerifyPassword(user, req.Password)
+		}
+	}
+	if !validPassword {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "账号或密码错误"})
 		return
 	}
 
@@ -206,7 +224,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	if h.registrationBudget == nil {
+	if h.abuseGuard == nil {
 		defer func() {
 			reason := "failed"
 			if c.Writer.Status() < 300 {
@@ -249,7 +267,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 	h.monitor.Record(opsmonitor.Event{Kind: "captcha", Reason: "success", TaskType: "register"})
-	if h.registrationBudget != nil && !h.registrationBudget.AdmitRegistration(c) {
+	if h.abuseGuard != nil && !h.abuseGuard.AdmitRegistration(c) {
 		return
 	}
 	var user *model.User
@@ -499,6 +517,6 @@ func (h *AuthHandler) RegistrationConfig(c *gin.Context) {
 	c.JSON(200, gin.H{"available": available, "provider": provider, "site_key": strings.TrimSpace(siteKey)})
 }
 
-func (h *AuthHandler) SetRegistrationBudget(guard *AuthAbuseGuard) { h.registrationBudget = guard }
+func (h *AuthHandler) SetAuthAbuseGuard(guard *AuthAbuseGuard) { h.abuseGuard = guard }
 
 func (h *AuthHandler) SetMonitor(m *opsmonitor.Recorder) { h.monitor = m }

@@ -64,7 +64,7 @@ function renderAuth(path: string) {
 }
 
 function submitLogin() {
-  fireEvent.change(screen.getByPlaceholderText('用户名'), { target: { value: 'reader' } })
+  fireEvent.change(screen.getByPlaceholderText('用户名或邮箱'), { target: { value: 'reader' } })
   fireEvent.change(screen.getByPlaceholderText('密码'), { target: { value: 'secret-password' } })
   fireEvent.click(screen.getByRole('button', { name: '登录' }))
 }
@@ -164,7 +164,7 @@ describe('authentication intents', () => {
     const source = 'https://source.example/feed'
     renderAuth(`/login?source=${encodeURIComponent(source)}&intent=subscribe`)
     submitLogin()
-    expect(await screen.findByText('用户名或密码错误')).toBeTruthy()
+    expect(await screen.findByText('账号或密码错误')).toBeTruthy()
     expect(screen.getByTestId('location').textContent).toBe(`/login?source=${encodeURIComponent(source)}&intent=subscribe`)
     expect(document.body.textContent).not.toContain('secret-password')
   })

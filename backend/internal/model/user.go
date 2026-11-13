@@ -35,7 +35,7 @@ type RegisterRequest struct {
 }
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required,max=64"`
+	Username string `json:"username" binding:"required,max=254"`
 	Password string `json:"password" binding:"required"`
 	// Remember asks the server to issue a long-lived refresh token so the
 	// client can re-mint access JWTs without re-prompting the user.

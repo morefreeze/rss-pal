@@ -97,6 +97,82 @@ func TestFirstPasswordSetup(t *testing.T) {
 			t.Fatalf("password login failed: %d", w.Code)
 		}
 	})
+	t.Run("accepts verified email after password setup", func(t *testing.T) {
+		for _, email := range []string{"password-setup@example.com", " Password-Setup@Example.COM "} {
+			body, _ := json.Marshal(map[string]string{"username": email, "password": "new-password"})
+			w := request("POST", "/login", string(body), "")
+			var result struct {
+				User struct {
+					ID int `json:"id"`
+				} `json:"user"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != http.StatusOK || result.User.ID != uid {
+				t.Fatalf("email login did not return the same account: %d %s", w.Code, w.Body.String())
+			}
+		}
+	})
+	t.Run("preserves an email-shaped legacy username", func(t *testing.T) {
+		const email = "password-setup@example.com"
+		legacy, err := users.CreateAdmin(email, "legacy-password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			password string
+			id       int
+		}{{"legacy-password", legacy.ID}, {"new-password", uid}} {
+			body, _ := json.Marshal(map[string]string{"username": email, "password": tc.password})
+			w := request("POST", "/login", string(body), "")
+			var result struct {
+				User struct {
+					ID int `json:"id"`
+				} `json:"user"`
+			}
+			if err = json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != http.StatusOK || result.User.ID != tc.id {
+				t.Fatalf("login did not return account %d: %d %s", tc.id, w.Code, w.Body.String())
+			}
+		}
+	})
+	t.Run("requires an explicitly verified email for third-party accounts", func(t *testing.T) {
+		ctx := context.Background()
+		identities := repository.NewAccountAuthRepository(db)
+		email := strings.Repeat("a", 64) + "@example.com"
+		thirdPartyID, err := identities.ResolveQQIdentity(ctx, "qq-password-test", 0, true, "Reader", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = identities.ResolveIdentity(ctx, "google", "google-password-test", email, thirdPartyID, false); err != nil {
+			t.Fatal(err)
+		}
+		if err = users.ChangePassword(thirdPartyID, "!external", "third-party-password"); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(map[string]string{"username": email, "password": "third-party-password"})
+		if w := request("POST", "/login", string(body), ""); w.Code != http.StatusUnauthorized {
+			t.Fatalf("third-party profile email accepted: %d %s", w.Code, w.Body.String())
+		}
+		if _, err = identities.ResolveIdentity(ctx, "email", email, email, thirdPartyID, false); err != nil {
+			t.Fatal(err)
+		}
+		w := request("POST", "/login", string(body), "")
+		var result struct {
+			User struct {
+				ID int `json:"id"`
+			} `json:"user"`
+		}
+		if err = json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != http.StatusOK || result.User.ID != thirdPartyID {
+			t.Fatalf("bound email did not return the QQ account: %d %s", w.Code, w.Body.String())
+		}
+	})
 	t.Run("requires old password for all later changes", func(t *testing.T) {
 		for _, body := range []string{`{"new_password":"replacement"}`, `{"old_password":"wrong","new_password":"replacement"}`} {
 			w := request("PUT", "/password", body, token)

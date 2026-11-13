@@ -31,19 +31,19 @@ it('shows an invalid password inline without retrying login or clearing the curr
     throw new AxiosError('Unauthorized', undefined, config, undefined, {
       ...response,
       status: 401,
-      data: { error: '用户名或密码错误' },
+      data: { error: '账号或密码错误' },
     })
   }
   const onLogin = vi.fn()
   render(<MemoryRouter initialEntries={[path]}><LoginPage onLogin={onLogin} /></MemoryRouter>)
 
-  const username = screen.getByLabelText<HTMLInputElement>('用户名')
+  const username = screen.getByLabelText<HTMLInputElement>('用户名或邮箱')
   const password = screen.getByLabelText<HTMLInputElement>('密码')
   fireEvent.change(username, { target: { value: 'reader' } })
   fireEvent.change(password, { target: { value: 'incorrect-password' } })
   fireEvent.click(screen.getByRole('button', { name: '登录' }))
 
-  expect((await screen.findByRole('alert')).textContent).toBe('用户名或密码错误')
+  expect((await screen.findByRole('alert')).textContent).toBe('账号或密码错误')
   expect(username.value).toBe('reader')
   expect(password.value).toBe('incorrect-password')
   expect(window.location.pathname + window.location.search).toBe(path)

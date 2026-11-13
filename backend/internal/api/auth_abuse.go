@@ -73,6 +73,14 @@ func (g *AuthAbuseGuard) take(c *gin.Context, scope, value string, limit int, wi
 	return true
 }
 
+func normalizeLoginIdentifier(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func (g *AuthAbuseGuard) takeLoginAccount(c *gin.Context, identifier string) bool {
+	return g.take(c, "login-account", normalizeLoginIdentifier(identifier), 10, 15*time.Minute)
+}
+
 // Middleware runs before body binding, bcrypt, invite consumption and token work.
 // Budgets count attempts, including failures, and do not reset on success.
 func (g *AuthAbuseGuard) Middleware(action string) gin.HandlerFunc {
@@ -128,7 +136,7 @@ func (g *AuthAbuseGuard) Middleware(action string) gin.HandlerFunc {
 			if !g.take(c, "login-ip", ip, 30, 15*time.Minute) {
 				return
 			}
-			if !g.take(c, "login-account", strings.ToLower(strings.TrimSpace(identity.Username)), 10, 15*time.Minute) {
+			if !g.takeLoginAccount(c, identity.Username) {
 				return
 			}
 		case "verified":

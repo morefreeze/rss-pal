@@ -111,10 +111,10 @@ describe('registration protection', () => {
  it('shows login rate limits without claiming the password is wrong', async () => {
   mocks.login.mockRejectedValue({response:{status:429,headers:{'retry-after':'900'},data:{error:'操作过于频繁，请稍后重试'}}})
   render(<MemoryRouter><LoginPage onLogin={vi.fn()} /></MemoryRouter>)
-  fireEvent.change(screen.getByPlaceholderText('用户名'),{target:{value:'alice'}})
+  fireEvent.change(screen.getByPlaceholderText('用户名或邮箱'),{target:{value:'alice'}})
   fireEvent.change(screen.getByPlaceholderText('密码'),{target:{value:'test-password'}})
   fireEvent.click(screen.getByRole('button',{name:'登录'}))
   expect(await screen.findByText(/操作过于频繁/)).toBeTruthy()
-  expect(screen.queryByText('用户名或密码错误')).toBeNull()
+  expect(screen.queryByText('账号或密码错误')).toBeNull()
  })
 })
