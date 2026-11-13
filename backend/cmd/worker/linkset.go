@@ -238,6 +238,10 @@ func processQueuedChildren(
 				log.Printf("link_set: resolve child owner %d: %v", c.ID, ownerErr)
 				return
 			}
+			due, err := articleRepo.FetchRetryDue(cctx, c.ID, false)
+			if err != nil || !due {
+				return
+			}
 			release, budgetErr := admitBackground(cctx, "background_fetch")
 			if budgetErr != nil {
 				// Keep processing state and retry attempts untouched until admission.
@@ -256,11 +260,8 @@ func processQueuedChildren(
 					return
 				}
 				log.Printf("link_set: child %d fetch failed: %v", c.ID, err)
-				if e := articleRepo.IncrementRefetchAttempts(c.ID); e != nil {
-					log.Printf("link_set: increment refetch_attempts %d: %v", c.ID, e)
-				}
-				if e := articleRepo.MarkFailedAfterRetries(c.ID, 3); e != nil {
-					log.Printf("link_set: mark failed %d: %v", c.ID, e)
+				if e := articleRepo.DeferLinkFetchRetry(c.ID); e != nil {
+					log.Printf("link_set: schedule retry for child %d: %v", c.ID, e)
 				}
 				atomic.AddInt64(&failed, 1)
 				return

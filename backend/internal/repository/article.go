@@ -606,7 +606,8 @@ func (r *ArticleRepository) UpdateMedia(articleID int, mediaURL, mediaType strin
 		SET media_url = $2,
 		    media_type = $3,
 		    media_duration_seconds = $4,
-		    transcript_fetched_at = NULL
+		    transcript_fetched_at = NULL,
+            transcript_retry_started_at = NULL, transcript_next_attempt_at = NULL, transcript_retry_attempts = 0
 		WHERE id = $1
 	`, articleID, nullableString(mediaURL), nullableString(mediaType), nullableInt(durationSeconds))
 	return err
@@ -715,7 +716,7 @@ func (r *ArticleRepository) UpdateSummaryIfContentUnchanged(id int, expectedCont
 }
 
 func (r *ArticleRepository) UpdateContent(id int, content string, wordCount, readingMinutes int) error {
-	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0,
+	_, err := r.db.Exec(`UPDATE articles SET content = $1, word_count = $2, reading_minutes = $3, refetch_attempts = 0, refetch_retry_started_at = NULL, refetch_next_attempt_at = NULL,
         summary_brief = CASE WHEN content IS DISTINCT FROM $1 THEN NULL ELSE summary_brief END,
         summary_detailed = CASE WHEN content IS DISTINCT FROM $1 THEN NULL ELSE summary_detailed END,
 		processing_state = CASE WHEN processing_state IN ('queued','failed') AND $1<>'' THEN 'ready' ELSE processing_state END,
@@ -732,7 +733,7 @@ func (r *ArticleRepository) UpdateEnrichedContentIfChanged(feedID int, articleUR
 		    reading_minutes = $5,
 		    summary_brief = NULL,
 		    summary_detailed = NULL,
-		    refetch_attempts = 0
+		    refetch_attempts = 0, refetch_retry_started_at = NULL, refetch_next_attempt_at = NULL
 		WHERE feed_id = $1
 		  AND url = $2
 		  AND parent_article_id IS NULL
@@ -758,12 +759,6 @@ func (r *ArticleRepository) UpdateTitle(id int, title string) error {
 	return err
 }
 
-func (r *ArticleRepository) IncrementRefetchAttempts(id int) error {
-	query := `UPDATE articles SET refetch_attempts = refetch_attempts + 1 WHERE id = $1`
-	_, err := r.db.Exec(query, id)
-	return err
-}
-
 // GetMediaArticlesWithoutTranscript returns up to limit video/audio
 // articles that have not yet had a transcript fetch attempt.
 func (r *ArticleRepository) GetMediaArticlesWithoutTranscript(limit int) ([]model.Article, error) {
@@ -771,7 +766,8 @@ func (r *ArticleRepository) GetMediaArticlesWithoutTranscript(limit int) ([]mode
 		SELECT id, feed_id, title, url, content, published_at, summary_brief, summary_detailed, fetched_at, word_count, reading_minutes, media_url, media_type, media_duration_seconds, links_extendable, parent_article_id, processing_state, COALESCE(processing_error, '') as processing_error, prerank_score, editor_note, kind
 		FROM articles
 		WHERE transcript_fetched_at IS NULL
- AND (transcript_next_attempt_at IS NULL OR transcript_next_attempt_at<=NOW())
+          AND (transcript_next_attempt_at IS NULL OR transcript_next_attempt_at <= statement_timestamp())
+          AND (transcript_retry_started_at IS NULL OR transcript_retry_started_at + interval '72 hours' > statement_timestamp())
 		  AND media_type IS NOT NULL
 		  AND (media_type LIKE 'video/%' OR media_type LIKE 'audio/%')
 		ORDER BY fetched_at DESC
@@ -797,6 +793,7 @@ func (r *ArticleRepository) UpdateTranscriptContent(id int, content string, word
 	_, err := r.db.Exec(`
 		UPDATE articles
 		SET content = $1,
+		    transcript_retry_started_at = NULL, transcript_next_attempt_at = NULL, transcript_retry_attempts = 0,
 		    word_count = $2,
 		    reading_minutes = $3,
 		    media_duration_seconds = CASE WHEN $5 > 0 THEN $5 ELSE media_duration_seconds END,
@@ -812,7 +809,7 @@ func (r *ArticleRepository) UpdateTranscriptContent(id int, content string, word
 // MarkTranscriptFetchAttempted records that we tried and failed to find
 // a transcript for the article, preventing retries.
 func (r *ArticleRepository) MarkTranscriptFetchAttempted(id int) error {
-	_, err := r.db.Exec(`UPDATE articles SET transcript_fetched_at = NOW() WHERE id = $1`, id)
+	_, err := r.db.Exec(`UPDATE articles SET transcript_fetched_at = NOW(), transcript_retry_started_at = NULL, transcript_next_attempt_at = NULL, transcript_retry_attempts = 0 WHERE id = $1`, id)
 	return err
 }
 
@@ -903,6 +900,7 @@ func (r *ArticleRepository) GetArticlesWithoutSummary(limit int) ([]model.Articl
 		    media_type IS NOT NULL
 		    AND (media_type LIKE 'video/%' OR media_type LIKE 'audio/%')
 		    AND transcript_fetched_at IS NULL
+		    AND (transcript_retry_started_at IS NULL OR transcript_retry_started_at + interval '72 hours' > statement_timestamp())
 		)
 		ORDER BY fetched_at DESC
 		LIMIT $1
@@ -920,7 +918,10 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 		SELECT a.id, a.feed_id, a.title, a.url, a.content, a.published_at, a.summary_brief, a.summary_detailed, a.fetched_at, a.word_count, a.reading_minutes, a.media_url, a.media_type, a.media_duration_seconds, a.links_extendable, a.parent_article_id, a.processing_state, COALESCE(a.processing_error, '') as processing_error, a.prerank_score, a.editor_note, a.kind
 		FROM articles a
 		JOIN feeds f ON a.feed_id = f.id
-		WHERE a.url != '' AND a.refetch_attempts < 5
+		WHERE a.url != '' AND f.status = 'active' AND f.is_active
+		  AND (a.refetch_next_attempt_at IS NULL OR a.refetch_next_attempt_at <= statement_timestamp())
+		  AND (a.refetch_retry_started_at + interval '72 hours' > statement_timestamp()
+		       OR a.refetch_retry_started_at IS NULL AND a.refetch_attempts < 5)
 		  AND f.feed_type NOT IN ('youtube', 'podcast')
 		  AND (a.media_type IS NULL OR (a.media_type NOT LIKE 'video/%' AND a.media_type NOT LIKE 'audio/%'))
 		  AND COALESCE(a.processing_state, 'ready') NOT IN ('stub', 'queued', 'processing', 'failed')
@@ -1600,7 +1601,8 @@ func (r *ArticleRepository) GetChildURLs(parentID int) ([]string, error) {
 func (r *ArticleRepository) QueueLinkSetChild(id int) (int64, error) {
 	res, err := r.db.Exec(`
 		UPDATE articles
-		SET processing_state = 'processing', refetch_attempts = 0, processing_error = ''
+		SET processing_state = 'processing', refetch_attempts = 0, processing_error = '',
+            refetch_retry_started_at = NULL, refetch_next_attempt_at = NULL
 		WHERE id = $1 AND parent_article_id IS NOT NULL AND processing_state IN ('stub', 'failed')
 	`, id)
 	if err != nil {
@@ -1609,9 +1611,14 @@ func (r *ArticleRepository) QueueLinkSetChild(id int) (int64, error) {
 	return res.RowsAffected()
 }
 
-// GetProcessingChildren returns children with processing_state='processing'
-// and refetch_attempts < 3, capped at limit.
+// GetProcessingChildren returns due link fetches and expires failed retry windows.
 func (r *ArticleRepository) GetProcessingChildren(limit int) ([]model.Article, error) {
+	if _, err := r.db.Exec(`
+		UPDATE articles SET processing_state='failed', processing_error='抓取重试已超过 3 天'
+		WHERE parent_article_id IS NOT NULL AND processing_state='processing'
+		  AND refetch_retry_started_at <= statement_timestamp() - interval '72 hours'`); err != nil {
+		return nil, err
+	}
 	query := `
 		SELECT id, feed_id, title, url, content, published_at,
 		       summary_brief, summary_detailed, fetched_at, word_count, reading_minutes,
@@ -1620,7 +1627,9 @@ func (r *ArticleRepository) GetProcessingChildren(limit int) ([]model.Article, e
 		FROM articles
 		WHERE processing_state = 'processing'
 		  AND parent_article_id IS NOT NULL
-		  AND COALESCE(refetch_attempts, 0) < 3
+		  AND (refetch_next_attempt_at IS NULL OR refetch_next_attempt_at <= statement_timestamp())
+		  AND (refetch_retry_started_at + interval '72 hours' > statement_timestamp()
+		       OR refetch_retry_started_at IS NULL AND coalesce(refetch_attempts, 0) < 3)
 		ORDER BY row_number() OVER (PARTITION BY (SELECT owner_id FROM feeds WHERE id = articles.feed_id) ORDER BY prerank_score DESC NULLS LAST, id), prerank_score DESC NULLS LAST, id ASC
 		LIMIT $1
 	`
@@ -1635,17 +1644,6 @@ func (r *ArticleRepository) GetProcessingChildren(limit int) ([]model.Article, e
 // MarkFailed transitions an article unconditionally to 'failed'.
 func (r *ArticleRepository) MarkFailed(id int) error {
 	_, err := r.db.Exec(`UPDATE articles SET processing_state = 'failed' WHERE id = $1`, id)
-	return err
-}
-
-// MarkFailedAfterRetries transitions processing_state to 'failed' if and only
-// if refetch_attempts has reached threshold. Safe to call after every failure.
-func (r *ArticleRepository) MarkFailedAfterRetries(id, threshold int) error {
-	_, err := r.db.Exec(`
-		UPDATE articles
-		SET processing_state = 'failed'
-		WHERE id = $1 AND COALESCE(refetch_attempts, 0) >= $2
-	`, id, threshold)
 	return err
 }
 
@@ -2092,19 +2090,13 @@ func (r *ArticleRepository) GetPDFOCRPending(limit int) ([]model.Article, error)
 // Do not call from production code.
 func (r *ArticleRepository) querier() Querier { return r.db }
 
-// DeferTranscriptRetry keeps pending providers from monopolizing each batch.
-func (r *ArticleRepository) DeferTranscriptRetry(id int) error {
-	_, err := r.db.Exec(`UPDATE articles SET transcript_next_attempt_at=NOW()+INTERVAL '2 minutes' WHERE id=$1`, id)
-	return err
-}
-
 // ReplaceFetchedContent is a compare-and-swap so a slow fetch cannot overwrite
 // another capture or transcript. Changed bodies invalidate both old summaries.
 func (r *ArticleRepository) ReplaceFetchedContent(id int, expected, content string, wordCount, readingMinutes int) (bool, error) {
 	result, err := r.db.Exec(`UPDATE articles SET content=$3, word_count=$4, reading_minutes=$5,
  summary_brief=CASE WHEN content IS DISTINCT FROM $3 THEN NULL ELSE summary_brief END,
  summary_detailed=CASE WHEN content IS DISTINCT FROM $3 THEN NULL ELSE summary_detailed END,
- refetch_attempts=0,
+ refetch_attempts=0, refetch_retry_started_at=NULL, refetch_next_attempt_at=NULL,
  processing_state=CASE WHEN processing_state IN ('queued','failed') AND $3<>'' THEN 'ready' ELSE processing_state END,
  processing_error=CASE WHEN processing_state IN ('queued','failed') AND $3<>'' THEN '' ELSE processing_error END
  WHERE id=$1 AND COALESCE(content,'')=$2`, id, expected, content, wordCount, readingMinutes)

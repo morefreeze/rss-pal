@@ -92,7 +92,7 @@ func (s *SQLStore) CompletePair(ctx context.Context, hash string, c Connection) 
 		return err
 	}
 	// Prior no-caption attempts become eligible when a new provider is connected.
-	if _, err = tx.ExecContext(ctx, `UPDATE articles SET transcript_fetched_at=NULL,transcript_next_attempt_at=NULL WHERE media_type='video/youtube' AND COALESCE(content,'') !~ '(^|\n)## (字幕|视频整理（englife）)'`); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE articles SET transcript_fetched_at=NULL,transcript_next_attempt_at=NULL,transcript_retry_started_at=NULL,transcript_retry_attempts=0 WHERE media_type='video/youtube' AND COALESCE(content,'') !~ '(^|\n)## (字幕|视频整理（englife）)'`); err != nil {
 		return err
 	}
 	return tx.Commit()

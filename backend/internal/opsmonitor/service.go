@@ -174,8 +174,8 @@ func (s *Service) queues(ctx context.Context, r *Response) error {
 		return err
 	}
 
-	q := Queue{Name: "summary", Status: "partial", SnapshotAt: r.GeneratedAt, Note: "可执行摘要：活跃订阅、无摘要、正文超过100字符、音视频已获取转录。无持久化执行/失败状态，数量不可用；等待时间按 fetched_at。"}
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*),COALESCE(greatest(0,extract(epoch from ($1::timestamptz-min(a.fetched_at)))),0) FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE f.status='active' AND f.is_active AND (a.summary_brief IS NULL OR a.summary_brief='') AND length(a.content)>100 AND NOT(a.media_type IS NOT NULL AND (a.media_type LIKE 'video/%' OR a.media_type LIKE 'audio/%') AND a.transcript_fetched_at IS NULL)`, r.GeneratedAt).Scan(&q.Waiting, &q.OldestWaitSeconds); err != nil {
+	q := Queue{Name: "summary", Status: "partial", SnapshotAt: r.GeneratedAt, Note: "可执行摘要：活跃订阅、无摘要、正文超过100字符、音视频转录已处理或重试期限已到。无持久化执行/失败状态，数量不可用；等待时间按 fetched_at。"}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*),COALESCE(greatest(0,extract(epoch from ($1::timestamptz-min(a.fetched_at)))),0) FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE f.status='active' AND f.is_active AND (a.summary_brief IS NULL OR a.summary_brief='') AND length(a.content)>100 AND NOT(a.media_type IS NOT NULL AND (a.media_type LIKE 'video/%' OR a.media_type LIKE 'audio/%') AND a.transcript_fetched_at IS NULL AND (a.transcript_retry_started_at IS NULL OR a.transcript_retry_started_at + interval '72 hours' > statement_timestamp()))`, r.GeneratedAt).Scan(&q.Waiting, &q.OldestWaitSeconds); err != nil {
 		return err
 	}
 	r.Queues = append(r.Queues, q)

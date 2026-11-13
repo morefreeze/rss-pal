@@ -273,6 +273,7 @@ func (r *ArticleRepository) CompleteLinkFetch(id int, title, content string, wor
 	result, err := r.db.Exec(`
 		UPDATE articles SET title = COALESCE(NULLIF($2, ''), title), content = $3,
 		    word_count = $4, reading_minutes = $5, refetch_attempts = 0,
+            refetch_retry_started_at = NULL, refetch_next_attempt_at = NULL,
 		    summary_brief = NULL, summary_detailed = NULL, processing_error = '', processing_state = 'ready'
 		WHERE id = $1 AND parent_article_id IS NOT NULL AND processing_state = 'processing'
 	`, id, title, content, words, minutes)

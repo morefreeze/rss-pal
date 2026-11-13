@@ -449,6 +449,10 @@ func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRep
 			if ownerErr != nil {
 				return
 			}
+			due, err := articleRepo.FetchRetryDue(ownerCtx, article.ID, true)
+			if err != nil || !due {
+				return
+			}
 			release, budgetErr := admitBackground(ownerCtx, "background_fetch")
 			if budgetErr != nil {
 				return
@@ -460,10 +464,10 @@ func backfillTranscripts(ctx context.Context, articleRepo *repository.ArticleRep
 			result, err := fetcher.Fetch(tCtx, article)
 			if err != nil {
 				log.Printf("Transcript fetch error for article %d: %v", article.ID, err)
-				if deferErr := articleRepo.DeferTranscriptRetry(article.ID); deferErr != nil {
+				if deferErr := articleRepo.DeferTranscriptRetry(article.ID, errors.Is(err, englife.ErrPending)); deferErr != nil {
 					log.Printf("Transcript retry scheduling failed for article %d", article.ID)
 				}
-				return // leave transcript_fetched_at NULL → retried next cycle
+				return
 			}
 			if result == nil || strings.TrimSpace(result.Text) == "" {
 				if err := articleRepo.MarkTranscriptFetchAttempted(article.ID); err != nil {
@@ -820,6 +824,10 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 			if ownerErr != nil {
 				return
 			}
+			due, err := articleRepo.FetchRetryDue(ownerCtx, article.ID, false)
+			if err != nil || !due {
+				return
+			}
 			release, budgetErr := admitBackground(ownerCtx, "background_fetch")
 			if budgetErr != nil {
 				return
@@ -832,7 +840,9 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 			content, err := contentFetcher.FetchContent(articleCtx, article.URL)
 			if err != nil {
 				log.Printf("Failed to re-fetch content for article %d: %v", article.ID, err)
-				articleRepo.IncrementRefetchAttempts(article.ID)
+				if err := articleRepo.DeferContentRetry(article.ID); err != nil {
+					log.Printf("Content retry scheduling failed for article %d: %v", article.ID, err)
+				}
 				return
 			}
 
@@ -847,7 +857,9 @@ func refetchShortContent(ctx context.Context, articleRepo *repository.ArticleRep
 					}
 				}
 			} else {
-				articleRepo.IncrementRefetchAttempts(article.ID)
+				if err := articleRepo.DeferContentRetry(article.ID); err != nil {
+					log.Printf("Content retry scheduling failed for article %d: %v", article.ID, err)
+				}
 			}
 		}(&articles[i])
 	}
