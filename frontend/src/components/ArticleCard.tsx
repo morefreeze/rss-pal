@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useReadingWorkspace } from '../workspace/ReadingWorkspaceContext'
 import React, { useCallback } from 'react'
 import { Article, ArticleListItem, UserTag } from '../api/client'
@@ -46,7 +47,7 @@ function MediaIndicator({ article, onPlay }: { article: ArticleCardItem; onPlay:
           className="tag-chip"
           style={{ border: '1px solid var(--border)' }}
         >
-          🎬 视频
+          <UiIcon name="video" size={14} /> 视频
         </span>
       )}
       {(isAudio || audioFallback) && (
@@ -62,7 +63,7 @@ function MediaIndicator({ article, onPlay }: { article: ArticleCardItem; onPlay:
           }}
           style={{ borderRadius: 999 }}
         >
-          ▶ 音频
+          <UiIcon name="play" size={14} /> 音频
         </button>
       )}
     </span>

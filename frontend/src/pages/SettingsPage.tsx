@@ -1,3 +1,4 @@
+import UiIcon from '../components/UiIcon'
 import LocalAISettings from '../components/LocalAISettings'
 import type { User } from '../App'
 import NicknameSetup from '../components/NicknameSetup'
@@ -496,7 +497,7 @@ function BookmarkletSection() {
           onClick={handleRegenerate}
           disabled={busy}
         >
-          {busy ? '...' : token ? '🔄 重新生成' : '生成 Token'}
+          {busy ? '...' : token ? <><UiIcon name="refresh" /> 重新生成</> : '生成 Token'}
         </button>
       </div>
       {token && (
@@ -575,10 +576,10 @@ function ExtensionSection() {
         <div>
           <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
             <button type="button" onClick={handleInstallExtension}>
-              📦 安装扩展
+              <UiIcon name="package" /> 安装扩展
             </button>
             <button type="button" className="secondary" onClick={() => setStep('configure')}>
-              ⚙️ 已安装，去配置
+              <UiIcon name="settings" /> 已安装，去配置
             </button>
           </div>
           <div style={{ marginTop: 8, padding: '10px 12px', background: 'var(--hover-bg, #f6f8fa)', borderRadius: 6 }}>

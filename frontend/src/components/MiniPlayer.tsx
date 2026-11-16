@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useEffect, useRef, useState } from 'react'
 import { usePlayer } from '../player/PlayerContext'
 import Spinner from './Spinner'
@@ -63,7 +64,7 @@ export default function MiniPlayer() {
         disabled={p.loading && !p.playing}
         style={{ fontSize: 20, padding: '4px 10px', minWidth: 40, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
       >
-        {p.loading ? <Spinner size={16} /> : p.playing ? '⏸' : '▶'}
+        {p.loading ? <Spinner size={16} /> : <UiIcon name={p.playing ? "pause" : "play"} />}
       </button>
 
       {!narrow && (
@@ -120,10 +121,10 @@ export default function MiniPlayer() {
           onClick={() => setExtraOpen(o => !o)}
           aria-label="更多控制"
           style={{ padding: '4px 8px' }}
-        >⋯</button>
+        ><UiIcon name="more" /></button>
       )}
 
-      <button onClick={p.close} aria-label="关闭播放器" style={{ padding: '4px 8px' }}>✕</button>
+      <button onClick={p.close} aria-label="关闭播放器" style={{ padding: '4px 8px' }}><UiIcon name="close" /></button>
 
       {p.error && <span style={{ color: '#c00', fontSize: 12 }}>{p.error}</span>}
 

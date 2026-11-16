@@ -1,17 +1,17 @@
-import UiIcon from './UiIcon'
+import UiIcon, { type UiIconName } from './UiIcon'
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
 
-type SheetItem = { icon: string; label: string; to?: string; action?: 'logout' }
+type SheetItem = { icon: UiIconName; label: string; to?: string; action?: 'logout' }
 
 const ITEMS: SheetItem[] = [
-  { icon: '🕘', label: '历史记录', to: '/history' },
-  { icon: '📡', label: '订阅管理', to: '/feeds' },
-  { icon: '💡', label: '兴趣',     to: '/interests' },
-  { icon: '📊', label: '统计',     to: '/stats' },
-  { icon: '⚙️', label: '设置',     to: '/settings' },
-  { icon: '🚪', label: '登出',     action: 'logout' },
+  { icon: 'history', label: '历史记录', to: '/history' },
+  { icon: 'rss', label: '订阅管理', to: '/feeds' },
+  { icon: 'spark', label: '兴趣',     to: '/interests' },
+  { icon: 'chart', label: '统计',     to: '/stats' },
+  { icon: 'settings', label: '设置',     to: '/settings' },
+  { icon: 'logout', label: '登出',     action: 'logout' },
 ]
 
 interface Props {
@@ -48,7 +48,7 @@ export default function MoreSheet({ open, onClose, onLogout, isAdmin = false, us
 
   if (!open) return null
 
-  const items: SheetItem[] = isAdmin ? [{ icon: '🛡️', label: '后台管理', to: '/admin' }, ...ITEMS] : ITEMS
+  const items: SheetItem[] = isAdmin ? [{ icon: 'shield', label: '后台管理', to: '/admin' }, ...ITEMS] : ITEMS
 
   const onItem = (item: SheetItem) => {
     onClose()

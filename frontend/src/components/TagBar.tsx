@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useEffect, useRef, useState } from 'react'
 import {
   ArticleTagsResponse,
@@ -134,7 +135,7 @@ export default function TagBar({ articleId }: Props) {
                 className="btn-text btn-sm"
                 style={{ padding: 0 }}
               >
-                ✕
+                <UiIcon name="close" size={14} />
               </button>
             </span>
           ))}

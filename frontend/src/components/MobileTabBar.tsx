@@ -1,17 +1,17 @@
-import UiIcon from './UiIcon'
+import UiIcon, { type UiIconName } from './UiIcon'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import MoreSheet from './MoreSheet'
 import { moduleDestination, type WorkspaceDestinations } from '../workspace/workspaceDestinations'
 import type { DisplayAccount } from './AccountDisplay'
 
-type Tab = { to: string; icon: string; label: string; showUnread?: boolean; matchClip?: boolean }
+type Tab = { to: string; icon: UiIconName; label: string; showUnread?: boolean; matchClip?: boolean }
 
 const TABS: Tab[] = [
-  { to: '/articles',            icon: '📰', label: '文章', showUnread: true, matchClip: false },
-  { to: '/articles?view=clip',  icon: '⭐', label: '网摘',                   matchClip: true  },
-  { to: '/explore',             icon: '🔭', label: '探索' },
-  { to: '/briefing',            icon: '📅', label: '简报' },
+  { to: '/articles',            icon: 'articles', label: '文章', showUnread: true, matchClip: false },
+  { to: '/articles?view=clip',  icon: 'bookmark', label: '网摘',                   matchClip: true  },
+  { to: '/explore',             icon: 'explore', label: '探索' },
+  { to: '/briefing',            icon: 'calendar', label: '简报' },
 ]
 
 interface Props {
@@ -84,7 +84,7 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
               style={tabStyle(active)}
             >
               <span style={{ fontSize: 22, lineHeight: 1, position: 'relative' }}>
-                <UiIcon name={tab.icon} size={21} />
+                <UiIcon name={tab.icon} size={22} />
                 {tab.showUnread && unreadCount > 0 && (
                   <span
                     className="unread-badge"
@@ -105,7 +105,7 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
           aria-expanded={moreOpen}
           style={tabStyle(moreOpen || ['/history', '/settings', '/stats', '/interests', '/feeds', '/admin'].some(path => location.pathname === path || location.pathname.startsWith(path + '/')))}
         >
-          <span aria-hidden="true" style={{ fontSize: 22, lineHeight: 1 }}><UiIcon name="user" size={21} /></span>
+          <span aria-hidden="true" style={{ fontSize: 22, lineHeight: 1 }}><UiIcon name="more" size={22} /></span>
           <span>更多</span>
         </button>
       </nav>

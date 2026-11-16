@@ -1,3 +1,4 @@
+import UiIcon from '../components/UiIcon'
 import '../components/ReadingPages.css'
 import { useReadingWorkspace, WorkspaceSidebar } from '../workspace/ReadingWorkspaceContext'
 import { SearchText } from '../components/ArticleSearch'
@@ -64,7 +65,7 @@ function MediaIndicator({ article, onPlay }: { article: MediaIndicatorArticle; o
           className="tag-chip"
           style={{ border: '1px solid var(--border)' }}
         >
-          🎬 视频
+          <UiIcon name="video" size={14} /> 视频
         </span>
       )}
       {(isAudio || audioFallback) && (
@@ -80,7 +81,7 @@ function MediaIndicator({ article, onPlay }: { article: MediaIndicatorArticle; o
           }}
           style={{ borderRadius: 999 }}
         >
-          ▶ 音频
+          <UiIcon name="play" size={14} /> 音频
         </button>
       )}
     </span>
@@ -268,7 +269,7 @@ function FeedPicker({
         onClick={() => setOpen(value => !value)}
       >
         <span className="feed-picker-label">{selectedLabel}</span>
-        <span aria-hidden="true" className="feed-picker-caret">▾</span>
+        <span aria-hidden="true" className="feed-picker-caret"><UiIcon name="chevronDown" size={14} /></span>
       </button>
       {open && (
         <div className="feed-picker-popover">
@@ -1095,7 +1096,7 @@ export default function ArticleListPage() {
               }}
               title={grouped ? '回到列表视图' : '按主题分组查看'}
             >
-              📚 分组
+              <UiIcon name="book" /> 分组
             </button>
           )
           const unreadEl = (
@@ -1154,7 +1155,7 @@ export default function ArticleListPage() {
               {!compactToolbar && groupEl}
               {markAllReadEl}
               {compactToolbar && hasOverflow && (
-                <OverflowMenu>
+                <OverflowMenu title="列表选项">
                   {!workspace && searchEl}
                   {!workspace && feedSelectEl}
                   {sortEl}
@@ -1199,7 +1200,7 @@ export default function ArticleListPage() {
             }}
           >
             <span aria-hidden className="rec-panel-arrow">
-              {showBriefing ? '▼' : '▶'}
+              <UiIcon name={showBriefing ? "chevronDown" : "chevronRight"} size={14} />
             </span>
             <h3 className="rec-panel-title">简报</h3>
             <span className="text-muted text-sm" style={{ fontWeight: 'normal' }}>({briefingArticles.length})</span>
@@ -1313,7 +1314,7 @@ export default function ArticleListPage() {
         <div className="card" role="alert">{listError} <button onClick={() => loadArticles(failedPageRef.current.offset, failedPageRef.current.reset, failedPageRef.current.restoreThrough)}>重试</button></div>
       ) : !isClippingMode && !searchQuery && articles.length === 0 && feeds.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>📰</div>
+          <div style={{ marginBottom: 12 }}><UiIcon name="articles" size={40} /></div>
           <div className="text-bold" style={{ marginBottom: 8, fontSize: 16 }}>还没有订阅</div>
           <div className="text-muted" style={{ marginBottom: 16 }}>去「订阅」页面添加你感兴趣的 RSS 源或网站，系统会自动抓取并生成 AI 摘要</div>
           <Link to="/feeds"><button>去添加订阅</button></Link>

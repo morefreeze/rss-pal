@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useReadingWorkspace } from '../workspace/ReadingWorkspaceContext'
 import ExploreArticleActions from './ExploreArticleActions'
 import { parsePublicationDate } from '../utils/publicationDate'
@@ -164,7 +165,7 @@ export default function ExploreArticleCard({
             event.stopPropagation()
             setMenuOpen(value => !value)
           }}
-        >⋯</button>
+        ><UiIcon name="more" /></button>
         {menuOpen && (
           <div role="menu" className="explore-card-menu__popover" onClick={event => event.stopPropagation()}>
             <button type="button" role="menuitem" aria-label={`隐藏来源「${sourceLabel}」`} onClick={() => { setMenuOpen(false); onHideSource(article.source_id) }}>

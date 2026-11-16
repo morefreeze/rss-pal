@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import {
   useEffect,
   useRef,
@@ -194,7 +195,7 @@ export default function ArticleReadSurface({
           disabled={disabled}
           onClick={() => setMenu((v) => !v)}
         >
-          ⋯
+          <UiIcon name="more" />
         </button>
         {menu && (
           <div className="article-read-menu" role="menu" aria-label="标记已读">

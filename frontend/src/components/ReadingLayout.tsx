@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { SearchText } from './ArticleSearch'
 import MarkdownArticle from './MarkdownArticle'
 import SummaryMarkdown from './SummaryMarkdown'
@@ -61,7 +62,7 @@ export default function ReadingLayout(props: Props) {
   return (
     <div className="reading-layout" style={{ fontFamily: ff }}>
       <div className="reading-toolbar">
-        <button className="reading-exit" onClick={onExit} title="退出阅读模式 (Esc / r)">← 退出阅读模式</button>
+        <button className="reading-exit" onClick={onExit} title="退出阅读模式 (Esc / r)"><UiIcon name="back" /> 退出阅读模式</button>
       </div>
 
       <article
@@ -81,7 +82,7 @@ export default function ReadingLayout(props: Props) {
         {(article.summary_brief || article.summary_detailed) && (
           <div className="reading-summary">
             <button type="button" className="reading-summary-toggle" aria-expanded={summaryOpen} disabled={summaryToggleDisabled} onClick={onToggleSummary}>
-              <span aria-hidden="true">{summaryOpen ? '▼' : '▶'}</span> AI 摘要
+              <UiIcon name={summaryOpen ? "chevronDown" : "chevronRight"} /> AI 摘要
             </button>
             {summaryOpen && (
               <div className="reading-summary-body">

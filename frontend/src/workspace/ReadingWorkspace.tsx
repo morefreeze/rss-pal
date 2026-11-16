@@ -123,7 +123,7 @@ export default function ReadingWorkspace({ children, navigation, account, footer
       <div className="workspace-scopes" ref={setSidebarTarget} />
       <div className="workspace-account">{account}</div>
     </aside>
-    <div className="workspace-mobile-header" ref={el => { if (el) el.inert = drawerOpen }}><span className="workspace-wordmark">RSS Pal</span><button className="btn-ghost btn-sm" onClick={openScopes} aria-haspopup="dialog" aria-expanded={drawerOpen}><UiIcon name="menu" /> 导航与筛选</button></div>
+    <div className="workspace-mobile-header" ref={el => { if (el) el.inert = drawerOpen }}><span className="workspace-wordmark">RSS Pal</span><button className="btn-ghost btn-sm" onClick={openScopes} aria-haspopup="dialog" aria-expanded={drawerOpen}><UiIcon name="panelLeft" /> 导航与筛选</button></div>
     {Object.entries(cached).map(([key, saved]) => {
       const active = key === activeKey
       const hidden = !active || (isPhone && isReader) || focusMode
@@ -143,7 +143,7 @@ export default function ReadingWorkspace({ children, navigation, account, footer
       if (event.key === 'End') { event.preventDefault(); setWidth(480) }
     }} onPointerDown={event => { event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId); event.preventDefault() }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) setWidth(event.clientX - (bp === 'desktop' ? 220 : 0)) }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }} />}
     <main ref={reader} tabIndex={-1} className="workspace-reader" aria-label={isReader ? '文章阅读器' : route ? '阅读概览' : '页面内容'} hidden={!!route && isPhone && !isReader}>
-      {isReader && <div className="workspace-reader-toolbar"><button className="btn-ghost btn-sm" onClick={closeReader}>← {route?.returnPath === '/history' ? '返回历史' : route?.module === 'briefing' ? '返回本期简报' : '返回列表'}</button><button className="btn-ghost btn-sm workspace-focus-toggle" aria-pressed={focusMode} onClick={() => setFocusMode(value => !value)}>{focusMode ? '退出专注' : '专注阅读'}</button></div>}
+      {isReader && <div className="workspace-reader-toolbar"><button className="btn-ghost btn-sm" onClick={closeReader}><UiIcon name="back" /> {route?.returnPath === '/history' ? '返回历史' : route?.module === 'briefing' ? '返回本期简报' : '返回列表'}</button><button className="btn-ghost btn-sm workspace-focus-toggle" aria-pressed={focusMode} onClick={() => setFocusMode(value => !value)}>{focusMode ? '退出专注' : '专注阅读'}</button></div>}
       <ReadingWorkspaceContext.Provider value={shared}>
         {(!route || isReader) && <div className="workspace-page">{children}{footer}</div>}
         {route && !isReader && <><div className="workspace-overview" ref={setOverviewTarget}><div className="workspace-empty-reader"><span className="workspace-empty-mark" aria-hidden="true"><UiIcon name="book" size={40} /></span><h2>选择一篇文章</h2><p>在列表中选择文章后，这里显示正文。</p></div></div>{!isPhone && footer}</>}

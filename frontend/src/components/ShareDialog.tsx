@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import ShareActions from './ShareActions'
 import { buildXPostText } from '../utils/xShare'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -300,7 +301,7 @@ export function ShareDialog({
       >
         <header className="share-dialog-header">
           <h2 id="share-dialog-title">管理分享链接</h2>
-          <button ref={closeButtonRef} type="button" className="btn-ghost" aria-label="关闭" onClick={closeDialog}>×</button>
+          <button ref={closeButtonRef} type="button" className="btn-ghost" aria-label="关闭" onClick={closeDialog}><UiIcon name="close" /></button>
         </header>
 
         <div className="share-dialog-body">

@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useEffect, useMemo, useState } from 'react'
 import { getBriefingIndex, BriefingIndex } from '../api/client'
 
@@ -105,9 +106,9 @@ export default function BriefingCalendar({ currentDate, onPick, onClose }: Props
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <button type="button" onClick={() => shiftMonth(-1)} aria-label="上一月" style={btnStyle}>‹</button>
+        <button type="button" onClick={() => shiftMonth(-1)} aria-label="上一月" style={btnStyle}><UiIcon name="chevronLeft" /></button>
         <div style={{ fontWeight: 600 }}>{year} 年 {monthOneBased} 月</div>
-        <button type="button" onClick={() => shiftMonth(1)} aria-label="下一月" style={btnStyle}>›</button>
+        <button type="button" onClick={() => shiftMonth(1)} aria-label="下一月" style={btnStyle}><UiIcon name="chevronRight" /></button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, marginBottom: 6 }}>
         {WEEKDAY_LABELS.map(w => (

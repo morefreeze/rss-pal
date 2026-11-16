@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useEffect, useRef, useState } from 'react'
 import { createArticleShare, listArticleShares, type ArticleShareListItem } from '../api/client'
 
@@ -71,7 +72,7 @@ export default function CopyPublicLinkButton({ articleId }: { articleId: number 
 
   return <div className="article-copy-public-link">
     <button type="button" className="secondary" style={{ fontSize: 13 }} disabled={busy}
-      title="复制公开分享链接" onClick={() => void copy()}>{busy ? '复制中…' : '复制链接'}</button>
+      title="复制公开分享链接" onClick={() => void copy()}><UiIcon name="link" /> {busy ? '复制中…' : '复制链接'}</button>
     {message && <span role="status" className="text-muted text-sm">{message}</span>}
     {error && <span role="alert" className="text-sm">{error}</span>}
     {fallback && <input ref={input} aria-label="公开分享链接" readOnly value={fallback}

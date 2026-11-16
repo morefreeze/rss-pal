@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 // Confirmation for the ordered per-article link draft list. Checkbox state
 // is only for the current submission; the remove button edits the draft list.
 
@@ -229,7 +230,7 @@ export function BatchFetchConfirmDialog({
               minHeight: 44,
               padding: 0,
             }}
-          >×</button>
+          ><UiIcon name="close" /></button>
         </div>
 
         {rows.length > 0 && <div style={{
@@ -377,7 +378,7 @@ export function BatchFetchConfirmDialog({
                         padding: '0 4px',
                         cursor: 'pointer',
                       }}
-                    >×</button>
+                    ><UiIcon name="close" /></button>
                   </li>
                 )
               })}

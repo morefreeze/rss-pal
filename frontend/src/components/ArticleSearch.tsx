@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createSearchHighlightPlugin } from '../utils/searchHighlight'
 import { findSearchMatches } from '../utils/searchMatches'
@@ -82,9 +83,9 @@ export function ArticleSearch({ query, articleKey, children, onClose }: { query:
     {activeQuery && <div className="article-search-toolbar" role="search" aria-label="文内搜索">
       <span className="article-search-query" title={activeQuery}>{activeQuery}</span>
       <output role="status" aria-live="polite">{position.total ? position.index + 1 : 0}/{position.total}</output>
-      <button type="button" aria-label="上一个匹配" disabled={!position.total} onClick={() => select(indexRef.current - 1)}>‹</button>
-      <button type="button" aria-label="下一个匹配" disabled={!position.total} onClick={() => select(indexRef.current + 1)}>›</button>
-      <button type="button" aria-label="退出搜索" onClick={() => { setClosedKey(sessionKey); onClose?.() }}>×</button>
+      <button type="button" aria-label="上一个匹配" disabled={!position.total} onClick={() => select(indexRef.current - 1)}><UiIcon name="chevronLeft" /></button>
+      <button type="button" aria-label="下一个匹配" disabled={!position.total} onClick={() => select(indexRef.current + 1)}><UiIcon name="chevronRight" /></button>
+      <button type="button" aria-label="退出搜索" onClick={() => { setClosedKey(sessionKey); onClose?.() }}><UiIcon name="close" /></button>
     </div>}
   </SearchContext.Provider>
 }

@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface Props {
@@ -39,9 +40,10 @@ export default function OverflowMenu({ children, title = '更多' }: Props) {
         aria-haspopup="menu"
         aria-expanded={open}
         title={title}
+        aria-label={title}
         style={{ padding: '4px 10px', minWidth: 0 }}
       >
-        ⋯
+        <UiIcon name="more" />
       </button>
       {open && (
         <div

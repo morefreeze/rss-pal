@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useEffect, useRef, useState } from 'react'
 
 interface Props {
@@ -35,9 +36,10 @@ export default function ArticleActionsMenu({ onDelete }: Props) {
         aria-haspopup="menu"
         aria-expanded={open}
         title="更多操作"
+        aria-label="更多操作"
         style={{ fontSize: 13, padding: '4px 10px' }}
       >
-        ⋯
+        <UiIcon name="more" />
       </button>
       {open && (
         <div
@@ -77,7 +79,7 @@ export default function ArticleActionsMenu({ onDelete }: Props) {
             onMouseEnter={e => (e.currentTarget.style.background = 'rgba(220,38,38,0.08)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
-            🗑 删除
+            <UiIcon name="trash" /> 删除
           </button>
         </div>
       )}

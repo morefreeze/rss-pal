@@ -1272,7 +1272,7 @@ function ArticlePageContent() {
       <div className="text-muted">{loadError}</div>
       <div className="flex gap-2" style={{ justifyContent: 'center', marginTop: 12 }}>
         <button className="secondary" onClick={() => void loadArticle()}>重试</button>
-        <button className="secondary" onClick={handleBack}>← 返回</button>
+        <button className="secondary" onClick={handleBack}><UiIcon name="back" /> 返回</button>
       </div>
     </div>
   )
@@ -1298,7 +1298,7 @@ function ArticlePageContent() {
       {(taskCount > 0 || fetchRefreshPending) && (
         <CollapsibleFab
           articleId={article.id}
-          icon="📥"
+          icon="download"
           label={taskCount > 0 ? `抓取列表 ${taskCount}` : '抓取列表'}
           variant="primary"
           title={taskCount > 0 ? `抓取列表（${taskCount}）` : '抓取列表'}
@@ -1388,7 +1388,7 @@ function ArticlePageContent() {
           className="p-3 rounded-md mb-4 text-sm flex items-center gap-3"
           style={{ border: '1px solid #fca5a5', background: '#fef2f2', color: '#991b1b' }}
         >
-          <span>🗑 这篇文章已删除 · 仍可查看</span>
+          <span><UiIcon name="trash" /> 这篇文章已删除 · 仍可查看</span>
           <button
             type="button"
             className="secondary"
@@ -1408,7 +1408,7 @@ function ArticlePageContent() {
               onClick={handleBack}
               style={{ fontSize: 13, padding: '4px 10px' }}
             >
-              ← 返回
+              <UiIcon name="back" /> 返回
             </button>}
             <button
               className="secondary"
@@ -1417,7 +1417,7 @@ function ArticlePageContent() {
               style={{ fontSize: 13, padding: '4px 10px' }}
               title="上一篇"
             >
-              ‹ 上一篇
+              <UiIcon name="chevronLeft" /> 上一篇
             </button>
             <button
               className="secondary"
@@ -1426,7 +1426,7 @@ function ArticlePageContent() {
               style={{ fontSize: 13, padding: '4px 10px' }}
               title="下一篇"
             >
-              {loadingNext ? '加载中…' : '下一篇 ›'}
+              {loadingNext ? '加载中…' : <>下一篇 <UiIcon name="chevronRight" /></>}
             </button>
           </div>
           {(article.source || article.feed_title) && (
@@ -1445,7 +1445,7 @@ function ArticlePageContent() {
           <span>{formatDate(article.published_at)}</span>
           <ReadingMeta wordCount={article.word_count} readingMinutes={article.reading_minutes} mediaType={article.media_type} mediaDurationSeconds={article.media_duration_seconds} />
           <span>·</span>
-          <a href={article.url} target="_blank" rel="noopener noreferrer">原文链接</a>
+          <a href={article.url} target="_blank" rel="noopener noreferrer"><UiIcon name="external" /> 原文链接</a>
           {progressDisplay.currentPercent > 0 && <span>· 阅读进度 {progressDisplay.currentPercent}%</span>}
         </div>
 
@@ -1472,9 +1472,7 @@ function ArticlePageContent() {
             title={liked ? '取消喜欢' : '喜欢'}
             onClick={handleLike}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-              <path d="M7 10v12H3a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1h4Zm0 0 5-8a3 3 0 0 1 3 3v4h5a2 2 0 0 1 2 2.3l-1.4 8a3 3 0 0 1-3 2.7H7" />
-            </svg>
+            <UiIcon name="like" />
           </button>
           <button
             type="button"
@@ -1484,16 +1482,14 @@ function ArticlePageContent() {
             title={disliked ? '取消不喜欢' : '不喜欢'}
             onClick={handleDislike}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-              <path d="M7 14V2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4Zm0 0 5 8a3 3 0 0 0 3-3v-4h5a2 2 0 0 0 2-2.3l-1.4-8A3 3 0 0 0 17.6 2H7" />
-            </svg>
+            <UiIcon name="dislike" />
           </button>
           <button
             className="secondary"
             onClick={handleSave}
             style={saved ? { backgroundColor: '#f59e0b', color: 'white', borderColor: '#f59e0b' } : {}}
           >
-            {saved ? '✓ 已保存' : <><UiIcon name="bookmark" size={15} /> 保存</>}
+            <UiIcon name="bookmark" /> {saved ? "已保存" : "保存"}
           </button>
           {progress?.is_completed ? (
             <button
@@ -1501,7 +1497,7 @@ function ArticlePageContent() {
               onClick={handleMarkUnread}
               style={{ fontSize: 13 }}
             >
-              ↩ 标记未读
+              <UiIcon name="unread" /> 标记未读
             </button>
           ) : (
             <button
@@ -1509,7 +1505,7 @@ function ArticlePageContent() {
               onClick={handleMarkRead}
               style={{ fontSize: 13 }}
             >
-              ✓ 标记已读
+              <UiIcon name="read" /> 标记已读
             </button>
           )}
           <button
@@ -1518,7 +1514,7 @@ function ArticlePageContent() {
             title="进入阅读模式 (r)"
             style={{ fontSize: 13 }}
           >
-            <UiIcon name="book" size={15} /> 阅读模式
+            <UiIcon name="book" /> 阅读模式
           </button>
           <div className="article-share-shortcuts">
           <button
@@ -1526,7 +1522,7 @@ function ArticlePageContent() {
             onClick={() => setShareDialogOpen(true)}
             style={{ fontSize: 13 }}
           >
-            分享
+            <UiIcon name="share" /> 分享
           </button>
           <CopyPublicLinkButton key={article.id} articleId={article.id} />
           </div>
@@ -1612,7 +1608,7 @@ function ArticlePageContent() {
       <div ref={summaryRef} className="card article-summary-section">
         <div className="flex-between mb-2 summary-controls">
           <button type="button" className="article-summary-toggle" aria-label={summaryOpen ? '收起 AI 总结' : '展开 AI 总结'} aria-expanded={summaryOpen} aria-controls={`article-summary-${articleID}`} disabled={summaryMustOpen} onClick={toggleSummary}>
-            <span aria-hidden="true">{summaryOpen ? '▾' : '▸'}</span> AI 总结
+            <UiIcon name={summaryOpen ? "chevronDown" : "chevronRight"} size={14} /> AI 总结
           </button>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select
@@ -1765,7 +1761,7 @@ function ArticlePageContent() {
           onClick={goPrev}
           style={{ fontSize: 13, padding: '6px 14px' }}
         >
-          ‹ 上一篇
+          <UiIcon name="chevronLeft" /> 上一篇
         </button>
         <button
           className="secondary"
@@ -1773,7 +1769,7 @@ function ArticlePageContent() {
           onClick={goNext}
           style={{ fontSize: 13, padding: '6px 14px' }}
         >
-          {loadingNext ? '加载中…' : '下一篇 ›'}
+          {loadingNext ? '加载中…' : <>下一篇 <UiIcon name="chevronRight" /></>}
         </button>
       </div>
       {!workspace && <BackFab onClick={handleBack} />}

@@ -1,4 +1,4 @@
-import UiIcon from './UiIcon'
+import UiIcon, { type UiIconName } from './UiIcon'
 import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
@@ -45,16 +45,16 @@ interface LayoutProps {
 // /articles?view=clip is in the URL, and the regular 文章 tab does NOT
 // match in that case. Without this, both share pathname /articles and
 // React Router's default isActive would light up both.
-type NavItem = { to: string; icon: string; label: string; matchClip?: boolean }
+type NavItem = { to: string; icon: UiIconName; label: string; matchClip?: boolean }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/articles',           icon: '📰', label: '文章' },
-  { to: '/articles?view=clip', icon: '⭐', label: '网摘', matchClip: true },
-  { to: '/explore',            icon: '🔭', label: '探索' },
-  { to: '/briefing',           icon: '📅', label: '简报' },
-  { to: '/feeds',              icon: '📡', label: '订阅' },
-  { to: '/interests',          icon: '💡', label: '兴趣' },
-  { to: '/stats',              icon: '📊', label: '统计' },
+  { to: '/articles',           icon: 'articles', label: '文章' },
+  { to: '/articles?view=clip', icon: 'bookmark', label: '网摘', matchClip: true },
+  { to: '/explore',            icon: 'explore', label: '探索' },
+  { to: '/briefing',           icon: 'calendar', label: '简报' },
+  { to: '/feeds',              icon: 'rss', label: '订阅' },
+  { to: '/interests',          icon: 'spark', label: '兴趣' },
+  { to: '/stats',              icon: 'chart', label: '统计' },
 ]
 
 function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => void }) {
@@ -107,7 +107,7 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
             transition: 'transform 0.15s ease',
           }}
         >
-          ▾
+          <UiIcon name="chevronDown" size={14} />
         </span>
       </button>
       {open && (
@@ -213,7 +213,7 @@ function LayoutInner({ user, unreadCount, onLogout, renderNavLabel }: LayoutInne
     if (workspaceRoute && workspaceRoute.articleId == null) rememberWorkspaceDestination(user?.id, workspaceRoute.module, workspaceRoute.listPath)
   }, [user?.id, workspaceRoute?.module, workspaceRoute?.listPath, workspaceRoute?.articleId])
   const showTabs = bp === 'phone' && workspaceRoute?.articleId == null
-  const navItems = user?.is_admin ? [...NAV_ITEMS, { to: '/admin', icon: '🛡️', label: '后台管理' }] : NAV_ITEMS
+  const navItems: NavItem[] = user?.is_admin ? [...NAV_ITEMS, { to: '/admin', icon: 'shield', label: '后台管理' }] : NAV_ITEMS
   const itemIsActive = (item: NavItem) => {
     if (item.to === '/articles') return workspaceRoute?.module === 'articles'
     if (item.matchClip) return workspaceRoute?.module === 'clips'

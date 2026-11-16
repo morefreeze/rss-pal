@@ -45,7 +45,7 @@ describe('ReadingWorkspace', () => {
     expect(screen.getByText('count 1')).toBeTruthy()
     expect(screen.queryByText('duplicate list')).toBeNull()
     expect(screen.queryByText('overview /articles')).toBeNull()
-    fireEvent.click(screen.getByText('← 返回列表'))
+    fireEvent.click(screen.getByText('返回列表'))
     expect(screen.queryByText('actual detail')).toBeNull()
     expect(screen.getByText('count 1')).toBeTruthy()
     expect(screen.getByText('overview /articles')).toBeTruthy()
@@ -70,7 +70,7 @@ describe('ReadingWorkspace', () => {
     fireEvent.click(screen.getByText('open article'))
     expect((screen.getByTestId('mock-list').closest('.workspace-list') as HTMLDivElement).hidden).toBe(true)
     expect(screen.getByRole('main').hidden).toBe(false)
-    fireEvent.click(screen.getByText('← 返回列表'))
+    fireEvent.click(screen.getByText('返回列表'))
     expect((screen.getByTestId('mock-list').closest('.workspace-list') as HTMLDivElement).hidden).toBe(false)
   })
   it('provides keyboard-close and focus restoration for tablet scopes', () => {
@@ -121,14 +121,14 @@ describe('ReadingWorkspace', () => {
     opener.focus()
     fireEvent.click(opener)
     expect(screen.getAllByText('test filing footer')).toHaveLength(1)
-    fireEvent.click(screen.getByText('← 返回列表'))
+    fireEvent.click(screen.getByText('返回列表'))
     expect(document.activeElement).toBe(opener)
     expect(screen.getAllByText('test filing footer')).toHaveLength(1)
   })
   it('returns to the validated history origin while using articles as the virtual list', () => {
     harness('/articles/42', { from: '/history' })
     expect(screen.getByText('source /articles')).toBeTruthy()
-    fireEvent.click(screen.getByText('← 返回历史'))
+    fireEvent.click(screen.getByText('返回历史'))
     expect(screen.getByText('history page')).toBeTruthy()
   })
   it('scope changes in a history-opened reader return to the virtual article list', () => {
@@ -140,7 +140,7 @@ describe('ReadingWorkspace', () => {
   })
   it('names the return to the same briefing issue', () => {
     harness('/articles/42', { from: '/weekly?week=2026-11-09' })
-    expect(screen.getByText('← 返回本期简报')).toBeTruthy()
+    expect(screen.getByText('返回本期简报')).toBeTruthy()
     expect(screen.getByText('source /weekly')).toBeTruthy()
   })
   it('keeps utility route content and navigation usable', () => {

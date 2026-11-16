@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getExploreSources,
@@ -158,7 +159,7 @@ export default function ExploreSourceDrawer({ onSubscribed, active = true }: Pro
         aria-controls="explore-source-drawer"
         onClick={() => { setError(null); setOpen(true) }}
       >
-        <span aria-hidden="true">☰</span>
+        <UiIcon name="panelLeft" />
         <span>{loadingSources ? '加载中' : loadError ? '加载失败' : `${sources.length} 个候选源`}</span>
       </button>
 
@@ -183,7 +184,7 @@ export default function ExploreSourceDrawer({ onSubscribed, active = true }: Pro
                 <h2>候选订阅源</h2>
                 <p>选择你想正式订阅的来源</p>
               </div>
-              <button ref={closeRef} type="button" className="btn-ghost" aria-label="关闭候选订阅源" onClick={() => setOpen(false)}>×</button>
+              <button ref={closeRef} type="button" className="btn-ghost" aria-label="关闭候选订阅源" onClick={() => setOpen(false)}><UiIcon name="close" /></button>
             </header>
 
             {error && <div role="alert" className="explore-inline-error">{error}</div>}

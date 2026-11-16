@@ -1,3 +1,4 @@
+import UiIcon from '../components/UiIcon'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
@@ -264,7 +265,7 @@ function Cloud({ title, size, items, empty, onDelete }: {
                     fontSize: 11, lineHeight: 1, padding: 0,
                   }}
                   aria-label="删除"
-                >×</button>
+                ><UiIcon name="close" /></button>
               )}
             </span>
           ))}

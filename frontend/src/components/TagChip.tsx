@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { tagChipColors } from '../utils/tagColor'
 
 type Variant = 'manual' | 'source' | 'suggestion'
@@ -18,7 +19,7 @@ export default function TagChip({ name, variant = 'manual', onRemove, onAdopt, o
         onClick={onClick}
         style={onClick ? { cursor: 'pointer' } : undefined}
       >
-        <span>📡</span>
+        <UiIcon name="rss" size={14} />
         <span>{name}</span>
       </span>
     )
@@ -50,7 +51,7 @@ export default function TagChip({ name, variant = 'manual', onRemove, onAdopt, o
           onClick={onRemove}
           aria-label={`移除 ${name}`}
         >
-          ✕
+          <UiIcon name="close" size={14} />
         </button>
       )}
     </span>

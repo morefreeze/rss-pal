@@ -1,3 +1,4 @@
+import UiIcon from '../components/UiIcon'
 import ExploreArticleActions from '../components/ExploreArticleActions'
 import { parsePublicationDate } from '../utils/publicationDate'
 import { useExploreArticleActions } from '../hooks/useExploreArticleActions'
@@ -295,7 +296,7 @@ export default function ExploreArticlePage() {
     return (
       <div className="reading-layout" aria-busy="true">
         <div className="reading-toolbar">
-          <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}>← {backLabel}</button>
+          <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}><UiIcon name="back" /> {backLabel}</button>
         </div>
         <div className="card" role="status">正在加载探索文章…</div>
       </div>
@@ -306,7 +307,7 @@ export default function ExploreArticlePage() {
     return (
       <div className="reading-layout">
         <div className="reading-toolbar">
-          <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}>← {backLabel}</button>
+          <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}><UiIcon name="back" /> {backLabel}</button>
         </div>
         <div className="card" role="alert">
           <p>{loadError || '探索文章不存在或已失效'}</p>
@@ -334,7 +335,7 @@ export default function ExploreArticlePage() {
   return (
     <div className="reading-layout explore-article-reader">
       <div className="reading-toolbar flex-between">
-        <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}>← {backLabel}</button>
+        <button type="button" className="reading-exit" aria-label={backLabel} onClick={goBack}><UiIcon name="back" /> {backLabel}</button>
         <div className="explore-article-actions"><ExploreArticleActions actions={actions} />{subscribeButton('top')}</div>
       </div>
 

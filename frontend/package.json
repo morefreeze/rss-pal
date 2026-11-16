@@ -20,6 +20,7 @@
     "graphemer": "^1.4.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.45",
+    "lucide-react": "1.73.0",
     "pinyin-pro": "^3.29.1",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",

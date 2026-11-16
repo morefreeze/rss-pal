@@ -796,12 +796,12 @@ describe('ArticleListPage automatic pagination', () => {
     expect(screen.queryByRole('button', { name: '订阅筛选：全部订阅' })).toBeNull()
     expect(screen.queryByRole('button', { name: '发布' })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '⋯' }))
+    fireEvent.click(screen.getByRole('button', { name: '列表选项' }))
 
     expect(screen.getByPlaceholderText('搜索文章... ( / 聚焦)')).toBeTruthy()
     expect(screen.getByRole('button', { name: '订阅筛选：全部订阅' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '发布 ↓' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '📚 分组' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '分组' })).toBeTruthy()
   })
 
   it('waits for reset page zero before rearming automatic page two', async () => {

@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { Article } from '../api/client'
 import { usePlayer } from '../player/PlayerContext'
 import Spinner from './Spinner'
@@ -69,7 +70,7 @@ function AudioCard({ article }: { article: Article }) {
           fontSize: 24,
         }}
       >
-        {isCurrent && p.loading ? <Spinner size={24} color="var(--accent-fg)" /> : playing ? '⏸' : '▶'}
+        {isCurrent && p.loading ? <Spinner size={24} color="var(--accent-fg)" /> : <UiIcon name={playing ? "pause" : "play"} size={24} />}
       </button>
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: 600, fontSize: 15 }}>音频节目</div>

@@ -1,8 +1,9 @@
+import UiIcon, { type UiIconName } from './UiIcon'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 type Props = {
   articleId: number
-  icon: string
+  icon: UiIconName
   label: string
   variant: 'primary' | 'outline'
   onActivate: () => void | Promise<void>
@@ -168,7 +169,7 @@ export default function CollapsibleFab({
           touchAction: 'pan-y',
         }}
       >
-        <span aria-hidden style={{ fontSize: 14 }}>{icon}</span>
+        <UiIcon name={icon} />
       </button>
     )
   }
@@ -201,7 +202,7 @@ export default function CollapsibleFab({
         touchAction: 'pan-y',
       }}
     >
-      <span style={{ whiteSpace: 'nowrap' }}>{icon} {label}</span>
+      <span style={{ whiteSpace: 'nowrap' }}><UiIcon name={icon} /> {label}</span>
       <span
         role="button"
         tabIndex={0}
@@ -229,7 +230,7 @@ export default function CollapsibleFab({
           color: 'inherit',
         }}
       >
-        ✕
+        <UiIcon name="close" />
       </span>
     </button>
   )
