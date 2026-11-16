@@ -316,7 +316,7 @@ function FeedPicker({
   )
 }
 
-export default function ArticleListPage() {
+export default function ArticleListPage({ allowLegacyBriefing = true }: { allowLegacyBriefing?: boolean }) {
   const workspace = useReadingWorkspace()
   const listRootRef = useRef<HTMLDivElement>(null)
   const listScrollPosition = () => workspace?.getListScrollElement()?.scrollTop ?? window.scrollY
@@ -524,7 +524,6 @@ export default function ArticleListPage() {
 
   useEffect(() => {
     void loadFeeds().catch(() => {})
-    if (!workspace) loadBriefing()
     const onRefreshUnread = () => {
       try {
         setSessionReadIds(new Set(JSON.parse(sessionStorage.getItem('readArticles') || '[]')))
@@ -538,6 +537,11 @@ export default function ArticleListPage() {
       window.removeEventListener('subscriptions-changed', onRefreshUnread)
     }
   }, [])
+
+  const showLegacyBriefing = !workspace && allowLegacyBriefing
+  useEffect(() => {
+    if (showLegacyBriefing) void loadBriefing()
+  }, [showLegacyBriefing])
 
   // /saved (legacy bookmark) redirects here as /articles?saved=1. The
   // savedOnly state is already initialized to true by the lazy init above;
@@ -1186,7 +1190,7 @@ export default function ArticleListPage() {
         />
       )}
 
-      {!workspace && !isClippingMode && briefingArticles.length > 0 && !searchQuery && !grouped && (
+      {showLegacyBriefing && !isClippingMode && briefingArticles.length > 0 && !searchQuery && !grouped && (
         <div className="rec-panel">
           <button
             type="button"

@@ -349,8 +349,12 @@ func main() {
 	catalogAdmin.PUT("/:id", catalogHandler.Update)
 	catalogAdmin.POST("/:id/check", catalogHandler.Check)
 	catalogAdmin.POST("/:id/publication", catalogHandler.Publication)
-	apiGroup.Use(api.TaskBudgetMiddleware(taskBudgets, policies))
-	apiGroup.Use(api.RLSTxMiddleware(db))
+	userTaskBudget := api.TaskBudgetMiddleware(taskBudgets, policies)
+	userRLS := api.RLSTxMiddleware(db)
+	// Restrict previews before charging any task budget or opening the user's RLS transaction.
+	registerPreviewRoutes(apiGroup.Group("", api.AdminPreviewOnly(adminDB), userTaskBudget, userRLS),
+		exploreHandler, dailyHandler, weeklyHandler, briefingHandler, briefingIndexHandler)
+	apiGroup.Use(userTaskBudget, userRLS)
 	{
 		// Private PDF assets use JWT and the owning article RLS boundary.
 		apiGroup.GET("/articles/:id/images/:idx", pdfImgHandler.Serve)
@@ -458,14 +462,6 @@ func main() {
 
 		// Interests (with one-version legacy aliases)
 		registerInterestRoutes(apiGroup, interestsHandler)
-		registerExploreRoutes(apiGroup, exploreHandler)
-
-		// Weekly / daily briefings (worker generates async; API is read-only)
-		apiGroup.GET("/weekly-digest", weeklyHandler.Get)
-		apiGroup.GET("/daily-digest", dailyHandler.Get)
-		apiGroup.GET("/briefing/last-tab", briefingHandler.GetLastTab)
-		apiGroup.POST("/briefing/last-tab", briefingHandler.SetLastTab)
-		apiGroup.GET("/briefing/index", briefingIndexHandler.Get)
 
 		// Templates
 		apiGroup.GET("/templates", settingsHandler.GetTemplates)

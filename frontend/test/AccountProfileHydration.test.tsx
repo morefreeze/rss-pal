@@ -7,7 +7,10 @@ vi.mock('../src/api/client', async importOriginal => ({
   ...await importOriginal<typeof import('../src/api/client')>(),
   getMe: mocks.me,
 }))
-vi.mock('../src/components/Layout', () => ({ default: ({ user }: { user: User }) => <p>{user.needs_password ? 'Password missing' : 'Password set'}</p> }))
+vi.mock('../src/components/Layout', () => ({ default: ({ user, allowPreviews }: { user: User; allowPreviews: boolean }) => <>
+  <p>{user.needs_password ? 'Password missing' : 'Password set'}</p>
+  {allowPreviews && <p>Preview available</p>}
+</> }))
 vi.mock('../src/components/AccountOnboarding', () => ({ default: ({ user }: { user: User }) => <p>{user.needs_password ? 'Password guidance' : user.needs_nickname ? 'Nickname guidance' : 'Setup complete'}</p> }))
 vi.mock('../src/hooks/useConnectionKeepAlive', () => ({ useConnectionKeepAlive: () => {} }))
 const user = { id: 19, username: 'reader_auto', is_admin: false, needs_password: true }
@@ -48,4 +51,20 @@ it('does not repeat nickname guidance that another device has acknowledged', asy
   await act(async () => { finish({ ...user, needs_password: false, needs_nickname: false }) })
   expect(screen.queryByText('Nickname guidance')).toBeNull()
   expect(screen.getByText('Setup complete')).toBeTruthy()
+})
+
+it.each([
+  [false, true, '/explore'],
+  [true, false, '/articles'],
+])('waits for the current role before resolving a preview link', async (cachedAdmin, currentAdmin, destination) => {
+  localStorage.setItem('user', JSON.stringify({ ...user, is_admin: cachedAdmin }))
+  window.history.replaceState({}, '', '/explore')
+  let finish!: (user: User) => void
+  mocks.me.mockReturnValue(new Promise<User>(resolve => { finish = resolve }))
+  render(<MainSiteApp />)
+  expect(window.location.pathname).toBe('/explore')
+  expect(screen.queryByText('Preview available')).toBeNull()
+  await act(async () => { finish({ ...user, is_admin: currentAdmin }) })
+  expect(window.location.pathname).toBe(destination)
+  expect(Boolean(screen.queryByText('Preview available'))).toBe(currentAdmin)
 })

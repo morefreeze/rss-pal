@@ -55,7 +55,8 @@ func (r *ReadingHistoryRepository) Record(userID, articleID int, explore bool) e
 			FROM explore_articles article
 			JOIN recommended_feeds source ON source.id=article.source_id
 			LEFT JOIN explore_article_states state ON state.user_id=$1 AND state.normalized_url=article.normalized_url
-			WHERE article.id=$3 AND (` + exploreArticleVisibility + `)
+			WHERE article.id=$3 AND EXISTS (SELECT 1 FROM users WHERE id=$1 AND is_admin)
+			  AND (` + exploreArticleVisibility + `)
 			ON CONFLICT (explore_article_key,user_id) WHERE explore_article_key IS NOT NULL DO UPDATE
 			SET opened_at=GREATEST(reading_history.opened_at,EXCLUDED.opened_at),
 			    explore_article_id=CASE WHEN EXCLUDED.opened_at >= reading_history.opened_at
@@ -99,6 +100,7 @@ func (r *ReadingHistoryRepository) List(userID, limit int, before *time.Time, be
 			LEFT JOIN recommended_feeds source ON source.id=article.source_id
 			LEFT JOIN explore_article_states state ON state.user_id=$1 AND state.normalized_url=article.normalized_url
 			WHERE history.explore_article_key IS NOT NULL
+			  AND EXISTS (SELECT 1 FROM users WHERE id=$1 AND is_admin)
 		) entry ON true
 		WHERE history.user_id=$1 AND ($3::timestamptz IS NULL OR (history.opened_at,history.id) < ($3,$4))
 		ORDER BY history.opened_at DESC, history.id DESC

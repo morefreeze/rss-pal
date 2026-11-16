@@ -9,7 +9,7 @@ import MiniPlayer from './MiniPlayer'
 import MobileTabBar from './MobileTabBar'
 import { useBreakpoint } from '../hooks/useBreakpoint'
 import ReadingWorkspace from '../workspace/ReadingWorkspace'
-import { resolveWorkspaceRoute } from '../workspace/workspaceRoutes'
+import { isPreviewPath, resolveWorkspaceRoute } from '../workspace/workspaceRoutes'
 import { readWorkspaceDestinations, rememberWorkspaceDestination, moduleDestination } from '../workspace/workspaceDestinations'
 import { VERSION as FRONTEND_VERSION } from '../version'
 
@@ -37,6 +37,7 @@ function VersionFooter({ backend }: { backend: string }) {
 }
 
 interface LayoutProps {
+  allowPreviews?: boolean
   user: (DisplayAccount & { id: number; is_admin: boolean }) | null
   onLogout: () => void
 }
@@ -146,7 +147,7 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
   )
 }
 
-export default function Layout({ user, onLogout }: LayoutProps) {
+export default function Layout({ user, onLogout, allowPreviews = user?.is_admin === true }: LayoutProps) {
   const [unreadCount, setUnreadCount] = useState(0)
 
   const refreshUnread = useCallback(() => {
@@ -185,6 +186,7 @@ export default function Layout({ user, onLogout }: LayoutProps) {
     <PlayerProvider>
       <LayoutInner
         user={user}
+        allowPreviews={allowPreviews}
         unreadCount={unreadCount}
         onLogout={handleLogout}
         renderNavLabel={renderNavLabel}
@@ -194,26 +196,28 @@ export default function Layout({ user, onLogout }: LayoutProps) {
 }
 
 interface LayoutInnerProps {
+  allowPreviews: boolean
   user: (DisplayAccount & { id: number; is_admin: boolean }) | null
   unreadCount: number
   onLogout: () => void
   renderNavLabel: (item: NavItem) => React.ReactNode
 }
 
-function LayoutInner({ user, unreadCount, onLogout, renderNavLabel }: LayoutInnerProps) {
+function LayoutInner({ user, allowPreviews, unreadCount, onLogout, renderNavLabel }: LayoutInnerProps) {
   const bp = useBreakpoint()
   const player = usePlayer()
   const location = useLocation()
   const [backendVersion, setBackendVersion] = useState('-')
   useEffect(() => { getServerHealth().then(health => setBackendVersion(health.version || '-')).catch(() => setBackendVersion('?')) }, [])
-  const workspaceRoute = resolveWorkspaceRoute(location.pathname, location.search, location.state)
+  const isAdmin = user?.is_admin === true
+  const workspaceRoute = resolveWorkspaceRoute(location.pathname, location.search, location.state, allowPreviews)
   const destinations = readWorkspaceDestinations(user?.id)
   if (workspaceRoute && workspaceRoute.articleId == null) destinations[workspaceRoute.module] = workspaceRoute.listPath
   useEffect(() => {
     if (workspaceRoute && workspaceRoute.articleId == null) rememberWorkspaceDestination(user?.id, workspaceRoute.module, workspaceRoute.listPath)
   }, [user?.id, workspaceRoute?.module, workspaceRoute?.listPath, workspaceRoute?.articleId])
   const showTabs = bp === 'phone' && workspaceRoute?.articleId == null
-  const navItems: NavItem[] = user?.is_admin ? [...NAV_ITEMS, { to: '/admin', icon: 'shield', label: '后台管理' }] : NAV_ITEMS
+  const navItems: NavItem[] = isAdmin ? [...NAV_ITEMS, { to: '/admin', icon: 'shield', label: '后台管理' }] : NAV_ITEMS
   const itemIsActive = (item: NavItem) => {
     if (item.to === '/articles') return workspaceRoute?.module === 'articles'
     if (item.matchClip) return workspaceRoute?.module === 'clips'
@@ -228,12 +232,12 @@ function LayoutInner({ user, unreadCount, onLogout, renderNavLabel }: LayoutInne
     document.body.style.setProperty('--mobile-tabs-offset', showTabs ? 'calc(56px + env(safe-area-inset-bottom))' : '0px')
     return () => { document.body.style.removeProperty('--bottom-chrome'); document.body.style.removeProperty('--mobile-tabs-offset') }
   }, [showTabs, player.articleId])
-  const navigation = <nav className="workspace-nav" aria-label="主导航">{navItems.slice(0, 4).map(item => <Link key={item.to} to={moduleDestination(item.to, destinations)} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav>
+  const navigation = <nav className="workspace-nav" aria-label="主导航">{navItems.slice(0, 4).filter(item => allowPreviews || !isPreviewPath(item.to)).map(item => <Link key={item.to} to={moduleDestination(item.to, destinations)} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav>
   const account = <><details className="workspace-more"><summary>更多</summary><nav className="workspace-nav" aria-label="更多导航">{navItems.slice(4).map(item => <Link key={item.to} to={item.to} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav></details>{user && <UserMenu user={user} onLogout={onLogout} />}</>
   return <>
-    <ReadingWorkspace navigation={navigation} account={account} footer={<VersionFooter backend={backendVersion} />}><Outlet /></ReadingWorkspace>
+    <ReadingWorkspace key={`${user?.id}:${allowPreviews}`} allowPreviews={allowPreviews} navigation={navigation} account={account} footer={<VersionFooter backend={backendVersion} />}><Outlet /></ReadingWorkspace>
     <Toaster />
     <MiniPlayer />
-    {showTabs && <MobileTabBar destinations={destinations} user={user} unreadCount={unreadCount} onLogout={onLogout} isAdmin={!!user?.is_admin} />}
+    {showTabs && <MobileTabBar destinations={destinations} user={user} unreadCount={unreadCount} onLogout={onLogout} isAdmin={isAdmin} allowPreviews={allowPreviews} />}
   </>
 }

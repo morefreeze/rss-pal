@@ -94,7 +94,7 @@ func (h *ExploreHandler) GetExplore(c *gin.Context) {
 	}
 	next := explorelogic.ExploreScheduleAt(h.now()).NextSlotAt
 	page.Snapshot.NextRefreshAt = &next
-	c.Header("Cache-Control", "private, no-cache")
+	c.Header("Cache-Control", "private, no-store")
 	c.JSON(http.StatusOK, page)
 }
 
@@ -183,7 +183,7 @@ func (h *ExploreHandler) GetSources(c *gin.Context) {
 	if items == nil {
 		items = []repository.ExploreSourceItem{}
 	}
-	c.Header("Cache-Control", "private, no-cache")
+	c.Header("Cache-Control", "private, no-store")
 	c.JSON(http.StatusOK, items)
 }
 
@@ -214,7 +214,7 @@ func (h *ExploreHandler) GetArticle(c *gin.Context) {
 			return
 		}
 	}
-	c.Header("Cache-Control", "private, no-cache")
+	c.Header("Cache-Control", "private, no-store")
 	c.JSON(http.StatusOK, article)
 }
 
@@ -258,7 +258,7 @@ func (h *ExploreHandler) FetchArticleContent(c *gin.Context) {
 		}
 		return
 	}
-	c.Header("Cache-Control", "private, no-cache")
+	c.Header("Cache-Control", "private, no-store")
 	c.JSON(http.StatusOK, article)
 }
 

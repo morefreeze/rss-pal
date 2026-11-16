@@ -20,6 +20,10 @@ func TestReadingHistoryHTTP(t *testing.T) {
 	group.GET("", handler.List)
 	group.POST("/:kind/:id", handler.Record)
 
+	if _, err := f.privDB.Exec(`UPDATE users SET is_admin=true WHERE id=$1`, f.userA); err != nil {
+		t.Fatal(err)
+	}
+
 	var clipID, exploreID int
 	if err := f.privDB.QueryRow(`
 		WITH feed AS (
@@ -152,6 +156,19 @@ func TestReadingHistoryHTTP(t *testing.T) {
 	record(f.userA, "explore", duplicateID, http.StatusNoContent)
 	if items, _ := list(f.userA, ""); fmt.Sprint(items) != fmt.Sprint(reopened) {
 		t.Fatalf("older write overwrote the latest Explore snapshot: %v", items)
+	}
+	if _, err := f.privDB.Exec(`UPDATE users SET is_admin=false WHERE id=$1`, f.userA); err != nil {
+		t.Fatal(err)
+	}
+	record(f.userA, "explore", duplicateID, http.StatusNotFound)
+	if items, cursor := list(f.userA, "?limit=2"); fmt.Sprint(items) != fmt.Sprint([]string{want[0], want[2]}) || cursor != "" {
+		t.Fatalf("ordinary reader history = %v cursor %q, want only article and clip", items, cursor)
+	}
+	if _, err := f.privDB.Exec(`UPDATE users SET is_admin=true WHERE id=$1`, f.userA); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := list(f.userA, ""); fmt.Sprint(items) != fmt.Sprint(reopened) {
+		t.Fatalf("restored administrator history = %v, want %v", items, reopened)
 	}
 	if items, _ := list(f.userB, ""); len(items) != 0 {
 		t.Fatalf("another account sees history: %v", items)

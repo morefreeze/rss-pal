@@ -28,6 +28,7 @@ import ExtensionConfigPage from './pages/ExtensionConfigPage'
 import ExplorePage from './pages/ExplorePage'
 import ExploreArticlePage from './pages/ExploreArticlePage'
 import Layout from './components/Layout'
+import { isPreviewPath } from './workspace/workspaceRoutes'
 import AdminLayout from './components/AdminLayout'
 import AdminStatusPage from './pages/AdminStatusPage'
 import RoutePageTitle from './components/RoutePageTitle'
@@ -70,7 +71,7 @@ export function ShortShareRoutes() {
   )
 }
 
-function RequireAuth({ user, onLogout, onUserUpdate, onboardingReady }: { user: User | null; onLogout: () => void; onUserUpdate: (user: User) => void; onboardingReady: boolean }) {
+function RequireAuth({ user, onLogout, onUserUpdate, onboardingReady, allowPreviews }: { user: User | null; onLogout: () => void; onUserUpdate: (user: User) => void; onboardingReady: boolean; allowPreviews: boolean }) {
   const loggedIn = isLoggedIn()
   // Mounted here rather than on the article list alone: the costliest case is
   // reading one article for a few minutes, going back, then opening another —
@@ -80,7 +81,7 @@ function RequireAuth({ user, onLogout, onUserUpdate, onboardingReady }: { user: 
   if (!loggedIn) {
     return <Navigate to="/login" replace />
   }
-  return <><Layout user={user} onLogout={onLogout} />{user && onboardingReady && <AccountOnboarding key={user.id} user={user} onSaved={onUserUpdate} />}</>
+  return <><Layout user={user} onLogout={onLogout} allowPreviews={allowPreviews} />{user && onboardingReady && <AccountOnboarding key={user.id} user={user} onSaved={onUserUpdate} />}</>
 }
 
 export function AppRoutes({
@@ -88,12 +89,18 @@ export function AppRoutes({
   onLogin,
   onLogout,
   onboardingReady = true,
+  checkingPreviewRole = false,
+  allowPreviews = user?.is_admin === true,
 }: {
   user: User | null
   onLogin: (user: User) => void
   onLogout: () => void
   onboardingReady?: boolean
+  checkingPreviewRole?: boolean
+  allowPreviews?: boolean
 }) {
+  const { pathname } = useLocation()
+  if (checkingPreviewRole && isPreviewPath(pathname)) return null
   return (
     <Routes>
       <Route path="/login" element={<LoginPage onLogin={onLogin} />} />
@@ -102,17 +109,19 @@ export function AppRoutes({
       <Route path="/share/:token" element={<SharePage />} />
       <Route path="/extension-config" element={<ExtensionConfigPage />} />
       <Route path="/capture" element={<ShareCapturePage />} />
-      <Route element={<RequireAuth user={user} onLogout={onLogout} onUserUpdate={onLogin} onboardingReady={onboardingReady} />}>
+      <Route element={<RequireAuth user={user} onLogout={onLogout} onUserUpdate={onLogin} onboardingReady={onboardingReady} allowPreviews={allowPreviews} />}>
         <Route index element={<Navigate to="/articles" replace />} />
         <Route path="feeds" element={<FeedListPage />} />
         <Route path="feeds/health" element={<FeedHealthPage />} />
-        <Route path="briefing" element={<BriefingRedirect />} />
-        <Route path="daily" element={<DailyPage />} />
-        <Route path="weekly" element={<WeeklyPage />} />
-        <Route path="articles" element={<ArticleListPage />} />
+        <Route path="articles" element={<ArticleListPage allowLegacyBriefing={allowPreviews} />} />
         <Route path="articles/:id" element={<ArticlePage />} />
-        <Route path="explore" element={<ExplorePage />} />
-        <Route path="explore/articles/:id" element={<ExploreArticlePage />} />
+        {allowPreviews && <>
+          <Route path="briefing" element={<BriefingRedirect />} />
+          <Route path="daily" element={<DailyPage />} />
+          <Route path="weekly" element={<WeeklyPage />} />
+          <Route path="explore" element={<ExplorePage />} />
+          <Route path="explore/articles/:id" element={<ExploreArticlePage />} />
+        </>}
         <Route path="clip" element={<ClipPage />} />
         {/* Back-compat: bookmarks of the old /saved view land on /articles
             with the 已保存 checkbox pre-ticked. ArticleListPage handles the
@@ -143,6 +152,8 @@ export function MainSiteApp() {
   // path is already handled by the response interceptor in api/client.
   const [user, setUser] = useState<User | null>(() => (isLoggedIn() ? getUser() : null))
   const [onboardingReady, setOnboardingReady] = useState(false)
+  const [checkingPreviewRole, setCheckingPreviewRole] = useState(isLoggedIn)
+  const allowPreviews = onboardingReady && user?.is_admin === true
 
   useEffect(() => {
     if (!isLoggedIn()) return
@@ -160,9 +171,11 @@ export function MainSiteApp() {
         // Transient errors (network, 5xx, DNS) — keep the cached session.
         // The interceptor logs out on a real 401.
       })
+      .finally(() => setCheckingPreviewRole(false))
   }, [])
 
   const handleLogin = (updated: User) => {
+    setCheckingPreviewRole(false)
     setUser(updated)
     setOnboardingReady(true)
   }
@@ -176,9 +189,9 @@ export function MainSiteApp() {
 
   return (
     <BrowserRouter>
-      <RoutePageTitle />
+      <RoutePageTitle allowPreviews={allowPreviews} />
       <SiteTraffic />
-      <AppRoutes user={user} onLogin={handleLogin} onLogout={handleLogout} onboardingReady={onboardingReady} />
+      <AppRoutes user={user} onLogin={handleLogin} onLogout={handleLogout} onboardingReady={onboardingReady} checkingPreviewRole={checkingPreviewRole} allowPreviews={allowPreviews} />
     </BrowserRouter>
   )
 }

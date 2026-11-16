@@ -1,3 +1,4 @@
+import { isPreviewPath } from '../workspace/workspaceRoutes'
 import UiIcon, { type UiIconName } from './UiIcon'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
@@ -18,11 +19,12 @@ interface Props {
   destinations?: WorkspaceDestinations
   user?: DisplayAccount | null
   isAdmin?: boolean
+  allowPreviews?: boolean
   unreadCount: number
   onLogout: () => void
 }
 
-export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, user, destinations = {} }: Props) {
+export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, allowPreviews = isAdmin, user, destinations = {} }: Props) {
   const [moreOpen, setMoreOpen] = useState(false)
   const location = useLocation()
   const isClipView = location.pathname === '/articles'
@@ -73,7 +75,7 @@ export default function MobileTabBar({ unreadCount, onLogout, isAdmin = false, u
           zIndex: 1000,
         }}
       >
-        {TABS.map(tab => {
+        {TABS.filter(tab => allowPreviews || !isPreviewPath(tab.to)).map(tab => {
           const active = tabIsActive(tab)
           return (
             <Link

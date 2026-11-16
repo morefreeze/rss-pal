@@ -22,14 +22,14 @@ function ListRoutes({ path }: { path: string }) {
   </Routes>
 }
 
-export default function ReadingWorkspace({ children, navigation, account, footer }: {
-  children: ReactNode; navigation: ReactNode; account: ReactNode; footer: ReactNode
+export default function ReadingWorkspace({ children, navigation, account, footer, allowPreviews = true }: {
+  children: ReactNode; navigation: ReactNode; account: ReactNode; footer: ReactNode; allowPreviews?: boolean
 }) {
   const location = useLocation()
   const navigate = useNavigate()
   const bp = useBreakpoint()
   const isPhone = bp === 'phone'
-  const route = resolveWorkspaceRoute(location.pathname, location.search, location.state)
+  const route = resolveWorkspaceRoute(location.pathname, location.search, location.state, allowPreviews)
   const isReader = route?.articleId != null
   const [cached, setCached] = useState<Record<string, WorkspaceRoute>>(() => route ? { [route.cacheKey]: route } : {})
   // Update synchronously so opening a detail never mounts a duplicate list Outlet.

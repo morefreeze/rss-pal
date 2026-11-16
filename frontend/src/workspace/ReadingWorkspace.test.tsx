@@ -153,7 +153,7 @@ describe('ReadingWorkspace', () => {
 
 describe('phone navigation', () => {
   it('uses the five approved tabs, marks briefings and offers subscription management in More', () => {
-    render(<MemoryRouter initialEntries={['/weekly']}><MobileTabBar unreadCount={0} onLogout={() => {}} /></MemoryRouter>)
+    render(<MemoryRouter initialEntries={['/weekly']}><MobileTabBar unreadCount={0} onLogout={() => {}} isAdmin /></MemoryRouter>)
     expect(screen.getAllByRole('link').map(link => link.textContent?.replace(/[^\u4e00-\u9fff]/g, ''))).toEqual(['文章', '网摘', '探索', '简报'])
     expect(screen.getByRole('link', { name: /简报/ }).getAttribute('aria-current')).toBe('page')
     fireEvent.click(screen.getByRole('button', { name: /更多/ }))

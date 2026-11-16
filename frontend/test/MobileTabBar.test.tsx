@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import MobileTabBar from '../src/components/MobileTabBar'
 
 describe('MobileTabBar', () => {
-  it('shows primary and overflow destinations in the requested order', () => {
+  it('shows only available destinations to an ordinary reader', () => {
     render(
       <MemoryRouter initialEntries={['/articles']}>
         <MobileTabBar unreadCount={0} onLogout={() => {}} />
@@ -15,8 +15,6 @@ describe('MobileTabBar', () => {
     expect(Array.from(nav.querySelectorAll('a, button')).map(item => item.textContent?.trim())).toEqual([
       '文章',
       '网摘',
-      '探索',
-      '简报',
       '更多',
     ])
 
@@ -36,6 +34,7 @@ describe('MobileTabBar', () => {
 
 it('管理员在手机更多菜单中可进入后台管理', () => {
   render(<MemoryRouter><MobileTabBar unreadCount={0} onLogout={() => {}} isAdmin /></MemoryRouter>)
+  expect(screen.getAllByRole('link').map(link => link.textContent?.trim())).toEqual(['文章', '网摘', '探索', '简报'])
   fireEvent.click(screen.getByRole('button', { name: '更多' }))
   expect(screen.getByRole('button', { name: /后台管理/ })).toBeTruthy()
 })

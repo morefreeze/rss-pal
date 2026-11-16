@@ -1,4 +1,8 @@
 export type WorkspaceModule = 'articles' | 'clips' | 'explore' | 'briefing'
+export function isPreviewPath(path: string): boolean {
+  return /^\/(explore|briefing|daily|weekly)(?:[/?]|$)/i.test(path)
+}
+
 export interface WorkspaceRoute {
   module: WorkspaceModule
   cacheKey: string
@@ -14,11 +18,13 @@ export function safeListPath(value: unknown): string | null {
   return value
 }
 
-export function resolveWorkspaceRoute(pathname: string, search: string, state?: unknown): WorkspaceRoute | null {
+export function resolveWorkspaceRoute(pathname: string, search: string, state?: unknown, allowPreviews = true): WorkspaceRoute | null {
+  if (!allowPreviews && isPreviewPath(pathname)) return null
   const match = pathname.match(/^\/(articles|explore\/articles)\/(\d+)$/)
   let listPath = safeListPath(pathname + search)
   if (match) {
-    const origin = safeListPath((state as { from?: unknown } | null)?.from)
+    const candidate = safeListPath((state as { from?: unknown } | null)?.from)
+    const origin = candidate && (allowPreviews || !isPreviewPath(candidate)) ? candidate : null
     if (match[1] === 'explore/articles') {
       listPath = origin?.split('?')[0] === '/explore' ? origin : '/explore'
     } else {
