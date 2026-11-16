@@ -72,3 +72,61 @@ func TestStoredFeedBurnerFetchUpgradesHTTPSAndKeepsConditionalHeaders(t *testing
 		}
 	}
 }
+
+func TestCalebAtomFeedUsesDirectRoute(t *testing.T) {
+	const feedURL = "https://caleb.software/feed.xml"
+	const atom = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>caleb.software</title><id>https://caleb.software/feed.xml</id><entry><title>Test post</title><id>https://caleb.software/posts/test.html</id><link href="https://caleb.software/posts/test.html"/></entry></feed>`
+	regular := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("regular route received %s", req.URL)
+		return nil, nil
+	})}
+	direct := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != feedURL {
+			t.Fatalf("direct route received %s", req.URL)
+		}
+		if req.Header.Get("If-None-Match") == `"unchanged"` {
+			return &http.Response{StatusCode: http.StatusNotModified, Body: http.NoBody, Request: req}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/xml"}}, Body: io.NopCloser(strings.NewReader(atom)), Request: req}, nil
+	})
+	public := NewPublicFetcher("")
+	public.publicClient = regular
+	worker := NewFetcher("")
+	worker.client = regular
+	for _, fetcher := range []*Fetcher{public, worker} {
+		fetcher.directFeedClient.Transport = direct
+	}
+	preview, err := public.Preview(context.Background(), feedURL)
+	if err != nil || preview.FeedType != "rss" || preview.ActualURL != feedURL || len(preview.Items) != 1 {
+		t.Fatalf("Preview() = %+v, %v", preview, err)
+	}
+	for _, fetcher := range []*Fetcher{public, worker} {
+		result, err := fetcher.Fetch(context.Background(), feedURL, "", "")
+		if err != nil || result.Feed.Title != "caleb.software" || len(result.Feed.Items) != 1 {
+			t.Fatalf("Fetch() = %+v, %v", result, err)
+		}
+		result, err = fetcher.Fetch(context.Background(), feedURL, `"unchanged"`, "")
+		if result != nil || err != nil {
+			t.Fatalf("conditional Fetch() = %+v, %v", result, err)
+		}
+	}
+}
+
+func TestCalebAtomFeedFallbackKeepsConditionalHeaders(t *testing.T) {
+	const feedURL = "https://caleb.software/feed.xml"
+	const etag = `"feed-etag"`
+	const modified = "Wed, 04 Nov 2026 18:02:20 GMT"
+	fetcher := NewPublicFetcher("")
+	fetcher.directFeedClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadGateway, Body: http.NoBody, Request: req}, nil
+	})
+	fetcher.publicClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != feedURL || req.Header.Get("If-None-Match") != etag || req.Header.Get("If-Modified-Since") != modified {
+			t.Fatalf("fallback request URL=%s headers=%v", req.URL, req.Header)
+		}
+		return &http.Response{StatusCode: http.StatusNotModified, Body: http.NoBody, Request: req}, nil
+	})}
+	if result, err := fetcher.Fetch(context.Background(), feedURL, etag, modified); result != nil || err != nil {
+		t.Fatalf("Fetch() = %+v, %v", result, err)
+	}
+}

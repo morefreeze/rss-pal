@@ -20,19 +20,21 @@ import (
 )
 
 type Fetcher struct {
-	parser       *gofeed.Parser
-	client       *http.Client // trusted client used by workers and derived RSSHub routes
-	publicClient *http.Client
-	rsshubBase   string
+	parser           *gofeed.Parser
+	client           *http.Client // trusted client used by workers and derived RSSHub routes
+	publicClient     *http.Client
+	directFeedClient *http.Client
+	rsshubBase       string
 }
 
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 func NewFetcher(rsshubBase string) *Fetcher {
 	return &Fetcher{
-		parser:     gofeed.NewParser(),
-		client:     newTrustedClient(),
-		rsshubBase: rsshubBase,
+		parser:           gofeed.NewParser(),
+		client:           newTrustedClient(),
+		directFeedClient: newDirectFeedClient(),
+		rsshubBase:       rsshubBase,
 	}
 }
 
@@ -57,11 +59,29 @@ func NewPublicFetcher(rsshubBase string) *Fetcher {
 
 func newPublicFetcherWithClients(rsshubBase string, publicClient, trustedClient *http.Client) *Fetcher {
 	return &Fetcher{
-		parser:       gofeed.NewParser(),
-		client:       trustedClient,
-		publicClient: publicClient,
-		rsshubBase:   rsshubBase,
+		parser:           gofeed.NewParser(),
+		client:           trustedClient,
+		publicClient:     publicClient,
+		directFeedClient: newDirectFeedClient(),
+		rsshubBase:       rsshubBase,
 	}
+}
+
+func isCalebAtomFeed(target *url.URL) bool {
+	return target.Scheme == "https" && target.User == nil &&
+		strings.EqualFold(target.Host, "caleb.software") && target.EscapedPath() == "/feed.xml"
+}
+
+func newDirectFeedClient() *http.Client {
+	client := httpx.NewDirectBufferedGETClient(12 * time.Second)
+	checkRedirect := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !isCalebAtomFeed(req.URL) {
+			return http.ErrUseLastResponse
+		}
+		return checkRedirect(req, via)
+	}
+	return client
 }
 
 type rssHubOrigin struct {
@@ -171,6 +191,20 @@ func (f *Fetcher) getFeedResponse(ctx context.Context, client *http.Client, targ
 			return nil, &feedRequestCreationError{err: err}
 		}
 		configure(req)
+		// Caleb's Atom feed is reachable directly. The configured proxy
+		// intermittently redirects the HTTPS request back to itself.
+		if f.directFeedClient != nil && isCalebAtomFeed(req.URL) {
+			resp, err := f.directFeedClient.Do(req)
+			if err == nil {
+				if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotModified {
+					return resp, nil
+				}
+				resp.Body.Close()
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		return client.Do(req)
 	}
 
