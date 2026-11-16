@@ -245,7 +245,6 @@ function ExplorePageContent() {
       <header className="explore-header">
         <div>
           <h1>{view ? '稍后读' : '探索'}</h1>
-          {workspace && <button className="btn-ghost workspace-scope-button" onClick={workspace.openScopes}>推荐与稍后读</button>}
           <p>{view ? '保存感兴趣的文章，随时回来继续阅读' : '从你的订阅出发，发现持续更新的新来源'}</p>
         </div>
         <div className="explore-toolbar" aria-label="探索排序与筛选">

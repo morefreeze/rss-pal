@@ -1024,7 +1024,7 @@ export default function ArticleListPage() {
         className={`article-list-header mb-2${compactToolbar ? ' article-list-header--compact' : ''}`}
       >
         <div className="article-list-heading">
-          {workspace ? <button type="button" className="btn-ghost workspace-scope-button" onClick={workspace.openScopes}>{isClippingMode ? '标签与来源' : '来源与标签'}</button> : !isClippingMode && <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />}
+          {!workspace && !isClippingMode && <SidebarToggleButton open={sidebarOpen} onToggle={toggleSidebar} />}
           <h2 style={{ margin: 0 }}>{isClippingMode ? '网摘' : workspace ? '文章' : '文章列表'}</h2>
         </div>
         {(() => {

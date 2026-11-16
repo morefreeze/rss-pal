@@ -81,7 +81,7 @@ export default function BriefingPage({ kind }: { kind: BriefingTab }) {
       {!workspace.isPhone && periodControl}
     </WorkspaceSidebar>}
     <div className="briefing-list-heading">
-      {workspace ? <><h2>简报</h2><button type="button" className="btn-ghost workspace-scope-button" onClick={workspace.openScopes}>日报与周报</button></> : <BriefingTabs current={kind} />}
+      {workspace ? <h2>简报</h2> : <BriefingTabs current={kind} />}
       {(!workspace || workspace.isPhone) && periodControl}
       <p className="text-muted text-sm">{shownPeriod}{kind === 'weekly' ? ' 当周' : ''}</p>
     </div>
