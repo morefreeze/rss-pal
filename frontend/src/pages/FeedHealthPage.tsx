@@ -1,3 +1,4 @@
+import UiIcon from '../components/UiIcon'
 import { useState, useEffect } from 'react'
 import { getFeedHealth, FeedHealthResponse, updateFeedStatus } from '../api/client'
 import { Link } from 'react-router-dom'
@@ -30,7 +31,7 @@ export default function FeedHealthPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h1 style={{ margin: 0 }}>Feed 健康度</h1>
-        <Link to="/feeds">← 订阅源管理</Link>
+        <Link to="/feeds"><UiIcon name="back" /> 订阅源管理</Link>
       </div>
       <div style={{ marginBottom: 16 }}>
         时间窗口：

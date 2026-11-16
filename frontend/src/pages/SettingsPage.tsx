@@ -469,7 +469,7 @@ function BookmarkletSection() {
             ⭐ 发送到 RSS Pal
           </a>
           <span className="text-muted text-sm" style={{ marginLeft: 12 }}>
-            ← 拖到书签栏
+            <UiIcon name="back" /> 拖到书签栏
           </span>
         </div>
       ) : (
@@ -628,7 +628,7 @@ function ExtensionSection() {
               已安装 → 下一步配置
             </button>
             <button type="button" className="secondary" onClick={() => setStep('intro')}>
-              ← 返回
+              <UiIcon name="back" /> 返回
             </button>
           </div>
         </div>
@@ -695,7 +695,7 @@ function ExtensionSection() {
           </div>
           <div className="flex gap-2">
             <button type="button" className="secondary" onClick={() => setStep('intro')}>
-              ← 返回
+              <UiIcon name="back" /> 返回
             </button>
           </div>
         </div>

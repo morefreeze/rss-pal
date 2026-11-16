@@ -69,8 +69,8 @@ export default function MiniPlayer() {
 
       {!narrow && (
         <>
-          <button onClick={() => p.skip(-5)} aria-label="后退5秒" style={{ padding: '4px 8px' }}>⏪5</button>
-          <button onClick={() => p.skip(10)} aria-label="前进10秒" style={{ padding: '4px 8px' }}>⏩10</button>
+          <button onClick={() => p.skip(-5)} aria-label="后退5秒" style={{ padding: '4px 8px' }}><UiIcon name="rewind" size={14} /> 5</button>
+          <button onClick={() => p.skip(10)} aria-label="前进10秒" style={{ padding: '4px 8px' }}><UiIcon name="fastForward" size={14} /> 10</button>
         </>
       )}
 
@@ -145,8 +145,8 @@ export default function MiniPlayer() {
             zIndex: 1001,
           }}
         >
-          <button onClick={() => p.skip(-5)} style={{ padding: '4px 8px' }}>⏪5</button>
-          <button onClick={() => p.skip(10)} style={{ padding: '4px 8px' }}>⏩10</button>
+          <button onClick={() => p.skip(-5)} aria-label="后退5秒" style={{ padding: '4px 8px' }}><UiIcon name="rewind" size={14} /> 5</button>
+          <button onClick={() => p.skip(10)} aria-label="前进10秒" style={{ padding: '4px 8px' }}><UiIcon name="fastForward" size={14} /> 10</button>
           <select
             value={p.speed}
             onChange={e => p.setSpeed(Number(e.target.value) as 1 | 1.25 | 1.5 | 1.75 | 2)}

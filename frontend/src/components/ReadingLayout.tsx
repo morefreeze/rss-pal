@@ -122,7 +122,7 @@ export default function ReadingLayout(props: Props) {
               disabled={!onPrev}
               title="上一篇"
             >
-              ‹ 上一篇
+              <UiIcon name="chevronLeft" /> 上一篇
             </button>
             <button
               type="button"
@@ -140,7 +140,7 @@ export default function ReadingLayout(props: Props) {
               disabled={!onNext}
               title="下一篇"
             >
-              下一篇 ›
+              下一篇 <UiIcon name="chevronRight" />
             </button>
           </div>
         )}

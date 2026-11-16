@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useState } from 'react'
 import { FeedHealthRow, updateFeedStatus, updateFeedWeight } from '../api/client'
 
@@ -31,7 +32,7 @@ export default function PruningDrawer({ rows, onChange }: Props) {
         style={{ padding: '12px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}
       >
         <strong>⚠ {candidates.length} 个 feed 建议处理</strong>
-        <span>{open ? '收起' : '展开'} ▾</span>
+        <span>{open ? '收起' : '展开'} <UiIcon name={open ? 'chevronUp' : 'chevronDown'} size={14} /></span>
       </div>
       {open && (
         <div style={{ padding: '0 16px 12px' }}>

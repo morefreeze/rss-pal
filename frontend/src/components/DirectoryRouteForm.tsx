@@ -1,3 +1,4 @@
+import UiIcon from './UiIcon'
 import { useState } from 'react'
 import type { DirectoryPlatform, DirectoryRoute } from '../api/sourceDirectory'
 import { buildDirectoryRouteURL, manualDirectoryRouteURL, parseDirectoryRoute, publicDirectoryFeedURL } from '../utils/directoryRoute'
@@ -54,7 +55,7 @@ function RouteForm({ platform, route, onPreview, onBack }: Props) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '请检查路由参数') }
   }
   return <section className="directory-route-form" aria-label="配置订阅路由">
-    <button type="button" className="btn btn-secondary" onClick={onBack}>← 返回路由列表</button>
+    <button type="button" className="btn btn-secondary" onClick={onBack}><UiIcon name="back" /> 返回路由列表</button>
     <h3>{platform.name} · {route.name}</h3>
     {route.description && <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{route.description}</p>}
     <p><code>{`/${platform.id}${path}`}</code></p>
