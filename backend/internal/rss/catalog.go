@@ -11,8 +11,8 @@ import (
 // CheckFeed parses a bounded RSS/Atom response through the same public/derived
 // platform transport boundary used by preview. It never falls back to HTML.
 func (f *Fetcher) CheckFeed(ctx context.Context, rawURL string) error {
-	target, client := f.resolveTarget(rawURL)
-	resp, err := f.getFeedResponse(ctx, client, target, func(r *http.Request) { r.Header.Set("User-Agent", userAgent) })
+	target, route := f.resolveTarget(rawURL)
+	resp, err := f.getFeedResponse(ctx, route, target, func(r *http.Request) { r.Header.Set("User-Agent", userAgent) })
 	if err != nil {
 		return err
 	}

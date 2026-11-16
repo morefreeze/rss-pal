@@ -19,6 +19,7 @@ func TestPublicPreviewRejectsFeedBeyondEightMiB(t *testing.T) {
 	const fixtureMode = "RSS_PAL_PREVIEW_LIMIT_FIXTURE"
 	if os.Getenv(fixtureMode) == "1" {
 		fetcher := NewPublicFetcher("")
+		fetcher.directFeedClient = nil // This fixture exercises the proxied response limit.
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		preview, err := fetcher.Preview(ctx, "http://93.184.216.34/small.xml")

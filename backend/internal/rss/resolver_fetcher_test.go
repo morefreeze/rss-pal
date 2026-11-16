@@ -476,6 +476,7 @@ func TestFetcherFetchRequestCreationErrorDoesNotReachTransport(t *testing.T) {
 
 func TestFetcherFetchDoesNotFallBackForExternalWeiboRouteLookalike(t *testing.T) {
 	fetcher := NewFetcher("http://rsshub.test:1200")
+	fetcher.directFeedClient = nil
 	var requestedPaths []string
 	fetcher.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		requestedPaths = append(requestedPaths, req.URL.Path)

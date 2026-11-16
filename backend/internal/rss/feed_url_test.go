@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveFeedURLUpgradesLegacyFeedBurnerWithoutRSSHub(t *testing.T) {
@@ -65,6 +66,7 @@ func TestStoredFeedBurnerFetchUpgradesHTTPSAndKeepsConditionalHeaders(t *testing
 	})}
 	worker := NewFetcher("")
 	worker.client = client
+	worker.directFeedClient = nil
 	for _, fetcher := range []*Fetcher{newPublicFetcherWithClients("", client, nil), worker} {
 		got, err := fetcher.Fetch(context.Background(), "http://feeds.feedburner.com/OtherFeed", `"feed-etag"`, "Wed, 04 Nov 2026 18:02:20 GMT")
 		if err != nil || got != nil {
@@ -73,9 +75,9 @@ func TestStoredFeedBurnerFetchUpgradesHTTPSAndKeepsConditionalHeaders(t *testing
 	}
 }
 
-func TestCalebAtomFeedUsesDirectRoute(t *testing.T) {
-	const feedURL = "https://caleb.software/feed.xml"
-	const atom = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>caleb.software</title><id>https://caleb.software/feed.xml</id><entry><title>Test post</title><id>https://caleb.software/posts/test.html</id><link href="https://caleb.software/posts/test.html"/></entry></feed>`
+func TestExternalAtomFeedUsesDirectRoute(t *testing.T) {
+	const feedURL = "https://feed.example/feed.xml"
+	const atom = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>feed.example</title><id>https://feed.example/feed.xml</id><entry><title>Test post</title><id>https://feed.example/posts/test.html</id><link href="https://feed.example/posts/test.html"/></entry></feed>`
 	regular := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		t.Fatalf("regular route received %s", req.URL)
 		return nil, nil
@@ -94,6 +96,9 @@ func TestCalebAtomFeedUsesDirectRoute(t *testing.T) {
 	worker := NewFetcher("")
 	worker.client = regular
 	for _, fetcher := range []*Fetcher{public, worker} {
+		if fetcher.directFeedClient.Timeout != 20*time.Second {
+			t.Fatalf("direct timeout = %v, want 20s", fetcher.directFeedClient.Timeout)
+		}
 		fetcher.directFeedClient.Transport = direct
 	}
 	preview, err := public.Preview(context.Background(), feedURL)
@@ -102,7 +107,7 @@ func TestCalebAtomFeedUsesDirectRoute(t *testing.T) {
 	}
 	for _, fetcher := range []*Fetcher{public, worker} {
 		result, err := fetcher.Fetch(context.Background(), feedURL, "", "")
-		if err != nil || result.Feed.Title != "caleb.software" || len(result.Feed.Items) != 1 {
+		if err != nil || result.Feed.Title != "feed.example" || len(result.Feed.Items) != 1 {
 			t.Fatalf("Fetch() = %+v, %v", result, err)
 		}
 		result, err = fetcher.Fetch(context.Background(), feedURL, `"unchanged"`, "")
@@ -112,13 +117,15 @@ func TestCalebAtomFeedUsesDirectRoute(t *testing.T) {
 	}
 }
 
-func TestCalebAtomFeedFallbackKeepsConditionalHeaders(t *testing.T) {
-	const feedURL = "https://caleb.software/feed.xml"
+func TestExternalAtomFeedFallbackKeepsConditionalHeaders(t *testing.T) {
+	const feedURL = "https://feed.example/feed.xml"
 	const etag = `"feed-etag"`
 	const modified = "Wed, 04 Nov 2026 18:02:20 GMT"
 	fetcher := NewPublicFetcher("")
+	fetcher.directFeedClient.Timeout = 10 * time.Millisecond
 	fetcher.directFeedClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusBadGateway, Body: http.NoBody, Request: req}, nil
+		<-req.Context().Done()
+		return nil, req.Context().Err()
 	})
 	fetcher.publicClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.String() != feedURL || req.Header.Get("If-None-Match") != etag || req.Header.Get("If-Modified-Since") != modified {
@@ -128,5 +135,35 @@ func TestCalebAtomFeedFallbackKeepsConditionalHeaders(t *testing.T) {
 	})}
 	if result, err := fetcher.Fetch(context.Background(), feedURL, etag, modified); result != nil || err != nil {
 		t.Fatalf("Fetch() = %+v, %v", result, err)
+	}
+}
+
+func TestFeedDiscoveryReservesTimeForProxy(t *testing.T) {
+	const home = "https://feed.example"
+	const discovered = home + "/feed.xml"
+	response := func(req *http.Request, status int, mime, body string) *http.Response {
+		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {mime}}, Body: io.NopCloser(strings.NewReader(body)), Request: req}
+	}
+	fetcher := NewPublicFetcher("")
+	fetcher.directFeedClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case home:
+			return response(req, 200, "text/html", "<html><title>Blog</title></html>"), nil
+		case discovered:
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		default:
+			return response(req, 404, "text/plain", ""), nil
+		}
+	})
+	fetcher.publicClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() == discovered {
+			return response(req, 200, "application/rss+xml", weiboRSSBody), nil
+		}
+		return response(req, 404, "text/plain", ""), nil
+	})
+	preview, err := fetcher.Preview(context.Background(), home)
+	if err != nil || preview.FeedType != "rss" || preview.DiscoveredRSSURL != discovered || len(preview.Items) != 1 {
+		t.Fatalf("Preview() = %+v, %v", preview, err)
 	}
 }

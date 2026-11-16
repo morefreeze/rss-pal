@@ -28,12 +28,13 @@ type Fetcher struct {
 }
 
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+const directFeedTimeout = 20 * time.Second
 
 func NewFetcher(rsshubBase string) *Fetcher {
 	return &Fetcher{
 		parser:           gofeed.NewParser(),
 		client:           newTrustedClient(),
-		directFeedClient: newDirectFeedClient(),
+		directFeedClient: httpx.NewDirectBufferedGETClient(directFeedTimeout),
 		rsshubBase:       rsshubBase,
 	}
 }
@@ -48,40 +49,24 @@ func newTrustedClient() *http.Client {
 	}
 }
 
-// NewPublicFetcher keeps trusted worker behavior intact while routing every
-// user-controlled, discovered, and probed target through httpx's DNS-aware,
+// NewPublicFetcher routes every user-controlled, discovered, and probed
+// target through httpx's DNS-aware,
 // redirect-aware and IP-pinning SSRF guard. Only supported platform URLs whose
 // resolver derives a target on the configured RSSHub origin use the trusted
 // client.
 func NewPublicFetcher(rsshubBase string) *Fetcher {
-	return newPublicFetcherWithClients(rsshubBase, httpx.NewBufferedGETClient(30*time.Second), newTrustedRSSHubClient(rsshubBase))
+	fetcher := newPublicFetcherWithClients(rsshubBase, httpx.NewBufferedGETClient(30*time.Second), newTrustedRSSHubClient(rsshubBase))
+	fetcher.directFeedClient = httpx.NewDirectBufferedGETClient(directFeedTimeout)
+	return fetcher
 }
 
 func newPublicFetcherWithClients(rsshubBase string, publicClient, trustedClient *http.Client) *Fetcher {
 	return &Fetcher{
-		parser:           gofeed.NewParser(),
-		client:           trustedClient,
-		publicClient:     publicClient,
-		directFeedClient: newDirectFeedClient(),
-		rsshubBase:       rsshubBase,
+		parser:       gofeed.NewParser(),
+		client:       trustedClient,
+		publicClient: publicClient,
+		rsshubBase:   rsshubBase,
 	}
-}
-
-func isCalebAtomFeed(target *url.URL) bool {
-	return target.Scheme == "https" && target.User == nil &&
-		strings.EqualFold(target.Host, "caleb.software") && target.EscapedPath() == "/feed.xml"
-}
-
-func newDirectFeedClient() *http.Client {
-	client := httpx.NewDirectBufferedGETClient(12 * time.Second)
-	checkRedirect := client.CheckRedirect
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if !isCalebAtomFeed(req.URL) {
-			return http.ErrUseLastResponse
-		}
-		return checkRedirect(req, via)
-	}
-	return client
 }
 
 type rssHubOrigin struct {
@@ -170,7 +155,12 @@ func (e *feedRequestCreationError) Unwrap() error {
 	return e.err
 }
 
-func (f *Fetcher) resolveTarget(input string) (string, *http.Client) {
+type feedRoute struct {
+	client *http.Client
+	direct *http.Client
+}
+
+func (f *Fetcher) resolveTarget(input string) (string, feedRoute) {
 	target, trustedRSSHub := resolveFeedURL(input, f.rsshubBase)
 	configuredOrigin, configuredErr := parseRSSHubOrigin(f.rsshubBase)
 	targetURL, targetErr := url.Parse(target)
@@ -178,23 +168,25 @@ func (f *Fetcher) resolveTarget(input string) (string, *http.Client) {
 	if configuredErr != nil || targetErr != nil || targetOriginErr != nil || targetOrigin != configuredOrigin {
 		trustedRSSHub = false
 	}
-	if f.publicClient != nil && !trustedRSSHub {
-		return target, f.publicClient
+	if trustedRSSHub {
+		return target, feedRoute{client: f.client}
 	}
-	return target, f.client
+	client := f.publicClient
+	if client == nil {
+		client = f.client
+	}
+	return target, feedRoute{client: client, direct: f.directFeedClient}
 }
 
-func (f *Fetcher) getFeedResponse(ctx context.Context, client *http.Client, target string, configure func(*http.Request)) (*http.Response, error) {
+func (f *Fetcher) getFeedResponse(ctx context.Context, route feedRoute, target string, configure func(*http.Request)) (*http.Response, error) {
 	doRequest := func(target string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
 		if err != nil {
 			return nil, &feedRequestCreationError{err: err}
 		}
 		configure(req)
-		// Caleb's Atom feed is reachable directly. The configured proxy
-		// intermittently redirects the HTTPS request back to itself.
-		if f.directFeedClient != nil && isCalebAtomFeed(req.URL) {
-			resp, err := f.directFeedClient.Do(req)
+		if route.direct != nil {
+			resp, err := route.direct.Do(req)
 			if err == nil {
 				if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotModified {
 					return resp, nil
@@ -205,7 +197,7 @@ func (f *Fetcher) getFeedResponse(ctx context.Context, client *http.Client, targ
 				return nil, err
 			}
 		}
-		return client.Do(req)
+		return route.client.Do(req)
 	}
 
 	resp, err := doRequest(target)
@@ -239,12 +231,12 @@ type PreviewResult struct {
 }
 
 func (f *Fetcher) Fetch(ctx context.Context, feedURL string, etag, lastModified string) (*FetchResult, error) {
-	feedURL, client := f.resolveTarget(feedURL)
-	return f.fetchTarget(ctx, client, feedURL, etag, lastModified)
+	feedURL, route := f.resolveTarget(feedURL)
+	return f.fetchTarget(ctx, route, feedURL, etag, lastModified)
 }
 
-func (f *Fetcher) fetchTarget(ctx context.Context, client *http.Client, feedURL, etag, lastModified string) (*FetchResult, error) {
-	resp, err := f.getFeedResponse(ctx, client, feedURL, func(req *http.Request) {
+func (f *Fetcher) fetchTarget(ctx context.Context, route feedRoute, feedURL, etag, lastModified string) (*FetchResult, error) {
+	resp, err := f.getFeedResponse(ctx, route, feedURL, func(req *http.Request) {
 		if etag != "" {
 			req.Header.Set("If-None-Match", etag)
 		}
@@ -286,8 +278,8 @@ func (f *Fetcher) fetchTarget(ctx context.Context, client *http.Client, feedURL,
 // Tries RSS/Atom first, then auto-discovers RSS link in HTML, then falls back to scraping.
 func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, error) {
 	rawURL = CanonicalFeedURL(rawURL)
-	fetchURL, client := f.resolveTarget(rawURL)
-	resp, err := f.getFeedResponse(ctx, client, fetchURL, func(req *http.Request) {
+	fetchURL, route := f.resolveTarget(rawURL)
+	resp, err := f.getFeedResponse(ctx, route, fetchURL, func(req *http.Request) {
 		req.Header.Set("User-Agent", userAgent)
 		req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9")
 		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
@@ -381,14 +373,20 @@ func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, e
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	discoveredCh := make(chan string, 1)
+	probeFetcher := *f
+	if f.directFeedClient != nil {
+		direct := *f.directFeedClient
+		direct.Timeout = min(direct.Timeout, 2*time.Second)
+		probeFetcher.directFeedClient = &direct
+	}
+	discoveredCh := make(chan *PreviewResult, 1)
 	for _, base := range probeBases {
 		for _, suffix := range candidates {
 			go func(candidate string) {
-				res, err := f.Fetch(probeCtx, candidate, "", "")
+				res, err := probeFetcher.Fetch(probeCtx, candidate, "", "")
 				if err == nil && res != nil && len(res.Feed.Items) > 0 {
 					select {
-					case discoveredCh <- candidate:
+					case discoveredCh <- rssToPreview(res.Feed, candidate):
 					default:
 					}
 				}
@@ -396,26 +394,23 @@ func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, e
 		}
 	}
 
-	var discovered string
+	var discovered *PreviewResult
 	select {
 	case discovered = <-discoveredCh:
 	case <-probeCtx.Done():
 	}
 
 	if len(htmlResult.Items) >= 3 {
-		htmlResult.DiscoveredRSSURL = discovered
+		if discovered != nil {
+			htmlResult.DiscoveredRSSURL = discovered.ActualURL
+		}
 		return htmlResult, nil
 	}
 
 	// HTML scrape was insufficient — prefer the discovered RSS for the actual preview.
-	if discovered != "" {
-		rssRes, err := f.Fetch(ctx, discovered, "", "")
-		if err == nil && rssRes != nil && len(rssRes.Feed.Items) > 0 {
-			out := rssToPreview(rssRes.Feed, discovered)
-			out.ActualURL = discovered
-			out.DiscoveredRSSURL = discovered
-			return out, nil
-		}
+	if discovered != nil {
+		discovered.DiscoveredRSSURL = discovered.ActualURL
+		return discovered, nil
 	}
 
 	return htmlResult, nil
@@ -423,9 +418,9 @@ func (f *Fetcher) Preview(ctx context.Context, rawURL string) (*PreviewResult, e
 
 // FetchHTML fetches an HTML page and extracts article links as a synthetic feed
 func (f *Fetcher) FetchHTML(ctx context.Context, feedURL string) (*gofeed.Feed, error) {
-	resolvedURL, client := f.resolveTarget(feedURL)
+	resolvedURL, route := f.resolveTarget(feedURL)
 	if resolvedURL != feedURL {
-		result, err := f.fetchTarget(ctx, client, resolvedURL, "", "")
+		result, err := f.fetchTarget(ctx, route, resolvedURL, "", "")
 		if err != nil {
 			return nil, err
 		}
@@ -438,13 +433,9 @@ func (f *Fetcher) FetchHTML(ctx context.Context, feedURL string) (*gofeed.Feed, 
 		return result.Feed, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", userAgent)
-
-	resp, err := client.Do(req)
+	resp, err := f.getFeedResponse(ctx, route, feedURL, func(req *http.Request) {
+		req.Header.Set("User-Agent", userAgent)
+	})
 	if err != nil {
 		return nil, err
 	}

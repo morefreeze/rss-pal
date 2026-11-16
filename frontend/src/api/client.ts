@@ -681,7 +681,7 @@ export const getFeeds = () =>
   api.get<Feed[]>('/feeds').then(res => res.data)
 
 export const previewFeed = (url: string, signal?: AbortSignal) =>
-  api.post<FeedPreview>('/feeds/preview', { url }, { signal, timeout: 35000 }).then(res => res.data)
+  api.post<FeedPreview>('/feeds/preview', { url }, { signal, timeout: 58000 }).then(res => res.data)
 
 export const addFeed = (url: string, feedType?: string, expandLinks: boolean = false, title?: string) =>
   api.post<Feed>('/feeds', { url, feed_type: feedType || 'rss', expand_links: expandLinks, title }).then(res => res.data)
@@ -727,7 +727,7 @@ export const toggleFeedActive = (id: number, isActive: boolean, title: string) =
   api.put<Feed>(`/feeds/${id}`, { is_active: isActive, title }).then(res => res.data)
 
 export const fetchFeedNow = (id: number) =>
-  api.post<{ message: string; new_articles: number; pending_articles?: boolean; feed_title: string }>(`/feeds/${id}/fetch`).then(res => res.data)
+  api.post<{ message: string; new_articles: number; pending_articles?: boolean; feed_title: string }>(`/feeds/${id}/fetch`, undefined, { timeout: 58000 }).then(res => res.data)
 
 export const exportOPML = () =>
   api.get('/feeds/export/opml', { responseType: 'blob' }).then(res => res.data as Blob)

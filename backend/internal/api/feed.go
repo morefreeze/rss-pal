@@ -98,7 +98,7 @@ func (h *FeedHandler) Preview(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 55*time.Second)
 	defer cancel()
 	result, err := h.fetcher.Preview(ctx, req.URL)
 	if err != nil {
