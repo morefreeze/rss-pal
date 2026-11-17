@@ -44,16 +44,18 @@ const jinaFallbackMinChars = 300
 const (
 	defaultJinaReaderBaseURL = "https://r.jina.ai/"
 	jinaReaderBodyLimit      = 200_000
+	articleDirectTimeout     = 8 * time.Second
 )
 
 type ContentFetcher struct {
-	client           *http.Client
-	freshClient      *http.Client // Used only for explicit manual source HTML fetches.
-	hnDirectClient   *http.Client // Direct, guarded requests to the fixed HN API.
-	hnRecoveryClient *http.Client // Checked-address recovery when a direct HN connection fails.
-	jinaAPIKey       string
-	jinaBaseURL      string
-	reader           *zaiReader
+	client             *http.Client
+	directSourceClient *http.Client
+	freshClient        *http.Client // Used only for explicit manual source HTML fetches.
+	hnDirectClient     *http.Client // Direct, guarded requests to the fixed HN API.
+	hnRecoveryClient   *http.Client // Checked-address recovery when a direct HN connection fails.
+	jinaAPIKey         string
+	jinaBaseURL        string
+	reader             *zaiReader
 }
 
 type ContentResult struct {
@@ -140,13 +142,14 @@ func SelectArticleContent(doc *goquery.Document, minChars int) (*goquery.Selecti
 func NewContentFetcher() *ContentFetcher {
 	client := httpx.NewClient(30 * time.Second)
 	return &ContentFetcher{
-		client:           client,
-		freshClient:      httpx.NewBufferedGETClient(30 * time.Second),
-		hnDirectClient:   httpx.NewDirectClient(30 * time.Second),
-		hnRecoveryClient: httpx.NewDirectBufferedGETClient(30 * time.Second),
-		jinaAPIKey:       os.Getenv("JINA_API_KEY"),
-		jinaBaseURL:      defaultJinaReaderBaseURL,
-		reader:           newZAIReader(os.Getenv("ZAI_READER_API_KEY"), os.Getenv("ZAI_READER_MCP_URL"), client),
+		client:             client,
+		directSourceClient: httpx.NewDirectBufferedGETClient(articleDirectTimeout),
+		freshClient:        httpx.NewBufferedGETClient(30 * time.Second),
+		hnDirectClient:     httpx.NewDirectClient(30 * time.Second),
+		hnRecoveryClient:   httpx.NewDirectBufferedGETClient(30 * time.Second),
+		jinaAPIKey:         os.Getenv("JINA_API_KEY"),
+		jinaBaseURL:        defaultJinaReaderBaseURL,
+		reader:             newZAIReader(os.Getenv("ZAI_READER_API_KEY"), os.Getenv("ZAI_READER_MCP_URL"), client),
 	}
 }
 
@@ -193,13 +196,13 @@ func (f *ContentFetcher) fetchContentWithMetadata(ctx context.Context, url strin
 	if readerAvailable {
 		stagesLeft++
 	}
-	directCtx, directCancel := f.fetchStageContext(ctx, stagesLeft)
-	directClient := f.client
+	sourceCtx, sourceCancel := f.fetchStageContext(ctx, stagesLeft)
+	proxyClient := f.client
 	if noReaderCache && f.freshClient != nil {
-		directClient = f.freshClient
+		proxyClient = f.freshClient
 	}
-	result, status, err := f.fetchDirectWithClient(directCtx, url, directClient)
-	directCancel()
+	result, status, err := f.fetchSource(sourceCtx, url, proxyClient)
+	sourceCancel()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ContentResult{}, ctxErr
 	}
@@ -262,57 +265,78 @@ func (f *ContentFetcher) fetchStageContext(ctx context.Context, stagesLeft int) 
 // the same way as "no transcript available". Returns a non-nil error only
 // for transport-level failures.
 func (f *ContentFetcher) FetchHTMLDocument(ctx context.Context, pageURL string) (*goquery.Document, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, nil
-	}
-
-	return goquery.NewDocumentFromReader(resp.Body)
+	doc, _, err := fetchArticleSource(ctx, f, f.client, func(ctx context.Context, client *http.Client) (*goquery.Document, int, error) {
+		return fetchArticleDocumentWithClient(ctx, pageURL, client)
+	}, func(doc *goquery.Document) bool {
+		return doc != nil
+	})
+	return doc, err
 }
 
-// fetchDirect performs the original direct HTTP scrape. Returns the extracted
-// content + metadata, the HTTP status code, and any transport error.
-func (f *ContentFetcher) fetchDirect(ctx context.Context, url string) (ContentResult, int, error) {
-	return f.fetchDirectWithClient(ctx, url, f.client)
+func fetchArticleSource[T any](ctx context.Context, f *ContentFetcher, proxyClient *http.Client,
+	fetch func(context.Context, *http.Client) (T, int, error), usable func(T) bool,
+) (T, int, error) {
+	if f.directSourceClient == nil {
+		return fetch(ctx, proxyClient)
+	}
+	// Split the source budget so a stalled direct request leaves time for the proxy.
+	directCtx, cancel := f.fetchStageContext(ctx, 2)
+	direct, directStatus, directErr := fetch(directCtx, f.directSourceClient)
+	cancel()
+	if err := ctx.Err(); err != nil {
+		var zero T
+		return zero, 0, err
+	}
+	directOK := directErr == nil && directStatus == http.StatusOK
+	if directOK && usable(direct) {
+		return direct, directStatus, nil
+	}
+	proxied, proxyStatus, proxyErr := fetch(ctx, proxyClient)
+	if directOK && (proxyErr != nil || proxyStatus != http.StatusOK) {
+		return direct, directStatus, nil
+	}
+	return proxied, proxyStatus, proxyErr
 }
 
-func (f *ContentFetcher) fetchDirectWithClient(ctx context.Context, url string, client *http.Client) (ContentResult, int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+func fetchArticleDocumentWithClient(ctx context.Context, pageURL string, client *http.Client) (*goquery.Document, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 	if err != nil {
-		return ContentResult{}, 0, err
+		return nil, 0, err
 	}
-
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return ContentResult{}, 0, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return ContentResult{}, resp.StatusCode, nil
+		return nil, resp.StatusCode, nil
 	}
-
-	// Parse HTML
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return ContentResult{}, resp.StatusCode, err
+	return doc, resp.StatusCode, err
+}
+
+// fetchDirect returns the source extraction without invoking either reader service.
+func (f *ContentFetcher) fetchDirect(ctx context.Context, pageURL string) (ContentResult, int, error) {
+	return f.fetchSource(ctx, pageURL, f.client)
+}
+
+func (f *ContentFetcher) fetchSource(ctx context.Context, pageURL string, proxyClient *http.Client) (ContentResult, int, error) {
+	return fetchArticleSource(ctx, f, proxyClient, func(ctx context.Context, client *http.Client) (ContentResult, int, error) {
+		return extractArticleSource(ctx, pageURL, client)
+	}, func(result ContentResult) bool {
+		return len(result.Content) >= jinaFallbackMinChars
+	})
+}
+
+func extractArticleSource(ctx context.Context, url string, client *http.Client) (ContentResult, int, error) {
+	doc, status, err := fetchArticleDocumentWithClient(ctx, url, client)
+	if err != nil || status != http.StatusOK {
+		return ContentResult{}, status, err
 	}
 	title := extractDocumentTitle(doc)
 	publishedAt := ExtractPublishedAt(doc, url)

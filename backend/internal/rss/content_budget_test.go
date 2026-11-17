@@ -392,3 +392,61 @@ func TestContentFetcherFreshClientOnlyFetchesSourceHTML(t *testing.T) {
 func contentBudgetResponse(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
+
+func TestArticleSourceTriesDirectBeforeProxy(t *testing.T) {
+	for _, entry := range []string{"content", "fresh content", "html document"} {
+		for _, direct := range []string{"usable", "blocked", "short"} {
+			t.Run(fmt.Sprintf("%s/direct %s", entry, direct), func(t *testing.T) {
+				var routes []string
+				client := func(route string, status int) *http.Client {
+					return &http.Client{Transport: hnTransport(func(r *http.Request) (*http.Response, error) {
+						if r.URL.Host != "article.example.org" {
+							t.Fatalf("unexpected request to %s", r.URL.Host)
+						}
+						routes = append(routes, route)
+						content := strings.Repeat("This is the article text. ", 20)
+						if route == "direct" && direct == "short" {
+							content = "Loading..."
+						}
+						html := "<article><p>" + content + "</p></article>"
+						return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(html))}, nil
+					})}
+				}
+				status := http.StatusOK
+				if direct == "blocked" {
+					status = http.StatusForbidden
+				}
+				fetcher := &ContentFetcher{
+					directSourceClient: client("direct", status),
+					client:             client("proxy", http.StatusOK),
+					freshClient:        client("fresh proxy", http.StatusOK),
+				}
+				ctx := context.Background()
+				const target = "https://article.example.org/post"
+				var err error
+				switch entry {
+				case "content":
+					_, err = fetcher.FetchContent(ctx, target)
+				case "fresh content":
+					_, err = fetcher.FetchContentFresh(ctx, target)
+				case "html document":
+					_, err = fetcher.FetchHTMLDocument(ctx, target)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := []string{"direct"}
+				if direct == "blocked" || (direct == "short" && entry != "html document") {
+					if entry == "fresh content" {
+						want = append(want, "fresh proxy")
+					} else {
+						want = append(want, "proxy")
+					}
+				}
+				if !reflect.DeepEqual(routes, want) {
+					t.Fatalf("routes = %v, want %v", routes, want)
+				}
+			})
+		}
+	}
+}

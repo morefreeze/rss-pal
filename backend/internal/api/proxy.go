@@ -20,10 +20,10 @@ const (
 	// A complete multi-MB image can take over 30s through the configured
 	// egress proxy. Keep a bounded full-body budget below nginx's image-only
 	// read timeout; partial bodies must still never receive success headers.
-	imageProxyTimeout   = 90 * time.Second
-	beekkaDirectTimeout = 8 * time.Second
-	mediaProxyMaxBytes  = 512 * 1024 * 1024 // 512MB
-	mediaProxyTimeout   = 10 * time.Minute
+	imageProxyTimeout  = 90 * time.Second
+	imageDirectTimeout = 8 * time.Second
+	mediaProxyMaxBytes = 512 * 1024 * 1024 // 512MB
+	mediaProxyTimeout  = 10 * time.Minute
 )
 
 // ImageProxy serves remote images through this server. Constructed via
@@ -47,18 +47,10 @@ type MediaProxy struct {
 // NewImageProxy returns a production-ready proxy: strict SSRF validation,
 // 90s timeout, 10MB cap, and redirect re-validation against the SSRF guard.
 func NewImageProxy() *ImageProxy {
-	directClient := httpx.NewDirectBufferedImageGETClient(beekkaDirectTimeout)
-	checkRedirect := directClient.CheckRedirect
-	directClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if !isBeekkaImageURL(req.URL) {
-			return http.ErrUseLastResponse
-		}
-		return checkRedirect(req, via)
-	}
 	return &ImageProxy{
 		Validate:     httpx.ValidateURL,
 		Client:       httpx.NewBufferedImageGETClient(imageProxyTimeout),
-		directClient: directClient,
+		directClient: httpx.NewDirectBufferedImageGETClient(imageDirectTimeout),
 	}
 }
 
@@ -146,7 +138,7 @@ func (p *ImageProxy) Handle(c *gin.Context) {
 }
 
 func (p *ImageProxy) fetchImage(req *http.Request) (*http.Response, error) {
-	if p.directClient != nil && isBeekkaImageURL(req.URL) {
+	if p.directClient != nil {
 		resp, err := p.directClient.Do(req)
 		if err == nil {
 			if resp.StatusCode == http.StatusOK && strings.HasPrefix(resp.Header.Get("Content-Type"), "image/") {
@@ -159,11 +151,6 @@ func (p *ImageProxy) fetchImage(req *http.Request) (*http.Response, error) {
 		}
 	}
 	return p.Client.Do(req)
-}
-
-func isBeekkaImageURL(target *url.URL) bool {
-	return target.Scheme == "https" && strings.EqualFold(target.Host, "cdn.beekka.com") &&
-		strings.HasPrefix(target.EscapedPath(), "/blogimg/asset/")
 }
 
 // Handle serves media GET/HEAD requests and preserves byte-range semantics so

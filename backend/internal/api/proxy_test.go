@@ -241,7 +241,7 @@ func TestProxyMediaXiaoyuzhouDirectAndFallback(t *testing.T) {
 	}
 }
 
-func TestProxyImageBeekkaDirectWithProxyFallback(t *testing.T) {
+func TestProxyImageDirectWithProxyFallback(t *testing.T) {
 	for _, tc := range []struct {
 		name, target          string
 		directStatus          int
@@ -249,13 +249,17 @@ func TestProxyImageBeekkaDirectWithProxyFallback(t *testing.T) {
 	}{
 		{"direct", "https://cdn.beekka.com/blogimg/asset/test.webp", 200, 1, 0},
 		{"fallback", "https://cdn.beekka.com/blogimg/asset/test.webp", 502, 1, 1},
-		{"unrelated host", "https://cdn.beekka.com.example.org/blogimg/asset/test.webp", 200, 0, 1},
-		{"unrelated path", "https://cdn.beekka.com/other.webp", 200, 0, 1},
+		{"other host direct", "https://images.example.org/test.webp", 200, 1, 0},
+		{"other host fallback", "https://images.example.org/test.webp", 502, 1, 1},
+		{"transport failure", "https://images.example.org/test.webp", 0, 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			serveImage := func(calls *int, status int) http.RoundTripper {
 				return mediaTestTransport(func(req *http.Request) (*http.Response, error) {
 					(*calls)++
+					if status == 0 {
+						return nil, errors.New("connection timed out")
+					}
 					return &http.Response{
 						StatusCode: status,
 						Header:     http.Header{"Content-Type": {"image/webp"}},
