@@ -161,3 +161,43 @@ describe('phone navigation', () => {
     expect(screen.getByRole('button', { name: /订阅管理/ })).toBeTruthy()
   })
 })
+
+describe('desktop sidebar collapse', () => {
+  it('keeps the current reader and list state while persisting the collapsed layout', () => {
+    harness()
+    fireEvent.click(screen.getByText('count 0'))
+    fireEvent.click(screen.getByText('open article'))
+    const toggle = screen.getByRole('button', { name: '收起侧栏' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(toggle)
+    expect(screen.getByText('actual detail')).toBeTruthy()
+    expect(screen.getByText('count 1')).toBeTruthy()
+    expect(localStorage.getItem('reading-workspace-sidebar-collapsed')).toBe('true')
+    const root = document.querySelector('.reading-workspace') as HTMLElement
+    expect(root.style.getPropertyValue('--workspace-sidebar-width')).toBe('64px')
+    expect(screen.getByRole('button', { name: '展开侧栏' }).getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: '展开侧栏' }))
+    expect(root.style.getPropertyValue('--workspace-sidebar-width')).toBe('220px')
+    expect(screen.getByText('actual detail')).toBeTruthy()
+  })
+
+  it('restores the rail and expands it to reach source and tag filters', () => {
+    localStorage.setItem('reading-workspace-sidebar-collapsed', 'true')
+    harness()
+    expect(screen.getByRole('button', { name: '展开侧栏' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '来源与标签' }))
+    expect(screen.getByRole('button', { name: '收起侧栏' })).toBeTruthy()
+    expect(screen.getByText('scope /articles')).toBeTruthy()
+  })
+
+  it('uses the full drawer on phone even with a collapsed desktop preference', () => {
+    localStorage.setItem('reading-workspace-sidebar-collapsed', 'true')
+    viewport(390)
+    harness()
+    expect(screen.queryByRole('button', { name: '展开侧栏' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '导航与筛选' }))
+    expect(screen.getByRole('dialog', { name: '导航与阅读范围' })).toBeTruthy()
+    expect(screen.getByText('scope /articles')).toBeTruthy()
+    expect(localStorage.getItem('reading-workspace-sidebar-collapsed')).toBe('true')
+  })
+})

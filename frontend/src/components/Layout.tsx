@@ -82,6 +82,7 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
         type="button"
         className="nav-link"
         aria-label="我的"
+        title="我的"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(o => !o)}
@@ -170,11 +171,11 @@ export default function Layout({ user, onLogout, allowPreviews = user?.is_admin 
 
   const renderNavLabel = (item: NavItem) => {
     if (item.to !== '/articles' || unreadCount === 0) {
-      return <><UiIcon name={item.icon} /> {item.label}</>
+      return <><UiIcon name={item.icon} /><span className="workspace-nav-label">{item.label}</span></>
     }
     return (
       <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <UiIcon name={item.icon} /> {item.label}
+        <UiIcon name={item.icon} /><span className="workspace-nav-label">{item.label}</span>
         <span className="unread-badge">
           {unreadCount > 99 ? '99+' : unreadCount}
         </span>
@@ -232,8 +233,8 @@ function LayoutInner({ user, allowPreviews, unreadCount, onLogout, renderNavLabe
     document.body.style.setProperty('--mobile-tabs-offset', showTabs ? 'calc(56px + env(safe-area-inset-bottom))' : '0px')
     return () => { document.body.style.removeProperty('--bottom-chrome'); document.body.style.removeProperty('--mobile-tabs-offset') }
   }, [showTabs, player.articleId])
-  const navigation = <nav className="workspace-nav" aria-label="主导航">{navItems.slice(0, 4).filter(item => allowPreviews || !isPreviewPath(item.to)).map(item => <Link key={item.to} to={moduleDestination(item.to, destinations)} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav>
-  const account = <><details className="workspace-more"><summary>更多</summary><nav className="workspace-nav" aria-label="更多导航">{navItems.slice(4).map(item => <Link key={item.to} to={item.to} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav></details>{user && <UserMenu user={user} onLogout={onLogout} />}</>
+  const navigation = <nav className="workspace-nav" aria-label="主导航">{navItems.slice(0, 4).filter(item => allowPreviews || !isPreviewPath(item.to)).map(item => <Link key={item.to} to={moduleDestination(item.to, destinations)} title={item.label} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav>
+  const account = <><details className="workspace-more"><summary title="更多"><UiIcon name="more" /><span className="workspace-nav-label">更多</span></summary><nav className="workspace-nav" aria-label="更多导航">{navItems.slice(4).map(item => <Link key={item.to} to={item.to} title={item.label} className={`nav-link${itemIsActive(item) ? ' active' : ''}`} aria-current={itemIsActive(item) ? 'page' : undefined}>{renderNavLabel(item)}</Link>)}</nav></details>{user && <UserMenu user={user} onLogout={onLogout} />}</>
   return <>
     <ReadingWorkspace key={`${user?.id}:${allowPreviews}`} allowPreviews={allowPreviews} navigation={navigation} account={account} footer={<VersionFooter backend={backendVersion} />}><Outlet /></ReadingWorkspace>
     <Toaster />
