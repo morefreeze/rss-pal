@@ -44,7 +44,7 @@ body.reading-workspace-mounted #root { max-width: none; padding: 0; }
 }
 @media (max-width: 1199px) {
   .reading-workspace { --workspace-sidebar-width: 0px; --workspace-header-height: 54px; }
-  .workspace-mobile-header { height: 54px; position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 32; }
+  .workspace-mobile-header { height: 54px; position: sticky; top: 0; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 32; }
   .workspace-wordmark { font-size: 18px; font-weight: 700; letter-spacing: -.5px; }
   .workspace-sidebar { display: none; width: min(320px, 86vw); z-index: 1201; padding-top: 24px; }
   .workspace-sidebar-open { display: flex; }
@@ -126,7 +126,7 @@ body.reading-workspace-mounted[data-theme='pearl'] { --workspace-canvas: #f5f5f5
 .workspace-empty-reader p { font-size: 13px; }
 .workspace-mobile-header { background: var(--bg); }
 .workspace-wordmark { font-size: 17px; }
-.workspace-mobile-header > button { display: inline-flex; align-items: center; gap: 6px; }
+.workspace-drawer-trigger { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; }
 .mobile-tab-bar .unread-badge { font-size: 9px; min-width: 16px; padding: 1px 4px; background: var(--accent); color: var(--bg); }
 @media (max-width: 1199px) {
   .reading-workspace .workspace-sidebar { padding-top: 0; }
@@ -136,7 +136,7 @@ body.reading-workspace-mounted[data-theme='pearl'] { --workspace-canvas: #f5f5f5
   .reading-workspace .workspace-list { padding: 16px 12px var(--bottom-chrome, 80px); }
   .reading-workspace .workspace-scopes .saved-row, .workspace-nav .nav-link { min-height: 44px; }
   .workspace-page { padding: 20px 20px; }
-  .reading-workspace .workspace-reader-toolbar button, .workspace-mobile-header > button { min-height: 44px; }
+  .reading-workspace .workspace-reader-toolbar button { min-height: 44px; }
   .workspace-reader-toolbar { padding: 2px 12px; }
   .reading-workspace .workspace-list :is(button,select,input[type='search']) { min-height: 44px; }
 }

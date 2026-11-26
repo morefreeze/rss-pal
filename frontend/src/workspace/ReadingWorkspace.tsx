@@ -145,7 +145,13 @@ export default function ReadingWorkspace({ children, navigation, account, footer
       <div className="workspace-scopes" ref={setSidebarTarget} hidden={isRail} />
       <div className="workspace-account">{account}</div>
     </aside>
-    <div className="workspace-mobile-header" ref={el => { if (el) el.inert = drawerOpen }}><span className="workspace-wordmark">RSS Pal</span><button className="btn-ghost btn-sm" onClick={openScopes} aria-haspopup="dialog" aria-expanded={drawerOpen}><UiIcon name="panelLeft" /> 导航与筛选</button></div>
+    <div className="workspace-mobile-header" ref={el => { if (el) el.inert = drawerOpen }}>
+      <button type="button" className="btn-ghost workspace-drawer-trigger" aria-label="导航与筛选"
+        aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={openScopes}>
+        <UiIcon name="panelLeft" size={22} />
+      </button>
+      <span className="workspace-wordmark">RSS Pal</span>
+    </div>
     {Object.entries(cached).map(([key, saved]) => {
       const active = key === activeKey
       const hidden = !active || (isPhone && isReader) || focusMode

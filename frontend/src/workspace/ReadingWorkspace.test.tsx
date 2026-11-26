@@ -77,6 +77,8 @@ describe('ReadingWorkspace', () => {
     viewport(900)
     harness()
     const trigger = screen.getByRole('button', { name: '导航与筛选' })
+    expect(trigger.textContent).toBe('')
+    expect(trigger.nextElementSibling?.textContent).toBe('RSS Pal')
     trigger.focus()
     fireEvent.click(trigger)
     expect(screen.getByRole('dialog', { name: '导航与阅读范围' })).toBeTruthy()
