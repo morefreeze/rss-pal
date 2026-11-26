@@ -88,7 +88,7 @@ func (h *ArticleHandler) MarkAllRead(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "已全部标记为已读", "count": len(result.ArticleIDs), "article_ids": result.ArticleIDs, "undo_token": result.UndoToken})
+	jsonAfterCommit(c, http.StatusOK, gin.H{"message": "已全部标记为已读", "count": len(result.ArticleIDs), "article_ids": result.ArticleIDs, "undo_token": result.UndoToken})
 }
 
 func NewArticleHandler(articleRepo *repository.ArticleRepository, bindRepo *repository.ArticleUserTagRepository, progressRepo *repository.ProgressRepository, prefRepo *repository.PreferenceRepository, hiddenRepo *repository.HiddenArticleRepository, summarizer *service.SummarizerService, contentFetcher *rss.ContentFetcher) *ArticleHandler {
@@ -334,7 +334,7 @@ func (h *ArticleHandler) Hide(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"hidden": true, "hidden_at": ts})
+	jsonAfterCommit(c, http.StatusOK, gin.H{"hidden": true, "hidden_at": ts})
 }
 
 // Unhide DELETE /api/articles/:id/hide — restore a previously hidden article.
@@ -354,7 +354,7 @@ func (h *ArticleHandler) Unhide(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"hidden": false})
+	jsonAfterCommit(c, http.StatusOK, gin.H{"hidden": false})
 }
 
 func (h *ArticleHandler) GetRecommended(c *gin.Context) {

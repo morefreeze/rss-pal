@@ -290,7 +290,7 @@ func (h *ProgressHandler) Update(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, progress)
+	jsonAfterCommit(c, http.StatusOK, progress)
 }
 
 func (h *ProgressHandler) Reset(c *gin.Context) {

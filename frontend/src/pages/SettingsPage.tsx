@@ -11,6 +11,7 @@ import { useTheme, type Theme } from '../util/theme'
 import IPhoneShortcutInstall from '../components/IPhoneShortcutInstall'
 import ShortcutConnection from '../components/ShortcutConnection'
 import AccountLoginMethods from '../components/AccountLoginMethods'
+import MobilePushSettings from '../components/MobilePushSettings'
 
 const STYLE_OPTIONS = [
   { value: 'bullets', label: '要点列表' },
@@ -1038,6 +1039,7 @@ export default function SettingsPage({ user, onUserUpdate }: SettingsPageProps) 
         <>
           {user && <div className="card mb-2"><h3 className="mb-2">昵称</h3><NicknameSetup key={user.id} user={user} onSaved={onUserUpdate || (() => {})} /></div>}
           <AccountLoginMethods/>
+          {user && <MobilePushSettings key={user.id} userID={user.id} />}
           {/* 修改密码 */}
           <div className="card mb-2">
             <h3 className="mb-2">{needsPassword ? '设置密码' : '修改密码'}</h3>

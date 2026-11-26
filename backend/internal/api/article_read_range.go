@@ -54,7 +54,7 @@ func (h *ArticleHandler) MarkReadRange(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "标记已读失败，请重试"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"count": len(result.ArticleIDs), "article_ids": result.ArticleIDs, "undo_token": result.UndoToken})
+	jsonAfterCommit(c, http.StatusOK, gin.H{"count": len(result.ArticleIDs), "article_ids": result.ArticleIDs, "undo_token": result.UndoToken})
 }
 
 func (h *ArticleHandler) UndoMarkRead(c *gin.Context) {
@@ -74,5 +74,5 @@ func (h *ArticleHandler) UndoMarkRead(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "撤销失败，请重试"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"count": len(ids), "article_ids": ids})
+	jsonAfterCommit(c, http.StatusOK, gin.H{"count": len(ids), "article_ids": ids})
 }

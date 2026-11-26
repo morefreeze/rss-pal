@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { useState, useEffect } from 'react'
 import { isLoggedIn, getMe, getUser } from './api/client'
 import { clearPrivateSessionState } from './api/privateSession'
+import { prepareMobilePush } from './utils/mobilePushDevice'
 import { useConnectionKeepAlive } from './hooks/useConnectionKeepAlive'
 import LoginPage from './pages/LoginPage'
 import AccountAuthComplete from './pages/AccountAuthComplete'
@@ -156,6 +157,12 @@ export function MainSiteApp() {
   const allowPreviews = onboardingReady && user?.is_admin === true
 
   useEffect(() => {
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      void prepareMobilePush().catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
     if (!isLoggedIn()) return
     const profileAtRequest = localStorage.getItem('user')
     getMe()
@@ -181,10 +188,10 @@ export function MainSiteApp() {
   }
 
   const handleLogout = () => {
-    clearPrivateSessionState()
+    const disconnectedPush = clearPrivateSessionState()
     setUser(null)
     setOnboardingReady(false)
-    window.location.href = '/login'
+    void disconnectedPush.then(() => { window.location.href = '/login' })
   }
 
   return (

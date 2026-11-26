@@ -1,7 +1,7 @@
 import { resetArticleDetailCache } from './articleDetailCache'
 import { logout } from './client'
 
-export function clearPrivateSessionState(): void {
+export function clearPrivateSessionState(): Promise<void> {
   resetArticleDetailCache()
-  logout()
+  return logout()
 }

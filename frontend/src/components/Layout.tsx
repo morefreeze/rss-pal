@@ -1,6 +1,6 @@
 import UiIcon, { type UiIconName } from './UiIcon'
 import AccountDisplay, { type DisplayAccount } from './AccountDisplay'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { getUnreadCount, getServerHealth } from '../api/client'
 import Toaster from './Toaster'
@@ -12,6 +12,7 @@ import ReadingWorkspace from '../workspace/ReadingWorkspace'
 import { isPreviewPath, resolveWorkspaceRoute } from '../workspace/workspaceRoutes'
 import { readWorkspaceDestinations, rememberWorkspaceDestination, moduleDestination } from '../workspace/workspaceDestinations'
 import { VERSION as FRONTEND_VERSION } from '../version'
+import { isInstalledApp, syncMobileBadge } from '../utils/mobilePushDevice'
 
 const ICP_FILING_NUMBER = '京ICP备2026025766号-2'
 const ICP_FILING_URL = 'https://beian.miit.gov.cn/'
@@ -151,19 +152,41 @@ function UserMenu({ user, onLogout }: { user: DisplayAccount; onLogout: () => vo
 export default function Layout({ user, onLogout, allowPreviews = user?.is_admin === true }: LayoutProps) {
   const [unreadCount, setUnreadCount] = useState(0)
 
-  const refreshUnread = useCallback(() => {
-    getUnreadCount().then(setUnreadCount).catch(() => {})
-  }, [])
-
+  const userID = user?.id
   useEffect(() => {
+    let request = 0
+    const refreshUnread = () => {
+      const current = ++request
+      getUnreadCount().then(count => {
+        if (current !== request) return
+        setUnreadCount(count)
+        if (userID !== undefined) syncMobileBadge(userID, count)
+      }).catch(() => {})
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshUnread()
+    }
+    const onDigest = (event: MessageEvent) => {
+      if (event.data === 'rss-pal-refresh-unread') refreshUnread()
+    }
+    const installed = isInstalledApp()
     refreshUnread()
     window.addEventListener('refresh-unread', refreshUnread)
+    if (installed) {
+      document.addEventListener('visibilitychange', onVisibilityChange)
+      navigator.serviceWorker?.addEventListener('message', onDigest)
+    }
     const interval = setInterval(refreshUnread, 2 * 60 * 1000)
     return () => {
+      request++
       window.removeEventListener('refresh-unread', refreshUnread)
+      if (installed) {
+        document.removeEventListener('visibilitychange', onVisibilityChange)
+        navigator.serviceWorker?.removeEventListener('message', onDigest)
+      }
       clearInterval(interval)
     }
-  }, [refreshUnread])
+  }, [userID])
 
   const handleLogout = () => {
     onLogout()

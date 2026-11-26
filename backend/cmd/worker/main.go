@@ -18,6 +18,7 @@ import (
 	"github.com/bytedance/rss-pal/internal/config"
 	"github.com/bytedance/rss-pal/internal/englife"
 	"github.com/bytedance/rss-pal/internal/imagefetch"
+	"github.com/bytedance/rss-pal/internal/mobilepush"
 	"github.com/bytedance/rss-pal/internal/model"
 	"github.com/bytedance/rss-pal/internal/opsmonitor"
 	"github.com/bytedance/rss-pal/internal/repository"
@@ -152,6 +153,10 @@ func main() {
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(context.Background())
 	defer cancelHeartbeat()
 	startWorkerHeartbeat(heartbeatCtx, heartbeatRepo)
+	pushCtx, cancelPush := context.WithCancel(context.Background())
+	defer cancelPush()
+	go mobilepush.Run(pushCtx, db)
+
 	exploreCtx, cancelExplore := context.WithCancel(context.Background())
 	defer cancelExplore()
 	startExploreWorker(exploreCtx, newProductionExploreCycle(db, cfg))

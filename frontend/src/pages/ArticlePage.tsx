@@ -793,6 +793,7 @@ function ArticlePageContent() {
         const result = await updateProgress(entry.articleId, entry.scrollPosition, entry.isCompleted)
         if (result.is_completed && owner !== null && progressAccountId() === owner) {
           window.dispatchEvent(new CustomEvent('article-read-changed', { detail: { id: entry.articleId, isRead: true } }))
+          if (entry.isCompleted) window.dispatchEvent(new Event('refresh-unread'))
         }
         return result
       },
@@ -859,7 +860,6 @@ function ArticlePageContent() {
           sessionStorage.setItem('readArticles', JSON.stringify(read))
         }
       } catch {}
-      window.dispatchEvent(new Event('refresh-unread'))
       flushProgress()
     }, 1000)
     return () => clearInterval(tick)
@@ -909,7 +909,6 @@ function ArticlePageContent() {
           sessionStorage.setItem('readArticles', JSON.stringify(read))
         }
       } catch {}
-      window.dispatchEvent(new Event('refresh-unread'))
       flushProgress()
       return
     }

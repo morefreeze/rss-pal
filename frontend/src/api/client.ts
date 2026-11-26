@@ -3,6 +3,7 @@ import type { User } from '../App'
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { clearAllFabCollapsed } from '../components/CollapsibleFab'
 import { safePublicSourceURL } from '../utils/authIntent'
+import { resetMobilePushDevice } from '../utils/mobilePushDevice'
 
 // Per-request retry counter so the interceptor never retries more than once.
 // __refreshed marks the request as already replayed after a refresh-token
@@ -53,6 +54,7 @@ async function tryRefreshAccessToken(): Promise<string | null> {
 // Clears all auth state. Called when both access JWT and refresh token have
 // been rejected (or no refresh token was issued in the first place).
 function clearAuthLocal() {
+  const disconnectedPush = resetMobilePushDevice().catch(() => {})
   for (const key of Object.keys(sessionStorage)) {
     if (key.startsWith('rsspal:nickname-skipped:') || key.startsWith('rsspal:password-skipped:')) sessionStorage.removeItem(key)
   }
@@ -61,6 +63,7 @@ function clearAuthLocal() {
   localStorage.removeItem('user')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('refresh_token_expires_at')
+  return disconnectedPush
 }
 
 // JWT interceptor
@@ -129,7 +132,7 @@ api.interceptors.response.use(
           return api(config)
         }
       }
-      clearAuthLocal()
+      await clearAuthLocal()
       const captureURLs = new URLSearchParams(window.location.search).getAll('url')
       const captureURL = window.location.pathname === '/capture' && captureURLs.length === 1
         ? safePublicSourceURL(captureURLs[0]) : null
@@ -207,7 +210,7 @@ export const logout = () => {
     // for logout anyway.
     void axios.post('/api/auth/logout', { refresh_token: refresh }).catch(() => {})
   }
-  clearAuthLocal()
+  const disconnectedPush = clearAuthLocal()
   // Clear session-local state so a new login gets a clean slate
   sessionStorage.removeItem('readArticles')
   sessionStorage.removeItem('articleNavList')
@@ -218,6 +221,7 @@ export const logout = () => {
   sessionStorage.removeItem('unreadOnly')
   sessionStorage.removeItem('savedOnly')
   clearAllFabCollapsed()
+  return disconnectedPush
 }
 
 export const getUser = () => {

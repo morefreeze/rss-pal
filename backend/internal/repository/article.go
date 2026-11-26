@@ -940,20 +940,31 @@ func (r *ArticleRepository) GetArticlesWithShortContent(minLength int) ([]model.
 	return r.scanArticleNoFeedTitle(rows)
 }
 
+const unreadArticlesFrom = `
+	FROM articles a
+	JOIN feeds f ON a.feed_id = f.id
+	LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
+	LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $1
+	WHERE f.owner_id = $1
+	  AND COALESCE(rp.is_completed, false) = false
+	  AND ha.id IS NULL
+`
+
 func (r *ArticleRepository) GetUnreadCount(userID int) (int, error) {
-	query := `
-		SELECT COUNT(*)
-		FROM articles a
-		JOIN feeds f ON a.feed_id = f.id
-		LEFT JOIN reading_progress rp ON a.id = rp.article_id AND rp.user_id = $1
-		LEFT JOIN hidden_articles ha ON a.id = ha.article_id AND ha.user_id = $1
-		WHERE (f.owner_id = $1)
-		AND COALESCE(rp.is_completed, false) = false
-		AND ha.id IS NULL
-	`
-	var count int
-	err := r.db.QueryRow(query, userID).Scan(&count)
-	return count, err
+	var total int
+	err := r.db.QueryRow("SELECT COUNT(*)"+unreadArticlesFrom, userID).Scan(&total)
+	return total, err
+}
+
+// UnreadDigest counts with the same rules as the app and captures a checkpoint
+// for this read. A concurrent article insert that commits later stays eligible
+// for the next digest, even when it started before this one.
+func UnreadDigest(ctx context.Context, db Querier, userID int, previous string) (total, recent int, checkpoint string, err error) {
+	query := `SELECT COUNT(*),
+		COUNT(*) FILTER (WHERE NOT pg_visible_in_snapshot(a.mobile_push_arrival_xid, $2::pg_snapshot)),
+		pg_current_snapshot()::text ` + unreadArticlesFrom
+	err = db.QueryRowContext(ctx, query, userID, previous).Scan(&total, &recent, &checkpoint)
+	return
 }
 
 func (r *ArticleRepository) Search(query string, userID, limit int) ([]model.Article, error) {
