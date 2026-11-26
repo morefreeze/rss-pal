@@ -100,7 +100,7 @@ prepare_frontend_nginx() {
   if [ -n "$FRONTEND_NGINX_BACKUP" ]; then
     FRONTEND_FORCE_RECREATE=true
     add_deploy_service frontend
-    log "Prepared mounted image proxy timeout; backup: $FRONTEND_NGINX_BACKUP"
+    log "Prepared mounted frontend routes; backup: $FRONTEND_NGINX_BACKUP"
   fi
 }
 

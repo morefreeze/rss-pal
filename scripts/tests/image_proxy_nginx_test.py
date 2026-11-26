@@ -46,11 +46,12 @@ class ImageProxyNginxTest(unittest.TestCase):
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o640)
         self.assertNotEqual(inode, self.path.stat().st_ino)
         updated = self.path.read_text()
-        exact = updated[updated.index("    location = /api/proxy/image {"):updated.index("    location ^~ /api {")]
+        added = updated[updated.index("    location = /push-worker.js {"):updated.index("    location ^~ /api {")]
+        exact = added[added.index("    location = /api/proxy/image {"):]
         self.assertIn("proxy_pass $upstream_api;", exact)
         self.assertIn("proxy_set_header Host $host;", exact)
         self.assertIn("proxy_read_timeout 120s;", exact)
-        self.assertEqual(updated.replace(exact, ""), self.original)
+        self.assertEqual(updated.replace(added, ""), self.original)
         again = self.run_helper(self.path)
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertEqual(again.stdout, "")
@@ -69,10 +70,11 @@ class ImageProxyNginxTest(unittest.TestCase):
         result = self.run_helper(self.path)
         self.assertEqual(result.returncode, 0, result.stderr)
         updated = self.path.read_text()
-        exact = updated[updated.index("    location = /api/proxy/image {"):updated.index("    location ^~ /api {")]
+        added = updated[updated.index("    location = /push-worker.js {"):updated.index("    location ^~ /api {")]
+        exact = added[added.index("    location = /api/proxy/image {"):]
         self.assertIn("http://private-api:18080", exact)
         self.assertIn("proxy_set_header Host internal.example;", exact)
-        self.assertEqual(updated.replace(exact, ""), self.original)
+        self.assertEqual(updated.replace(added, ""), self.original)
 
     def test_existing_recognized_image_location_changes_only_timeout(self):
         self.assertEqual(self.run_helper(self.path).returncode, 0)
@@ -83,6 +85,23 @@ class ImageProxyNginxTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.path.read_text(), valid)
         self.assertEqual(pathlib.Path(result.stdout.strip()).read_text(), stale)
+
+    def test_pwa_assets_have_exact_routes_and_revalidate(self):
+        result = self.run_helper(self.path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        updated = self.path.read_text()
+        for route in ("push-worker.js", "manifest.webmanifest"):
+            with self.subTest(route=route):
+                start = updated.index(f"    location = /{route} {{")
+                block = updated[start:updated.index("    }", start)]
+                self.assertIn("try_files $uri =404;", block)
+                self.assertIn('add_header Cache-Control "no-cache, must-revalidate";', block)
+                if route == "manifest.webmanifest":
+                    self.assertIn("default_type application/manifest+json;", block)
+        stale = updated.replace(
+            'location = /push-worker.js {', 'location = /old-push-worker.js {', 1
+        )
+        self.assertNotEqual(self.run_helper("--check-stdin", stdin=stale).returncode, 0)
 
     def test_loaded_nginx_dump_and_tracked_multihost_config(self):
         tracked = (ROOT / "frontend/nginx.conf").read_text()
@@ -158,8 +177,9 @@ class ImageProxyNginxTest(unittest.TestCase):
         result = self.run_helper(self.path)
         self.assertEqual(result.returncode, 0, result.stderr)
         updated = self.path.read_text()
-        exact = updated[updated.index("    location = /api/proxy/image {"):updated.index("    location ^~ /api {")]
-        self.assertEqual(updated.replace(exact, ""), source)
+        added = updated[updated.index("    location = /push-worker.js {"):updated.index("    location ^~ /api {")]
+        exact = added[added.index("    location = /api/proxy/image {"):]
+        self.assertEqual(updated.replace(added, ""), source)
         self.assertIn("proxy_pass http://127.0.0.1:18080;", exact)
         again = self.run_helper(self.path)
         self.assertEqual(again.returncode, 0, again.stderr)

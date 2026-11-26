@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Patch the frontend bind source without replacing it with stock nginx.conf.
 
-Only a recognized flat API proxy can supply a new exact image location. Every
-other byte is preserved. stdout is empty for no change, or the backup pathname
+Only a recognized flat API proxy can supply new exact image and PWA locations.
+Other configuration is preserved. stdout is empty for no change, or the backup pathname
 after an atomic replacement (which requires frontend container recreation).
 """
 import dataclasses
@@ -189,6 +189,34 @@ def check_image_location_conflicts(server, api, image):
             raise Refused("more-specific location conflicts with image endpoint")
 
 
+def missing_pwa_locations(server, indent):
+    static = [
+        ["try_files", "$uri", "=404"],
+        ["add_header", "Cache-Control", '"no-cache, must-revalidate"'],
+    ]
+    locations = [
+        ("/push-worker.js", static),
+        ("/manifest.webmanifest", [["default_type", "application/manifest+json"], *static]),
+    ]
+    blocks = []
+    for path, directives in locations:
+        exact = [
+            node for node in server.children
+            if len(node.words) == 3 and node.words[0] == "location"
+            and location_token(node.words[1]) == "=" and location_token(node.words[2]) == path
+        ]
+        if exact:
+            if len(exact) != 1 or [child.words for child in exact[0].children] != directives:
+                raise Refused(f"existing {path} location has unexpected directives")
+            continue
+        blocks.append(
+            f"{indent}location = {path} {{\n"
+            + "".join(f"{indent}    {' '.join(words)};\n" for words in directives)
+            + f"{indent}}}\n\n"
+        )
+    return "".join(blocks)
+
+
 def patched(source):
     servers = []
 
@@ -214,7 +242,14 @@ def patched(source):
         if len(image) > 1:
             raise Refused("duplicate exact image locations")
         check_image_location_conflicts(server, api, image)
+        line = source.rfind("\n", 0, api.start) + 1
+        indent = source[line:api.start]
+        pwa = missing_pwa_locations(server, indent)
+        if (pwa or not image) and indent.strip():
+            raise Refused("generic API block must start on its own line")
         if image:
+            if pwa:
+                edits.append((line, line, pwa))
             image_upstream, image_headers, image_timeout = proxy_contract(image[0])
             # Upgrade/Connection are websocket-only. All origin identity
             # headers must agree even if an existing image location omits them.
@@ -227,11 +262,7 @@ def patched(source):
         body = source[api.opening:api.end]
         start, end = timeout.start - api.opening, timeout.end - api.opening
         body = body[:start] + "proxy_read_timeout 120s;" + body[end:]
-        line = source.rfind("\n", 0, api.start) + 1
-        indent = source[line:api.start]
-        if indent.strip():
-            raise Refused("generic API block must start on its own line")
-        edits.append((line, line, indent + "location = /api/proxy/image " + body + "\n\n"))
+        edits.append((line, line, pwa + indent + "location = /api/proxy/image " + body + "\n\n"))
     if not found:
         raise Refused("no recognized generic API proxy")
     for start, end, replacement in sorted(edits, reverse=True):
@@ -275,7 +306,7 @@ def main():
     if sys.argv[1:] == ["--check-stdin"]:
         source = sys.stdin.read()
         if patched(source) != source:
-            raise Refused("running nginx lacks the exact 120s image proxy")
+            raise Refused("running nginx lacks the required image proxy or PWA asset locations")
         return
     if len(sys.argv) == 4 and sys.argv[1] == "--restore":
         backup, path = map(pathlib.Path, sys.argv[2:])
@@ -296,7 +327,7 @@ def main():
     # either a backup or a replacement. nginx performs its own syntax check
     # after the frontend has remounted the new inode and before API startup.
     if patched(updated.decode("utf-8")).encode("utf-8") != updated:
-        raise Refused("generated image proxy is not stable")
+        raise Refused("generated frontend locations are not stable")
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     backup = path.with_name(path.name + ".image-proxy-" + timestamp + ".bak")
     with backup.open("xb") as stream:

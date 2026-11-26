@@ -16,6 +16,8 @@ import (
 	"github.com/bytedance/rss-pal/internal/httpx"
 )
 
+const fcmHost = "fcm.googleapis.com"
+
 func ValidateEndpoint(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.User != nil ||
@@ -23,7 +25,7 @@ func ValidateEndpoint(raw string) error {
 		return errors.New("invalid push endpoint")
 	}
 	switch host := u.Hostname(); {
-	case host == "fcm.googleapis.com", host == "updates.push.services.mozilla.com",
+	case host == fcmHost, host == "updates.push.services.mozilla.com",
 		host == "push.apple.com", strings.HasSuffix(host, ".push.apple.com"):
 		return nil
 	}
@@ -59,13 +61,18 @@ func payload(recent, total int) ([]byte, error) {
 
 type sender struct {
 	keys   Keys
-	client *http.Client
+	direct *http.Client
+	fcm    *http.Client
 }
 
 func newSender(keys Keys) sender {
-	client := httpx.NewDirectClient(10 * time.Second)
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return sender{keys, client}
+	direct := httpx.NewDirectClient(10 * time.Second)
+	// Tencent's existing OCI proxy reaches Google when its direct route does not.
+	fcm := httpx.NewClient(10 * time.Second)
+	for _, client := range []*http.Client{direct, fcm} {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	return sender{keys: keys, direct: direct, fcm: fcm}
 }
 
 func (s sender) send(ctx context.Context, subscription webpush.Subscription, recent, total int) (int, error) {
@@ -76,11 +83,15 @@ func (s sender) send(ctx context.Context, subscription webpush.Subscription, rec
 	if err != nil {
 		return 0, err
 	}
+	client := s.direct
+	if strings.HasPrefix(subscription.Endpoint, "https://"+fcmHost+"/") {
+		client = s.fcm
+	}
 	response, err := webpush.SendNotificationWithContext(ctx, message, &subscription, &webpush.Options{
 		Subscriber:      "https://rss.morefreeze.top",
 		VAPIDPublicKey:  s.keys.Public,
 		VAPIDPrivateKey: s.keys.Private,
-		HTTPClient:      s.client,
+		HTTPClient:      client,
 		TTL:             3600,
 		Topic:           "rss-pal-unread",
 	})
