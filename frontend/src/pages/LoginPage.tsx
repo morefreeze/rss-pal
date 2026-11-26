@@ -4,6 +4,7 @@ import { login, api } from '../api/client'
 import { authSearch, parseAuthIntent, postAuthURL } from '../utils/authIntent'
 
 import VerifiedAccountAccess from '../components/VerifiedAccountAccess'
+import UiIcon from '../components/UiIcon'
 import { getAuthMethods, type AuthMethods } from '../api/accountAuth'
 import { authErrorMessage } from '../utils/authError'
 import './LoginPage.css'
@@ -18,6 +19,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const intent = parseAuthIntent(location.search)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordVisible, setPasswordVisible] = useState(false)
   // Default ON — most users will want this; the "log in once per device for
   // 90 days" tradeoff matches the workflow rss-pal is built for.
   const [remember, setRemember] = useState(true)
@@ -59,7 +61,17 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         <label htmlFor="login-username">用户名或邮箱</label>
         <input id="login-username" placeholder="用户名或邮箱" type="text" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" disabled={submitting} />
         <label htmlFor="login-password">密码</label>
-        <input id="login-password" placeholder="密码" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" disabled={submitting} />
+        <div className="login-password-field">
+          <input id="login-password" placeholder="密码" type={passwordVisible ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" disabled={submitting} />
+          <button
+            type="button"
+            aria-label={passwordVisible ? '隐藏密码' : '查看密码'}
+            aria-controls="login-password"
+            onClick={() => setPasswordVisible(visible => !visible)}
+          >
+            <UiIcon name={passwordVisible ? 'eyeOff' : 'eye'} />
+          </button>
+        </div>
         <label className="account-remember">
           <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={submitting} />
           <span>记住此设备 90 天</span>
@@ -84,7 +96,10 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           rememberSession={{ value: remember, onChange: setRemember }}
           onSuccess={user => { onLogin(user); navigate(postAuthURL(intent), { replace: true }) }}
         >
-          <button type="button" className="login-text-action" aria-expanded={showPassword} aria-controls="password-login" onClick={() => setShowPassword(value => !value)}>
+          <button type="button" className="login-text-action" aria-expanded={showPassword} aria-controls="password-login" onClick={() => {
+            setPasswordVisible(false)
+            setShowPassword(value => !value)
+          }}>
             {showPassword ? methods.email ? '使用邮箱验证码登录' : '使用第三方登录' : '使用账号密码登录'}
           </button>
         </VerifiedAccountAccess> : passwordForm}

@@ -36,6 +36,25 @@
 .login-privacy { display: inline-block; color: var(--fg-muted); margin-top: 20px; font-size: 12px; padding: 6px; }
 .login-password-form { margin-top: 16px; }
 .login-password-form > label:not(.account-remember) { display: block; margin-top: 16px; }
+.login-password-field { position: relative; margin-top: 4px; }
+.login-page .login-password-field input { margin-top: 0; padding-inline-end: 52px; }
+.login-password-field input::-ms-reveal { display: none; }
+.login-page .login-password-field button {
+  position: absolute;
+  inset-inline-end: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+}
+.login-page .login-password-field button:hover { background: var(--surface-hover); color: var(--fg); opacity: 1; }
+.login-page .login-password-field button:focus-visible { outline-offset: -2px; }
 .login-error { color: var(--danger); margin-top: 12px; font-size: 14px; }
 .login-notice { color: var(--fg-muted); font-size: 14px; }
 @media (max-width: 600px) {

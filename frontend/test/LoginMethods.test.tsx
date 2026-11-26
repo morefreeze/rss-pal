@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, expect, it, vi } from 'vitest'
 import LoginPage from '../src/pages/LoginPage'
@@ -52,6 +53,31 @@ it('replaces email login with password login and restores email when switched ba
   expect(screen.getByLabelText('邮箱验证码')).toBeTruthy()
   expect(screen.queryByLabelText('密码')).toBeNull()
   expect(screen.getAllByRole('checkbox', { name: '记住此设备 90 天' })).toHaveLength(1)
+})
+
+it('toggles password visibility with the keyboard without submitting the form', async () => {
+  const user = userEvent.setup()
+  view()
+  await user.click(await screen.findByRole('button', { name: '使用账号密码登录' }))
+  const password = screen.getByLabelText<HTMLInputElement>('密码')
+  await user.type(password, 'test-password')
+  expect(password.type).toBe('password')
+
+  await user.tab()
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '查看密码' }))
+  await user.keyboard('[Space]')
+  expect(password.type).toBe('text')
+  expect(password.value).toBe('test-password')
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '隐藏密码' }))
+  await user.keyboard('[Enter]')
+  expect(password.type).toBe('password')
+  expect(password.value).toBe('test-password')
+  expect(mocks.login).not.toHaveBeenCalled()
+
+  await user.click(screen.getByRole('button', { name: '查看密码' }))
+  await user.click(screen.getByRole('button', { name: '使用邮箱验证码登录' }))
+  await user.click(screen.getByRole('button', { name: '使用账号密码登录' }))
+  expect(screen.getByLabelText<HTMLInputElement>('密码').type).toBe('password')
 })
 
 it('submits password login and keeps the requested destination after switching', async () => {
